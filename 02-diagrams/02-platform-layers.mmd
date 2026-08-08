@@ -1,0 +1,16 @@
+flowchart TB
+  L1[Experience: taxpayer, NamRA and administration applications]
+  L2[Edge and integration: API gateway, adapters, file exchange, verification]
+  L3[Domain services: taxpayer, invoice, VAT, returns, reconciliation, audit, risk]
+  L4[Transaction and event backbone: workflow, rules, messaging, outbox]
+  L5[Data: operational stores, VAT sub-ledger, audit/event store, object storage]
+  L6[Intelligence: matching, anomaly detection, graph, warehouse, BI]
+  L7[Platform and security: IAM, PKI/HSM, observability, CI/CD, DR]
+  L1 --> L2 --> L3 --> L4 --> L5 --> L6
+  L7 -. governs and protects .-> L1
+  L7 -. governs and protects .-> L2
+  L7 -. governs and protects .-> L3
+  L7 -. governs and protects .-> L4
+  L7 -. governs and protects .-> L5
+  L7 -. governs and protects .-> L6
+

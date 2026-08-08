@@ -1,0 +1,303 @@
+openapi: 3.1.0
+info:
+  title: VAT-MSA Fiscal Transaction API
+  version: 0.1.0
+  summary: Starter contract for controlled invoice submission, certification and verification.
+  description: |
+    Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
+    error codes, signature formats, retention and service levels require NamRA approval.
+servers:
+  - url: https://sandbox.api.vat-msa.na
+    description: Conformance sandbox
+  - url: https://api.vat-msa.na
+    description: Production (proposed)
+security:
+  - oauth2: [invoices.write]
+tags:
+  - name: Invoices
+  - name: Certificates
+  - name: Offline
+  - name: Verification
+paths:
+  /v1/invoices:
+    post:
+      tags: [Invoices]
+      operationId: submitInvoice
+      summary: Submit a canonical fiscal document for validation and certification.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './schemas/vat-msa-invoice.schema.json'
+      responses:
+        '201':
+          description: Certified and posted.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificationReceipt'
+        '202':
+          description: Accepted for asynchronous processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionAccepted'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /v1/invoices/{invoice_id}:
+    get:
+      tags: [Invoices]
+      operationId: getInvoiceStatus
+      summary: Get status, calculation evidence and exception references for a submitted invoice.
+      security:
+        - oauth2: [invoices.read]
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Invoice processing status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceStatus'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/certificates/{certificate_id}:
+    get:
+      tags: [Certificates]
+      operationId: getCertificate
+      summary: Retrieve the signed certification receipt for an authorised party.
+      security:
+        - oauth2: [certificates.read]
+      parameters:
+        - name: certificate_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Signed receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificationReceipt'
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/offline/batches:
+    post:
+      tags: [Offline]
+      operationId: submitOfflineBatch
+      summary: Synchronise a signed, ordered batch from an enrolled offline device.
+      security:
+        - oauth2: [offline.sync]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfflineBatch'
+      responses:
+        '202':
+          description: Batch accepted; individual document outcomes are processed independently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionAccepted'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/verify/{verification_token}:
+    get:
+      tags: [Verification]
+      operationId: verifyCertificate
+      summary: Verify a certificate using the opaque QR token without exposing full invoice data.
+      security: []
+      parameters:
+        - name: verification_token
+          in: path
+          required: true
+          schema: { type: string, minLength: 32, maxLength: 256 }
+      responses:
+        '200':
+          description: Privacy-minimised verification outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicVerification'
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.vat-msa.na/oauth2/token
+          scopes:
+            invoices.write: Submit fiscal documents.
+            invoices.read: Read documents belonging to the authorised taxpayer.
+            certificates.read: Retrieve certification receipts.
+            offline.sync: Synchronise enrolled offline devices.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Stable key unique to the client and business operation. Reuse with a different body is rejected.
+      schema: { type: string, minLength: 16, maxLength: 128 }
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      schema: { type: string, format: uuid }
+    InvoiceId:
+      name: invoice_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    CorrelationId:
+      description: End-to-end trace identifier.
+      schema: { type: string, format: uuid }
+  schemas:
+    SubmissionAccepted:
+      type: object
+      additionalProperties: false
+      required: [submission_id, status, received_at]
+      properties:
+        submission_id: { type: string, format: uuid }
+        status: { type: string, enum: [RECEIVED, PROCESSING] }
+        received_at: { type: string, format: date-time }
+        status_url: { type: string, format: uri }
+    CertificationReceipt:
+      type: object
+      additionalProperties: false
+      required: [invoice_id, transaction_id, certificate_id, status, certified_at, invoice_hash, signature, verification_url]
+      properties:
+        invoice_id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        certificate_id: { type: string, format: uuid }
+        status: { type: string, const: CERTIFIED }
+        certified_at: { type: string, format: date-time }
+        rule_set_version: { type: string }
+        invoice_hash: { type: string, pattern: '^[A-Fa-f0-9]{64}$' }
+        signature: { type: string, description: JWS or equivalent approved signature container. }
+        verification_url: { type: string, format: uri }
+        qr_payload: { type: string }
+    InvoiceStatus:
+      type: object
+      additionalProperties: false
+      required: [invoice_id, status, updated_at]
+      properties:
+        invoice_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [RECEIVED, VALIDATING, REJECTED, ACCEPTED, CERTIFIED, POSTED, MATCHED, EXCEPTION, REVERSED]
+        updated_at: { type: string, format: date-time }
+        certificate_id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        exception_ids:
+          type: array
+          items: { type: string, format: uuid }
+        validation_messages:
+          type: array
+          items: { $ref: '#/components/schemas/ValidationMessage' }
+    ValidationMessage:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message]
+      properties:
+        code: { type: string, maxLength: 80 }
+        severity: { type: string, enum: [ERROR, WARNING, INFORMATION] }
+        path: { type: string, description: JSON Pointer to the affected value. }
+        message: { type: string, maxLength: 1000 }
+        rule_reference: { type: string, maxLength: 100 }
+    OfflineBatch:
+      type: object
+      additionalProperties: false
+      required: [device_id, batch_id, sequence_from, sequence_to, created_at, documents, device_signature]
+      properties:
+        device_id: { type: string, maxLength: 100 }
+        batch_id: { type: string, format: uuid }
+        sequence_from: { type: integer, minimum: 1 }
+        sequence_to: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        previous_batch_hash: { type: string, pattern: '^[A-Fa-f0-9]{64}$' }
+        documents:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: './schemas/vat-msa-invoice.schema.json'
+        device_signature: { type: string }
+    PublicVerification:
+      type: object
+      additionalProperties: false
+      required: [valid, certificate_status, certified_at, supplier_display, invoice_number_masked, total_amount, currency]
+      properties:
+        valid: { type: boolean }
+        certificate_status: { type: string, enum: [VALID, REVERSED, REVOKED, UNKNOWN] }
+        certified_at: { type: string, format: date-time }
+        supplier_display: { type: string, maxLength: 250 }
+        invoice_number_masked: { type: string, maxLength: 100 }
+        total_amount: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    Problem:
+      type: object
+      description: RFC 9457-compatible problem detail.
+      additionalProperties: true
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string, format: uri-reference }
+        correlation_id: { type: string, format: uuid }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ValidationMessage' }
+  responses:
+    BadRequest:
+      description: Malformed request.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unauthorized:
+      description: Authentication failed.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Forbidden:
+      description: Authenticated identity lacks the required permission or taxpayer scope.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    NotFound:
+      description: Resource not found or not visible to the caller.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Conflict:
+      description: Duplicate, sequence conflict or idempotency-key body mismatch.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    ValidationFailed:
+      description: Canonical or business-rule validation failed.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    RateLimited:
+      description: Client or taxpayer rate limit exceeded.
+      headers:
+        Retry-After: { schema: { type: integer, minimum: 1 } }
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unavailable:
+      description: Temporary dependency or platform failure; retry only with the same idempotency key.
+      headers:
+        Retry-After: { schema: { type: integer, minimum: 1 } }
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+

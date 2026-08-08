@@ -1,0 +1,21 @@
+flowchart TB
+  INTERNET[Internet and partner networks]
+  EDGE[Protected edge: WAF, DDoS, API gateway, verification portal]
+  APP[Application zone: domain workloads and service mesh]
+  DATA[Restricted data zone: operational DB, ledger, evidence store]
+  MGMT[Privileged management zone: PAM, CI/CD, bastion, break-glass]
+  SOC[Security operations: SIEM, SOAR, monitoring, threat detection]
+  HSM[HSM / KMS / PKI]
+
+  INTERNET --> EDGE
+  EDGE -->|authenticated, authorised and rate-limited| APP
+  APP -->|workload identity and least privilege| DATA
+  MGMT -->|approved privileged session| APP
+  MGMT -->|approved privileged session| DATA
+  HSM --> EDGE
+  HSM --> APP
+  EDGE --> SOC
+  APP --> SOC
+  DATA --> SOC
+  MGMT --> SOC
+

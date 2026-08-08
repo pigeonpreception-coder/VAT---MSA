@@ -1,0 +1,18 @@
+flowchart LR
+  INV[Certified invoice]
+  SELLER[Seller taxpayer]
+  BUYER[Buyer taxpayer]
+  OUT[Seller output VAT entry]
+  IN[Buyer input VAT candidate]
+  MATCH[Matching decision]
+  PERIOD[Tax periods]
+  RETS[Seller and buyer VAT returns]
+  EXC[Exception case]
+
+  SELLER --> INV --> BUYER
+  INV --> OUT --> MATCH
+  INV --> IN --> MATCH
+  MATCH -->|matched| PERIOD --> RETS
+  MATCH -->|mismatch, missing or duplicate| EXC
+  EXC -->|resolved evidence| MATCH
+

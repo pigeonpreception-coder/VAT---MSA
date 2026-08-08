@@ -1,0 +1,35 @@
+flowchart TB
+  subgraph TAXPAYERS[Taxpayer ecosystem]
+    POS[POS and retail SaaS]
+    ERP[ERP and accounting systems]
+    PORTALS[Seller and buyer portals]
+    DESKTOP[Offline desktop client]
+  end
+
+  subgraph CORE[VAT-MSA platform]
+    EDGE[API and integration gateway]
+    TXN[Invoice and VAT transaction core]
+    MATCH[Matching, exception and risk services]
+    DATA[VAT sub-ledger, audit evidence and analytics]
+  end
+
+  subgraph GOV[Government ecosystem]
+    ITAS[ITAS / taxpayer account and returns]
+    CUSTOMS[Customs and import records]
+    PAY[Payment and refund controls]
+    IAM[Government IAM / PKI / SOC]
+  end
+
+  POS --> EDGE
+  ERP --> EDGE
+  PORTALS --> EDGE
+  DESKTOP --> EDGE
+  EDGE --> TXN
+  TXN --> MATCH
+  TXN --> DATA
+  MATCH --> DATA
+  EDGE <--> ITAS
+  MATCH <--> CUSTOMS
+  DATA <--> PAY
+  IAM --> CORE
+

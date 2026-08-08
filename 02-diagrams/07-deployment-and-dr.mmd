@@ -1,0 +1,34 @@
+flowchart LR
+  USERS[Taxpayers and NamRA users]
+  DNS[Global DNS / traffic management]
+
+  subgraph PRIMARY[Primary production site]
+    LB1[Load balancer / ingress]
+    APP1[Application cells]
+    DB1[(PostgreSQL HA cluster)]
+    MQ1[(Message broker)]
+    OBJ1[(Evidence object store)]
+    LB1 --> APP1
+    APP1 --> DB1
+    APP1 --> MQ1
+    APP1 --> OBJ1
+  end
+
+  subgraph DR[Secondary disaster-recovery site]
+    LB2[Standby ingress]
+    APP2[Warm application cells]
+    DB2[(Replicated database)]
+    MQ2[(Replicated broker)]
+    OBJ2[(Replicated evidence store)]
+    LB2 --> APP2
+    APP2 --> DB2
+    APP2 --> MQ2
+    APP2 --> OBJ2
+  end
+
+  USERS --> DNS --> LB1
+  DNS -. failover .-> LB2
+  DB1 -. encrypted replication .-> DB2
+  MQ1 -. mirrored durable state .-> MQ2
+  OBJ1 -. immutable replication .-> OBJ2
+

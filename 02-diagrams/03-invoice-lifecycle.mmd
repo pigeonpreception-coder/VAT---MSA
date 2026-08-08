@@ -1,0 +1,15 @@
+stateDiagram-v2
+  [*] --> RECEIVED
+  RECEIVED --> VALIDATING
+  VALIDATING --> REJECTED: schema, identity or rule failure
+  REJECTED --> RECEIVED: corrected resubmission
+  VALIDATING --> ACCEPTED: all controls pass
+  ACCEPTED --> CERTIFIED: receipt signed
+  CERTIFIED --> POSTED: VAT transaction and ledger committed
+  POSTED --> MATCHED: counterpart confirms or deterministic match
+  POSTED --> EXCEPTION: missing or inconsistent counterpart
+  EXCEPTION --> MATCHED: resolved
+  CERTIFIED --> REVERSED: approved cancellation or credit-note chain
+  REVERSED --> [*]
+  MATCHED --> [*]
+

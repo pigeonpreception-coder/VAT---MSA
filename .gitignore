@@ -1,0 +1,13 @@
+# Generated visual QA output
+qa/
+
+# Microsoft Office lock and recovery files
+~$*
+~WRL*.tmp
+
+# Local source prompts retained outside version control
+Prompt - VATMS*.docx
+
+# Python caches
+__pycache__/
+*.py[cod]

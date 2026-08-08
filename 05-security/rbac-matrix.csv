@@ -1,0 +1,48 @@
+role,resource,action,scope,approval_required,segregation_of_duties_note
+SELLER_ADMIN,organisation_users,manage,own_taxpayer,no,Cannot grant NamRA or platform roles
+SELLER_ADMIN,invoices,submit,own_taxpayer,no,Cannot alter accepted/certified invoices
+SELLER_ADMIN,invoices,read,own_taxpayer,no,Buyer data minimised to authorised business purpose
+SELLER_ADMIN,certificates,read,own_taxpayer,no,
+SELLER_ADMIN,integrations,manage,own_taxpayer,yes,Client credential issuance requires re-authentication
+SELLER_OPERATOR,invoices,submit,own_taxpayer,no,Cannot manage organisation users or API clients
+SELLER_OPERATOR,invoices,read,own_taxpayer,no,
+SELLER_OPERATOR,exceptions,respond,own_taxpayer,no,Cannot close NamRA exception
+SELLER_VIEWER,invoices,read,own_taxpayer,no,Read only
+SELLER_VIEWER,reports,read,own_taxpayer,no,Export is audited
+BUYER_ADMIN,organisation_users,manage,own_taxpayer,no,Cannot grant NamRA or platform roles
+BUYER_ADMIN,purchases,read,own_taxpayer,no,
+BUYER_ADMIN,input_vat_candidates,review,own_taxpayer,no,Cannot override tax rule
+BUYER_USER,purchases,read,own_taxpayer,no,
+BUYER_USER,input_vat_candidates,respond,own_taxpayer,no,
+NAMRA_COMPLIANCE_OFFICER,taxpayers,read,assigned_portfolio,no,Tax identifiers masked unless purpose requires full value
+NAMRA_COMPLIANCE_OFFICER,invoices,read,assigned_portfolio,no,
+NAMRA_COMPLIANCE_OFFICER,exceptions,investigate,assigned_portfolio,no,
+NAMRA_COMPLIANCE_OFFICER,exceptions,resolve,assigned_portfolio,conditional,High/critical resolution requires supervisor
+NAMRA_AUDITOR,taxpayers,read,assigned_cases,no,
+NAMRA_AUDITOR,invoices,read,assigned_cases,no,
+NAMRA_AUDITOR,audit_evidence,collect,assigned_cases,no,Evidence export watermarked and audited
+NAMRA_AUDITOR,audit_cases,manage,assigned_cases,no,Cannot approve own final determination
+NAMRA_AUDIT_SUPERVISOR,audit_cases,assign,organisational_unit,no,
+NAMRA_AUDIT_SUPERVISOR,audit_cases,approve_decision,organisational_unit,yes,Cannot be the case lead for the same decision
+NAMRA_REFUND_OFFICER,refund_cases,investigate,assigned_cases,no,Cannot approve or release payment
+NAMRA_REFUND_APPROVER,refund_cases,approve,approval_limit,yes,Cannot prepare same case
+NAMRA_REFUND_APPROVER,payment_instruction,authorise,approval_limit,yes,Dual control above configured threshold
+NAMRA_RISK_ANALYST,risk_rules,propose,national,no,Cannot activate own rule/model
+NAMRA_RISK_ANALYST,risk_alerts,analyse,assigned_portfolio,no,
+NAMRA_RISK_GOVERNOR,risk_rules,approve,national,yes,Independent validation required for models
+NAMRA_DATA_STEWARD,taxpayer_matches,resolve,assigned_queue,no,All merges reversible and audited
+NAMRA_DATA_STEWARD,taxpayer_identifiers,update,assigned_queue,conditional,High-impact identity change requires peer approval
+INTEGRATION_ADMIN,api_clients,manage,assigned_partners,yes,Cannot read taxpayer invoice payloads by default
+INTEGRATION_ADMIN,connector_config,manage,assigned_partners,yes,Secrets stored in vault and never displayed
+SECURITY_ANALYST,security_events,read,national,no,No business-record mutation
+SECURITY_ANALYST,incidents,manage,national,no,
+SECURITY_ADMIN,security_policy,manage,national,yes,Cannot approve own policy change
+SECURITY_ADMIN,signing_keys,request_operation,national,yes,HSM quorum and dual control
+SYSTEM_ADMIN,platform_configuration,manage,national,yes,Cannot change tax rules or business outcomes
+SYSTEM_ADMIN,application_data,read,none,no,No standing access to taxpayer payloads
+PLATFORM_OPERATOR,deployment,execute,environment,yes,Production release must be approved artifact
+PLATFORM_OPERATOR,service_health,manage,environment,no,Cannot query tax-confidential content
+INTERNAL_AUDITOR,audit_events,read,national,no,Read-only and independent
+INTERNAL_AUDITOR,access_reviews,read,national,no,Cannot administer reviewed identities
+BREAK_GLASS_ADMIN,platform_emergency,manage,declared_incident,yes,Time-bound dual approval session recorded and reviewed within 24 hours
+

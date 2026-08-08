@@ -1,0 +1,64 @@
+catalog_version: 0.1.0
+envelope:
+  specification: CloudEvents 1.0
+  required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
+  delivery: at-least-once
+  ordering: guaranteed only within the declared aggregate partition
+  idempotency: consumers persist event id and business-effect key
+  compatibility: additive changes only within a major event version
+events:
+  - type: na.vatmsa.invoice.received.v1
+    owner: Invoice Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Confirms durable receipt before business validation.
+  - type: na.vatmsa.invoice.rejected.v1
+    owner: Invoice Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records terminal validation failure and structured reasons.
+  - type: na.vatmsa.invoice.certified.v1
+    owner: Certification Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Announces signed certification after invoice and VAT transaction commit.
+  - type: na.vatmsa.vat.posted.v1
+    owner: VAT Ledger Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Announces balanced VAT sub-ledger posting.
+  - type: na.vatmsa.match.resolved.v1
+    owner: Reconciliation Domain
+    partition_key: transaction_id
+    contains_tax_confidential_data: true
+    purpose: Records the counterpart match decision, confidence and evidence.
+  - type: na.vatmsa.exception.opened.v1
+    owner: Exception Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Opens a controlled discrepancy workflow.
+  - type: na.vatmsa.exception.resolved.v1
+    owner: Exception Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records disposition, evidence and authorised actor.
+  - type: na.vatmsa.return.drafted.v1
+    owner: Return Domain
+    partition_key: taxpayer_period_id
+    contains_tax_confidential_data: true
+    purpose: Announces a reproducible return draft built from a closed ledger snapshot.
+  - type: na.vatmsa.risk.alerted.v1
+    owner: Risk Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Raises explainable risk indicators; does not itself impose an adverse decision.
+  - type: na.vatmsa.audit.case-opened.v1
+    owner: Audit Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Creates an investigation case with immutable evidence references.
+  - type: na.vatmsa.offline.batch-received.v1
+    owner: Offline Synchronisation Domain
+    partition_key: device_id
+    contains_tax_confidential_data: true
+    purpose: Records batch sequence, device signature and chain-integrity result.

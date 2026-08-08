@@ -1,0 +1,23 @@
+sequenceDiagram
+  participant S as Seller system
+  participant G as API gateway
+  participant I as Invoice service
+  participant R as Rules service
+  participant D as Transaction DB
+  participant O as Outbox / broker
+  participant M as Matching service
+  participant A as Audit and analytics
+
+  S->>G: POST invoice + idempotency key
+  G->>I: authenticated canonical request
+  I->>R: validate taxpayers, invoice and effective rules
+  R-->>I: calculation and rule evidence
+  I->>D: commit invoice, VAT transaction, ledger and outbox atomically
+  D-->>I: committed transaction ID
+  I-->>G: signed certification receipt
+  G-->>S: 201 Certified
+  D->>O: publish committed outbox events
+  O->>M: InvoiceCertified / VATPosted
+  O->>A: audit, risk and analytical events
+  M-->>O: MatchResolved or ExceptionOpened
+
