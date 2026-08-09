@@ -1,0 +1,20 @@
+flowchart TD
+  USERS["Users / Machine clients"] --> GLOBAL["Global DNS / CDN / DDoS / WAF"]
+  GLOBAL --> GTM["Health-aware global routing"]
+  GTM --> P["Primary region / multiple zones"]
+  GTM -. "approved DR activation" .-> S["Warm secondary region"]
+  P --> LB["Regional/API load balancing"]
+  LB --> APPS["Stateless portal/API replicas"]
+  APPS --> CACHE[("Distributed cache")]
+  APPS --> DB[("Partitioned replicated operational/tax DB")]
+  APPS --> BUS[("Replicated message/event platform")]
+  BUS --> WORKERS["Autoscaled worker pools"]
+  APPS --> OBJECTS[("Encrypted object storage + scan")]
+  DB --> READS[("Read replicas / governed read models")]
+  READS --> BI[("Analytics lakehouse/warehouse")]
+  APPS --> OBS["Metrics logs traces"]
+  WORKERS --> OBS
+  OBS --> SIEM["SIEM / SOC / Incident"]
+  DB -. "replication + PITR" .-> S
+  DB --> VAULT[("Immutable encrypted backup vault")]
+  VAULT -. "isolated restore" .-> S

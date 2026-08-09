@@ -1,0 +1,14 @@
+flowchart TD
+  USERS["Taxpayers | NamRA | Platform operators"] --> EDGE["CDN / DDoS / WAF / API Gateway"]
+  SYSTEMS["ITAS | SaaS / POS / ERP | Approved regulated systems"] --> EDGE
+  EDGE --> TRUST["Identity federation + RBAC/ABAC + risk policy"]
+  TRUST --> PORTALS["Buyer | Seller | NamRA | Admin | Developer experiences"]
+  PORTALS --> CORE["Taxpayer / Business / Invoice / VAT / Compliance domains"]
+  CORE --> DATA["Operational relational + tax ledger"]
+  CORE --> EVENTS["Transactional outbox + durable event bus"]
+  EVENTS --> WORKERS["Matching | Returns | Notifications | Sync | Analytics"]
+  CORE --> DOCS["Encrypted document platform"]
+  CORE --> EVIDENCE["Immutable audit + security evidence"]
+  WORKERS --> NAMRA["ITAS / NamRA statutory processing"]
+  WORKERS --> BI["Governed reporting / analytics"]
+  EVIDENCE --> SOC["SIEM / SOC / Incident response"]

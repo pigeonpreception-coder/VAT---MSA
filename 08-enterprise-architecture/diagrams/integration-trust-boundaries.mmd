@@ -1,0 +1,10 @@
+flowchart LR
+  EXT["ITAS / SaaS / POS / ERP"] --> EDGE["mTLS / OAuth / WAF / Gateway"]
+  EDGE --> ID["Machine identity + scopes + tenant + quota"]
+  ID --> ADAPTER["Integration anti-corruption adapter"]
+  ADAPTER --> VALIDATE["Schema / replay / idempotency / canonical mapping"]
+  VALIDATE --> DOMAIN["VAT-MSA domain API"]
+  DOMAIN --> OUTBOX["Outbox / event delivery"]
+  OUTBOX --> EXT
+  EDGE --> SIEM["Security telemetry / SOC"]
+  ADAPTER --> RECON["Sync checkpoints / reconciliation / DLQ"]

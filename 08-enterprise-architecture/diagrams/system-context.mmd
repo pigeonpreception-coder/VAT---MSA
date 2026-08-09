@@ -1,0 +1,16 @@
+flowchart TD
+  TAX["Verified taxpayer organisation"] --> EDGE["Protected edge / API gateway"]
+  NAMRA["NamRA officials"] --> EDGE
+  OPS["Platform / SRE / SOC"] --> EDGE
+  SAAS["Approved SaaS / POS / ERP"] --> EDGE
+  EDGE --> IAM["Identity federation and policy"]
+  ITAS["ITAS / NamRA authority"] <--> IAM
+  IAM --> PORTALS["Buyer | Seller | NamRA | Admin portals"]
+  PORTALS --> DOMAINS["Domain-modular application services"]
+  DOMAINS --> TX["Operational transaction stores"]
+  DOMAINS --> OUTBOX["Transactional outbox / event bus"]
+  OUTBOX --> WORKERS["VAT | reconciliation | notification | analytics workers"]
+  DOMAINS --> DOCS["Secure document storage"]
+  DOMAINS --> EVIDENCE["Immutable audit / security evidence"]
+  DOMAINS <--> ITAS
+  WORKERS --> ANALYTICS["Governed analytics / reporting"]

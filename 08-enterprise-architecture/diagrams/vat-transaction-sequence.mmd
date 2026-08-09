@@ -1,0 +1,21 @@
+sequenceDiagram
+  participant S as Seller / SaaS
+  participant G as Protected Gateway
+  participant I as Invoice Service
+  participant T as Taxpayer + Tax Rules
+  participant D as Authoritative DB
+  participant E as Event Bus
+  participant R as Reconciliation / Returns
+  participant N as ITAS / NamRA Adapter
+  S->>G: Submit invoice + identity + idempotency key
+  G->>G: Authenticate, authorize, bound, quota, correlate
+  G->>I: Canonical command
+  I->>T: Resolve parties, capabilities, rule and period
+  T-->>I: Verified snapshots + rule version
+  I->>D: Atomic invoice + VAT ledger + audit + outbox
+  D-->>I: Durable IDs / receipt
+  I-->>S: Certified transaction receipt
+  D->>E: Relay outbox event
+  E->>R: Match and assemble governed return state
+  R->>N: Idempotent return/status integration
+  N-->>R: Official receipt/status or controlled error

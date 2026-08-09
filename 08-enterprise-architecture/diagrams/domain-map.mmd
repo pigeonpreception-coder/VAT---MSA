@@ -1,0 +1,22 @@
+flowchart LR
+  IAM["Identity & Access"] --> ORG["Taxpayer & Organisation"]
+  ORG --> PARTY["Customers & Suppliers"]
+  ORG --> COMMERCIAL["Quotations & Invoices"]
+  PARTY --> COMMERCIAL
+  COMMERCIAL --> VAT["VAT & Tax Rules"]
+  COMMERCIAL --> ACCOUNTING["Accounting"]
+  COMMERCIAL --> INVENTORY["Inventory"]
+  COMMERCIAL --> EXPENSE["Expense"]
+  COMMERCIAL --> PROJECT["Project"]
+  VAT --> RECON["Reconciliation"]
+  VAT --> RETURNS["Returns & Compliance"]
+  RECON --> RETURNS
+  RETURNS --> AUDIT["Audit & Dispute"]
+  RETURNS --> RISK["NamRA Risk"]
+  CONSENT["Consent & Delegation"] --> IAM
+  DOCS["Documents"] --> COMMERCIAL
+  DOCS --> AUDIT
+  INTEGRATION["Integration & Developer"] --> COMMERCIAL
+  NOTIFY["Communication & Notification"] --> ORG
+  OPS["Security & Platform Operations"] --> IAM
+  RETURNS --> ANALYTICS["Reporting & Analytics"]

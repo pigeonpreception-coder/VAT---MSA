@@ -1,0 +1,21 @@
+flowchart TD
+  CLIENTS["Web / Mobile responsive / Offline / SaaS clients"] --> EDGE["Protected Edge + API Gateway"]
+  EDGE --> IAM["Identity + Policy Plane"]
+  EDGE --> UX["Portal / BFF Containers"]
+  UX --> TAXPAYER["Taxpayer + Organisation"]
+  UX --> BUSINESS["Commercial + Business"]
+  UX --> TAX["VAT + Compliance"]
+  EDGE --> INTEGRATION["Integration + Developer Platform"]
+  TAXPAYER --> OPDB[("Operational DB partitions")]
+  BUSINESS --> OPDB
+  TAX --> TAXDB[("Tax transaction + ledger")]
+  BUSINESS --> OUTBOX["Outbox / Event Bus"]
+  TAX --> OUTBOX
+  OUTBOX --> WORKERS["Async workers / read models"]
+  BUSINESS --> DOCS[("Document objects + metadata")]
+  WORKERS --> ANALYTICS[("Analytics platform")]
+  TAX --> AUDIT[("Immutable audit evidence")]
+  EDGE --> SIEM[("Security lake / SIEM")]
+  IAM --> SIEM
+  INTEGRATION <--> ITAS["ITAS / NamRA"]
+  INTEGRATION <--> SAAS["Approved SaaS providers"]

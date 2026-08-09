@@ -1,0 +1,25 @@
+flowchart LR
+  USERS["Taxpayers NamRA Partners"] --> DNS["Health-aware DNS / Global Traffic"]
+  DNS --> PA["Primary Region Edge"]
+  DNS -. "approved failover" .-> SA["Secondary Region Edge"]
+  subgraph PRIMARY["Primary Region - Multiple Failure Domains"]
+    PA --> APP1["Stateless Application Pools"]
+    APP1 --> DB1[("Relational Primary + Local HA")]
+    APP1 --> EV1[("Durable Event Backbone")]
+    APP1 --> OBJ1[("Encrypted Object Store")]
+  end
+  subgraph SECONDARY["Secondary Region - Warm/Active by Tier"]
+    SA --> APP2["Deployable Application Pools"]
+    APP2 --> DB2[("Regional Replica")]
+    APP2 --> EV2[("Replicated Event State")]
+    APP2 --> OBJ2[("Replicated Objects")]
+  end
+  DB1 -. "encrypted replication" .-> DB2
+  EV1 -. "checkpointed replication" .-> EV2
+  OBJ1 -. "versioned replication" .-> OBJ2
+  DB1 --> VAULT[("Cross-account Immutable Backup Vault")]
+  EV1 --> VAULT
+  OBJ1 --> VAULT
+  VAULT -. "quorum-controlled restore" .-> CLEAN["Isolated DR Clean Room"]
+  CLEAN -. "verified recovery" .-> SECONDARY
+

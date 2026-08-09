@@ -1,0 +1,75 @@
+version: 1
+base_path: /api/v1
+common_controls:
+  authentication: human OIDC/SAML session or registered machine identity
+  authorization: RBAC plus ABAC plus tenant/resource ownership
+  correlation: X-Correlation-Id required or server-generated
+  errors: application/problem+json
+  idempotency: required for financial and tax commands
+  limits: schema byte page query and multi-level rate budgets
+domains:
+  identity:
+    - { method: GET, path: /identity/federation-status, permission: identity:read, status: foundation }
+    - { method: POST, path: /auth/token-exchange, permission: external-provider-contract, status: gated-by-ITAS }
+  taxpayers:
+    - { method: GET, path: /taxpayers, permission: taxpayers:read, status: planned }
+    - { method: POST, path: /registration-applications, permission: registrations:submit, status: foundation }
+    - { method: GET, path: "/registration-applications/{id}", permission: registrations:review-or-owner, status: foundation }
+  organisations:
+    - { method: GET, path: /organisations, permission: identity:read, status: foundation }
+    - { method: GET, path: "/organisations/{id}", permission: identity:read-and-member, status: planned }
+    - { method: POST, path: "/organisations/{id}/memberships", permission: organisation:users:manage, status: planned }
+  users:
+    - { method: GET, path: /users, permission: users:read, status: planned }
+    - { method: POST, path: "/users/{id}/role-assignments", permission: users:roles:manage, status: planned }
+  quotations:
+    - { method: POST, path: /quotations, permission: quotations:create, status: phase-5 }
+    - { method: POST, path: "/quotations/{id}/convert", permission: invoices:submit, status: phase-5 }
+  invoices:
+    - { method: GET, path: /invoices, permission: invoices:read, status: implemented }
+    - { method: POST, path: /invoices, permission: invoices:submit, status: implemented }
+    - { method: GET, path: "/invoices/{id}", permission: invoices:read-and-resource-scope, status: implemented }
+    - { method: POST, path: "/invoices/{id}/credit-notes", permission: credit-notes:create, status: phase-6 }
+  verification:
+    - { method: GET, path: "/verify/{token}", permission: public-minimal, status: implemented }
+  vat:
+    - { method: GET, path: /vat/transactions, permission: vat:read, status: phase-6 }
+    - { method: GET, path: /tax-rules, permission: tax-rules:read, status: foundation }
+  returns:
+    - { method: GET, path: /vat-returns, permission: returns:read, status: planned }
+    - { method: POST, path: "/vat-returns/{id}/submit", permission: returns:submit, status: gated-by-NamRA-rules }
+  reconciliation:
+    - { method: GET, path: /reconciliation/exceptions, permission: exceptions:read, status: planned }
+    - { method: POST, path: "/reconciliation/exceptions/{id}/resolve", permission: exceptions:resolve, status: planned }
+  accounting:
+    - { method: GET, path: /journals, permission: accounting:read, status: planned }
+    - { method: POST, path: /journals, permission: accounting:post, status: planned }
+  inventory:
+    - { method: GET, path: /stock-movements, permission: inventory:read, status: planned }
+    - { method: POST, path: /stock-movements, permission: inventory:move, status: planned }
+  expenses:
+    - { method: POST, path: /expenses, permission: expenses:create, status: planned }
+    - { method: POST, path: "/expenses/{id}/approve", permission: expenses:approve, status: planned }
+  projects:
+    - { method: GET, path: /projects, permission: projects:read, status: planned }
+    - { method: POST, path: /projects, permission: projects:create, status: planned }
+  audit:
+    - { method: GET, path: /audit/events, permission: audit:read, status: planned }
+  documents:
+    - { method: POST, path: /documents, permission: documents:create, status: phase-9-r2 }
+    - { method: GET, path: "/documents/{id}/download-ticket", permission: documents:read, status: planned }
+  notifications:
+    - { method: GET, path: /notifications, permission: notifications:read, status: planned }
+    - { method: PUT, path: /notification-preferences, permission: notifications:manage-own, status: planned }
+  reporting:
+    - { method: POST, path: /reports, permission: reports:generate, status: planned }
+    - { method: GET, path: "/report-jobs/{id}", permission: reports:read-own-or-authorized, status: planned }
+  developer:
+    - { method: POST, path: /developer/clients, permission: developer-clients:create, status: planned }
+    - { method: POST, path: "/developer/clients/{id}/rotate", permission: developer-clients:manage, status: planned }
+  integrations:
+    - { method: GET, path: /integrations, permission: integrations:read, status: foundation }
+    - { method: POST, path: "/integrations/{id}/credentials/rotate", permission: integrations:manage, status: managed-secret-service }
+  operations:
+    - { method: GET, path: /health/live, permission: platform-probe, status: implemented }
+    - { method: GET, path: /health/ready, permission: platform-probe, status: implemented }

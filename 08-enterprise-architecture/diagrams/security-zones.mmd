@@ -1,0 +1,17 @@
+flowchart TD
+  INTERNET["Internet / Partners"] --> EDGE["PUBLIC ZONE: DNS CDN DDoS WAF Bot Gateway"]
+  EDGE --> ID["IDENTITY ZONE: Federation MFA Policy PAM"]
+  EDGE --> APP["APPLICATION ZONE: Portal APIs Workers"]
+  ID --> APP
+  PARTNER["ITAS / SaaS"] --> INT["INTEGRATION ZONE: Adapters Sandbox File/Webhook"]
+  INT --> APP
+  APP --> DATA["DATA ZONE: Operational DB Tax Ledger Events Cache Objects"]
+  DATA --> ANALYTICS["ANALYTICS ZONE: Read Models Warehouse BI"]
+  EDGE --> SEC["SECURITY ZONE: Collectors SIEM SOAR SOC Evidence"]
+  ID --> SEC
+  APP --> SEC
+  DATA --> SEC
+  MGMT["MANAGEMENT ZONE: CI/CD Registry Orchestration KMS"] --> APP
+  MGMT --> DATA
+  RECOVERY["RECOVERY ZONE: Immutable Vault DR Clean Room"] -.-> DATA
+  RECOVERY -.-> APP

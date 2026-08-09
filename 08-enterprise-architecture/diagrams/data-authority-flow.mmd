@@ -1,0 +1,16 @@
+flowchart LR
+  ITAS["ITAS - presumed legal taxpayer / return authority"] -->|"verified identity/status + acknowledgements"| ADAPTER["ITAS Anti-corruption Adapter"]
+  SAAS["Consented SaaS / Bank / Payment Sources"] -->|"signed scoped source records"| INTEGRATION["Integration Zone"]
+  ADAPTER --> CORE["VAT-MSA Domain Services"]
+  INTEGRATION --> CORE
+  RULES["NamRA-approved Signed Tax Rule Bundles"] --> CORE
+  CORE --> OLTP[("Authoritative VAT-MSA Relational Store")]
+  CORE --> OBJECTS[("Encrypted Evidence Objects")]
+  CORE --> OUTBOX[("Transactional Outbox / Event Backbone")]
+  OUTBOX --> SEARCH[("Permission-filtered Search Projection")]
+  OUTBOX --> WAREHOUSE[("Governed Analytics Warehouse")]
+  OUTBOX --> ADAPTER
+  OLTP -. "CDC/control totals" .-> WAREHOUSE
+  WAREHOUSE --> REPORTS["Certified Reports and BI"]
+  REPORTS -->|"reconciled aggregates only"| OPEN["Approved Open Data"]
+

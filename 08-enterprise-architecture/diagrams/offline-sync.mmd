@@ -1,0 +1,12 @@
+flowchart TD
+  USER["Authorized offline user"] --> CLIENT["Hardened desktop client"]
+  CLIENT --> LOCAL[("Encrypted local DB + signed event log")]
+  RESERVE["Server-signed sequence reservation"] --> CLIENT
+  LOCAL --> QUEUE["Idempotent encrypted sync queue"]
+  QUEUE --> GATEWAY["Gateway + device/user identity"]
+  GATEWAY --> VERIFY["Signature / chain / reservation / schema / rule / conflict validation"]
+  VERIFY -->|"valid"| COMMIT["Authoritative server certification + ledger commit"]
+  VERIFY -->|"conflict"| TASK["Controlled conflict task"]
+  VERIFY -->|"tamper"| QUAR["Quarantine device/batch + SOC alert"]
+  COMMIT --> RECEIPT["Server IDs + checkpoint + recognized status"]
+  RECEIPT --> LOCAL

@@ -1,0 +1,11 @@
+flowchart LR
+  BUYER["Taxpayer user as Buyer"] --> VATMSA["VAT-MSA national platform"]
+  SELLER["Taxpayer user as Seller"] --> VATMSA
+  NAMRA["NamRA official"] --> VATMSA
+  ADMIN["NamRA / Technical / Security administrator"] --> VATMSA
+  DESKTOP["Offline desktop client"] <--> VATMSA
+  ITAS["ITAS identity and tax administration"] <--> VATMSA
+  SAAS["POS / ERP / Accounting / Retail SaaS"] <--> VATMSA
+  BANK["Approved bank / payment systems"] -. "future regulated contracts" .-> VATMSA
+  CUSTOMS["Approved customs/import systems"] -. "future confirmed contracts" .-> VATMSA
+  IDP["Approved standalone identity service"] -. "selected after architecture gate" .-> VATMSA
