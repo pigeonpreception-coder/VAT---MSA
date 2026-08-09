@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.2.0
-  summary: Controlled taxpayer identity, organisation, invoice certification and verification contract.
+  version: 0.3.0
+  summary: Controlled identity, business operations, VAT invoice certification and verification contract.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
     error codes, signature formats, retention and service levels require NamRA approval.
@@ -17,6 +17,11 @@ tags:
   - name: Identity
   - name: Organisations
   - name: Registrations
+  - name: Quotations
+  - name: Accounting
+  - name: Expenses
+  - name: Inventory
+  - name: Projects
   - name: Invoices
   - name: Certificates
   - name: Offline
@@ -95,6 +100,140 @@ paths:
               schema: { $ref: '#/components/schemas/RegistrationAccepted' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/quotations:
+    get:
+      tags: [Quotations]
+      operationId: listQuotations
+      summary: List quotations in the authorised organisation.
+      security: [{ oauth2: [commercial.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped quotation register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Quotations]
+      operationId: createQuotation
+      summary: Issue a quotation whose monetary and tax totals are calculated server-side.
+      security: [{ oauth2: [quotations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/QuotationSubmission' } } }
+      responses:
+        '201': { description: Quotation issued. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/quotations/{quotation_id}/accept:
+    post:
+      tags: [Quotations]
+      operationId: acceptQuotation
+      summary: Accept an unexpired issued quotation using an idempotent state transition.
+      security: [{ oauth2: [quotations.manage] }]
+      parameters:
+        - name: quotation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { description: Quotation accepted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/accounting/journals:
+    get:
+      tags: [Accounting]
+      operationId: listJournals
+      summary: List journals in the authorised organisation.
+      security: [{ oauth2: [accounting.read] }]
+      responses: { '200': { description: Tenant-scoped journal register. } }
+    post:
+      tags: [Accounting]
+      operationId: postJournal
+      summary: Post a balanced double-entry journal.
+      security: [{ oauth2: [accounting.post] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/JournalSubmission' } } }
+      responses:
+        '201': { description: Balanced journal posted. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses:
+    get:
+      tags: [Expenses]
+      operationId: listExpenses
+      summary: List expenses in the authorised organisation.
+      security: [{ oauth2: [expenses.read] }]
+      responses: { '200': { description: Tenant-scoped expense register. } }
+    post:
+      tags: [Expenses]
+      operationId: createExpense
+      summary: Record a draft expense with exact integer totals.
+      security: [{ oauth2: [expenses.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExpenseSubmission' } } }
+      responses:
+        '201': { description: Draft expense recorded. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/inventory/movements:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryBalances
+      summary: List inventory balances in the authorised organisation.
+      security: [{ oauth2: [inventory.read] }]
+      responses: { '200': { description: Tenant-scoped inventory balances. } }
+    post:
+      tags: [Inventory]
+      operationId: recordStockMovement
+      summary: Record a signed stock movement without permitting negative on-hand stock.
+      security: [{ oauth2: [inventory.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/StockMovementSubmission' } } }
+      responses:
+        '201': { description: Stock movement recorded. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: List projects and budget-to-cost projections in the authorised organisation.
+      security: [{ oauth2: [projects.read] }]
+      responses: { '200': { description: Tenant-scoped project register. } }
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Create a planned project and optional proposed budget.
+      security: [{ oauth2: [projects.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProjectSubmission' } } }
+      responses:
+        '201': { description: Project created. }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/invoices:
@@ -229,6 +368,16 @@ components:
             identity.read: Read canonical identity and organisation data within authorised scope.
             registrations.read: Read authorised registration applications.
             registrations.submit: Submit a registration application for verification.
+            commercial.read: Read commercial records.
+            quotations.manage: Create and transition quotations.
+            accounting.read: Read the chart and journal register.
+            accounting.post: Post balanced journals.
+            expenses.read: Read expenses.
+            expenses.manage: Record and transition expenses.
+            inventory.read: Read inventory balances.
+            inventory.manage: Record stock movements.
+            projects.read: Read projects.
+            projects.manage: Manage projects and budgets.
             invoices.write: Submit fiscal documents.
             invoices.read: Read documents belonging to the authorised taxpayer.
             certificates.read: Retrieve certification receipts.
@@ -254,6 +403,12 @@ components:
       name: organisation_id
       in: path
       required: true
+      schema: { type: string, minLength: 1, maxLength: 100 }
+    OrganisationScope:
+      name: organisation_id
+      in: query
+      required: false
+      description: National-pilot operators may select an organisation; taxpayer identities are always forced to their own organisation.
       schema: { type: string, minLength: 1, maxLength: 100 }
   headers:
     CorrelationId:
@@ -303,6 +458,109 @@ components:
         verification_status: { type: string, const: AWAITING_PROVIDER_CONTRACT }
         submitted_at: { type: string, format: date-time }
         next_action: { type: string }
+    QuotationSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, customer_party_id, quotation_number, currency, issue_date, valid_until, lines]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        customer_party_id: { type: string, minLength: 2, maxLength: 100 }
+        branch_id: { type: string, minLength: 2, maxLength: 100 }
+        quotation_number: { type: string, minLength: 2, maxLength: 40 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        issue_date: { type: string, format: date }
+        valid_until: { type: string, format: date }
+        notes: { type: string, maxLength: 2000 }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [description, quantity_micros, unit_code, unit_price_cents, tax_category, tax_rate_bps]
+            properties:
+              product_id: { type: string, minLength: 2, maxLength: 100 }
+              description: { type: string, minLength: 2, maxLength: 500 }
+              quantity_micros: { type: integer, minimum: 1 }
+              unit_code: { type: string, minLength: 1, maxLength: 12 }
+              unit_price_cents: { type: integer, minimum: 0 }
+              tax_category: { type: string, enum: [STANDARD, ZERO_RATED, EXEMPT, OUT_OF_SCOPE] }
+              tax_rate_bps: { type: integer, minimum: 0, maximum: 10000 }
+    JournalSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, journal_number, journal_date, description, currency, source_type, lines]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        journal_number: { type: string, minLength: 2, maxLength: 40 }
+        journal_date: { type: string, format: date }
+        reference: { type: string, maxLength: 100 }
+        description: { type: string, minLength: 2, maxLength: 500 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        source_type: { type: string, enum: [MANUAL, EXPENSE, INVOICE, IMPORT, ADJUSTMENT] }
+        source_id: { type: string, minLength: 2, maxLength: 100 }
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [account_id, description, debit_cents, credit_cents]
+            properties:
+              account_id: { type: string, minLength: 2, maxLength: 100 }
+              branch_id: { type: string, minLength: 2, maxLength: 100 }
+              project_id: { type: string, minLength: 2, maxLength: 100 }
+              description: { type: string, minLength: 2, maxLength: 500 }
+              debit_cents: { type: integer, minimum: 0 }
+              credit_cents: { type: integer, minimum: 0 }
+              tax_code: { type: string, maxLength: 40 }
+    ExpenseSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, category_id, expense_number, expense_date, description, currency, net_cents, tax_cents, total_cents]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        category_id: { type: string, minLength: 2, maxLength: 100 }
+        supplier_party_id: { type: string, minLength: 2, maxLength: 100 }
+        project_id: { type: string, minLength: 2, maxLength: 100 }
+        branch_id: { type: string, minLength: 2, maxLength: 100 }
+        expense_number: { type: string, minLength: 2, maxLength: 40 }
+        expense_date: { type: string, format: date }
+        description: { type: string, minLength: 2, maxLength: 500 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        net_cents: { type: integer, minimum: 0 }
+        tax_cents: { type: integer, minimum: 0 }
+        total_cents: { type: integer, minimum: 0 }
+    StockMovementSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, warehouse_id, product_id, movement_type, quantity_micros, unit_cost_cents, reference_type, reference_id, reason]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        warehouse_id: { type: string, minLength: 2, maxLength: 100 }
+        product_id: { type: string, minLength: 2, maxLength: 100 }
+        movement_type: { type: string, enum: [RECEIPT, ISSUE, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT_IN, ADJUSTMENT_OUT] }
+        quantity_micros: { type: integer, minimum: 1 }
+        unit_cost_cents: { type: integer, minimum: 0 }
+        reference_type: { type: string, minLength: 2, maxLength: 40 }
+        reference_id: { type: string, minLength: 2, maxLength: 100 }
+        reason: { type: string, minLength: 2, maxLength: 500 }
+        occurred_at: { type: string, format: date-time }
+    ProjectSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, code, name, currency, start_date]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        code: { type: string, minLength: 2, maxLength: 40 }
+        name: { type: string, minLength: 2, maxLength: 200 }
+        customer_party_id: { type: string, minLength: 2, maxLength: 100 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        budget_cents: { type: integer, minimum: 0 }
     SubmissionAccepted:
       type: object
       additionalProperties: false

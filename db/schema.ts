@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const taxpayers = sqliteTable(
   "taxpayers",
@@ -240,6 +240,384 @@ export const registrationVerifications = sqliteTable(
     uniqueIndex("ux_registration_verification_reference").on(table.provider, table.requestReference),
     index("idx_registration_verification_application").on(table.registrationApplicationId, table.status),
   ],
+);
+
+export const businessParties = sqliteTable(
+  "business_parties",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    displayName: text("display_name").notNull(),
+    legalName: text("legal_name"),
+    vatNumber: text("vat_number"),
+    tin: text("tin"),
+    email: text("email"),
+    phone: text("phone"),
+    address: text("address"),
+    sourceSystem: text("source_system").notNull(),
+    sourcePartyId: text("source_party_id"),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("ux_business_parties_source").on(table.organisationId, table.sourceSystem, table.sourcePartyId),
+    index("idx_business_parties_name").on(table.organisationId, table.displayName),
+  ],
+);
+
+export const partyRelationships = sqliteTable(
+  "party_relationships",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    partyId: text("party_id").notNull().references(() => businessParties.id),
+    relationship: text("relationship").notNull(),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_party_relationship").on(table.organisationId, table.partyId, table.relationship)],
+);
+
+export const products = sqliteTable(
+  "products",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    sku: text("sku").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    unitCode: text("unit_code").notNull(),
+    taxCategory: text("tax_category").notNull(),
+    taxRateBps: integer("tax_rate_bps").notNull(),
+    salesPriceCents: integer("sales_price_cents").notNull(),
+    costPriceCents: integer("cost_price_cents").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_products_organisation_sku").on(table.organisationId, table.sku)],
+);
+
+export const warehouses = sqliteTable(
+  "warehouses",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    branchId: text("branch_id").references(() => branches.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    address: text("address").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_warehouses_organisation_code").on(table.organisationId, table.code)],
+);
+
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    customerPartyId: text("customer_party_id").references(() => businessParties.id),
+    managerUserId: text("manager_user_id").references(() => appUsers.id),
+    currency: text("currency").notNull(),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_projects_organisation_code").on(table.organisationId, table.code)],
+);
+
+export const expenseCategories = sqliteTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    defaultTaxCategory: text("default_tax_category").notNull(),
+    requiresReceipt: integer("requires_receipt", { mode: "boolean" }).notNull().default(true),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_expense_categories_organisation_code").on(table.organisationId, table.code)],
+);
+
+export const quotations = sqliteTable(
+  "quotations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    branchId: text("branch_id").references(() => branches.id),
+    customerPartyId: text("customer_party_id").notNull().references(() => businessParties.id),
+    quotationNumber: text("quotation_number").notNull(),
+    currency: text("currency").notNull(),
+    issueDate: text("issue_date").notNull(),
+    validUntil: text("valid_until").notNull(),
+    status: text("status").notNull(),
+    subtotalCents: integer("subtotal_cents").notNull(),
+    taxCents: integer("tax_cents").notNull(),
+    totalCents: integer("total_cents").notNull(),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    acceptedAt: text("accepted_at"),
+    convertedInvoiceId: text("converted_invoice_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_quotations_number").on(table.organisationId, table.quotationNumber),
+    index("idx_quotations_status_date").on(table.organisationId, table.status, table.issueDate),
+  ],
+);
+
+export const quotationLines = sqliteTable(
+  "quotation_lines",
+  {
+    id: text("id").primaryKey(),
+    quotationId: text("quotation_id").notNull().references(() => quotations.id),
+    lineNumber: integer("line_number").notNull(),
+    productId: text("product_id").references(() => products.id),
+    description: text("description").notNull(),
+    quantityMicros: integer("quantity_micros").notNull(),
+    unitCode: text("unit_code").notNull(),
+    unitPriceCents: integer("unit_price_cents").notNull(),
+    netAmountCents: integer("net_amount_cents").notNull(),
+    taxCategory: text("tax_category").notNull(),
+    taxRateBps: integer("tax_rate_bps").notNull(),
+    taxAmountCents: integer("tax_amount_cents").notNull(),
+  },
+  (table) => [uniqueIndex("ux_quotation_lines_number").on(table.quotationId, table.lineNumber)],
+);
+
+export const chartOfAccounts = sqliteTable(
+  "chart_of_accounts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    accountType: text("account_type").notNull(),
+    currency: text("currency").notNull(),
+    controlType: text("control_type"),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_accounts_organisation_code").on(table.organisationId, table.code)],
+);
+
+export const journalEntries = sqliteTable(
+  "journal_entries",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    journalNumber: text("journal_number").notNull(),
+    journalDate: text("journal_date").notNull(),
+    reference: text("reference"),
+    description: text("description").notNull(),
+    currency: text("currency").notNull(),
+    status: text("status").notNull(),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    postedBy: text("posted_by").references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    postedAt: text("posted_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_journal_number").on(table.organisationId, table.journalNumber),
+    index("idx_journals_status_date").on(table.organisationId, table.status, table.journalDate),
+  ],
+);
+
+export const journalLines = sqliteTable(
+  "journal_lines",
+  {
+    id: text("id").primaryKey(),
+    journalEntryId: text("journal_entry_id").notNull().references(() => journalEntries.id),
+    lineNumber: integer("line_number").notNull(),
+    accountId: text("account_id").notNull().references(() => chartOfAccounts.id),
+    branchId: text("branch_id").references(() => branches.id),
+    projectId: text("project_id").references(() => projects.id),
+    description: text("description").notNull(),
+    debitCents: integer("debit_cents").notNull().default(0),
+    creditCents: integer("credit_cents").notNull().default(0),
+    taxCode: text("tax_code"),
+  },
+  (table) => [
+    uniqueIndex("ux_journal_lines_number").on(table.journalEntryId, table.lineNumber),
+    index("idx_journal_lines_account").on(table.accountId, table.journalEntryId),
+  ],
+);
+
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    branchId: text("branch_id").references(() => branches.id),
+    categoryId: text("category_id").notNull().references(() => expenseCategories.id),
+    supplierPartyId: text("supplier_party_id").references(() => businessParties.id),
+    projectId: text("project_id").references(() => projects.id),
+    expenseNumber: text("expense_number").notNull(),
+    expenseDate: text("expense_date").notNull(),
+    description: text("description").notNull(),
+    currency: text("currency").notNull(),
+    netCents: integer("net_cents").notNull(),
+    taxCents: integer("tax_cents").notNull(),
+    totalCents: integer("total_cents").notNull(),
+    status: text("status").notNull(),
+    receiptDocumentId: text("receipt_document_id"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    approvedAt: text("approved_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_expenses_number").on(table.organisationId, table.expenseNumber),
+    index("idx_expenses_status_date").on(table.organisationId, table.status, table.expenseDate),
+  ],
+);
+
+export const inventoryBalances = sqliteTable(
+  "inventory_balances",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    warehouseId: text("warehouse_id").notNull().references(() => warehouses.id),
+    productId: text("product_id").notNull().references(() => products.id),
+    quantityMicros: integer("quantity_micros").notNull().default(0),
+    averageCostCents: integer("average_cost_cents").notNull().default(0),
+    version: integer("version").notNull().default(0),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_inventory_balance").on(table.warehouseId, table.productId),
+    check("ck_inventory_quantity_nonnegative", sql`${table.quantityMicros} >= 0`),
+  ],
+);
+
+export const stockMovements = sqliteTable(
+  "stock_movements",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    warehouseId: text("warehouse_id").notNull().references(() => warehouses.id),
+    productId: text("product_id").notNull().references(() => products.id),
+    movementType: text("movement_type").notNull(),
+    quantityMicros: integer("quantity_micros").notNull(),
+    unitCostCents: integer("unit_cost_cents").notNull(),
+    referenceType: text("reference_type").notNull(),
+    referenceId: text("reference_id").notNull(),
+    reason: text("reason").notNull(),
+    occurredAt: text("occurred_at").notNull(),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+  },
+  (table) => [
+    uniqueIndex("ux_stock_movement_reference").on(table.organisationId, table.referenceType, table.referenceId),
+    index("idx_stock_movement_product_time").on(table.warehouseId, table.productId, table.occurredAt),
+  ],
+);
+
+export const projectBudgets = sqliteTable(
+  "project_budgets",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id),
+    category: text("category").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    approvedAmountCents: integer("approved_amount_cents").notNull(),
+    status: text("status").notNull(),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    approvedAt: text("approved_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_project_budget_category").on(table.projectId, table.category)],
+);
+
+export const projectCosts = sqliteTable(
+  "project_costs",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull().references(() => projects.id),
+    costType: text("cost_type").notNull(),
+    sourceId: text("source_id").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    occurredAt: text("occurred_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_project_cost_source").on(table.projectId, table.costType, table.sourceId)],
+);
+
+export const importRecords = sqliteTable(
+  "import_records",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    declarationNumber: text("declaration_number").notNull(),
+    customsOffice: text("customs_office"),
+    supplierName: text("supplier_name").notNull(),
+    countryOfOrigin: text("country_of_origin").notNull(),
+    currency: text("currency").notNull(),
+    customsValueCents: integer("customs_value_cents").notNull(),
+    importVatCents: integer("import_vat_cents").notNull(),
+    declarationDate: text("declaration_date").notNull(),
+    evidenceDocumentId: text("evidence_document_id"),
+    status: text("status").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_import_declaration").on(table.organisationId, table.declarationNumber)],
+);
+
+export const documentMetadata = sqliteTable(
+  "document_metadata",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    ownerDomain: text("owner_domain").notNull(),
+    ownerResourceId: text("owner_resource_id").notNull(),
+    objectKey: text("object_key").notNull(),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    checksumSha256: text("checksum_sha256").notNull(),
+    classification: text("classification").notNull(),
+    scanStatus: text("scan_status").notNull(),
+    status: text("status").notNull(),
+    uploadedBy: text("uploaded_by").notNull().references(() => appUsers.id),
+    uploadedAt: text("uploaded_at").notNull(),
+    retainedUntil: text("retained_until"),
+    legalHold: integer("legal_hold", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("ux_document_object_key").on(table.objectKey),
+    index("idx_documents_owner").on(table.organisationId, table.ownerDomain, table.ownerResourceId),
+  ],
+);
+
+export const commandIdempotency = sqliteTable(
+  "command_idempotency",
+  {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    commandType: text("command_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_command_idempotency").on(table.actorId, table.commandType, table.idempotencyKey)],
 );
 
 export const invoices = sqliteTable(

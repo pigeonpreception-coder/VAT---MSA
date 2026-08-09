@@ -106,6 +106,154 @@ const SCHEMA_STATEMENTS = [
     checked_at TEXT NOT NULL, expires_at TEXT,
     UNIQUE (provider, request_reference)
   )`,
+  `CREATE TABLE IF NOT EXISTS business_parties (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    display_name TEXT NOT NULL, legal_name TEXT, vat_number TEXT, tin TEXT,
+    email TEXT, phone TEXT, address TEXT, source_system TEXT NOT NULL,
+    source_party_id TEXT, status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, source_system, source_party_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS party_relationships (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    party_id TEXT NOT NULL REFERENCES business_parties(id), relationship TEXT NOT NULL,
+    status TEXT NOT NULL, effective_from TEXT NOT NULL, effective_to TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, party_id, relationship)
+  )`,
+  `CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    sku TEXT NOT NULL, name TEXT NOT NULL, description TEXT, unit_code TEXT NOT NULL,
+    tax_category TEXT NOT NULL, tax_rate_bps INTEGER NOT NULL,
+    sales_price_cents INTEGER NOT NULL, cost_price_cents INTEGER NOT NULL,
+    status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, sku)
+  )`,
+  `CREATE TABLE IF NOT EXISTS warehouses (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    branch_id TEXT REFERENCES branches(id), code TEXT NOT NULL, name TEXT NOT NULL,
+    address TEXT NOT NULL, status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    code TEXT NOT NULL, name TEXT NOT NULL,
+    customer_party_id TEXT REFERENCES business_parties(id),
+    manager_user_id TEXT REFERENCES app_users(id), currency TEXT NOT NULL,
+    start_date TEXT NOT NULL, end_date TEXT, status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS expense_categories (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    code TEXT NOT NULL, name TEXT NOT NULL, default_tax_category TEXT NOT NULL,
+    requires_receipt INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS quotations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    branch_id TEXT REFERENCES branches(id),
+    customer_party_id TEXT NOT NULL REFERENCES business_parties(id),
+    quotation_number TEXT NOT NULL, currency TEXT NOT NULL, issue_date TEXT NOT NULL,
+    valid_until TEXT NOT NULL, status TEXT NOT NULL, subtotal_cents INTEGER NOT NULL,
+    tax_cents INTEGER NOT NULL, total_cents INTEGER NOT NULL, notes TEXT,
+    created_by TEXT NOT NULL REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
+    accepted_at TEXT, converted_invoice_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, quotation_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS quotation_lines (
+    id TEXT PRIMARY KEY, quotation_id TEXT NOT NULL REFERENCES quotations(id), line_number INTEGER NOT NULL,
+    product_id TEXT REFERENCES products(id), description TEXT NOT NULL,
+    quantity_micros INTEGER NOT NULL, unit_code TEXT NOT NULL, unit_price_cents INTEGER NOT NULL,
+    net_amount_cents INTEGER NOT NULL, tax_category TEXT NOT NULL, tax_rate_bps INTEGER NOT NULL,
+    tax_amount_cents INTEGER NOT NULL, UNIQUE (quotation_id, line_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS chart_of_accounts (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    code TEXT NOT NULL, name TEXT NOT NULL, account_type TEXT NOT NULL, currency TEXT NOT NULL,
+    control_type TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS journal_entries (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    journal_number TEXT NOT NULL, journal_date TEXT NOT NULL, reference TEXT,
+    description TEXT NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
+    source_type TEXT NOT NULL, source_id TEXT, created_by TEXT NOT NULL REFERENCES app_users(id),
+    posted_by TEXT REFERENCES app_users(id), created_at TEXT NOT NULL, posted_at TEXT,
+    UNIQUE (organisation_id, journal_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS journal_lines (
+    id TEXT PRIMARY KEY, journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id),
+    line_number INTEGER NOT NULL, account_id TEXT NOT NULL REFERENCES chart_of_accounts(id),
+    branch_id TEXT REFERENCES branches(id), project_id TEXT REFERENCES projects(id),
+    description TEXT NOT NULL, debit_cents INTEGER NOT NULL DEFAULT 0,
+    credit_cents INTEGER NOT NULL DEFAULT 0, tax_code TEXT,
+    UNIQUE (journal_entry_id, line_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS expenses (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    branch_id TEXT REFERENCES branches(id), category_id TEXT NOT NULL REFERENCES expense_categories(id),
+    supplier_party_id TEXT REFERENCES business_parties(id), project_id TEXT REFERENCES projects(id),
+    expense_number TEXT NOT NULL, expense_date TEXT NOT NULL, description TEXT NOT NULL,
+    currency TEXT NOT NULL, net_cents INTEGER NOT NULL, tax_cents INTEGER NOT NULL,
+    total_cents INTEGER NOT NULL, status TEXT NOT NULL, receipt_document_id TEXT,
+    created_by TEXT NOT NULL REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
+    created_at TEXT NOT NULL, approved_at TEXT, UNIQUE (organisation_id, expense_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS inventory_balances (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    warehouse_id TEXT NOT NULL REFERENCES warehouses(id), product_id TEXT NOT NULL REFERENCES products(id),
+    quantity_micros INTEGER NOT NULL DEFAULT 0 CHECK (quantity_micros >= 0), average_cost_cents INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+    UNIQUE (warehouse_id, product_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS stock_movements (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    warehouse_id TEXT NOT NULL REFERENCES warehouses(id), product_id TEXT NOT NULL REFERENCES products(id),
+    movement_type TEXT NOT NULL, quantity_micros INTEGER NOT NULL, unit_cost_cents INTEGER NOT NULL,
+    reference_type TEXT NOT NULL, reference_id TEXT NOT NULL, reason TEXT NOT NULL,
+    occurred_at TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES app_users(id),
+    UNIQUE (organisation_id, reference_type, reference_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS project_budgets (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), category TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL, approved_amount_cents INTEGER NOT NULL, status TEXT NOT NULL,
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (project_id, category)
+  )`,
+  `CREATE TABLE IF NOT EXISTS project_costs (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), cost_type TEXT NOT NULL,
+    source_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL,
+    occurred_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, cost_type, source_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS import_records (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    declaration_number TEXT NOT NULL, customs_office TEXT, supplier_name TEXT NOT NULL,
+    country_of_origin TEXT NOT NULL, currency TEXT NOT NULL, customs_value_cents INTEGER NOT NULL,
+    import_vat_cents INTEGER NOT NULL, declaration_date TEXT NOT NULL, evidence_document_id TEXT,
+    status TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, declaration_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS document_metadata (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    owner_domain TEXT NOT NULL, owner_resource_id TEXT NOT NULL, object_key TEXT NOT NULL UNIQUE,
+    file_name TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+    checksum_sha256 TEXT NOT NULL, classification TEXT NOT NULL, scan_status TEXT NOT NULL,
+    status TEXT NOT NULL, uploaded_by TEXT NOT NULL REFERENCES app_users(id), uploaded_at TEXT NOT NULL,
+    retained_until TEXT, legal_hold INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS command_idempotency (
+    id TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES app_users(id),
+    command_type TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL,
+    resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (actor_id, command_type, idempotency_key)
+  )`,
   `CREATE TABLE IF NOT EXISTS invoice_lines (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id), line_number INTEGER NOT NULL,
     description TEXT NOT NULL, quantity TEXT NOT NULL, unit_code TEXT NOT NULL,
@@ -189,6 +337,13 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_status_submitted ON registration_applications(status, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_identifiers ON registration_applications(vat_number, tin)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
+  `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id, journal_entry_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
 ];
 
 const SEED_STATEMENTS = [
@@ -344,6 +499,103 @@ const IDENTITY_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('identity-v1','2026-08-09T09:30:00Z')`,
 ];
 
+const BUSINESS_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('commercial:read','COMMERCIAL','READ','Read customer, supplier, product and quotation records','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('quotations:manage','QUOTATION','MANAGE','Create and transition authorised quotations','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('accounting:read','ACCOUNTING','READ','Read the authorised chart and journals','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('accounting:post','ACCOUNTING','POST','Post balanced journals','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('expenses:read','EXPENSE','READ','Read authorised expenses','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('expenses:manage','EXPENSE','MANAGE','Record and transition authorised expenses','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('inventory:read','INVENTORY','READ','Read authorised inventory','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('inventory:manage','INVENTORY','MANAGE','Record authorised stock movements','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('projects:read','PROJECT','READ','Read authorised projects','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('projects:manage','PROJECT','MANAGE','Create and manage authorised projects','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('imports:read','IMPORT','READ','Read authorised import declarations','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('imports:manage','IMPORT','MANAGE','Record authorised import declarations','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('documents:read','DOCUMENT','READ','Read authorised document metadata','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('documents:upload','DOCUMENT','UPLOAD','Upload governed evidence into quarantine','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-cr','TAXPAYER_OWNER','commercial:read','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-qm','TAXPAYER_OWNER','quotations:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ar','TAXPAYER_OWNER','accounting:read','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ap','TAXPAYER_OWNER','accounting:post','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-em','TAXPAYER_OWNER','expenses:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-im','TAXPAYER_OWNER','inventory:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-pm','TAXPAYER_OWNER','projects:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+
+  `INSERT OR IGNORE INTO business_parties
+    (id,organisation_id,display_name,legal_name,vat_number,tin,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
+    VALUES ('party-0001-customer','org-0001','Atlantic Retail','Atlantic Retail Group (Pty) Ltd','VAT1000789','TIN-1000789','tax@atlanticretail.example','+264 64 000 100','8 Theo-Ben Gurirab Street, Swakopmund','CRM','ATL-001','ACTIVE','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO business_parties
+    (id,organisation_id,display_name,legal_name,vat_number,tin,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
+    VALUES ('party-0001-supplier','org-0001','Desert Logistics','Desert Logistics CC','VAT1000456','TIN-1000456','accounts@desertlogistics.example','+264 64 000 200','44 Sam Nujoma Drive, Walvis Bay','ERP','DES-001','ACTIVE','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO party_relationships VALUES ('rel-0001-customer','org-0001','party-0001-customer','CUSTOMER','ACTIVE','2026-08-09T10:00:00Z',NULL,'2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO party_relationships VALUES ('rel-0001-supplier','org-0001','party-0001-supplier','SUPPLIER','ACTIVE','2026-08-09T10:00:00Z',NULL,'2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO products
+    (id,organisation_id,sku,name,description,unit_code,tax_category,tax_rate_bps,sales_price_cents,cost_price_cents,status,created_at,updated_at)
+    VALUES ('prod-0001','org-0001','OFFICE-CHAIR','Ergonomic office chair','Adjustable office chair','EA','STANDARD',1500,459900,290000,'ACTIVE','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO products
+    (id,organisation_id,sku,name,description,unit_code,tax_category,tax_rate_bps,sales_price_cents,cost_price_cents,status,created_at,updated_at)
+    VALUES ('prod-0002','org-0001','PAPER-A4','A4 paper carton','Five reams per carton','CT','STANDARD',1500,49900,31000,'ACTIVE','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO warehouses
+    (id,organisation_id,branch_id,code,name,address,status,created_at)
+    VALUES ('wh-0001','org-0001','br-0001','WH-WHK','Windhoek Main Warehouse','12 Independence Avenue, Windhoek','ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO expense_categories
+    (id,organisation_id,code,name,default_tax_category,requires_receipt,status,created_at)
+    VALUES ('expcat-0001','org-0001','TRAVEL','Travel and accommodation','STANDARD',1,'ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO expense_categories
+    (id,organisation_id,code,name,default_tax_category,requires_receipt,status,created_at)
+    VALUES ('expcat-0002','org-0001','UTILITIES','Utilities','STANDARD',1,'ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO projects
+    (id,organisation_id,code,name,customer_party_id,manager_user_id,currency,start_date,end_date,status,created_at,updated_at)
+    VALUES ('prj-0001','org-0001','ATL-FITOUT','Atlantic Retail Fit-out','party-0001-customer','usr-local-admin','NAD','2026-08-01','2026-11-30','ACTIVE','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO project_budgets
+    (id,project_id,category,amount_cents,approved_amount_cents,status,approved_by,approved_at,created_at)
+    VALUES ('budget-0001','prj-0001','TOTAL',25000000,25000000,'APPROVED','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO quotations
+    (id,organisation_id,branch_id,customer_party_id,quotation_number,currency,issue_date,valid_until,status,subtotal_cents,tax_cents,total_cents,notes,created_by,approved_by,accepted_at,converted_invoice_id,created_at,updated_at)
+    VALUES ('quote-0001','org-0001','br-0001','party-0001-customer','QUO-2026-0001','NAD','2026-08-08','2026-09-07','ISSUED',969700,145455,1115155,'Pilot commercial quotation','usr-local-admin','usr-local-admin',NULL,NULL,'2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO quotation_lines
+    (id,quotation_id,line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents)
+    VALUES ('quote-line-0001','quote-0001',1,'prod-0001','Ergonomic office chair',2000000,'EA',459900,919800,'STANDARD',1500,137970)` ,
+  `INSERT OR IGNORE INTO quotation_lines
+    (id,quotation_id,line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents)
+    VALUES ('quote-line-0002','quote-0001',2,'prod-0002','A4 paper carton',1000000,'CT',49900,49900,'STANDARD',1500,7485)` ,
+  `INSERT OR IGNORE INTO chart_of_accounts VALUES ('acct-1000','org-0001','1000','Bank','ASSET','NAD','BANK','ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO chart_of_accounts VALUES ('acct-2000','org-0001','2000','Accounts payable','LIABILITY','NAD','PAYABLE','ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO chart_of_accounts VALUES ('acct-4000','org-0001','4000','Sales revenue','REVENUE','NAD','REVENUE','ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO chart_of_accounts VALUES ('acct-5000','org-0001','5000','Cost of sales','EXPENSE','NAD','COST_OF_SALES','ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO chart_of_accounts VALUES ('acct-5100','org-0001','5100','Travel expense','EXPENSE','NAD','EXPENSE','ACTIVE','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO journal_entries
+    (id,organisation_id,journal_number,journal_date,reference,description,currency,status,source_type,source_id,created_by,posted_by,created_at,posted_at)
+    VALUES ('journal-0001','org-0001','JRN-2026-0001','2026-08-08','OPENING-001','Pilot opening bank balance','NAD','POSTED','MANUAL',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO journal_lines VALUES ('journal-line-0001','journal-0001',1,'acct-1000','br-0001',NULL,'Opening bank balance',5000000,0,NULL)`,
+  `INSERT OR IGNORE INTO journal_lines VALUES ('journal-line-0002','journal-0001',2,'acct-4000','br-0001',NULL,'Opening balance offset',0,5000000,NULL)`,
+  `INSERT OR IGNORE INTO expenses
+    (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
+    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO project_costs VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO inventory_balances
+    (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
+    VALUES ('balance-0001','org-0001','wh-0001','prod-0001',12000000,290000,1,'2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO inventory_balances
+    (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
+    VALUES ('balance-0002','org-0001','wh-0001','prod-0002',45000000,31000,1,'2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO stock_movements
+    (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
+    VALUES ('stock-0001','org-0001','wh-0001','prod-0001','RECEIPT',12000000,290000,'GOODS_RECEIPT','GRN-2026-0001','Opening pilot receipt','2026-08-08T08:00:00Z','usr-local-admin')`,
+  `INSERT OR IGNORE INTO stock_movements
+    (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
+    VALUES ('stock-0002','org-0001','wh-0001','prod-0002','RECEIPT',45000000,31000,'GOODS_RECEIPT','GRN-2026-0002','Opening pilot receipt','2026-08-08T08:05:00Z','usr-local-admin')`,
+  `INSERT OR IGNORE INTO import_records
+    (id,organisation_id,declaration_number,customs_office,supplier_name,country_of_origin,currency,customs_value_cents,import_vat_cents,declaration_date,evidence_document_id,status,created_by,created_at)
+    VALUES ('import-0001','org-0001','NAMCUS-2026-0001','Walvis Bay','Cape Office Manufacturing','ZA','NAD',7500000,1125000,'2026-08-05',NULL,'EVIDENCE_REQUIRED','usr-local-admin','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO outbox_events
+    (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
+    VALUES ('out-quote-0001','QUOTATION','quote-0001','QuotationIssued',1,'org-0001','{"quotation_id":"quote-0001","organisation_id":"org-0001"}','PENDING',0,'2026-08-09T10:00:00Z','2026-08-09T10:00:00Z',NULL,NULL)`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('business-v1','2026-08-09T10:00:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -370,6 +622,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!securitySeed) await db.batch(SECURITY_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const identitySeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("identity-v1").first();
     if (!identitySeed) await db.batch(IDENTITY_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const businessSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("business-v1").first();
+    if (!businessSeed) await db.batch(BUSINESS_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }
