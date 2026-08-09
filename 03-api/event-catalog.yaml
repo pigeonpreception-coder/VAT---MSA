@@ -1,4 +1,4 @@
-catalog_version: 0.2.0
+catalog_version: 0.3.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,31 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.return.approval-requested.v1
+    owner: VAT Return Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Places an immutable return version into maker-checker approval.
+  - type: na.vatmsa.return.approved.v1
+    owner: VAT Return Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records independent approval and locks the VAT period against ordinary writes.
+  - type: na.vatmsa.return.rejected.v1
+    owner: VAT Return Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records independent rejection and reopens the period for a superseding version.
+  - type: na.vatmsa.return.submission-blocked.v1
+    owner: ITAS Integration Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Makes missing authority rules or provider configuration explicit without claiming legal filing.
+  - type: na.vatmsa.adjustment.approval-requested.v1
+    owner: VAT Return Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records a proposed VAT adjustment that has no return effect until independently approved.
   - type: na.vatmsa.quotation.issued.v1
     owner: Commercial Domain
     partition_key: organisation_id

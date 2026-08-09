@@ -254,6 +254,82 @@ const SCHEMA_STATEMENTS = [
     resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,
     UNIQUE (actor_id, command_type, idempotency_key)
   )`,
+  `CREATE TABLE IF NOT EXISTS tax_rule_sets (
+    id TEXT PRIMARY KEY, jurisdiction TEXT NOT NULL, version TEXT NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT, standard_rate_bps INTEGER NOT NULL,
+    legal_authority_reference TEXT, status TEXT NOT NULL,
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, created_at TEXT NOT NULL,
+    UNIQUE (jurisdiction, version)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_box_mappings (
+    id TEXT PRIMARY KEY, tax_rule_set_id TEXT NOT NULL REFERENCES tax_rule_sets(id),
+    box_code TEXT NOT NULL, label TEXT NOT NULL, source_entry_type TEXT NOT NULL,
+    direction TEXT NOT NULL, formula TEXT NOT NULL, status TEXT NOT NULL,
+    UNIQUE (tax_rule_set_id, box_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_periods (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), period_code TEXT NOT NULL,
+    period_start TEXT NOT NULL, period_end TEXT NOT NULL, due_date TEXT NOT NULL,
+    status TEXT NOT NULL, lock_version INTEGER NOT NULL DEFAULT 0,
+    close_requested_by TEXT REFERENCES app_users(id), close_requested_at TEXT,
+    closed_by TEXT REFERENCES app_users(id), closed_at TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (taxpayer_id, period_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_adjustments (
+    id TEXT PRIMARY KEY, vat_period_id TEXT NOT NULL REFERENCES vat_periods(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    adjustment_type TEXT NOT NULL, direction TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+    reason_code TEXT NOT NULL, explanation TEXT NOT NULL,
+    evidence_document_id TEXT REFERENCES document_metadata(id), status TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
+    created_at TEXT NOT NULL, approved_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS reconciliation_matches (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), vat_period_id TEXT REFERENCES vat_periods(id),
+    invoice_id TEXT NOT NULL REFERENCES invoices(id), ledger_entry_id TEXT REFERENCES ledger_entries(id),
+    match_type TEXT NOT NULL, confidence_bps INTEGER NOT NULL, status TEXT NOT NULL,
+    evidence TEXT NOT NULL, reconciled_by TEXT REFERENCES app_users(id), reconciled_at TEXT,
+    created_at TEXT NOT NULL, UNIQUE (invoice_id, taxpayer_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_return_versions (
+    id TEXT PRIMARY KEY, vat_period_id TEXT NOT NULL REFERENCES vat_periods(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    version_number INTEGER NOT NULL, parent_version_id TEXT,
+    tax_rule_set_id TEXT NOT NULL REFERENCES tax_rule_sets(id),
+    output_tax_cents INTEGER NOT NULL, input_tax_cents INTEGER NOT NULL,
+    adjustment_cents INTEGER NOT NULL, net_payable_cents INTEGER NOT NULL,
+    status TEXT NOT NULL, ledger_snapshot_hash TEXT NOT NULL,
+    generated_by TEXT NOT NULL REFERENCES app_users(id), generated_at TEXT NOT NULL,
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, superseded_at TEXT,
+    UNIQUE (vat_period_id, version_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_return_boxes (
+    id TEXT PRIMARY KEY, vat_return_version_id TEXT NOT NULL REFERENCES vat_return_versions(id),
+    box_code TEXT NOT NULL, label TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+    source_count INTEGER NOT NULL, calculation_trace TEXT NOT NULL,
+    UNIQUE (vat_return_version_id, box_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS approval_tasks (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), domain TEXT NOT NULL,
+    resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, requested_action TEXT NOT NULL,
+    risk_tier TEXT NOT NULL, status TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), assigned_role TEXT NOT NULL,
+    decided_by TEXT REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    decided_at TEXT, decision_comment TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_return_submissions (
+    id TEXT PRIMARY KEY, vat_return_version_id TEXT NOT NULL REFERENCES vat_return_versions(id),
+    provider TEXT NOT NULL, request_reference TEXT NOT NULL, status TEXT NOT NULL,
+    request_hash TEXT NOT NULL, provider_reference TEXT, response_hash TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    submitted_at TEXT, acknowledged_at TEXT, last_error TEXT,
+    UNIQUE (provider, request_reference)
+  )`,
   `CREATE TABLE IF NOT EXISTS invoice_lines (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id), line_number INTEGER NOT NULL,
     description TEXT NOT NULL, quantity TEXT NOT NULL, unit_code TEXT NOT NULL,
@@ -344,6 +420,12 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_period_status_due ON vat_periods(status, due_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_adjustments_period_status ON vat_adjustments(vat_period_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_reconciliation_period_status ON reconciliation_matches(vat_period_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_return_status_generated ON vat_return_versions(status, generated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_approval_queue ON approval_tasks(status, assigned_role, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_return_submission_status ON vat_return_submissions(status, requested_at)`,
 ];
 
 const SEED_STATEMENTS = [
@@ -596,6 +678,86 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('business-v1','2026-08-09T10:00:00Z')`,
 ];
 
+const VAT_LIFECYCLE_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('returns:generate','VAT_RETURN','GENERATE','Generate a reproducible return version from controlled ledger evidence','CONFIDENTIAL','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('returns:approve','VAT_RETURN','APPROVE','Approve a return version subject to maker-checker separation','CONFIDENTIAL','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('returns:submit','VAT_RETURN','SUBMIT','Request submission of an approved return to the statutory provider','CONFIDENTIAL','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('vat-adjustments:manage','VAT_ADJUSTMENT','MANAGE','Submit governed VAT adjustments for independent approval','CONFIDENTIAL','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('reconciliation:manage','RECONCILIATION','MANAGE','Review and resolve controlled reconciliation evidence','CONFIDENTIAL','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-rg','TAXPAYER_OWNER','returns:generate','ALLOW','{"scope":"own-organisation"}','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ra','TAXPAYER_OWNER','returns:approve','ALLOW','{"scope":"own-organisation","separation":"maker-checker"}','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-rsb','TAXPAYER_OWNER','returns:submit','ALLOW','{"scope":"own-organisation","requires":"approved"}','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-vam','TAXPAYER_OWNER','vat-adjustments:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T11:00:00Z')`,
+
+  `INSERT OR IGNORE INTO tax_rule_sets
+    (id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference,status,approved_by,approved_at,created_at)
+    VALUES ('taxrule-na-pilot-2026-1','NA','NA-VAT-PILOT-2026.1','2026-01-01',NULL,1500,NULL,'PILOT_CONTROLLED',NULL,NULL,'2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-output','taxrule-na-pilot-2026-1','BOX_OUTPUT','Output VAT','OUTPUT_VAT','CREDIT','SUM(eligible output VAT ledger entries)','ACTIVE')`,
+  `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-input','taxrule-na-pilot-2026-1','BOX_INPUT','Eligible input VAT','INPUT_VAT','DEBIT','SUM(matched eligible input VAT ledger entries)','ACTIVE')`,
+  `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-adjust','taxrule-na-pilot-2026-1','BOX_ADJUST','Approved net adjustments','ADJUSTMENT','SIGNED','SUM(approved adjustment effects)','ACTIVE')`,
+  `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-net','taxrule-na-pilot-2026-1','BOX_NET','Net VAT payable or refundable','CALCULATED','SIGNED','BOX_OUTPUT - BOX_INPUT + BOX_ADJUST','ACTIVE')`,
+
+  `INSERT OR IGNORE INTO vat_periods
+    (id,organisation_id,taxpayer_id,period_code,period_start,period_end,due_date,status,lock_version,close_requested_by,close_requested_at,closed_by,closed_at,created_at,updated_at)
+    VALUES ('period-0001','org-0001','tp-0001','2026-08','2026-08-01','2026-08-31','2026-09-25','OPEN',0,NULL,NULL,NULL,NULL,'2026-08-09T11:00:00Z','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO vat_periods
+    (id,organisation_id,taxpayer_id,period_code,period_start,period_end,due_date,status,lock_version,close_requested_by,close_requested_at,closed_by,closed_at,created_at,updated_at)
+    VALUES ('period-0002','org-0002','tp-0002','2026-08','2026-08-01','2026-08-31','2026-09-25','OPEN',0,NULL,NULL,NULL,NULL,'2026-08-09T11:00:00Z','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO vat_periods
+    (id,organisation_id,taxpayer_id,period_code,period_start,period_end,due_date,status,lock_version,close_requested_by,close_requested_at,closed_by,closed_at,created_at,updated_at)
+    VALUES ('period-0003','org-0003','tp-0003','2026-08','2026-08-01','2026-08-31','2026-09-25','OPEN',0,NULL,NULL,NULL,NULL,'2026-08-09T11:00:00Z','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO vat_periods
+    (id,organisation_id,taxpayer_id,period_code,period_start,period_end,due_date,status,lock_version,close_requested_by,close_requested_at,closed_by,closed_at,created_at,updated_at)
+    VALUES ('period-0004','org-0004','tp-0004','2026-08','2026-08-01','2026-08-31','2026-09-25','OPEN',0,NULL,NULL,NULL,NULL,'2026-08-09T11:00:00Z','2026-08-09T11:00:00Z')`,
+
+  `INSERT OR IGNORE INTO reconciliation_matches
+    (id,organisation_id,taxpayer_id,vat_period_id,invoice_id,ledger_entry_id,match_type,confidence_bps,status,evidence,reconciled_by,reconciled_at,created_at)
+    VALUES ('match-0001','org-0001','tp-0001','period-0001','inv-0001','led-0001a','CERTIFIED_OUTPUT',10000,'MATCHED','{"certificate":"cert-0001","ledger_entry":"led-0001a"}','usr-local-admin','2026-08-09T11:00:00Z','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO reconciliation_matches
+    (id,organisation_id,taxpayer_id,vat_period_id,invoice_id,ledger_entry_id,match_type,confidence_bps,status,evidence,reconciled_by,reconciled_at,created_at)
+    VALUES ('match-0002','org-0001','tp-0001','period-0001','inv-0002','led-0002b','COUNTERPART_MATCH',10000,'MATCHED','{"certificate":"cert-0002","supplier":"tp-0002"}','usr-local-admin','2026-08-09T11:00:00Z','2026-08-09T11:00:00Z')`,
+  `INSERT OR IGNORE INTO reconciliation_matches
+    (id,organisation_id,taxpayer_id,vat_period_id,invoice_id,ledger_entry_id,match_type,confidence_bps,status,evidence,reconciled_by,reconciled_at,created_at)
+    VALUES ('match-0003','org-0001','tp-0001','period-0001','inv-0004','led-0004b','RISK_EXCEPTION',0,'BLOCKED_EXCEPTION','{"exception":"exc-0001","reason":"HIGH_VALUE_TRANSACTION"}',NULL,NULL,'2026-08-09T11:00:00Z')`,
+
+  `INSERT OR IGNORE INTO vat_return_versions
+    (id,vat_period_id,organisation_id,taxpayer_id,version_number,parent_version_id,tax_rule_set_id,output_tax_cents,input_tax_cents,adjustment_cents,net_payable_cents,status,ledger_snapshot_hash,generated_by,generated_at,approved_by,approved_at,superseded_at)
+    VALUES ('returnv-0001','period-0001','org-0001','tp-0001',1,NULL,'taxrule-na-pilot-2026-1',1717500,780000,0,937500,'PENDING_APPROVAL','b100000000000000000000000000000000000000000000000000000000000001','usr-tp1-owner','2026-08-09T11:10:00Z',NULL,NULL,NULL)`,
+  `INSERT OR IGNORE INTO vat_return_versions
+    (id,vat_period_id,organisation_id,taxpayer_id,version_number,parent_version_id,tax_rule_set_id,output_tax_cents,input_tax_cents,adjustment_cents,net_payable_cents,status,ledger_snapshot_hash,generated_by,generated_at,approved_by,approved_at,superseded_at)
+    VALUES ('returnv-0002','period-0002','org-0002','tp-0002',1,NULL,'taxrule-na-pilot-2026-1',780000,0,0,780000,'DRAFT','b200000000000000000000000000000000000000000000000000000000000002','usr-local-admin','2026-08-09T11:10:00Z',NULL,NULL,NULL)`,
+  `INSERT OR IGNORE INTO vat_return_versions
+    (id,vat_period_id,organisation_id,taxpayer_id,version_number,parent_version_id,tax_rule_set_id,output_tax_cents,input_tax_cents,adjustment_cents,net_payable_cents,status,ledger_snapshot_hash,generated_by,generated_at,approved_by,approved_at,superseded_at)
+    VALUES ('returnv-0003','period-0003','org-0003','tp-0003',1,NULL,'taxrule-na-pilot-2026-1',127500,1717500,0,-1590000,'DRAFT','b300000000000000000000000000000000000000000000000000000000000003','usr-local-admin','2026-08-09T11:10:00Z',NULL,NULL,NULL)`,
+  `INSERT OR IGNORE INTO vat_return_versions
+    (id,vat_period_id,organisation_id,taxpayer_id,version_number,parent_version_id,tax_rule_set_id,output_tax_cents,input_tax_cents,adjustment_cents,net_payable_cents,status,ledger_snapshot_hash,generated_by,generated_at,approved_by,approved_at,superseded_at)
+    VALUES ('returnv-0004','period-0004','org-0004','tp-0004',1,NULL,'taxrule-na-pilot-2026-1',18000000,0,0,18000000,'DRAFT','b400000000000000000000000000000000000000000000000000000000000004','usr-local-admin','2026-08-09T11:10:00Z',NULL,NULL,NULL)`,
+
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0001-o','returnv-0001','BOX_OUTPUT','Output VAT',1717500,1,'{"entry_type":"OUTPUT_VAT"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0001-i','returnv-0001','BOX_INPUT','Eligible input VAT',780000,1,'{"entry_type":"INPUT_VAT","invoice_status":"MATCHED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0001-a','returnv-0001','BOX_ADJUST','Approved net adjustments',0,0,'{"adjustment_status":"APPROVED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0001-n','returnv-0001','BOX_NET','Net VAT payable or refundable',937500,2,'{"formula":"OUTPUT - INPUT + NET_ADJUSTMENTS"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0002-o','returnv-0002','BOX_OUTPUT','Output VAT',780000,1,'{"entry_type":"OUTPUT_VAT"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0002-i','returnv-0002','BOX_INPUT','Eligible input VAT',0,0,'{"entry_type":"INPUT_VAT","invoice_status":"MATCHED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0002-a','returnv-0002','BOX_ADJUST','Approved net adjustments',0,0,'{"adjustment_status":"APPROVED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0002-n','returnv-0002','BOX_NET','Net VAT payable or refundable',780000,1,'{"formula":"OUTPUT - INPUT + NET_ADJUSTMENTS"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0003-o','returnv-0003','BOX_OUTPUT','Output VAT',127500,1,'{"entry_type":"OUTPUT_VAT"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0003-i','returnv-0003','BOX_INPUT','Eligible input VAT',1717500,1,'{"entry_type":"INPUT_VAT","invoice_status":"MATCHED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0003-a','returnv-0003','BOX_ADJUST','Approved net adjustments',0,0,'{"adjustment_status":"APPROVED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0003-n','returnv-0003','BOX_NET','Net VAT payable or refundable',-1590000,2,'{"formula":"OUTPUT - INPUT + NET_ADJUSTMENTS"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0004-o','returnv-0004','BOX_OUTPUT','Output VAT',18000000,1,'{"entry_type":"OUTPUT_VAT"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0004-i','returnv-0004','BOX_INPUT','Eligible input VAT',0,0,'{"entry_type":"INPUT_VAT","invoice_status":"MATCHED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0004-a','returnv-0004','BOX_ADJUST','Approved net adjustments',0,0,'{"adjustment_status":"APPROVED"}')`,
+  `INSERT OR IGNORE INTO vat_return_boxes VALUES ('returnbox-0004-n','returnv-0004','BOX_NET','Net VAT payable or refundable',18000000,1,'{"formula":"OUTPUT - INPUT + NET_ADJUSTMENTS"}')`,
+  `INSERT OR IGNORE INTO approval_tasks
+    (id,organisation_id,taxpayer_id,domain,resource_type,resource_id,requested_action,risk_tier,status,requested_by,assigned_role,decided_by,requested_at,decided_at,decision_comment)
+    VALUES ('approval-0001','org-0001','tp-0001','VAT_RETURN','VAT_RETURN_VERSION','returnv-0001','APPROVE_RETURN','CRITICAL','PENDING','usr-tp1-owner','TAXPAYER_OWNER',NULL,'2026-08-09T11:12:00Z',NULL,NULL)`,
+  `INSERT OR IGNORE INTO outbox_events
+    (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
+    VALUES ('out-returnv-0001','VAT_RETURN_VERSION','returnv-0001','VatReturnApprovalRequested',1,'tp-0001','{"return_version_id":"returnv-0001","task_id":"approval-0001"}','PENDING',0,'2026-08-09T11:12:00Z','2026-08-09T11:12:00Z',NULL,NULL)`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('vat-lifecycle-v1','2026-08-09T11:30:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -624,6 +786,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!identitySeed) await db.batch(IDENTITY_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const businessSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("business-v1").first();
     if (!businessSeed) await db.batch(BUSINESS_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const vatLifecycleSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("vat-lifecycle-v1").first();
+    if (!vatLifecycleSeed) await db.batch(VAT_LIFECYCLE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

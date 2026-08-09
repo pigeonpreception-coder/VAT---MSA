@@ -24,11 +24,29 @@ export type ItasTaxpayerVerificationResult = {
 export interface ItasIdentityPort {
   status(): Promise<ItasIntegrationStatus>;
   verifyTaxpayer(request: ItasTaxpayerVerificationRequest): Promise<ItasTaxpayerVerificationResult>;
+  submitVatReturn(request: ItasVatReturnSubmissionRequest): Promise<ItasVatReturnSubmissionResult>;
 }
 
+export type ItasVatReturnSubmissionRequest = {
+  requestReference: string;
+  taxpayerVatNumber: string;
+  periodCode: string;
+  returnVersion: number;
+  payloadHash: string;
+  boxes: Array<{ code: string; amountCents: number }>;
+  correlationId: string;
+};
+
+export type ItasVatReturnSubmissionResult = {
+  providerReference: string;
+  status: "ACCEPTED" | "REJECTED";
+  responseHash: string;
+  submittedAt: string;
+};
+
 export class ItasIntegrationUnavailableError extends Error {
-  constructor() {
-    super("ITAS taxpayer verification is awaiting a confirmed technical contract and is not available in this environment.");
+  constructor(capability = "taxpayer verification") {
+    super(`ITAS ${capability} is awaiting a confirmed technical contract and is not available in this environment.`);
     this.name = "ItasIntegrationUnavailableError";
   }
 }
@@ -46,6 +64,11 @@ export class UnconfiguredItasIdentityAdapter implements ItasIdentityPort {
   async verifyTaxpayer(request: ItasTaxpayerVerificationRequest): Promise<ItasTaxpayerVerificationResult> {
     void request;
     throw new ItasIntegrationUnavailableError();
+  }
+
+  async submitVatReturn(request: ItasVatReturnSubmissionRequest): Promise<ItasVatReturnSubmissionResult> {
+    void request;
+    throw new ItasIntegrationUnavailableError("VAT return submission");
   }
 }
 

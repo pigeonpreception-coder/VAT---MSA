@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.3.0
+  version: 0.4.0
   summary: Controlled identity, business operations, VAT invoice certification and verification contract.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
@@ -22,6 +22,9 @@ tags:
   - name: Expenses
   - name: Inventory
   - name: Projects
+  - name: VAT periods
+  - name: VAT returns
+  - name: Approvals
   - name: Invoices
   - name: Certificates
   - name: Offline
@@ -236,6 +239,101 @@ paths:
         '201': { description: Project created. }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/vat-periods:
+    get:
+      tags: [VAT periods]
+      operationId: listVatPeriods
+      summary: List governed VAT periods, latest return versions, approval tasks, reconciliation evidence and provider posture.
+      security: [{ oauth2: [returns.read] }]
+      responses:
+        '200': { description: Authorised VAT lifecycle snapshot. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/vat-periods/{period_id}/adjustments:
+    post:
+      tags: [VAT periods]
+      operationId: createVatAdjustment
+      summary: Submit an adjustment into the maker-checker approval queue.
+      security: [{ oauth2: [vat-adjustments.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/VatPeriodId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VatAdjustmentSubmission' } } }
+      responses:
+        '201': { description: Adjustment recorded pending independent approval. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/vat-periods/{period_id}/returns:
+    post:
+      tags: [VAT returns]
+      operationId: generateVatReturn
+      summary: Generate a reproducible return version from eligible ledger entries and approved adjustments.
+      security: [{ oauth2: [returns.generate] }]
+      parameters:
+        - $ref: '#/components/parameters/VatPeriodId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '201': { description: Draft return version and calculation boxes generated. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/vat-returns/{return_version_id}:
+    get:
+      tags: [VAT returns]
+      operationId: getVatReturnVersion
+      summary: Retrieve a return version with boxes, adjustments, approval history and provider submissions.
+      security: [{ oauth2: [returns.read] }]
+      parameters:
+        - $ref: '#/components/parameters/VatReturnVersionId'
+      responses:
+        '200': { description: Return calculation evidence. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/vat-returns/{return_version_id}/approval-requests:
+    post:
+      tags: [Approvals]
+      operationId: requestVatReturnApproval
+      summary: Place a draft return into independent maker-checker approval.
+      security: [{ oauth2: [returns.generate] }]
+      parameters:
+        - $ref: '#/components/parameters/VatReturnVersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': { description: Approval task created. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/approval-tasks/{approval_task_id}/decision:
+    post:
+      tags: [Approvals]
+      operationId: decideVatApproval
+      summary: Approve or reject a VAT control, enforcing that requester and decision-maker differ.
+      security: [{ oauth2: [returns.approve] }]
+      parameters:
+        - $ref: '#/components/parameters/ApprovalTaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ApprovalDecision' } } }
+      responses:
+        '200': { description: Approval task decided and controlled resource transitioned. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/vat-returns/{return_version_id}/submissions:
+    post:
+      tags: [VAT returns]
+      operationId: requestVatReturnSubmission
+      summary: Request statutory-provider submission for an approved return.
+      description: The request is recorded as blocked configuration when the authority-approved rules or ITAS contract are absent. This operation never represents an unacknowledged return as filed.
+      security: [{ oauth2: [returns.submit] }]
+      parameters:
+        - $ref: '#/components/parameters/VatReturnVersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '202': { description: Submission request recorded as ready or explicitly blocked. }
+        '409': { $ref: '#/components/responses/Conflict' }
   /v1/invoices:
     post:
       tags: [Invoices]
@@ -378,6 +476,10 @@ components:
             inventory.manage: Record stock movements.
             projects.read: Read projects.
             projects.manage: Manage projects and budgets.
+            returns.generate: Generate versioned VAT returns.
+            returns.approve: Decide VAT approvals under maker-checker control.
+            returns.submit: Request provider submission of an approved return.
+            vat-adjustments.manage: Submit governed VAT adjustments.
             invoices.write: Submit fiscal documents.
             invoices.read: Read documents belonging to the authorised taxpayer.
             certificates.read: Retrieve certification receipts.
@@ -410,6 +512,21 @@ components:
       required: false
       description: National-pilot operators may select an organisation; taxpayer identities are always forced to their own organisation.
       schema: { type: string, minLength: 1, maxLength: 100 }
+    VatPeriodId:
+      name: period_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 2, maxLength: 100 }
+    VatReturnVersionId:
+      name: return_version_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 2, maxLength: 100 }
+    ApprovalTaskId:
+      name: approval_task_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 2, maxLength: 100 }
   headers:
     CorrelationId:
       description: End-to-end trace identifier.
@@ -561,6 +678,25 @@ components:
         start_date: { type: string, format: date }
         end_date: { type: string, format: date }
         budget_cents: { type: integer, minimum: 0 }
+    VatAdjustmentSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, adjustment_type, direction, amount_cents, reason_code, explanation]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        adjustment_type: { type: string, enum: [OUTPUT_TAX, INPUT_TAX, NET_PAYABLE] }
+        direction: { type: string, enum: [INCREASE, DECREASE] }
+        amount_cents: { type: integer, minimum: 1 }
+        reason_code: { type: string, minLength: 2, maxLength: 40 }
+        explanation: { type: string, minLength: 10, maxLength: 2000 }
+        evidence_document_id: { type: string, minLength: 2, maxLength: 100 }
+    ApprovalDecision:
+      type: object
+      additionalProperties: false
+      required: [decision, comment]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: string, minLength: 5, maxLength: 1000 }
     SubmissionAccepted:
       type: object
       additionalProperties: false

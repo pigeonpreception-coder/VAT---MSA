@@ -620,6 +620,174 @@ export const commandIdempotency = sqliteTable(
   (table) => [uniqueIndex("ux_command_idempotency").on(table.actorId, table.commandType, table.idempotencyKey)],
 );
 
+export const taxRuleSets = sqliteTable(
+  "tax_rule_sets",
+  {
+    id: text("id").primaryKey(),
+    jurisdiction: text("jurisdiction").notNull(),
+    version: text("version").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    standardRateBps: integer("standard_rate_bps").notNull(),
+    legalAuthorityReference: text("legal_authority_reference"),
+    status: text("status").notNull(),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    approvedAt: text("approved_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_tax_rule_version").on(table.jurisdiction, table.version)],
+);
+
+export const taxBoxMappings = sqliteTable(
+  "tax_box_mappings",
+  {
+    id: text("id").primaryKey(),
+    taxRuleSetId: text("tax_rule_set_id").notNull().references(() => taxRuleSets.id),
+    boxCode: text("box_code").notNull(),
+    label: text("label").notNull(),
+    sourceEntryType: text("source_entry_type").notNull(),
+    direction: text("direction").notNull(),
+    formula: text("formula").notNull(),
+    status: text("status").notNull(),
+  },
+  (table) => [uniqueIndex("ux_tax_box_mapping").on(table.taxRuleSetId, table.boxCode)],
+);
+
+export const vatPeriods = sqliteTable(
+  "vat_periods",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    periodCode: text("period_code").notNull(),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    dueDate: text("due_date").notNull(),
+    status: text("status").notNull(),
+    lockVersion: integer("lock_version").notNull().default(0),
+    closeRequestedBy: text("close_requested_by").references(() => appUsers.id),
+    closeRequestedAt: text("close_requested_at"),
+    closedBy: text("closed_by").references(() => appUsers.id),
+    closedAt: text("closed_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_vat_period_code").on(table.taxpayerId, table.periodCode),
+    index("idx_vat_period_status_due").on(table.status, table.dueDate),
+  ],
+);
+
+export const vatAdjustments = sqliteTable(
+  "vat_adjustments",
+  {
+    id: text("id").primaryKey(),
+    vatPeriodId: text("vat_period_id").notNull().references(() => vatPeriods.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    adjustmentType: text("adjustment_type").notNull(),
+    direction: text("direction").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    explanation: text("explanation").notNull(),
+    evidenceDocumentId: text("evidence_document_id").references(() => documentMetadata.id),
+    status: text("status").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    approvedAt: text("approved_at"),
+  },
+  (table) => [index("idx_vat_adjustments_period_status").on(table.vatPeriodId, table.status)],
+);
+
+export const vatReturnVersions = sqliteTable(
+  "vat_return_versions",
+  {
+    id: text("id").primaryKey(),
+    vatPeriodId: text("vat_period_id").notNull().references(() => vatPeriods.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    versionNumber: integer("version_number").notNull(),
+    parentVersionId: text("parent_version_id"),
+    taxRuleSetId: text("tax_rule_set_id").notNull().references(() => taxRuleSets.id),
+    outputTaxCents: integer("output_tax_cents").notNull(),
+    inputTaxCents: integer("input_tax_cents").notNull(),
+    adjustmentCents: integer("adjustment_cents").notNull(),
+    netPayableCents: integer("net_payable_cents").notNull(),
+    status: text("status").notNull(),
+    ledgerSnapshotHash: text("ledger_snapshot_hash").notNull(),
+    generatedBy: text("generated_by").notNull().references(() => appUsers.id),
+    generatedAt: text("generated_at").notNull(),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    approvedAt: text("approved_at"),
+    supersededAt: text("superseded_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_vat_return_version").on(table.vatPeriodId, table.versionNumber),
+    index("idx_vat_return_status_generated").on(table.status, table.generatedAt),
+  ],
+);
+
+export const vatReturnBoxes = sqliteTable(
+  "vat_return_boxes",
+  {
+    id: text("id").primaryKey(),
+    vatReturnVersionId: text("vat_return_version_id").notNull().references(() => vatReturnVersions.id),
+    boxCode: text("box_code").notNull(),
+    label: text("label").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    sourceCount: integer("source_count").notNull(),
+    calculationTrace: text("calculation_trace").notNull(),
+  },
+  (table) => [uniqueIndex("ux_vat_return_box").on(table.vatReturnVersionId, table.boxCode)],
+);
+
+export const approvalTasks = sqliteTable(
+  "approval_tasks",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    domain: text("domain").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    requestedAction: text("requested_action").notNull(),
+    riskTier: text("risk_tier").notNull(),
+    status: text("status").notNull(),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    assignedRole: text("assigned_role").notNull(),
+    decidedBy: text("decided_by").references(() => appUsers.id),
+    requestedAt: text("requested_at").notNull(),
+    decidedAt: text("decided_at"),
+    decisionComment: text("decision_comment"),
+  },
+  (table) => [index("idx_approval_queue").on(table.status, table.assignedRole, table.requestedAt)],
+);
+
+export const vatReturnSubmissions = sqliteTable(
+  "vat_return_submissions",
+  {
+    id: text("id").primaryKey(),
+    vatReturnVersionId: text("vat_return_version_id").notNull().references(() => vatReturnVersions.id),
+    provider: text("provider").notNull(),
+    requestReference: text("request_reference").notNull(),
+    status: text("status").notNull(),
+    requestHash: text("request_hash").notNull(),
+    providerReference: text("provider_reference"),
+    responseHash: text("response_hash"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    requestedAt: text("requested_at").notNull(),
+    submittedAt: text("submitted_at"),
+    acknowledgedAt: text("acknowledged_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    uniqueIndex("ux_vat_return_submission_reference").on(table.provider, table.requestReference),
+    index("idx_vat_return_submission_status").on(table.status, table.requestedAt),
+  ],
+);
+
 export const invoices = sqliteTable(
   "invoices",
   {
@@ -710,6 +878,29 @@ export const ledgerEntries = sqliteTable(
   (table) => [
     index("idx_ledger_taxpayer_period").on(table.taxpayerId, table.period),
     index("idx_ledger_transaction").on(table.transactionId),
+  ],
+);
+
+export const reconciliationMatches = sqliteTable(
+  "reconciliation_matches",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    vatPeriodId: text("vat_period_id").references(() => vatPeriods.id),
+    invoiceId: text("invoice_id").notNull().references(() => invoices.id),
+    ledgerEntryId: text("ledger_entry_id").references(() => ledgerEntries.id),
+    matchType: text("match_type").notNull(),
+    confidenceBps: integer("confidence_bps").notNull(),
+    status: text("status").notNull(),
+    evidence: text("evidence").notNull(),
+    reconciledBy: text("reconciled_by").references(() => appUsers.id),
+    reconciledAt: text("reconciled_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_reconciliation_invoice_taxpayer").on(table.invoiceId, table.taxpayerId),
+    index("idx_reconciliation_period_status").on(table.vatPeriodId, table.status),
   ],
 );
 
