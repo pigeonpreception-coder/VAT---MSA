@@ -3,11 +3,14 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { listTaxpayers } from "@/lib/data/repository";
 import { formatMoney } from "@/lib/format";
+import { getCurrentUser, requirePermission } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Taxpayer registry" };
 export const dynamic = "force-dynamic";
 
 export default async function TaxpayersPage() {
+  const user = await getCurrentUser();
+  requirePermission(user, "taxpayers:read");
   const taxpayers = await listTaxpayers();
   return <AppShell active="taxpayers" permission="taxpayers:read">
     <PageHeader eyebrow="Identity and taxpayer domain" title="Canonical taxpayer registry" description="VAT numbers, TINs and legal identities resolve to immutable internal taxpayer records used across every transaction." />
@@ -22,4 +25,3 @@ export default async function TaxpayersPage() {
     </section>
   </AppShell>;
 }
-

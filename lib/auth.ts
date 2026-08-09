@@ -61,7 +61,7 @@ export async function getCurrentUser(): Promise<UserContext> {
 }
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
-  PILOT_ADMIN: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "audit:read"]),
+  PILOT_ADMIN: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "audit:read", "security:read"]),
   SELLER_ADMIN: new Set(["dashboard:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read"]),
   SELLER_OPERATOR: new Set(["dashboard:read", "invoices:read", "invoices:submit", "exceptions:read"]),
   SELLER_VIEWER: new Set(["dashboard:read", "invoices:read", "returns:read"]),
@@ -70,11 +70,25 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
   NAMRA_COMPLIANCE_OFFICER: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "exceptions:read", "returns:read"]),
   NAMRA_AUDITOR: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "exceptions:read", "returns:read", "audit:read"]),
   INTERNAL_AUDITOR: new Set(["dashboard:read", "audit:read"]),
+  SECURITY_ANALYST: new Set(["dashboard:read", "security:read", "audit:read"]),
 };
 
+export function hasPermission(user: UserContext, permission: string): boolean {
+  return ROLE_PERMISSIONS[user.role]?.has(permission) ?? false;
+}
+
 export function requirePermission(user: UserContext, permission: string): void {
-  if (!ROLE_PERMISSIONS[user.role]?.has(permission)) {
+  if (!hasPermission(user, permission)) {
     throw new AccessDeniedError(`Role ${user.role} does not have ${permission} permission.`);
   }
 }
 
+export function isNationalScope(user: UserContext): boolean {
+  return user.taxpayerId === null && ["PILOT_ADMIN", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "INTERNAL_AUDITOR", "SECURITY_ANALYST"].includes(user.role);
+}
+
+export function requireTaxpayerScope(user: UserContext, taxpayerId: string): void {
+  if (!isNationalScope(user) && user.taxpayerId !== taxpayerId) {
+    throw new AccessDeniedError("The requested record is outside your authorised taxpayer scope.");
+  }
+}

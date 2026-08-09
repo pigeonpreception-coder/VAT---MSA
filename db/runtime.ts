@@ -63,6 +63,26 @@ const SCHEMA_STATEMENTS = [
     request_hash TEXT NOT NULL, response_invoice_id TEXT NOT NULL REFERENCES invoices(id),
     created_at TEXT NOT NULL, UNIQUE (actor_id, idempotency_key)
   )`,
+  `CREATE TABLE IF NOT EXISTS rate_limit_windows (
+    bucket_key TEXT NOT NULL, window_start INTEGER NOT NULL, request_count INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL, UNIQUE (bucket_key, window_start)
+  )`,
+  `CREATE TABLE IF NOT EXISTS security_events (
+    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, severity TEXT NOT NULL, actor_id TEXT,
+    source_token TEXT NOT NULL, correlation_id TEXT NOT NULL, action TEXT NOT NULL,
+    outcome TEXT NOT NULL, details TEXT NOT NULL, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS security_incidents (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL,
+    source_event_id TEXT REFERENCES security_events(id), automated_action TEXT,
+    owner TEXT, opened_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS outbox_events (
+    id TEXT PRIMARY KEY, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL,
+    event_type TEXT NOT NULL, event_version INTEGER NOT NULL, partition_key TEXT NOT NULL,
+    payload TEXT NOT NULL, status TEXT NOT NULL, publish_attempts INTEGER NOT NULL DEFAULT 0,
+    occurred_at TEXT NOT NULL, available_at TEXT NOT NULL, published_at TEXT, last_error TEXT
+  )`,
   `CREATE TABLE IF NOT EXISTS seed_state (key TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_status_issue_date ON invoices(status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_supplier_issue_date ON invoices(supplier_taxpayer_id, issue_date)`,
@@ -72,6 +92,12 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_exceptions_status_created ON reconciliation_exceptions(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_events(resource_type, resource_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_occurred ON audit_events(occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_rate_limit_expiry ON rate_limit_windows(expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_events_severity_time ON security_events(severity, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_events_actor_time ON security_events(actor_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_incidents_status_severity ON security_incidents(status, severity)`,
+  `CREATE INDEX IF NOT EXISTS idx_outbox_status_available ON outbox_events(status, available_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id)`,
 ];
 
 const SEED_STATEMENTS = [
@@ -117,6 +143,15 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('pilot-v1','2026-08-09T00:00:00Z')`,
 ];
 
+const SECURITY_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO security_events VALUES ('sec-0001','API_RATE_ANOMALY','MEDIUM','usr-local-admin','src:pilot','a1000000-0000-4000-8000-000000000001','INVOICE_SUBMISSION','THROTTLED','{"bucket":"actor","threshold":120}','2026-08-09T06:45:00Z')`,
+  `INSERT OR IGNORE INTO security_events VALUES ('sec-0002','AUTHORISATION_DENIED','HIGH','unknown','src:external','a1000000-0000-4000-8000-000000000002','INVOICE_READ','DENIED','{"reason":"taxpayer_scope_mismatch"}','2026-08-09T07:10:00Z')`,
+  `INSERT OR IGNORE INTO security_events VALUES ('sec-0003','PAYLOAD_REJECTED','LOW','usr-local-admin','src:pilot','a1000000-0000-4000-8000-000000000003','INVOICE_SUBMISSION','REJECTED','{"reason":"payload_limit"}','2026-08-09T07:18:00Z')`,
+  `INSERT OR IGNORE INTO security_incidents VALUES ('inc-0001','Repeated cross-taxpayer access attempts','HIGH','INVESTIGATING','sec-0002','SESSION_CHALLENGE','SOC Tier 2','2026-08-09T07:11:00Z','2026-08-09T07:20:00Z')`,
+  `INSERT OR IGNORE INTO outbox_events VALUES ('out-0001','INVOICE','inv-0001','InvoiceCertified',1,'tp-0001','{"invoice_id":"inv-0001","transaction_id":"txn-0001"}','PUBLISHED',1,'2026-08-08T08:12:45Z','2026-08-08T08:12:45Z','2026-08-08T08:12:46Z',NULL)`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('security-v1','2026-08-09T08:00:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -138,5 +173,7 @@ async function initialize(db: D1Database): Promise<void> {
   await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
   const existing = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("pilot-v1").first();
   if (!existing) await db.batch(SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+  const securitySeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("security-v1").first();
+  if (!securitySeed) await db.batch(SECURITY_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.prepare("PRAGMA optimize").run();
 }

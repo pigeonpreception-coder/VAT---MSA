@@ -11,8 +11,13 @@
     "start": "vinext start",
     "test": "vitest run --config vitest.config.ts && vinext build",
     "test:unit": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "security:secrets": "node tools/secret-scan.mjs",
+    "security:audit": "pnpm audit --audit-level high",
+    "sbom:generate": "node tools/generate-sbom.mjs",
+    "security:ci": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm security:secrets && pnpm run sbom:generate && pnpm build"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

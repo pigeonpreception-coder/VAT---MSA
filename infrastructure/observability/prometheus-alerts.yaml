@@ -1,0 +1,39 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vat-msa-slo-and-security
+  namespace: vat-msa
+spec:
+  groups:
+    - name: vat-msa.availability
+      rules:
+        - alert: VATMSAHighServerErrorRatio
+          expr: sum(rate(http_server_requests_total{service="vat-msa",status_code=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_total{service="vat-msa"}[5m])), 1) > 0.02
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: VAT-MSA server error ratio exceeds 2%
+        - alert: VATMSAHighInvoiceLatency
+          expr: histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="vat-msa",route="/api/v1/invoices",method="POST"}[5m]))) > 0.75
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: Invoice acceptance p95 exceeds the proposed SLO
+        - alert: VATMSAOutboxBacklog
+          expr: vat_msa_outbox_oldest_pending_seconds > 60
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: Critical asynchronous events are delayed
+        - alert: VATMSASecurityTelemetryMissing
+          expr: absent_over_time(vat_msa_security_events_total[5m]) == 1
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: Required security telemetry is missing
+        - alert: VATMSAReadinessCapacityLow
+          expr: sum(kube_deployment_status_replicas_available{namespace="vat-msa",deployment="vat-msa-web"}) < 2
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: Fewer than two application replicas are available

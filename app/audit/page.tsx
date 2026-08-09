@@ -3,6 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { listAuditEvents } from "@/lib/data/repository";
 import { formatDateTime } from "@/lib/format";
+import { getCurrentUser, requirePermission } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Audit evidence" };
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ function detailSummary(value: string): string {
 }
 
 export default async function AuditPage() {
+  const user = await getCurrentUser();
+  requirePermission(user, "audit:read");
   const events = await listAuditEvents();
   return <AppShell active="audit" permission="audit:read">
     <PageHeader eyebrow="Tamper-evident evidence" title="Append-only audit stream" description="Security and business events are chained by hash so changes to historical evidence can be detected and investigated." />
@@ -24,4 +27,3 @@ export default async function AuditPage() {
     </section>
   </AppShell>;
 }
-

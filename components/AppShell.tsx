@@ -1,14 +1,15 @@
 import Link from "next/link";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
 import { initials } from "@/lib/format";
 
 const navigation = [
-  { href: "/", label: "Operations dashboard", key: "dashboard" },
-  { href: "/invoices", label: "Tax invoices", key: "invoices" },
-  { href: "/taxpayers", label: "Taxpayer registry", key: "taxpayers" },
-  { href: "/reconciliation", label: "Reconciliation", key: "reconciliation" },
-  { href: "/returns", label: "VAT returns", key: "returns" },
-  { href: "/audit", label: "Audit evidence", key: "audit" },
+  { href: "/", label: "Operations dashboard", key: "dashboard", permission: "dashboard:read" },
+  { href: "/invoices", label: "Tax invoices", key: "invoices", permission: "invoices:read" },
+  { href: "/taxpayers", label: "Taxpayer registry", key: "taxpayers", permission: "taxpayers:read" },
+  { href: "/reconciliation", label: "Reconciliation", key: "reconciliation", permission: "exceptions:read" },
+  { href: "/returns", label: "VAT returns", key: "returns", permission: "returns:read" },
+  { href: "/audit", label: "Audit evidence", key: "audit", permission: "audit:read" },
+  { href: "/security", label: "Security operations", key: "security", permission: "security:read" },
 ];
 
 export async function AppShell({ active, permission, children }: { active: string; permission: string; children: React.ReactNode }) {
@@ -24,15 +25,15 @@ export async function AppShell({ active, permission, children }: { active: strin
         </div>
         <nav className="nav" aria-label="Primary navigation">
           <div className="nav-label">Workspace</div>
-          {navigation.map((item) => (
+          {navigation.filter((item) => hasPermission(user, item.permission)).map((item) => (
             <Link key={item.key} className={`nav-link ${active === item.key ? "active" : ""}`} href={item.href} aria-current={active === item.key ? "page" : undefined}>
               <span className="nav-dot" aria-hidden="true" />{item.label}
             </Link>
           ))}
           <div className="nav-label">Submission</div>
-          <Link className={`nav-link ${active === "new-invoice" ? "active" : ""}`} href="/invoices/new">
+          {hasPermission(user, "invoices:submit") ? <Link className={`nav-link ${active === "new-invoice" ? "active" : ""}`} href="/invoices/new">
             <span className="nav-dot" aria-hidden="true" />Submit invoice
-          </Link>
+          </Link> : null}
         </nav>
         <div className="sidebar-foot">
           Namibia pilot environment<br />Rule set: NA-VAT-PILOT-2026.1
@@ -51,4 +52,3 @@ export async function AppShell({ active, permission, children }: { active: strin
     </div>
   );
 }
-

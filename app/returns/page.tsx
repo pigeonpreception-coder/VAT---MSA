@@ -3,12 +3,15 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { listReturns } from "@/lib/data/repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { getCurrentUser, requirePermission } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "VAT returns" };
 export const dynamic = "force-dynamic";
 
 export default async function ReturnsPage() {
-  const returns = await listReturns();
+  const user = await getCurrentUser();
+  requirePermission(user, "returns:read");
+  const returns = await listReturns(user);
   const output = returns.reduce((sum, item) => sum + Number(item.output_tax_cents), 0);
   const input = returns.reduce((sum, item) => sum + Number(item.input_tax_cents), 0);
   return <AppShell active="returns" permission="returns:read">
@@ -25,4 +28,3 @@ export default async function ReturnsPage() {
     </section>
   </AppShell>;
 }
-

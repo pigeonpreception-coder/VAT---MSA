@@ -1,0 +1,52 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:019006fb-ebd4-4da7-8268-62e980ddbb1b",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-08-09T17:48:05.638Z",
+    "tools": [
+      {
+        "vendor": "VAT-MSA",
+        "name": "generate-sbom.mjs",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "vat-msa-platform",
+      "version": "0.2.0",
+      "bom-ref": "pkg:npm/vat-msa-platform@0.2.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "drizzle-orm",
+      "version": "0.45.2",
+      "bom-ref": "pkg:npm/drizzle-orm@0.45.2",
+      "purl": "pkg:npm/drizzle-orm@0.45.2"
+    },
+    {
+      "type": "library",
+      "name": "react-dom",
+      "version": "19.2.6",
+      "bom-ref": "pkg:npm/react-dom@19.2.6",
+      "purl": "pkg:npm/react-dom@19.2.6"
+    },
+    {
+      "type": "library",
+      "name": "react",
+      "version": "19.2.6",
+      "bom-ref": "pkg:npm/react@19.2.6",
+      "purl": "pkg:npm/react@19.2.6"
+    },
+    {
+      "type": "library",
+      "name": "scheduler",
+      "version": "0.27.0",
+      "bom-ref": "pkg:npm/scheduler@0.27.0",
+      "purl": "pkg:npm/scheduler@0.27.0"
+    }
+  ]
+}

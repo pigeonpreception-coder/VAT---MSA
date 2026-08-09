@@ -51,7 +51,7 @@ function roundedDivide(numerator: number, denominator: number): number {
 }
 
 function vatIdentifier(party: InvoiceSubmission["supplier"]): string | null {
-  return party.identifiers.find((identifier) => identifier.type === "VAT_NUMBER")?.value.trim() || null;
+  return party.identifiers?.find((identifier) => identifier.type === "VAT_NUMBER")?.value.trim() || null;
 }
 
 export function calculateAndValidateInvoice(payload: InvoiceSubmission): CalculatedInvoice {
@@ -62,15 +62,31 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
   }
   if (!payload.invoice_number?.trim()) {
     errors.push({ code: "INVOICE_NUMBER_REQUIRED", path: "/invoice_number", message: "Invoice number is required." });
+  } else if (payload.invoice_number.length > 100) {
+    errors.push({ code: "INVOICE_NUMBER_TOO_LONG", path: "/invoice_number", message: "Invoice number must not exceed 100 characters." });
   }
   if (!payload.source?.system_id?.trim() || !payload.source?.document_id?.trim()) {
     errors.push({ code: "SOURCE_REQUIRED", path: "/source", message: "Source system and document identifiers are required." });
+  } else {
+    if (payload.source.system_id.length > 100) errors.push({ code: "SOURCE_SYSTEM_TOO_LONG", path: "/source/system_id", message: "Source system ID must not exceed 100 characters." });
+    if (payload.source.document_id.length > 150) errors.push({ code: "SOURCE_DOCUMENT_TOO_LONG", path: "/source/document_id", message: "Source document ID must not exceed 150 characters." });
+    if (!payload.source.submitted_at || Number.isNaN(Date.parse(payload.source.submitted_at))) errors.push({ code: "SUBMITTED_AT_INVALID", path: "/source/submitted_at", message: "Submitted timestamp must be a valid ISO date-time." });
   }
   if (!payload.supplier?.name?.trim() || !vatIdentifier(payload.supplier)) {
     errors.push({ code: "SUPPLIER_VAT_REQUIRED", path: "/supplier", message: "The supplier name and VAT number are required." });
+  } else if (payload.supplier.name.length > 250) {
+    errors.push({ code: "SUPPLIER_NAME_TOO_LONG", path: "/supplier/name", message: "Supplier name must not exceed 250 characters." });
   }
   if (!payload.customer?.name?.trim() || !payload.customer.identifiers?.length) {
     errors.push({ code: "CUSTOMER_REQUIRED", path: "/customer", message: "Customer name and at least one identifier are required." });
+  } else if (payload.customer.name.length > 250) {
+    errors.push({ code: "CUSTOMER_NAME_TOO_LONG", path: "/customer/name", message: "Customer name must not exceed 250 characters." });
+  }
+  for (const [partyName, party] of [["supplier", payload.supplier], ["customer", payload.customer]] as const) {
+    if ((party?.identifiers?.length ?? 0) > 20) errors.push({ code: "TOO_MANY_IDENTIFIERS", path: `/${partyName}/identifiers`, message: "A party may have at most 20 identifiers." });
+    party?.identifiers?.forEach((identifier, index) => {
+      if (!identifier.value?.trim() || identifier.value.length > 100) errors.push({ code: "IDENTIFIER_INVALID", path: `/${partyName}/identifiers/${index}/value`, message: "Identifier values must contain 1 to 100 characters." });
+    });
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.issue_date ?? "")) {
     errors.push({ code: "ISSUE_DATE_INVALID", path: "/issue_date", message: "Issue date must use YYYY-MM-DD." });
@@ -80,13 +96,25 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
   }
   if (!Array.isArray(payload.lines) || payload.lines.length === 0) {
     errors.push({ code: "LINES_REQUIRED", path: "/lines", message: "At least one invoice line is required." });
+  } else if (payload.lines.length > 10_000) {
+    errors.push({ code: "TOO_MANY_LINES", path: "/lines", message: "An invoice may contain at most 10,000 lines." });
   }
   if (["CREDIT_NOTE", "DEBIT_NOTE"].includes(payload.document_type) && !payload.original_document_reference) {
     errors.push({ code: "ORIGINAL_DOCUMENT_REQUIRED", path: "/original_document_reference", message: "Credit and debit notes must reference the original document." });
   }
 
-  const calculatedLines = (payload.lines ?? []).map((line, index) => {
+  const seenLineNumbers = new Set<number>();
+  const calculatedLines = (payload.lines ?? []).slice(0, 10_000).map((line, index) => {
     const path = `/lines/${index}`;
+    if (!line || typeof line !== "object") {
+      errors.push({ code: "LINE_INVALID", path, message: "Each invoice line must be an object." });
+      return {
+        line_number: index + 1, description: "", quantity: "0", unit_code: "EA", unit_price: "0", net_amount: "0",
+        tax: { category: "OTHER" as const, rate: "0", taxable_amount: "0", tax_amount: "0" },
+        quantityMicros: 0, unitPriceCents: 0, netAmountCents: 0, taxRateBps: 0, taxAmountCents: 0,
+      };
+    }
+    const tax = line?.tax ?? { category: "OTHER" as const, rate: "", taxable_amount: "", tax_amount: "" };
     let quantityMicros = 0;
     let unitPriceCents = 0;
     let suppliedNetCents = 0;
@@ -100,21 +128,36 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
     catch { errors.push({ code: "UNIT_PRICE_INVALID", path: `${path}/unit_price`, message: "Unit price must be a decimal amount." }); }
     try { suppliedNetCents = decimalToScaled(line.net_amount, 2); }
     catch { errors.push({ code: "NET_AMOUNT_INVALID", path: `${path}/net_amount`, message: "Net amount must be a decimal amount." }); }
-    try { suppliedTaxableCents = decimalToScaled(line.tax.taxable_amount, 2); }
+    try { suppliedTaxableCents = decimalToScaled(tax.taxable_amount, 2); }
     catch { errors.push({ code: "TAXABLE_AMOUNT_INVALID", path: `${path}/tax/taxable_amount`, message: "Taxable amount must be a decimal amount." }); }
-    try { suppliedTaxCents = decimalToScaled(line.tax.tax_amount, 2); }
+    try { suppliedTaxCents = decimalToScaled(tax.tax_amount, 2); }
     catch { errors.push({ code: "TAX_AMOUNT_INVALID", path: `${path}/tax/tax_amount`, message: "Tax amount must be a decimal amount." }); }
-    try { taxRateBps = decimalToScaled(line.tax.rate, 2); }
+    try { taxRateBps = decimalToScaled(tax.rate, 2); }
     catch { errors.push({ code: "TAX_RATE_INVALID", path: `${path}/tax/rate`, message: "Tax rate must be a non-negative percentage." }); }
 
     if (!Number.isInteger(line.line_number) || line.line_number < 1) {
       errors.push({ code: "LINE_NUMBER_INVALID", path: `${path}/line_number`, message: "Line number must be a positive integer." });
+    } else if (seenLineNumbers.has(line.line_number)) {
+      errors.push({ code: "LINE_NUMBER_DUPLICATE", path: `${path}/line_number`, message: "Line numbers must be unique within an invoice." });
+    } else {
+      seenLineNumbers.add(line.line_number);
     }
     if (!line.description?.trim()) {
       errors.push({ code: "DESCRIPTION_REQUIRED", path: `${path}/description`, message: "Line description is required." });
+    } else if (line.description.length > 1_000) {
+      errors.push({ code: "DESCRIPTION_TOO_LONG", path: `${path}/description`, message: "Line description must not exceed 1,000 characters." });
     }
-    if (quantityMicros < 0) {
-      errors.push({ code: "QUANTITY_NEGATIVE", path: `${path}/quantity`, message: "Quantity cannot be negative." });
+    if (quantityMicros <= 0) {
+      errors.push({ code: "QUANTITY_NOT_POSITIVE", path: `${path}/quantity`, message: "Quantity must be greater than zero." });
+    }
+    if (line.unit_code?.length > 20) {
+      errors.push({ code: "UNIT_CODE_TOO_LONG", path: `${path}/unit_code`, message: "Unit code must not exceed 20 characters." });
+    }
+    if (taxRateBps < 0 || taxRateBps > 10_000) {
+      errors.push({ code: "TAX_RATE_OUT_OF_RANGE", path: `${path}/tax/rate`, message: "Tax rate must be between 0 and 100 percent." });
+    }
+    if (!["CREDIT_NOTE"].includes(payload.document_type) && [unitPriceCents, suppliedNetCents, suppliedTaxableCents, suppliedTaxCents].some((value) => value < 0)) {
+      errors.push({ code: "NEGATIVE_AMOUNT_NOT_ALLOWED", path, message: "Negative amounts require the approved credit-note workflow." });
     }
 
     const computedNetCents = roundedDivide(quantityMicros * unitPriceCents, 1_000_000);
@@ -128,12 +171,13 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
     if (computedTaxCents !== suppliedTaxCents) {
       errors.push({ code: "LINE_TAX_MISMATCH", path: `${path}/tax/tax_amount`, message: `Expected ${centsToDecimal(computedTaxCents)} for the supplied rate.` });
     }
-    if (["ZERO_RATED", "EXEMPT", "OUTSIDE_SCOPE"].includes(line.tax.category) && taxRateBps !== 0) {
-      errors.push({ code: "ZERO_RATE_REQUIRED", path: `${path}/tax/rate`, message: `${line.tax.category} lines must use a zero rate.` });
+    if (["ZERO_RATED", "EXEMPT", "OUTSIDE_SCOPE"].includes(tax.category) && taxRateBps !== 0) {
+      errors.push({ code: "ZERO_RATE_REQUIRED", path: `${path}/tax/rate`, message: `${tax.category} lines must use a zero rate.` });
     }
 
     return {
       ...line,
+      tax,
       quantityMicros,
       unitPriceCents,
       netAmountCents: computedNetCents,

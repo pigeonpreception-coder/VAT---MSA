@@ -16,6 +16,13 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Hash-chained, append-only business audit events.
 - D1/SQLite schema, generated migration, indexes and synthetic pilot data.
 - Responsive, keyboard-accessible operational interface.
+- Taxpayer-scoped repository queries and server-side resource authorization.
+- Bounded streaming JSON ingestion and multi-level actor, device, source, tenant and global rate controls.
+- Correlated structured security events, incident records and a Security Operations view.
+- Transactional outbox records for reliable asynchronous processing hand-off.
+- Liveness/readiness endpoints and consistent edge security/cache headers.
+- Strict release gate: lint, TypeScript, unit/security tests, secret scan, CycloneDX SBOM and production build.
+- A complete security, hyperscale, HA/DR, observability and incident architecture pack under `07-security-resilience/`.
 
 ## Local operation
 
@@ -28,10 +35,10 @@ pnpm dev
 
 The local runtime creates the pilot schema idempotently and seeds synthetic taxpayers and fiscal records on first use. Development mode uses the explicitly labelled `PILOT_ADMIN` local identity. Production mode never enables that fallback.
 
-Run release verification with:
+Run the complete hardened release gate with:
 
 ```powershell
-pnpm test
+pnpm security:ci
 ```
 
 ## Identity and authorisation
@@ -46,6 +53,8 @@ The platform uses D1-compatible SQLite for the operational pilot. Monetary value
 
 The generated migration is stored in `drizzle/`. The runtime initializer is an onboarding convenience for the local pilot; controlled hosted environments should apply reviewed migrations through the deployment pipeline.
 
+The pilot additionally commits an outbox event in the same transaction as each accepted invoice. A production relay and idempotent queue consumers must publish and process these records; the local pilot deliberately exposes pending/published outbox posture rather than pretending that a national message platform exists locally.
+
 ## Production gates
 
 This is working application software, but it is not yet authorised for statutory or national production use. Before production, NamRA must approve or supply:
@@ -59,3 +68,4 @@ This is working application software, but it is not yet authorised for statutory
 
 The current `DEV-SHA256` certificate profile is deliberately labelled and must never be represented as a production legal signature.
 
+The national-scale planning targets, proposed SLO/RTO/RPO values and Kubernetes manifests are testable reference hypotheses, not achieved capacity claims. Production acceptance requires the objective evidence listed in `07-security-resilience/10-production-acceptance-gates.md`.

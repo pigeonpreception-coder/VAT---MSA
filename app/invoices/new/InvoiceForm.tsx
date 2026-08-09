@@ -98,7 +98,7 @@ export function InvoiceForm({ taxpayers }: { taxpayers: TaxpayerOption[] }) {
 
       <h3 className="section-title">Seller and buyer</h3>
       <div className="form-group"><label htmlFor="supplier">Registered supplier</label><select id="supplier" className="select" required value={supplierVat} onChange={(event) => setSupplierVat(event.target.value)}>{taxpayers.map((item) => <option key={item.id} value={item.vatNumber}>{item.legalName} · {item.vatNumber}</option>)}</select></div>
-      <div className="form-group"><label htmlFor="customer-vat">Buyer VAT registration</label><select id="customer-vat" className="select" value={customerVat} onChange={(event) => chooseCustomer(event.target.value)}><option value="">Not VAT registered / consumer</option>{taxpayers.filter((item) => item.vatNumber !== supplierVat).map((item) => <option key={item.id} value={item.vatNumber}>{item.legalName} · {item.vatNumber}</option>)}</select></div>
+      <div className="form-group"><label htmlFor="customer-vat">Buyer VAT registration</label><input id="customer-vat" className="field" list="customer-taxpayers" placeholder="Leave blank for a consumer" value={customerVat} onChange={(event) => chooseCustomer(event.target.value)} /><datalist id="customer-taxpayers">{taxpayers.filter((item) => item.vatNumber !== supplierVat).map((item) => <option key={item.id} value={item.vatNumber}>{item.legalName}</option>)}</datalist><span className="field-help">The server resolves and validates registered buyer identities; unknown numbers do not receive input-VAT postings.</span></div>
       <div className="form-group full"><label htmlFor="customer-name">Buyer name</label><input id="customer-name" className="field" required value={customerName} onChange={(event) => setCustomerName(event.target.value)} /></div>
 
       <h3 className="section-title">Invoice lines</h3>
@@ -127,4 +127,3 @@ export function InvoiceForm({ taxpayers }: { taxpayers: TaxpayerOption[] }) {
     </div>
   </form>;
 }
-

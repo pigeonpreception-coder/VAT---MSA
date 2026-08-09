@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vat-msa-web-config
+  namespace: vat-msa
+data:
+  NODE_ENV: production
+  PORT: "3000"

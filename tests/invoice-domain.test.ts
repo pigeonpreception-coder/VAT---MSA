@@ -51,5 +51,29 @@ describe("VAT invoice rules", () => {
   it("produces stable canonical JSON independent of key order", () => {
     expect(stableStringify({ b: 2, a: 1 })).toBe(stableStringify({ a: 1, b: 2 }));
   });
-});
 
+  it("rejects duplicate line numbers", () => {
+    const firstLine = invoice().lines[0];
+    const payload = invoice({ lines: [firstLine, { ...firstLine }] });
+    expect(() => calculateAndValidateInvoice(payload)).toThrow(InvoiceValidationError);
+  });
+
+  it("rejects non-positive quantities", () => {
+    const payload = invoice();
+    payload.lines[0].quantity = "0";
+    payload.lines[0].net_amount = "0.00";
+    payload.lines[0].tax.taxable_amount = "0.00";
+    payload.lines[0].tax.tax_amount = "0.00";
+    expect(() => calculateAndValidateInvoice(payload)).toThrow(InvoiceValidationError);
+  });
+
+  it("rejects invoice identifiers above the bounded length", () => {
+    expect(() => calculateAndValidateInvoice(invoice({ invoice_number: "X".repeat(101) }))).toThrow(InvoiceValidationError);
+  });
+
+  it("rejects more than 10,000 lines before unbounded processing", () => {
+    const line = invoice().lines[0];
+    const payload = invoice({ lines: Array.from({ length: 10_001 }, (_, index) => ({ ...line, line_number: index + 1 })) });
+    expect(() => calculateAndValidateInvoice(payload)).toThrow(InvoiceValidationError);
+  });
+});

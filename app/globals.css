@@ -104,7 +104,7 @@ tbody tr:hover { background: #fafcfc; }
 .status { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 8px; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; font-weight: 900; white-space: nowrap; }
 .status-certified, .status-matched, .status-filed, .status-active { color: var(--green); background: var(--green-pale); }
 .status-exception, .status-high, .status-critical, .status-open, .status-denied, .status-failed { color: var(--red); background: var(--red-pale); }
-.status-processing, .status-medium, .status-draft, .status-under-review { color: #9a6714; background: var(--amber-pale); }
+.status-processing, .status-medium, .status-draft, .status-under-review, .status-investigating, .status-pending { color: #9a6714; background: var(--amber-pale); }
 .status-low, .status-received, .status-success { color: var(--teal); background: var(--teal-pale); }
 
 .activity { display: grid; gap: 16px; }

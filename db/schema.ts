@@ -195,6 +195,79 @@ export const idempotencyRecords = sqliteTable(
   (table) => [uniqueIndex("ux_idempotency_actor_key").on(table.actorId, table.idempotencyKey)],
 );
 
+export const rateLimitWindows = sqliteTable(
+  "rate_limit_windows",
+  {
+    bucketKey: text("bucket_key").notNull(),
+    windowStart: integer("window_start").notNull(),
+    requestCount: integer("request_count").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_rate_limit_bucket_window").on(table.bucketKey, table.windowStart),
+    index("idx_rate_limit_expiry").on(table.expiresAt),
+  ],
+);
+
+export const securityEvents = sqliteTable(
+  "security_events",
+  {
+    id: text("id").primaryKey(),
+    eventType: text("event_type").notNull(),
+    severity: text("severity").notNull(),
+    actorId: text("actor_id"),
+    sourceToken: text("source_token").notNull(),
+    correlationId: text("correlation_id").notNull(),
+    action: text("action").notNull(),
+    outcome: text("outcome").notNull(),
+    details: text("details").notNull(),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (table) => [
+    index("idx_security_events_severity_time").on(table.severity, table.occurredAt),
+    index("idx_security_events_actor_time").on(table.actorId, table.occurredAt),
+  ],
+);
+
+export const securityIncidents = sqliteTable(
+  "security_incidents",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    severity: text("severity").notNull(),
+    status: text("status").notNull(),
+    sourceEventId: text("source_event_id").references(() => securityEvents.id),
+    automatedAction: text("automated_action"),
+    owner: text("owner"),
+    openedAt: text("opened_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_security_incidents_status_severity").on(table.status, table.severity)],
+);
+
+export const outboxEvents = sqliteTable(
+  "outbox_events",
+  {
+    id: text("id").primaryKey(),
+    aggregateType: text("aggregate_type").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    eventType: text("event_type").notNull(),
+    eventVersion: integer("event_version").notNull(),
+    partitionKey: text("partition_key").notNull(),
+    payload: text("payload").notNull(),
+    status: text("status").notNull(),
+    publishAttempts: integer("publish_attempts").notNull().default(0),
+    occurredAt: text("occurred_at").notNull(),
+    availableAt: text("available_at").notNull(),
+    publishedAt: text("published_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    index("idx_outbox_status_available").on(table.status, table.availableAt),
+    index("idx_outbox_aggregate").on(table.aggregateType, table.aggregateId),
+  ],
+);
+
 export const seedState = sqliteTable("seed_state", {
   key: text("key").primaryKey(),
   appliedAt: text("applied_at").notNull(),

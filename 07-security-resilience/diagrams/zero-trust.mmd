@@ -1,0 +1,16 @@
+flowchart TD
+  U["Human or registered machine"] --> E["Protected DNS / CDN / DDoS"]
+  E --> W["WAF / bot / API gateway"]
+  W --> I["Identity and device/integration posture"]
+  I --> P["Policy: role + scope + tenant + risk"]
+  P --> V["Bounded schema / replay / quota controls"]
+  V --> S["Private stateless services"]
+  S --> Q["Transactional outbox / durable queue"]
+  S --> D["Encrypted operational data"]
+  S --> A["Tamper-evident audit evidence"]
+  E --> SIEM["SIEM / SOC"]
+  W --> SIEM
+  I --> SIEM
+  P --> SIEM
+  S --> SIEM
+  D --> SIEM

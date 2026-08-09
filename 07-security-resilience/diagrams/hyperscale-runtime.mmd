@@ -1,0 +1,15 @@
+flowchart TD
+  C["Clients / SaaS integrations"] --> G["Global protected traffic management"]
+  G --> R1["Primary region / 3 failure domains"]
+  G -. "DR activation" .-> R2["Warm secondary region"]
+  R1 --> LB["Regional load balancer"]
+  LB --> APP["Stateless application replicas"]
+  APP --> OUT["Transactional outbox"]
+  OUT --> QUEUE["Partitioned durable queue"]
+  QUEUE --> WORK["Autoscaled idempotent workers"]
+  APP --> DATA["Partitioned operational database"]
+  DATA --> READ["Read replicas"]
+  DATA -. "replication" .-> R2
+  DATA --> VAULT["Encrypted immutable backup vault"]
+  APP --> OBS["Metrics / logs / traces / SIEM"]
+  WORK --> OBS

@@ -38,6 +38,7 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+*.tsbuildinfo
 
 # Microsoft Office lock and recovery files
 ~$*

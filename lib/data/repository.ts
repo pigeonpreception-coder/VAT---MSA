@@ -8,6 +8,8 @@ import {
   stableStringify,
 } from "@/lib/domain/invoice";
 import type { InvoiceDetail, InvoiceSubmission, InvoiceSummary, RiskLevel, UserContext } from "@/lib/domain/types";
+import { hasPermission, isNationalScope, requireTaxpayerScope } from "@/lib/auth";
+import type { RequestContext } from "@/lib/security/request";
 
 type InvoiceRow = {
   id: string; invoice_number: string; document_type: string; source_system: string; source_document_id: string;
@@ -44,15 +46,21 @@ function mapInvoice(row: InvoiceRow): InvoiceSummary {
   };
 }
 
-export async function listInvoices(limit = 100): Promise<InvoiceSummary[]> {
+export async function listInvoices(user: UserContext, limit = 100): Promise<InvoiceSummary[]> {
   const db = await ensureDatabase();
-  const result = await db.prepare("SELECT * FROM invoices ORDER BY issue_date DESC, certified_at DESC LIMIT ?").bind(limit).all<InvoiceRow>();
+  const result = isNationalScope(user)
+    ? await db.prepare("SELECT * FROM invoices ORDER BY issue_date DESC, certified_at DESC LIMIT ?").bind(limit).all<InvoiceRow>()
+    : await db.prepare("SELECT * FROM invoices WHERE supplier_taxpayer_id = ? OR customer_taxpayer_id = ? ORDER BY issue_date DESC, certified_at DESC LIMIT ?")
+      .bind(user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__", limit).all<InvoiceRow>();
   return result.results.map(mapInvoice);
 }
 
-export async function getInvoiceById(id: string): Promise<InvoiceDetail | null> {
+export async function getInvoiceById(id: string, user: UserContext): Promise<InvoiceDetail | null> {
   const db = await ensureDatabase();
-  const row = await db.prepare(`SELECT i.*, c.signature, c.signature_profile FROM invoices i JOIN certificates c ON c.invoice_id = i.id WHERE i.id = ?`).bind(id).first<InvoiceRow>();
+  const row = isNationalScope(user)
+    ? await db.prepare(`SELECT i.*, c.signature, c.signature_profile FROM invoices i JOIN certificates c ON c.invoice_id = i.id WHERE i.id = ?`).bind(id).first<InvoiceRow>()
+    : await db.prepare(`SELECT i.*, c.signature, c.signature_profile FROM invoices i JOIN certificates c ON c.invoice_id = i.id
+      WHERE i.id = ? AND (i.supplier_taxpayer_id = ? OR i.customer_taxpayer_id = ?)`).bind(id, user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").first<InvoiceRow>();
   if (!row) return null;
 
   const [lineResult, ledgerResult] = await Promise.all([
@@ -84,18 +92,26 @@ export async function getInvoiceById(id: string): Promise<InvoiceDetail | null> 
   };
 }
 
-export async function getDashboardSnapshot() {
+export async function getDashboardSnapshot(user: UserContext) {
   const db = await ensureDatabase();
+  const scoped = !isNationalScope(user);
+  const taxpayerId = user.taxpayerId ?? "__none__";
   const [metrics, recentInvoices, recentAudit, riskCounts] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS invoice_count, COALESCE(SUM(total_cents),0) AS total_cents,
+    scoped ? db.prepare(`SELECT COUNT(*) AS invoice_count, COALESCE(SUM(total_cents),0) AS total_cents,
+      COALESCE(SUM(tax_cents),0) AS tax_cents,
+      SUM(CASE WHEN status = 'EXCEPTION' THEN 1 ELSE 0 END) AS exception_count
+      FROM invoices WHERE supplier_taxpayer_id = ? OR customer_taxpayer_id = ?`).bind(taxpayerId, taxpayerId).first<{ invoice_count: number; total_cents: number; tax_cents: number; exception_count: number }>()
+      : db.prepare(`SELECT COUNT(*) AS invoice_count, COALESCE(SUM(total_cents),0) AS total_cents,
       COALESCE(SUM(tax_cents),0) AS tax_cents,
       SUM(CASE WHEN status = 'EXCEPTION' THEN 1 ELSE 0 END) AS exception_count
       FROM invoices`).first<{ invoice_count: number; total_cents: number; tax_cents: number; exception_count: number }>(),
-    listInvoices(6),
-    db.prepare("SELECT * FROM audit_events ORDER BY occurred_at DESC LIMIT 6").all<{
+    listInvoices(user, 6),
+    hasPermission(user, "audit:read") ? db.prepare("SELECT * FROM audit_events ORDER BY occurred_at DESC LIMIT 6").all<{
       id: string; action: string; resource_type: string; resource_id: string; outcome: string; details: string; occurred_at: string;
-    }>(),
-    db.prepare("SELECT risk_level, COUNT(*) AS count FROM invoices GROUP BY risk_level").all<{ risk_level: RiskLevel; count: number }>(),
+    }>() : Promise.resolve({ results: [] }),
+    scoped ? db.prepare("SELECT risk_level, COUNT(*) AS count FROM invoices WHERE supplier_taxpayer_id = ? OR customer_taxpayer_id = ? GROUP BY risk_level")
+      .bind(taxpayerId, taxpayerId).all<{ risk_level: RiskLevel; count: number }>()
+      : db.prepare("SELECT risk_level, COUNT(*) AS count FROM invoices GROUP BY risk_level").all<{ risk_level: RiskLevel; count: number }>(),
   ]);
   return {
     metrics: metrics ?? { invoice_count: 0, total_cents: 0, tax_cents: 0, exception_count: 0 },
@@ -115,18 +131,33 @@ export async function listTaxpayers() {
   return result.results;
 }
 
-export async function listExceptions() {
+export async function listTaxpayerOptions(user: UserContext) {
   const db = await ensureDatabase();
-  const result = await db.prepare(`SELECT e.*, i.invoice_number, i.supplier_name, i.total_cents, i.currency
-    FROM reconciliation_exceptions e JOIN invoices i ON i.id = e.invoice_id
-    ORDER BY CASE e.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, e.created_at DESC`).all<Record<string, string | number | null>>();
+  const result = isNationalScope(user)
+    ? await db.prepare("SELECT id, legal_name, vat_number FROM taxpayers WHERE vat_status = 'ACTIVE' ORDER BY legal_name").all<{ id: string; legal_name: string; vat_number: string }>()
+    : await db.prepare("SELECT id, legal_name, vat_number FROM taxpayers WHERE id = ? AND vat_status = 'ACTIVE'").bind(user.taxpayerId ?? "__none__").all<{ id: string; legal_name: string; vat_number: string }>();
   return result.results;
 }
 
-export async function listReturns() {
+export async function listExceptions(user: UserContext) {
   const db = await ensureDatabase();
-  const result = await db.prepare(`SELECT r.*, t.legal_name, t.vat_number FROM vat_returns r
-    JOIN taxpayers t ON t.id = r.taxpayer_id ORDER BY r.period DESC, t.legal_name`).all<Record<string, string | number | null>>();
+  const query = `SELECT e.*, i.invoice_number, i.supplier_name, i.total_cents, i.currency
+    FROM reconciliation_exceptions e JOIN invoices i ON i.id = e.invoice_id
+    ${isNationalScope(user) ? "" : "WHERE i.supplier_taxpayer_id = ? OR i.customer_taxpayer_id = ?"}
+    ORDER BY CASE e.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, e.created_at DESC`;
+  const statement = db.prepare(query);
+  const result = isNationalScope(user)
+    ? await statement.all<Record<string, string | number | null>>()
+    : await statement.bind(user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").all<Record<string, string | number | null>>();
+  return result.results;
+}
+
+export async function listReturns(user: UserContext) {
+  const db = await ensureDatabase();
+  const result = isNationalScope(user)
+    ? await db.prepare(`SELECT r.*, t.legal_name, t.vat_number FROM vat_returns r JOIN taxpayers t ON t.id = r.taxpayer_id ORDER BY r.period DESC, t.legal_name`).all<Record<string, string | number | null>>()
+    : await db.prepare(`SELECT r.*, t.legal_name, t.vat_number FROM vat_returns r JOIN taxpayers t ON t.id = r.taxpayer_id WHERE r.taxpayer_id = ? ORDER BY r.period DESC, t.legal_name`)
+      .bind(user.taxpayerId ?? "__none__").all<Record<string, string | number | null>>();
   return result.results;
 }
 
@@ -134,6 +165,18 @@ export async function listAuditEvents(limit = 100) {
   const db = await ensureDatabase();
   const result = await db.prepare("SELECT * FROM audit_events ORDER BY occurred_at DESC LIMIT ?").bind(limit).all<Record<string, string | null>>();
   return result.results;
+}
+
+export async function getSecurityOperationsSnapshot() {
+  const db = await ensureDatabase();
+  const [eventCounts, incidents, recentEvents, outbox, database] = await Promise.all([
+    db.prepare("SELECT severity, COUNT(*) AS count FROM security_events GROUP BY severity").all<{ severity: string; count: number }>(),
+    db.prepare("SELECT * FROM security_incidents ORDER BY CASE severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, updated_at DESC LIMIT 20").all<Record<string, string | null>>(),
+    db.prepare("SELECT * FROM security_events ORDER BY occurred_at DESC LIMIT 20").all<Record<string, string | null>>(),
+    db.prepare("SELECT status, COUNT(*) AS count FROM outbox_events GROUP BY status").all<{ status: string; count: number }>(),
+    db.prepare("SELECT COUNT(*) AS taxpayers, (SELECT COUNT(*) FROM invoices) AS invoices, (SELECT COUNT(*) FROM audit_events) AS audit_events FROM taxpayers").first<{ taxpayers: number; invoices: number; audit_events: number }>(),
+  ]);
+  return { eventCounts: eventCounts.results, incidents: incidents.results, recentEvents: recentEvents.results, outbox: outbox.results, database };
 }
 
 export async function getPublicVerification(token: string) {
@@ -146,7 +189,7 @@ export async function getPublicVerification(token: string) {
     }>();
 }
 
-export async function submitInvoice(payload: InvoiceSubmission, actor: UserContext, idempotencyKey: string): Promise<InvoiceDetail> {
+export async function submitInvoice(payload: InvoiceSubmission, actor: UserContext, idempotencyKey: string, context: RequestContext): Promise<InvoiceDetail> {
   if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
     throw new InvoiceValidationError([{ code: "IDEMPOTENCY_KEY_INVALID", path: "/headers/idempotency-key", message: "Idempotency key must contain 16 to 128 characters." }]);
   }
@@ -157,7 +200,7 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
     .bind(actor.userId, idempotencyKey).first<{ request_hash: string; response_invoice_id: string }>();
   if (prior) {
     if (prior.request_hash !== requestHash) throw new RepositoryConflictError("The idempotency key was already used for a different invoice payload.");
-    const existing = await getInvoiceById(prior.response_invoice_id);
+    const existing = await getInvoiceById(prior.response_invoice_id, actor);
     if (!existing) throw new RepositoryConflictError("The prior idempotent response is unavailable.");
     return existing;
   }
@@ -168,6 +211,7 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   if (!supplier) {
     throw new InvoiceValidationError([{ code: "SUPPLIER_NOT_REGISTERED", path: "/supplier/identifiers", message: "Supplier VAT number is not active in the pilot taxpayer registry." }]);
   }
+  requireTaxpayerScope(actor, supplier.id);
   const customer = customerVat
     ? await db.prepare("SELECT id FROM taxpayers WHERE vat_number = ? AND vat_status = 'ACTIVE'").bind(customerVat).first<{ id: string }>()
     : null;
@@ -232,7 +276,16 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
 
   const priorAudit = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
   const auditId = crypto.randomUUID();
-  const auditDetails = JSON.stringify({ invoiceNumber: payload.invoice_number, transactionId, certificateId, riskLevel: risk.level, exceptionId });
+  const auditDetails = JSON.stringify({
+    invoiceNumber: payload.invoice_number,
+    transactionId,
+    certificateId,
+    riskLevel: risk.level,
+    exceptionId,
+    correlationId: context.correlationId,
+    deviceId: context.deviceId,
+    sourceToken: context.sourceToken,
+  });
   const auditHash = await sha256Hex(`${priorAudit?.event_hash ?? "GENESIS"}|${auditId}|${actor.userId}|${auditDetails}|${now}`);
   statements.push(db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(
     auditId, actor.userId, actor.role, "INVOICE_CERTIFIED", "INVOICE", invoiceId, "SUCCESS",
@@ -241,9 +294,21 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   statements.push(db.prepare("INSERT INTO idempotency_records VALUES (?,?,?,?,?,?)").bind(
     crypto.randomUUID(), actor.userId, idempotencyKey, requestHash, invoiceId, now,
   ));
+  statements.push(db.prepare("INSERT INTO outbox_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(
+    crypto.randomUUID(), "INVOICE", invoiceId, "InvoiceCertified", 1, supplier.id,
+    JSON.stringify({ invoice_id: invoiceId, transaction_id: transactionId, certificate_id: certificateId, correlation_id: context.correlationId }),
+    "PENDING", 0, now, now, null, null,
+  ));
+  if (risk.level === "HIGH" || risk.level === "CRITICAL") {
+    statements.push(db.prepare("INSERT INTO security_events VALUES (?,?,?,?,?,?,?,?,?,?)").bind(
+      crypto.randomUUID(), "HIGH_RISK_TRANSACTION", risk.level, actor.userId, context.sourceToken,
+      context.correlationId, "INVOICE_SUBMISSION", "FLAGGED",
+      JSON.stringify({ invoiceId, transactionId, taxpayerId: supplier.id, riskReasons: risk.reasons.length }), now,
+    ));
+  }
 
   await db.batch(statements);
-  const created = await getInvoiceById(invoiceId);
+  const created = await getInvoiceById(invoiceId, actor);
   if (!created) throw new Error("Invoice was committed but could not be reloaded.");
   return created;
 }

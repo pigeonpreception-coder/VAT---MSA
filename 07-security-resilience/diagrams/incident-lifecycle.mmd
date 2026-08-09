@@ -1,0 +1,7 @@
+flowchart LR
+  D["Detect"] --> C["Classify"] --> P["Prioritise"] --> N["Contain"] --> E["Eradicate"] --> R["Recover"] --> V["Verify"] --> L["Lessons learned"]
+  N --> A{"High-impact action?"}
+  A -->|"yes"| H["Human approval / emergency authority"]
+  A -->|"no, high confidence"| X["Reversible automation"]
+  H --> E
+  X --> E

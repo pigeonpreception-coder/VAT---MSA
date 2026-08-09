@@ -1,0 +1,28 @@
+version: 1
+purpose: provider-neutral policy requirements for the managed edge and API gateway
+origin:
+  direct_public_access: deny
+  accepted_sources: protected_edge_egress_only
+  tls: modern_policy_with_automated_certificate_rotation
+controls:
+  - id: uri-bounds
+    action: reject
+    condition: request_uri_bytes > 8192
+  - id: invoice-body-bounds
+    action: reject
+    condition: route == /api/v1/invoices && request_body_bytes > 1048576
+  - id: disallowed-methods
+    action: reject
+    condition: method in [TRACE, CONNECT]
+  - id: adaptive-api-rate
+    action: challenge_or_throttle
+    condition: anomaly_or_quota_policy
+  - id: managed-waf
+    action: score_then_block_high_confidence
+    condition: managed_attack_signatures
+operations:
+  false_positive_monitoring: required
+  emergency_rollback: versioned_policy
+  security_event_export: siem_with_correlation_id
+  public_verification_cache: max_age_60_stale_300
+  confidential_route_cache: deny
