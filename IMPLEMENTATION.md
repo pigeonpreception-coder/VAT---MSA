@@ -6,6 +6,12 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 
 - Role-aware operations dashboard and protected application routes.
 - Canonical taxpayer registry with VAT-number and TIN identities.
+- One-to-one canonical taxpayer/organisation records with database-enforced uniqueness.
+- Dynamic buyer and seller organisation capabilities rather than duplicate taxpayer accounts.
+- Identity-provider registry and immutable provider-subject links; workspace identity is configured while ITAS and standalone access remain explicitly gated.
+- Branch-scoped organisation model, governed memberships, role/permission metadata and taxpayer-scoped identity queries.
+- Idempotent taxpayer-registration intake with duplicate controls, append-only audit evidence, outbox event and an ITAS verification record that remains pending until the authoritative contract is confirmed.
+- Identity foundation, organisation detail and registration-intake portal experiences plus protected organisation/registration APIs.
 - Electronic invoice submission through the web portal and `POST /api/v1/invoices`.
 - Exact integer-cent VAT calculation, document-total validation and duplicate controls.
 - Idempotent submission handling: an exact retry returns the original outcome; a changed payload is rejected.
@@ -33,7 +39,7 @@ pnpm install
 pnpm dev
 ```
 
-The local runtime creates the pilot schema idempotently and seeds synthetic taxpayers and fiscal records on first use. Development mode uses the explicitly labelled `PILOT_ADMIN` local identity. Production mode never enables that fallback.
+The local runtime creates the pilot schema idempotently and seeds synthetic taxpayers, canonical organisations, identity-provider posture and fiscal records on first use. Development mode uses the explicitly labelled `PILOT_ADMIN` local identity. Production mode never enables that fallback.
 
 Run the complete hardened release gate with:
 
@@ -43,13 +49,15 @@ pnpm security:ci
 
 ## Identity and authorisation
 
-Production access expects the authenticated identity headers supplied by the Sites/ChatGPT sign-in dispatcher. The identity must also exist as an active row in `app_users`; an authenticated but unprovisioned user is denied. Server-side permission checks protect both pages and API handlers.
+Production access expects the authenticated identity headers supplied by the Sites/ChatGPT sign-in dispatcher. The identity must also exist as an active row in `app_users` and resolve through an approved provider link; an authenticated but unprovisioned user is denied. Server-side permission checks protect both pages and API handlers.
+
+The system includes an ITAS identity/verification port and an intentionally unconfigured adapter. It does not invent ITAS protocols, claims or responses. Live ITAS SSO, taxpayer verification and return exchange remain disabled until NamRA/ITAS provides and approves the authoritative contract. Standalone public authentication must use an approved identity platform and is not implemented as an application-owned password stack.
 
 The pilot role exists only for local development. Production roles must be provisioned from the approved RBAC matrix and constrained to their taxpayer, portfolio or case scope before operational use.
 
 ## Database and integrity model
 
-The platform uses D1-compatible SQLite for the operational pilot. Monetary values are stored as integer cents. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
+The platform uses D1-compatible SQLite for the operational pilot. Migration `0002_silky_vanisher.sql` adds canonical organisations, taxpayer identifiers, branches, dynamic capabilities, memberships, identity links/providers, RBAC reference records and controlled registration/verification records. Monetary values are stored as integer cents. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
 
 The generated migration is stored in `drizzle/`. The runtime initializer is an onboarding convenience for the local pilot; controlled hosted environments should apply reviewed migrations through the deployment pipeline.
 

@@ -15,6 +15,13 @@
       "when": 1786291499170,
       "tag": "0001_stiff_magik",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786308510559,
+      "tag": "0002_silky_vanisher",
+      "breakpoints": true
     }
   ]
 }

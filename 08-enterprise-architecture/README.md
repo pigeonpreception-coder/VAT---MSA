@@ -48,9 +48,9 @@ ADRs 001-012 cover canonical taxpayer identity, dynamic buyer/seller roles, ITAS
 
 ## Implementation state
 
-Implemented now: operational D1 pilot, secure invoice API, certification receipt, seller/buyer ledger entries, VAT-period summaries, exception queue, public verification, audit/security evidence, outbox, role/scoped authorization, health and release gates.
+Implemented now: operational D1 pilot, canonical taxpayer/organisation mappings, taxpayer identifiers, branches, dynamic buyer/seller capabilities, identity-provider links, membership/RBAC metadata, idempotent registration intake, secure invoice API, certification receipt, seller/buyer ledger entries, VAT-period summaries, exception queue, public verification, audit/security evidence, outbox, role/scoped authorization, health and release gates.
 
-The first proposed implementation increment, only after the Architecture Approval Gate approves it, is the identity/taxpayer foundation: canonical organisations, branches, identity-provider links, memberships, dynamic buyer/seller capabilities, registration-verification records, centrally governed tax-rule metadata and separated portal/admin experiences.
+The next proposed increment is controlled membership/branch administration and verified taxpayer activation after the relevant identity, ITAS and NamRA decisions are approved. The current registration flow deliberately stops at `AWAITING_PROVIDER_CONTRACT`; it cannot create a legal taxpayer from an unverified application.
 
 Still gated: live ITAS protocol/SSO, MFA/PAM, statutory return formulas, HSM signature, official invoice numbering, document R2 and malware scanning, message-broker relay/consumers, accounting/inventory/project modules, production WAF/SIEM/KMS, bank/payment/customs integrations, independently proven national capacity and regional DR.
 

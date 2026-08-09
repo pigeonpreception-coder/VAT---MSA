@@ -1,9 +1,17 @@
-# VAT-MSA Enterprise Architecture
+# VAT-MSA VAT Management System
 
-This repository is the implementation blueprint for a national-scale VAT transaction, reconciliation, compliance and audit platform for Namibia. It converts the VAT-MSA concept into governed architecture, contracts, data definitions, controls and delivery gates that a product, engineering, security, data and operations team can use.
+This repository contains the working VAT-MSA operational pilot and its governed enterprise architecture for a national-scale VAT transaction, reconciliation, compliance and audit platform for Namibia.
+
+## Working system
+
+The application currently provides protected operations, taxpayer and organisation identity, registration intake, invoice certification, seller/output and buyer/input VAT ledger entries, reconciliation exceptions, VAT-period summaries, public certificate verification, audit evidence and security operations. See `IMPLEMENTATION.md` for the implemented capabilities and explicit production gates.
+
+The identity foundation enforces one canonical organisation per taxpayer and models buyer/seller as dynamic transaction capabilities. ITAS federation and authoritative verification are represented by a disabled integration boundary; the application does not fabricate government protocols or decisions.
 
 ## Authoritative deliverable
 
+- `08-enterprise-architecture/VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md` - consolidated 23-part, 45-deliverable enterprise architecture package.
+- `08-enterprise-architecture/29-architecture-approval-gate.md` - formal decisions, external confirmations and production blockers.
 - `VAT-MSA_Enterprise_Architecture_Blueprint.docx` - visually reviewed master blueprint.
 - `01-blueprint/VAT-MSA_Enterprise_Architecture_Blueprint.md` - maintainable source edition.
 
@@ -31,5 +39,4 @@ The target is a modular, event-driven platform. The initial implementation shoul
 
 ## Status and use
 
-This package is a design baseline, not legal advice or a final production specification. All tax rules, return mappings, retention periods, invoice particulars, rollout mandates and cross-border/data-sovereignty obligations must be approved by NamRA policy, legal, security and records-management authorities before production.
-
+This is working pilot software plus a design baseline, not legal advice or statutory production authorization. All tax rules, ITAS contracts, return mappings, retention periods, invoice particulars, rollout mandates and cross-border/data-sovereignty obligations must be approved by NamRA policy, legal, security and records-management authorities before production.

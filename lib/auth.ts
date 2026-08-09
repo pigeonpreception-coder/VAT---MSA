@@ -28,8 +28,11 @@ export async function getCurrentUser(): Promise<UserContext> {
 
   if (chatGptUser) {
     const row = await db
-      .prepare("SELECT * FROM app_users WHERE status = 'ACTIVE' AND (external_user_id = ? OR email = ?) LIMIT 1")
-      .bind(chatGptUser.userId, chatGptUser.email.toLowerCase())
+      .prepare(`SELECT u.* FROM app_users u
+        JOIN identity_links l ON l.user_id=u.id AND l.status='ACTIVE'
+        JOIN identity_providers p ON p.id=l.provider_id AND p.status='ACTIVE'
+        WHERE u.status='ACTIVE' AND p.provider_key='SITES_WORKSPACE' AND l.subject=? LIMIT 1`)
+      .bind(chatGptUser.userId)
       .first<UserRow>();
     if (!row) {
       throw new AccessDeniedError("Your identity is authenticated but has not been provisioned for VAT-MSA.");
@@ -48,7 +51,10 @@ export async function getCurrentUser(): Promise<UserContext> {
     throw new AccessDeniedError("Authentication is required.", 401);
   }
 
-  const row = await db.prepare("SELECT * FROM app_users WHERE external_user_id = 'local-demo-user' LIMIT 1").first<UserRow>();
+  const row = await db.prepare(`SELECT u.* FROM app_users u
+    JOIN identity_links l ON l.user_id=u.id AND l.status='ACTIVE'
+    JOIN identity_providers p ON p.id=l.provider_id AND p.status='ACTIVE'
+    WHERE u.status='ACTIVE' AND p.provider_key='SITES_WORKSPACE' AND l.subject='local-demo-user' LIMIT 1`).first<UserRow>();
   if (!row) throw new AccessDeniedError("The local pilot identity is unavailable.", 500);
   return {
     userId: row.id,
@@ -61,14 +67,19 @@ export async function getCurrentUser(): Promise<UserContext> {
 }
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
-  PILOT_ADMIN: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "audit:read", "security:read"]),
-  SELLER_ADMIN: new Set(["dashboard:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read"]),
-  SELLER_OPERATOR: new Set(["dashboard:read", "invoices:read", "invoices:submit", "exceptions:read"]),
-  SELLER_VIEWER: new Set(["dashboard:read", "invoices:read", "returns:read"]),
-  BUYER_ADMIN: new Set(["dashboard:read", "invoices:read", "exceptions:read", "returns:read"]),
-  BUYER_USER: new Set(["dashboard:read", "invoices:read", "exceptions:read"]),
-  NAMRA_COMPLIANCE_OFFICER: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "exceptions:read", "returns:read"]),
-  NAMRA_AUDITOR: new Set(["dashboard:read", "taxpayers:read", "invoices:read", "exceptions:read", "returns:read", "audit:read"]),
+  PILOT_ADMIN: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "registrations:submit", "organisations:manage", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "audit:read", "security:read"]),
+  TAXPAYER_OWNER: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "registrations:submit", "organisations:manage", "invoices:read", "invoices:submit", "exceptions:read", "returns:read"]),
+  TAXPAYER_ADMIN: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "organisations:manage", "invoices:read", "invoices:submit", "exceptions:read", "returns:read"]),
+  TAXPAYER_ACCOUNTANT: new Set(["dashboard:read", "identity:read", "taxpayers:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read"]),
+  TAXPAYER_STAFF: new Set(["dashboard:read", "identity:read", "invoices:read", "invoices:submit", "exceptions:read"]),
+  TAXPAYER_VIEWER: new Set(["dashboard:read", "identity:read", "invoices:read", "returns:read"]),
+  SELLER_ADMIN: new Set(["dashboard:read", "identity:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read"]),
+  SELLER_OPERATOR: new Set(["dashboard:read", "identity:read", "invoices:read", "invoices:submit", "exceptions:read"]),
+  SELLER_VIEWER: new Set(["dashboard:read", "identity:read", "invoices:read", "returns:read"]),
+  BUYER_ADMIN: new Set(["dashboard:read", "identity:read", "invoices:read", "exceptions:read", "returns:read"]),
+  BUYER_USER: new Set(["dashboard:read", "identity:read", "invoices:read", "exceptions:read"]),
+  NAMRA_COMPLIANCE_OFFICER: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read"]),
+  NAMRA_AUDITOR: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read", "audit:read"]),
   INTERNAL_AUDITOR: new Set(["dashboard:read", "audit:read"]),
   SECURITY_ANALYST: new Set(["dashboard:read", "security:read", "audit:read"]),
 };

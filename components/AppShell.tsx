@@ -6,6 +6,8 @@ const navigation = [
   { href: "/", label: "Operations dashboard", key: "dashboard", permission: "dashboard:read" },
   { href: "/invoices", label: "Tax invoices", key: "invoices", permission: "invoices:read" },
   { href: "/taxpayers", label: "Taxpayer registry", key: "taxpayers", permission: "taxpayers:read" },
+  { href: "/organisations", label: "Identity foundation", key: "organisations", permission: "identity:read" },
+  { href: "/registrations", label: "Registration intake", key: "registrations", permission: "registrations:read" },
   { href: "/reconciliation", label: "Reconciliation", key: "reconciliation", permission: "exceptions:read" },
   { href: "/returns", label: "VAT returns", key: "returns", permission: "returns:read" },
   { href: "/audit", label: "Audit evidence", key: "audit", permission: "audit:read" },

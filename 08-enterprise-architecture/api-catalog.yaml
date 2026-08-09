@@ -13,11 +13,11 @@ domains:
     - { method: POST, path: /auth/token-exchange, permission: external-provider-contract, status: gated-by-ITAS }
   taxpayers:
     - { method: GET, path: /taxpayers, permission: taxpayers:read, status: planned }
-    - { method: POST, path: /registration-applications, permission: registrations:submit, status: foundation }
-    - { method: GET, path: "/registration-applications/{id}", permission: registrations:review-or-owner, status: foundation }
+    - { method: POST, path: /registration-applications, permission: registrations:submit, status: implemented-pending-ITAS-verification }
+    - { method: GET, path: "/registration-applications/{id}", permission: registrations:review-or-owner, status: planned }
   organisations:
-    - { method: GET, path: /organisations, permission: identity:read, status: foundation }
-    - { method: GET, path: "/organisations/{id}", permission: identity:read-and-member, status: planned }
+    - { method: GET, path: /organisations, permission: identity:read, status: implemented }
+    - { method: GET, path: "/organisations/{id}", permission: identity:read-and-member, status: implemented }
     - { method: POST, path: "/organisations/{id}/memberships", permission: organisation:users:manage, status: planned }
   users:
     - { method: GET, path: /users, permission: users:read, status: planned }

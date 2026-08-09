@@ -124,6 +124,10 @@ export async function getDashboardSnapshot(user: UserContext) {
 export async function listTaxpayers() {
   const db = await ensureDatabase();
   const result = await db.prepare(`SELECT t.*,
+    (SELECT o.id FROM organisations o WHERE o.taxpayer_id = t.id AND o.status = 'ACTIVE') AS organisation_id,
+    COALESCE((SELECT GROUP_CONCAT(c.capability, ',') FROM organisation_capabilities c JOIN organisations o ON o.id=c.organisation_id
+      WHERE o.taxpayer_id=t.id AND c.status='ACTIVE' AND datetime(c.effective_from)<=CURRENT_TIMESTAMP
+        AND (c.effective_to IS NULL OR datetime(c.effective_to)>CURRENT_TIMESTAMP)), '') AS capabilities,
     (SELECT COUNT(*) FROM invoices i WHERE i.supplier_taxpayer_id = t.id OR i.customer_taxpayer_id = t.id) AS transaction_count,
     (SELECT COALESCE(SUM(amount_cents),0) FROM ledger_entries l WHERE l.taxpayer_id = t.id AND l.entry_type = 'OUTPUT_VAT') AS output_tax_cents,
     (SELECT COALESCE(SUM(amount_cents),0) FROM ledger_entries l WHERE l.taxpayer_id = t.id AND l.entry_type = 'INPUT_VAT') AS input_tax_cents
@@ -207,13 +211,21 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
 
   const supplierVat = getVatNumber(payload.supplier);
   const customerVat = getVatNumber(payload.customer);
-  const supplier = await db.prepare("SELECT id FROM taxpayers WHERE vat_number = ? AND vat_status = 'ACTIVE'").bind(supplierVat).first<{ id: string }>();
+  const supplier = await db.prepare(`SELECT t.id FROM taxpayers t
+    JOIN organisations o ON o.taxpayer_id=t.id AND o.status='ACTIVE'
+    JOIN organisation_capabilities c ON c.organisation_id=o.id AND c.capability='SELLER' AND c.status='ACTIVE'
+      AND datetime(c.effective_from)<=CURRENT_TIMESTAMP AND (c.effective_to IS NULL OR datetime(c.effective_to)>CURRENT_TIMESTAMP)
+    WHERE t.vat_number=? AND t.vat_status='ACTIVE' LIMIT 1`).bind(supplierVat).first<{ id: string }>();
   if (!supplier) {
-    throw new InvoiceValidationError([{ code: "SUPPLIER_NOT_REGISTERED", path: "/supplier/identifiers", message: "Supplier VAT number is not active in the pilot taxpayer registry." }]);
+    throw new InvoiceValidationError([{ code: "SUPPLIER_NOT_AUTHORISED", path: "/supplier/identifiers", message: "Supplier VAT number does not resolve to an active organisation with seller capability." }]);
   }
   requireTaxpayerScope(actor, supplier.id);
   const customer = customerVat
-    ? await db.prepare("SELECT id FROM taxpayers WHERE vat_number = ? AND vat_status = 'ACTIVE'").bind(customerVat).first<{ id: string }>()
+    ? await db.prepare(`SELECT t.id FROM taxpayers t
+      JOIN organisations o ON o.taxpayer_id=t.id AND o.status='ACTIVE'
+      JOIN organisation_capabilities c ON c.organisation_id=o.id AND c.capability='BUYER' AND c.status='ACTIVE'
+        AND datetime(c.effective_from)<=CURRENT_TIMESTAMP AND (c.effective_to IS NULL OR datetime(c.effective_to)>CURRENT_TIMESTAMP)
+      WHERE t.vat_number=? AND t.vat_status='ACTIVE' LIMIT 1`).bind(customerVat).first<{ id: string }>()
     : null;
   const duplicate = await db.prepare("SELECT id FROM invoices WHERE supplier_taxpayer_id = ? AND source_system = ? AND source_document_id = ?")
     .bind(supplier.id, payload.source.system_id, payload.source.document_id).first<{ id: string }>();

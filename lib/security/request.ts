@@ -49,7 +49,7 @@ export async function readBoundedJson<T>(request: Request, maxBytes = MAX_INVOIC
   }
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new RequestGuardError(413, "PAYLOAD_TOO_LARGE", `Invoice payload must not exceed ${maxBytes} bytes.`);
+    throw new RequestGuardError(413, "PAYLOAD_TOO_LARGE", `JSON payload must not exceed ${maxBytes} bytes.`);
   }
   const reader = request.body?.getReader();
   if (!reader) throw new RequestGuardError(400, "EMPTY_BODY", "A JSON request body is required.");
@@ -61,7 +61,7 @@ export async function readBoundedJson<T>(request: Request, maxBytes = MAX_INVOIC
     receivedBytes += value.byteLength;
     if (receivedBytes > maxBytes) {
       await reader.cancel("VAT-MSA payload limit exceeded");
-      throw new RequestGuardError(413, "PAYLOAD_TOO_LARGE", `Invoice payload must not exceed ${maxBytes} bytes.`);
+      throw new RequestGuardError(413, "PAYLOAD_TOO_LARGE", `JSON payload must not exceed ${maxBytes} bytes.`);
     }
     chunks.push(value);
   }
@@ -91,6 +91,16 @@ export async function enforceInvoiceRateLimits(user: UserContext, context: Reque
     { key: "invoice:global", limit: 5_000, windowSeconds: 60 },
   ];
   await enforceRateLimits(buckets);
+}
+
+export async function enforceRegistrationRateLimits(user: UserContext, context: RequestContext): Promise<void> {
+  const tenant = user.taxpayerId ?? `role:${user.role}`;
+  await enforceRateLimits([
+    { key: `registration:actor:${user.userId}`, limit: 10, windowSeconds: 300 },
+    { key: `registration:source:${context.sourceToken}`, limit: 20, windowSeconds: 300 },
+    { key: `registration:tenant:${tenant}`, limit: 30, windowSeconds: 300 },
+    { key: "registration:global", limit: 500, windowSeconds: 300 },
+  ]);
 }
 
 export async function enforceRateLimits(buckets: RateBucket[], nowMs = Date.now()): Promise<void> {

@@ -19,6 +19,25 @@ export const taxpayers = sqliteTable(
   (table) => [uniqueIndex("ux_taxpayers_vat_number").on(table.vatNumber)],
 );
 
+export const taxpayerIdentifiers = sqliteTable(
+  "taxpayer_identifiers",
+  {
+    id: text("id").primaryKey(),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    identifierType: text("identifier_type").notNull(),
+    identifierValue: text("identifier_value").notNull(),
+    country: text("country").notNull().default("NA"),
+    status: text("status").notNull(),
+    source: text("source").notNull(),
+    verifiedAt: text("verified_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("ux_taxpayer_identifier_authority").on(table.identifierType, table.identifierValue, table.country),
+    index("idx_taxpayer_identifiers_taxpayer").on(table.taxpayerId, table.status),
+  ],
+);
+
 export const appUsers = sqliteTable(
   "app_users",
   {
@@ -34,6 +53,192 @@ export const appUsers = sqliteTable(
   (table) => [
     uniqueIndex("ux_app_users_external_id").on(table.externalUserId),
     uniqueIndex("ux_app_users_email").on(table.email),
+  ],
+);
+
+export const identityProviders = sqliteTable(
+  "identity_providers",
+  {
+    id: text("id").primaryKey(),
+    providerKey: text("provider_key").notNull(),
+    displayName: text("display_name").notNull(),
+    providerType: text("provider_type").notNull(),
+    authorityLevel: text("authority_level").notNull(),
+    issuer: text("issuer"),
+    status: text("status").notNull(),
+    configurationStatus: text("configuration_status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_identity_providers_key").on(table.providerKey)],
+);
+
+export const identityLinks = sqliteTable(
+  "identity_links",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => appUsers.id),
+    providerId: text("provider_id").notNull().references(() => identityProviders.id),
+    subject: text("subject").notNull(),
+    emailAtLink: text("email_at_link"),
+    assuranceLevel: text("assurance_level").notNull(),
+    status: text("status").notNull(),
+    linkedAt: text("linked_at").notNull(),
+    lastAuthenticatedAt: text("last_authenticated_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_identity_links_provider_subject").on(table.providerId, table.subject),
+    index("idx_identity_links_user_status").on(table.userId, table.status),
+  ],
+);
+
+export const organisations = sqliteTable(
+  "organisations",
+  {
+    id: text("id").primaryKey(),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    legalName: text("legal_name").notNull(),
+    tradingName: text("trading_name"),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_organisations_taxpayer").on(table.taxpayerId)],
+);
+
+export const branches = sqliteTable(
+  "branches",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    address: text("address").notNull(),
+    status: text("status").notNull(),
+    isHeadOffice: integer("is_head_office", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("ux_branches_organisation_code").on(table.organisationId, table.code),
+    index("idx_branches_organisation_status").on(table.organisationId, table.status),
+  ],
+);
+
+export const organisationCapabilities = sqliteTable(
+  "organisation_capabilities",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    capability: text("capability").notNull(),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    approvedBy: text("approved_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("ux_organisation_capability").on(table.organisationId, table.capability),
+    index("idx_organisation_capabilities_status").on(table.status, table.capability),
+  ],
+);
+
+export const accessRoles = sqliteTable("access_roles", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+  audience: text("audience").notNull(),
+  riskTier: text("risk_tier").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const accessPermissions = sqliteTable("access_permissions", {
+  code: text("code").primaryKey(),
+  resource: text("resource").notNull(),
+  action: text("action").notNull(),
+  description: text("description").notNull(),
+  classification: text("classification").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const rolePermissionGrants = sqliteTable(
+  "role_permission_grants",
+  {
+    id: text("id").primaryKey(),
+    roleCode: text("role_code").notNull().references(() => accessRoles.code),
+    permissionCode: text("permission_code").notNull().references(() => accessPermissions.code),
+    effect: text("effect").notNull(),
+    conditions: text("conditions").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("ux_role_permission_grant").on(table.roleCode, table.permissionCode)],
+);
+
+export const organisationMemberships = sqliteTable(
+  "organisation_memberships",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    userId: text("user_id").notNull().references(() => appUsers.id),
+    roleCode: text("role_code").notNull().references(() => accessRoles.code),
+    branchId: text("branch_id").references(() => branches.id),
+    status: text("status").notNull(),
+    validFrom: text("valid_from").notNull(),
+    validTo: text("valid_to"),
+    assignedBy: text("assigned_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_memberships_user_status").on(table.userId, table.status),
+    index("idx_memberships_organisation_status").on(table.organisationId, table.status),
+  ],
+);
+
+export const registrationApplications = sqliteTable(
+  "registration_applications",
+  {
+    id: text("id").primaryKey(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    vatNumber: text("vat_number").notNull(),
+    tin: text("tin").notNull(),
+    companyRegistrationNumber: text("company_registration_number"),
+    legalName: text("legal_name").notNull(),
+    tradingName: text("trading_name"),
+    taxpayerType: text("taxpayer_type").notNull(),
+    returnFrequency: text("return_frequency").notNull(),
+    address: text("address").notNull(),
+    email: text("email").notNull(),
+    status: text("status").notNull(),
+    verificationSource: text("verification_source").notNull(),
+    submittedBy: text("submitted_by").notNull().references(() => appUsers.id),
+    submittedAt: text("submitted_at").notNull(),
+    reviewedAt: text("reviewed_at"),
+    reviewReason: text("review_reason"),
+  },
+  (table) => [
+    uniqueIndex("ux_registration_submitter_key").on(table.submittedBy, table.idempotencyKey),
+    index("idx_registration_status_submitted").on(table.status, table.submittedAt),
+    index("idx_registration_identifiers").on(table.vatNumber, table.tin),
+  ],
+);
+
+export const registrationVerifications = sqliteTable(
+  "registration_verifications",
+  {
+    id: text("id").primaryKey(),
+    registrationApplicationId: text("registration_application_id").notNull().references(() => registrationApplications.id),
+    provider: text("provider").notNull(),
+    requestReference: text("request_reference").notNull(),
+    status: text("status").notNull(),
+    responseHash: text("response_hash"),
+    verifiedTaxpayerId: text("verified_taxpayer_id").references(() => taxpayers.id),
+    checkedAt: text("checked_at").notNull(),
+    expiresAt: text("expires_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_registration_verification_reference").on(table.provider, table.requestReference),
+    index("idx_registration_verification_application").on(table.registrationApplicationId, table.status),
   ],
 );
 
