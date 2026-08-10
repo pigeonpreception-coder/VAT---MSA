@@ -19,6 +19,20 @@ type InvoiceRow = {
   verification_token: string; certified_at: string; signature?: string; signature_profile?: string;
 };
 
+type CorrectionOriginal = {
+  id: string;
+  invoice_number: string;
+  document_type: string;
+  source_document_id: string;
+  customer_taxpayer_id: string | null;
+  customer_vat_number: string | null;
+  issue_date: string;
+  currency: string;
+  line_net_cents: number;
+  tax_cents: number;
+  total_cents: number;
+};
+
 export class RepositoryConflictError extends Error {
   constructor(message: string) { super(message); this.name = "RepositoryConflictError"; }
 }
@@ -63,7 +77,7 @@ export async function getInvoiceById(id: string, user: UserContext): Promise<Inv
       WHERE i.id = ? AND (i.supplier_taxpayer_id = ? OR i.customer_taxpayer_id = ?)`).bind(id, user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").first<InvoiceRow>();
   if (!row) return null;
 
-  const [lineResult, ledgerResult] = await Promise.all([
+  const [lineResult, ledgerResult, correctionResult, correctionsResult] = await Promise.all([
     db.prepare("SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY line_number").bind(id).all<{
       id: string; line_number: number; description: string; quantity: string; unit_code: string; unit_price_cents: number;
       net_amount_cents: number; tax_rate_bps: number; tax_category: string; tax_amount_cents: number;
@@ -71,6 +85,14 @@ export async function getInvoiceById(id: string, user: UserContext): Promise<Inv
     db.prepare(`SELECT l.*, t.legal_name AS taxpayer_name FROM ledger_entries l JOIN taxpayers t ON t.id = l.taxpayer_id WHERE l.invoice_id = ? ORDER BY l.entry_type DESC`).bind(id).all<{
       id: string; taxpayer_name: string; entry_type: string; direction: string; amount_cents: number; period: string;
     }>(),
+    db.prepare(`SELECT c.*,i.invoice_number AS original_invoice_number FROM invoice_corrections c
+      JOIN invoices i ON i.id=c.original_invoice_id WHERE c.correction_invoice_id=?`).bind(id).first<{
+        original_invoice_id: string; original_invoice_number: string; correction_type: string; reason_code: string | null; reason: string; status: string; created_at: string;
+      }>(),
+    db.prepare(`SELECT c.*,i.invoice_number AS correction_invoice_number,i.total_cents FROM invoice_corrections c
+      JOIN invoices i ON i.id=c.correction_invoice_id WHERE c.original_invoice_id=? ORDER BY c.created_at`).bind(id).all<{
+        correction_invoice_id: string; correction_invoice_number: string; correction_type: string; reason_code: string | null; reason: string; status: string; total_cents: number; created_at: string;
+      }>(),
   ]);
 
   return {
@@ -80,6 +102,25 @@ export async function getInvoiceById(id: string, user: UserContext): Promise<Inv
     payloadHash: row.payload_hash,
     signature: row.signature ?? "",
     signatureProfile: row.signature_profile ?? "",
+    correction: correctionResult ? {
+      originalInvoiceId: correctionResult.original_invoice_id,
+      originalInvoiceNumber: correctionResult.original_invoice_number,
+      correctionType: correctionResult.correction_type,
+      reasonCode: correctionResult.reason_code,
+      reason: correctionResult.reason,
+      status: correctionResult.status,
+      createdAt: correctionResult.created_at,
+    } : null,
+    corrections: correctionsResult.results.map((correction) => ({
+      correctionInvoiceId: correction.correction_invoice_id,
+      correctionInvoiceNumber: correction.correction_invoice_number,
+      correctionType: correction.correction_type,
+      reasonCode: correction.reason_code,
+      reason: correction.reason,
+      status: correction.status,
+      totalCents: correction.total_cents,
+      createdAt: correction.created_at,
+    })),
     lines: lineResult.results.map((line) => ({
       id: line.id, lineNumber: line.line_number, description: line.description, quantity: line.quantity,
       unitCode: line.unit_code, unitPriceCents: line.unit_price_cents, netAmountCents: line.net_amount_cents,
@@ -227,6 +268,45 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
         AND datetime(c.effective_from)<=CURRENT_TIMESTAMP AND (c.effective_to IS NULL OR datetime(c.effective_to)>CURRENT_TIMESTAMP)
       WHERE t.vat_number=? AND t.vat_status='ACTIVE' LIMIT 1`).bind(customerVat).first<{ id: string }>()
     : null;
+  const isCorrection = payload.document_type === "CREDIT_NOTE" || payload.document_type === "DEBIT_NOTE";
+  let originalInvoice: CorrectionOriginal | null = null;
+  if (isCorrection) {
+    const reference = payload.original_document_reference!;
+    if (reference.vat_msa_invoice_id) {
+      originalInvoice = await db.prepare(`SELECT id,invoice_number,document_type,source_document_id,customer_taxpayer_id,customer_vat_number,
+        issue_date,currency,line_net_cents,tax_cents,total_cents FROM invoices WHERE id=? AND supplier_taxpayer_id=?`)
+        .bind(reference.vat_msa_invoice_id, supplier.id).first<CorrectionOriginal>();
+      if (originalInvoice && originalInvoice.source_document_id !== reference.source_document_id) {
+        throw new RepositoryConflictError("The correction's VAT-MSA invoice id and source document reference do not identify the same original invoice.");
+      }
+    } else {
+      const candidates = await db.prepare(`SELECT id,invoice_number,document_type,source_document_id,customer_taxpayer_id,customer_vat_number,
+        issue_date,currency,line_net_cents,tax_cents,total_cents FROM invoices WHERE source_document_id=? AND supplier_taxpayer_id=? LIMIT 2`)
+        .bind(reference.source_document_id, supplier.id).all<CorrectionOriginal>();
+      if (candidates.results.length > 1) throw new RepositoryConflictError("The source document reference is ambiguous; include vat_msa_invoice_id.");
+      originalInvoice = candidates.results[0] ?? null;
+    }
+    if (!originalInvoice) throw new RepositoryConflictError("The original invoice was not found in the authorised supplier scope.");
+    if (!["TAX_INVOICE", "SIMPLIFIED_TAX_INVOICE", "SELF_BILLED_INVOICE"].includes(originalInvoice.document_type)) throw new RepositoryConflictError("A correction must reference an original invoice, not another correction document.");
+    if (originalInvoice.currency !== payload.currency) throw new RepositoryConflictError("A correction must use the original invoice currency.");
+    if (payload.issue_date < originalInvoice.issue_date) throw new RepositoryConflictError("A correction cannot be issued before the original invoice.");
+    if (originalInvoice.customer_taxpayer_id !== (customer?.id ?? null) || (originalInvoice.customer_vat_number ?? null) !== (customerVat ?? null)) throw new RepositoryConflictError("A correction must preserve the original customer identity.");
+    if (payload.document_type === "CREDIT_NOTE") {
+      const prior = await db.prepare(`SELECT COALESCE(SUM(i.line_net_cents),0) AS line_net_cents,
+        COALESCE(SUM(i.tax_cents),0) AS tax_cents,COALESCE(SUM(i.total_cents),0) AS total_cents
+        FROM invoice_corrections c JOIN invoices i ON i.id=c.correction_invoice_id
+        WHERE c.original_invoice_id=? AND c.correction_type='CREDIT_NOTE' AND c.status='ACTIVE'`).bind(originalInvoice.id)
+        .first<{ line_net_cents: number; tax_cents: number; total_cents: number }>();
+      const cumulative = {
+        line: Number(prior?.line_net_cents ?? 0) + calculated.lineNetCents,
+        tax: Number(prior?.tax_cents ?? 0) + calculated.taxCents,
+        total: Number(prior?.total_cents ?? 0) + calculated.totalCents,
+      };
+      if (Math.abs(cumulative.line) > originalInvoice.line_net_cents || Math.abs(cumulative.tax) > originalInvoice.tax_cents || Math.abs(cumulative.total) > originalInvoice.total_cents) {
+        throw new RepositoryConflictError("The cumulative credit would exceed the original invoice value or VAT.");
+      }
+    }
+  }
   const duplicate = await db.prepare("SELECT id FROM invoices WHERE supplier_taxpayer_id = ? AND source_system = ? AND source_document_id = ?")
     .bind(supplier.id, payload.source.system_id, payload.source.document_id).first<{ id: string }>();
   if (duplicate) throw new RepositoryConflictError(`Source document already exists as invoice ${duplicate.id}.`);
@@ -249,6 +329,13 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
     requestHash, transactionId, certificateId, verificationToken, now, now,
   ));
 
+  if (originalInvoice) {
+    const reference = payload.original_document_reference!;
+    statements.push(db.prepare(`INSERT INTO invoice_corrections
+      (id,original_invoice_id,correction_invoice_id,correction_type,reason_code,reason,status,created_by,created_at)
+      VALUES (?,?,?,?,?,?,'ACTIVE',?,?)`).bind(crypto.randomUUID(), originalInvoice.id, invoiceId, payload.document_type, reference.reason_code ?? null, reference.reason!.trim(), actor.userId, now));
+  }
+
   for (const line of calculated.lines) {
     statements.push(db.prepare(`INSERT INTO invoice_lines VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(
       crypto.randomUUID(), invoiceId, line.line_number, line.description.trim(), line.quantity, line.unit_code,
@@ -258,8 +345,10 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   statements.push(db.prepare("INSERT INTO certificates VALUES (?,?,?,?,?,?,?,?)").bind(
     certificateId, invoiceId, verificationToken, requestHash, signature, "DEV-SHA256", "VALID", now,
   ));
+  const reversesVat = payload.document_type === "CREDIT_NOTE";
+  const ledgerVatCents = Math.abs(calculated.taxCents);
   statements.push(db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
-    crypto.randomUUID(), transactionId, invoiceId, supplier.id, "OUTPUT_VAT", "CREDIT", calculated.taxCents, period, now,
+    crypto.randomUUID(), transactionId, invoiceId, supplier.id, "OUTPUT_VAT", reversesVat ? "DEBIT" : "CREDIT", ledgerVatCents, period, now,
   ));
   statements.push(db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
     ON CONFLICT(taxpayer_id, period) DO UPDATE SET output_tax_cents = output_tax_cents + excluded.output_tax_cents,
@@ -268,7 +357,7 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   ));
   if (customer) {
     statements.push(db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
-      crypto.randomUUID(), transactionId, invoiceId, customer.id, "INPUT_VAT", "DEBIT", calculated.taxCents, period, now,
+      crypto.randomUUID(), transactionId, invoiceId, customer.id, "INPUT_VAT", reversesVat ? "CREDIT" : "DEBIT", ledgerVatCents, period, now,
     ));
     statements.push(db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(taxpayer_id, period) DO UPDATE SET input_tax_cents = input_tax_cents + excluded.input_tax_cents,
@@ -300,15 +389,15 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   });
   const auditHash = await sha256Hex(`${priorAudit?.event_hash ?? "GENESIS"}|${auditId}|${actor.userId}|${auditDetails}|${now}`);
   statements.push(db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(
-    auditId, actor.userId, actor.role, "INVOICE_CERTIFIED", "INVOICE", invoiceId, "SUCCESS",
+    auditId, actor.userId, actor.role, originalInvoice ? "INVOICE_CORRECTION_CERTIFIED" : "INVOICE_CERTIFIED", "INVOICE", invoiceId, "SUCCESS",
     auditDetails, priorAudit?.event_hash ?? null, auditHash, now,
   ));
   statements.push(db.prepare("INSERT INTO idempotency_records VALUES (?,?,?,?,?,?)").bind(
     crypto.randomUUID(), actor.userId, idempotencyKey, requestHash, invoiceId, now,
   ));
   statements.push(db.prepare("INSERT INTO outbox_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(
-    crypto.randomUUID(), "INVOICE", invoiceId, "InvoiceCertified", 1, supplier.id,
-    JSON.stringify({ invoice_id: invoiceId, transaction_id: transactionId, certificate_id: certificateId, correlation_id: context.correlationId }),
+    crypto.randomUUID(), "INVOICE", invoiceId, originalInvoice ? "InvoiceCorrected" : "InvoiceCertified", 1, supplier.id,
+    JSON.stringify({ invoice_id: invoiceId, transaction_id: transactionId, certificate_id: certificateId, ...(originalInvoice ? { original_invoice_id: originalInvoice.id, correction_type: payload.document_type } : {}), correlation_id: context.correlationId }),
     "PENDING", 0, now, now, null, null,
   ));
   if (risk.level === "HIGH" || risk.level === "CRITICAL") {

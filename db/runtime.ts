@@ -532,6 +532,12 @@ const SCHEMA_STATEMENTS = [
     verification_token TEXT NOT NULL UNIQUE, invoice_hash TEXT NOT NULL,
     signature TEXT NOT NULL, signature_profile TEXT NOT NULL, status TEXT NOT NULL, issued_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS invoice_corrections (
+    id TEXT PRIMARY KEY, original_invoice_id TEXT NOT NULL REFERENCES invoices(id),
+    correction_invoice_id TEXT NOT NULL UNIQUE REFERENCES invoices(id),
+    correction_type TEXT NOT NULL, reason_code TEXT, reason TEXT NOT NULL,
+    status TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS ledger_entries (
     id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL, invoice_id TEXT NOT NULL REFERENCES invoices(id),
     taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), entry_type TEXT NOT NULL,
@@ -610,6 +616,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_invoice_correction_original ON invoice_corrections(original_invoice_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_period_status_due ON vat_periods(status, due_date)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_adjustments_period_status ON vat_adjustments(vat_period_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_reconciliation_period_status ON reconciliation_matches(vat_period_id, status)`,

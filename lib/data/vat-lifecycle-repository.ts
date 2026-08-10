@@ -185,9 +185,9 @@ export async function generateVatReturn(periodId: string, actor: UserContext, id
     AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC LIMIT 1`).bind(period.period_end, period.period_start).first<{ id: string; version: string; status: string }>();
   if (!rule) throw new VatLifecycleResourceError("No controlled tax rule set covers this VAT period.");
   const [output, input, adjustments, priorVersion] = await Promise.all([
-    db.prepare(`SELECT l.id,l.amount_cents FROM ledger_entries l JOIN invoices i ON i.id=l.invoice_id JOIN certificates c ON c.invoice_id=i.id AND c.status='VALID'
+    db.prepare(`SELECT l.id,CASE WHEN l.direction='CREDIT' THEN l.amount_cents ELSE -l.amount_cents END AS amount_cents FROM ledger_entries l JOIN invoices i ON i.id=l.invoice_id JOIN certificates c ON c.invoice_id=i.id AND c.status='VALID'
       WHERE l.taxpayer_id=? AND l.period=? AND l.entry_type='OUTPUT_VAT' AND i.status IN ('CERTIFIED','MATCHED','EXCEPTION') ORDER BY l.id`).bind(period.taxpayer_id, period.period_code).all<{ id: string; amount_cents: number }>(),
-    db.prepare(`SELECT l.id,l.amount_cents FROM ledger_entries l JOIN invoices i ON i.id=l.invoice_id JOIN certificates c ON c.invoice_id=i.id AND c.status='VALID'
+    db.prepare(`SELECT l.id,CASE WHEN l.direction='DEBIT' THEN l.amount_cents ELSE -l.amount_cents END AS amount_cents FROM ledger_entries l JOIN invoices i ON i.id=l.invoice_id JOIN certificates c ON c.invoice_id=i.id AND c.status='VALID'
       WHERE l.taxpayer_id=? AND l.period=? AND l.entry_type='INPUT_VAT' AND i.status='MATCHED' ORDER BY l.id`).bind(period.taxpayer_id, period.period_code).all<{ id: string; amount_cents: number }>(),
     db.prepare(`SELECT id,adjustment_type,direction,amount_cents FROM vat_adjustments
       WHERE vat_period_id=? AND status='APPROVED' ORDER BY id`).bind(period.id).all<{ id: string; adjustment_type: string; direction: string; amount_cents: number }>(),

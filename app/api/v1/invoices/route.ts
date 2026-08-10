@@ -49,9 +49,12 @@ export async function POST(request: Request) {
     emitStructuredSecurityLog({ level: "INFO", event: "INVOICE_SUBMISSION", correlationId: context.correlationId, actorId, outcome: "CERTIFIED", durationMs: Date.now() - startedAt });
     return Response.json({
       invoice_id: invoice.id,
+      document_type: invoice.documentType,
       transaction_id: invoice.transactionId,
       certificate_id: invoice.certificateId,
       status: "CERTIFIED",
+      processing_status: invoice.status,
+      correction: invoice.correction,
       certified_at: invoice.certifiedAt,
       rule_set_version: "NA-VAT-PILOT-2026.1",
       invoice_hash: invoice.payloadHash,

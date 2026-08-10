@@ -131,6 +131,25 @@ export type InvoiceDetail = InvoiceSummary & {
   payloadHash: string;
   signature: string;
   signatureProfile: string;
+  correction: {
+    originalInvoiceId: string;
+    originalInvoiceNumber: string;
+    correctionType: string;
+    reasonCode: string | null;
+    reason: string;
+    status: string;
+    createdAt: string;
+  } | null;
+  corrections: Array<{
+    correctionInvoiceId: string;
+    correctionInvoiceNumber: string;
+    correctionType: string;
+    reasonCode: string | null;
+    reason: string;
+    status: string;
+    totalCents: number;
+    createdAt: string;
+  }>;
   lines: Array<{
     id: string;
     lineNumber: number;
@@ -152,4 +171,3 @@ export type InvoiceDetail = InvoiceSummary & {
     period: string;
   }>;
 };
-

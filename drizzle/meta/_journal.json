@@ -50,6 +50,13 @@
       "when": 1786347299854,
       "tag": "0006_colossal_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786366552473,
+      "tag": "0007_moaning_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

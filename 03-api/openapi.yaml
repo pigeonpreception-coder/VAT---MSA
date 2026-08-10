@@ -911,15 +911,28 @@ components:
       required: [invoice_id, transaction_id, certificate_id, status, certified_at, invoice_hash, signature, verification_url]
       properties:
         invoice_id: { type: string, format: uuid }
+        document_type: { type: string, enum: [TAX_INVOICE, SIMPLIFIED_TAX_INVOICE, CREDIT_NOTE, DEBIT_NOTE, SELF_BILLED_INVOICE] }
         transaction_id: { type: string, format: uuid }
         certificate_id: { type: string, format: uuid }
         status: { type: string, const: CERTIFIED }
+        processing_status: { type: string, enum: [CERTIFIED, MATCHED, EXCEPTION] }
         certified_at: { type: string, format: date-time }
         rule_set_version: { type: string }
         invoice_hash: { type: string, pattern: '^[A-Fa-f0-9]{64}$' }
         signature: { type: string, description: JWS or equivalent approved signature container. }
         verification_url: { type: string, format: uri }
         qr_payload: { type: string }
+        correction:
+          type: [object, 'null']
+          additionalProperties: false
+          properties:
+            originalInvoiceId: { type: string }
+            originalInvoiceNumber: { type: string }
+            correctionType: { type: string, enum: [CREDIT_NOTE, DEBIT_NOTE] }
+            reasonCode: { type: [string, 'null'] }
+            reason: { type: string }
+            status: { type: string }
+            createdAt: { type: string, format: date-time }
     InvoiceStatus:
       type: object
       additionalProperties: false

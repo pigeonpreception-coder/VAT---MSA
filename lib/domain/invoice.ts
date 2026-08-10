@@ -101,6 +101,9 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
   }
   if (["CREDIT_NOTE", "DEBIT_NOTE"].includes(payload.document_type) && !payload.original_document_reference) {
     errors.push({ code: "ORIGINAL_DOCUMENT_REQUIRED", path: "/original_document_reference", message: "Credit and debit notes must reference the original document." });
+  } else if (["CREDIT_NOTE", "DEBIT_NOTE"].includes(payload.document_type)) {
+    if (!payload.original_document_reference?.reason_code?.trim()) errors.push({ code: "CORRECTION_REASON_CODE_REQUIRED", path: "/original_document_reference/reason_code", message: "A correction reason code is required." });
+    if ((payload.original_document_reference?.reason?.trim().length ?? 0) < 5) errors.push({ code: "CORRECTION_REASON_REQUIRED", path: "/original_document_reference/reason", message: "A correction reason of at least 5 characters is required." });
   }
 
   const seenLineNumbers = new Set<number>();
@@ -159,6 +162,9 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
     if (!["CREDIT_NOTE"].includes(payload.document_type) && [unitPriceCents, suppliedNetCents, suppliedTaxableCents, suppliedTaxCents].some((value) => value < 0)) {
       errors.push({ code: "NEGATIVE_AMOUNT_NOT_ALLOWED", path, message: "Negative amounts require the approved credit-note workflow." });
     }
+    if (payload.document_type === "CREDIT_NOTE" && [unitPriceCents, suppliedNetCents, suppliedTaxableCents, suppliedTaxCents].some((value) => value > 0)) {
+      errors.push({ code: "CREDIT_NOTE_SIGN_INVALID", path, message: "Credit-note monetary values must be zero or negative." });
+    }
 
     const computedNetCents = roundedDivide(quantityMicros * unitPriceCents, 1_000_000);
     const computedTaxCents = roundedDivide(computedNetCents * taxRateBps, 10_000);
@@ -189,6 +195,12 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
   const lineNetCents = calculatedLines.reduce((sum, line) => sum + line.netAmountCents, 0);
   const taxCents = calculatedLines.reduce((sum, line) => sum + line.taxAmountCents, 0);
   const totalCents = lineNetCents + taxCents;
+  if (payload.document_type === "CREDIT_NOTE" && totalCents >= 0) {
+    errors.push({ code: "CREDIT_NOTE_TOTAL_INVALID", path: "/totals/payable_amount", message: "A credit note must reduce the original document with a negative payable total." });
+  }
+  if (payload.document_type === "DEBIT_NOTE" && totalCents <= 0) {
+    errors.push({ code: "DEBIT_NOTE_TOTAL_INVALID", path: "/totals/payable_amount", message: "A debit note must increase the original document with a positive payable total." });
+  }
 
   const totalChecks: Array<[keyof InvoiceSubmission["totals"], number, string]> = [
     ["line_net_amount", lineNetCents, "Line net total"],

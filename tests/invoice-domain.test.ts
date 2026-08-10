@@ -39,6 +39,30 @@ describe("VAT invoice rules", () => {
     expect(() => calculateAndValidateInvoice(invoice({ document_type: "CREDIT_NOTE" }))).toThrow(/failed validation/i);
   });
 
+  it("requires a credit note to carry negative correction amounts", () => {
+    expect(() => calculateAndValidateInvoice(invoice({
+      document_type: "CREDIT_NOTE",
+      original_document_reference: { source_document_id: "ORIGINAL-1", reason_code: "PRICE_CORRECTION", reason: "Agreed price correction." },
+    }))).toThrow(InvoiceValidationError);
+    const result = calculateAndValidateInvoice(invoice({
+      document_type: "CREDIT_NOTE",
+      original_document_reference: { source_document_id: "ORIGINAL-1", reason_code: "PRICE_CORRECTION", reason: "Agreed price correction." },
+      lines: [{ line_number: 1, description: "Price correction", quantity: "1", unit_code: "EA", unit_price: "-100.00", net_amount: "-100.00", tax: { category: "STANDARD", rate: "15.00", taxable_amount: "-100.00", tax_amount: "-15.00" } }],
+      totals: { line_net_amount: "-100.00", tax_exclusive_amount: "-100.00", tax_amount: "-15.00", tax_inclusive_amount: "-115.00", payable_amount: "-115.00" },
+    }));
+    expect(result).toMatchObject({ lineNetCents: -10_000, taxCents: -1_500, totalCents: -11_500 });
+  });
+
+  it("requires a debit note to carry a positive correction total", () => {
+    const negative = invoice({
+      document_type: "DEBIT_NOTE",
+      original_document_reference: { source_document_id: "ORIGINAL-1", reason_code: "PRICE_CORRECTION", reason: "Invalid debit correction." },
+      lines: [{ line_number: 1, description: "Invalid debit", quantity: "1", unit_code: "EA", unit_price: "-10.00", net_amount: "-10.00", tax: { category: "STANDARD", rate: "15.00", taxable_amount: "-10.00", tax_amount: "-1.50" } }],
+      totals: { line_net_amount: "-10.00", tax_exclusive_amount: "-10.00", tax_amount: "-1.50", tax_inclusive_amount: "-11.50", payable_amount: "-11.50" },
+    });
+    expect(() => calculateAndValidateInvoice(negative)).toThrow(InvoiceValidationError);
+  });
+
   it("classifies million-dollar transactions as critical", () => {
     const payload = invoice({
       lines: [{ line_number: 1, description: "Large supply", quantity: "1", unit_code: "EA", unit_price: "1000000.00", net_amount: "1000000.00", tax: { category: "STANDARD", rate: "15.00", taxable_amount: "1000000.00", tax_amount: "150000.00" } }],

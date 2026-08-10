@@ -7,6 +7,11 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.invoice.corrected.v1
+    owner: Invoice Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Links an independently certified credit or debit note to its original invoice with reason and signed VAT effect while retaining both histories.
   - type: na.vatmsa.document.quarantined.v1
     owner: Evidence Custody Domain
     partition_key: taxpayer_id

@@ -39,12 +39,12 @@
       "description": "Required for credit notes, debit notes and approved reversals.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_document_id"],
+      "required": ["source_document_id", "reason_code", "reason"],
       "properties": {
         "source_document_id": { "type": "string", "maxLength": 150 },
         "vat_msa_invoice_id": { "type": "string", "format": "uuid" },
-        "reason_code": { "type": "string", "maxLength": 50 },
-        "reason": { "type": "string", "maxLength": 500 }
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "reason": { "type": "string", "minLength": 5, "maxLength": 500 }
       }
     },
     "lines": {
@@ -221,4 +221,3 @@
     }
   }
 }
-

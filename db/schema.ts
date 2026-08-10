@@ -1344,6 +1344,25 @@ export const invoices = sqliteTable(
   ],
 );
 
+export const invoiceCorrections = sqliteTable(
+  "invoice_corrections",
+  {
+    id: text("id").primaryKey(),
+    originalInvoiceId: text("original_invoice_id").notNull().references(() => invoices.id),
+    correctionInvoiceId: text("correction_invoice_id").notNull().references(() => invoices.id),
+    correctionType: text("correction_type").notNull(),
+    reasonCode: text("reason_code"),
+    reason: text("reason").notNull(),
+    status: text("status").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_invoice_correction_document").on(table.correctionInvoiceId),
+    index("idx_invoice_correction_original").on(table.originalInvoiceId, table.createdAt),
+  ],
+);
+
 export const invoiceLines = sqliteTable(
   "invoice_lines",
   {
