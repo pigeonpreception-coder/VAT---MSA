@@ -67,6 +67,44 @@ export async function getPlatformSnapshot(actor: UserContext) {
   return { integrations: integrations.results, clients: clients.results, webhooks: webhooks.results, syncJobs: sync.results, bankImports: bankImportsResult.results, payments: payments.results, devices: devices.results, numberRanges: ranges.results, batches: batches.results, conflicts: conflicts.results, reportDefinitions: definitions.results, reportRuns: runs.results, components: components.results, documents: documents.results, outbox: outboxState.results };
 }
 
+export async function getTechnicalPlatformSnapshot() {
+  const db = await ensureDatabase();
+  const [integrations, components, outboxState, clientState, webhookState, syncState, securityState] = await Promise.all([
+    db.prepare(`SELECT provider_key,category,display_name,capabilities,configuration_status,operational_status,
+      data_classification,last_health_check_at,last_health_outcome FROM integration_connections ORDER BY category,display_name`).all<Record<string, string | null>>(),
+    db.prepare("SELECT * FROM service_components ORDER BY criticality DESC,display_name").all<Record<string, string | null>>(),
+    db.prepare("SELECT status,COUNT(*) AS count FROM outbox_events GROUP BY status").all<{ status: string; count: number }>(),
+    db.prepare("SELECT status,COUNT(*) AS count FROM api_clients GROUP BY status").all<{ status: string; count: number }>(),
+    db.prepare("SELECT status,COUNT(*) AS count FROM webhook_subscriptions GROUP BY status").all<{ status: string; count: number }>(),
+    db.prepare("SELECT status,COUNT(*) AS count FROM sync_jobs GROUP BY status").all<{ status: string; count: number }>(),
+    db.prepare("SELECT severity,COUNT(*) AS count FROM security_events GROUP BY severity").all<{ severity: string; count: number }>(),
+  ]);
+  return { integrations: integrations.results, components: components.results, outbox: outboxState.results, apiClients: clientState.results, webhooks: webhookState.results, syncJobs: syncState.results, securityEvents: securityState.results };
+}
+
+export async function getDocumentCustodySummary(actor: UserContext) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(db, actor);
+  const result = await db.prepare(`SELECT COUNT(*) AS total,
+    SUM(CASE WHEN status='QUARANTINED' THEN 1 ELSE 0 END) AS quarantined,
+    SUM(CASE WHEN scan_status='CLEAN' THEN 1 ELSE 0 END) AS clean
+    FROM document_metadata WHERE organisation_id=?`).bind(organisation.organisation_id).first<{ total: number; quarantined: number; clean: number }>();
+  return { total: Number(result?.total ?? 0), quarantined: Number(result?.quarantined ?? 0), clean: Number(result?.clean ?? 0) };
+}
+
+export async function getDeveloperPortalSnapshot(actor: UserContext) {
+  if (actor.role === "DEVELOPER_PARTNER" && !actor.taxpayerId) return { clients: [], webhooks: [], provisioning: "ORGANISATION_LINK_REQUIRED" };
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(db, actor);
+  const [clients, webhooks] = await Promise.all([
+    db.prepare("SELECT id,name,client_key,scopes,status,rate_limit_profile,last_rotated_at,expires_at,created_at FROM api_clients WHERE organisation_id=? ORDER BY name").bind(organisation.organisation_id).all<Record<string, string | null>>(),
+    db.prepare(`SELECT w.id,w.api_client_id,w.event_types,w.endpoint_url,w.status,w.created_at
+      FROM webhook_subscriptions w JOIN api_clients c ON c.id=w.api_client_id
+      WHERE c.organisation_id=? ORDER BY w.created_at DESC`).bind(organisation.organisation_id).all<Record<string, string | null>>(),
+  ]);
+  return { clients: clients.results, webhooks: webhooks.results, provisioning: "ORGANISED_SCOPE" };
+}
+
 export async function uploadDocument(input: { file: File; ownerDomain: string; ownerResourceId: string; classification: string; organisationId?: string | null }, actor: UserContext, correlationId: string) {
   const db = await ensureDatabase();
   const scope = await resolveOrganisation(db, actor, input.organisationId);

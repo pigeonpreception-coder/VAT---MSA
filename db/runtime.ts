@@ -1073,6 +1073,29 @@ const PLATFORM_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('platform-v1','2026-08-10T09:00:00Z')`,
 ];
 
+const PORTAL_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('administration:read','ADMINISTRATION','READ','Read authorised access administration posture','RESTRICTED','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('administration:manage','ADMINISTRATION','MANAGE','Manage governed identity and access administration','SECURITY','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('platform:manage','PLATFORM','MANAGE','Manage governed technical platform configuration references','SECURITY','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_SYSTEM_ADMIN','NamRA System Administrator','NAMRA_ADMIN','CRITICAL','ACTIVE','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('SUPER_ADMIN','Super Administrator','PLATFORM','CRITICAL','ACTIVE','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('INFRASTRUCTURE_ADMIN','Infrastructure Administrator','PLATFORM','CRITICAL','ACTIVE','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('DEVELOPER_PARTNER','Developer Partner','PARTNER','HIGH','ACTIVE','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-id','NAMRA_SYSTEM_ADMIN','identity:read','ALLOW','{"scope":"administrative-authority","excludes":"transaction-access"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-tr','NAMRA_SYSTEM_ADMIN','taxpayers:read','ALLOW','{"scope":"administrative-metadata"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-rr','NAMRA_SYSTEM_ADMIN','registrations:read','ALLOW','{"scope":"administrative-authority"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-om','NAMRA_SYSTEM_ADMIN','organisations:manage','ALLOW','{"scope":"administrative-authority","requires":"approval"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-ar','NAMRA_SYSTEM_ADMIN','administration:read','ALLOW','{"scope":"administrative-authority"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-am','NAMRA_SYSTEM_ADMIN','administration:manage','ALLOW','{"scope":"administrative-authority","requires":"jit-mfa-approval"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-sa-pr','SUPER_ADMIN','platform:read','ALLOW','{"scope":"technical-only","excludes":"tax-data"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-sa-pm','SUPER_ADMIN','platform:manage','ALLOW','{"scope":"technical-only","requires":"jit-mfa-change-approval"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-ia-pr','INFRASTRUCTURE_ADMIN','platform:read','ALLOW','{"scope":"infrastructure-only"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-ia-pm','INFRASTRUCTURE_ADMIN','platform:manage','ALLOW','{"scope":"infrastructure-only","requires":"jit-mfa-change-approval"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-dp-dr','DEVELOPER_PARTNER','developer:read','ALLOW','{"scope":"own-client"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-dp-dm','DEVELOPER_PARTNER','developer:manage','ALLOW','{"scope":"own-client","requires":"conformance-approval"}','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('portal-separation-v1','2026-08-10T09:30:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -1107,6 +1130,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!complianceSeed) await db.batch(COMPLIANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const platformSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("platform-v1").first();
     if (!platformSeed) await db.batch(PLATFORM_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const portalSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("portal-separation-v1").first();
+    if (!portalSeed) await db.batch(PORTAL_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

@@ -3,6 +3,7 @@ import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
 import { initials } from "@/lib/format";
 
 const navigation = [
+  { href: "/portals", label: "Portal switchboard", key: "portals", permission: "dashboard:read" },
   { href: "/", label: "Operations dashboard", key: "dashboard", permission: "dashboard:read" },
   { href: "/invoices", label: "Tax invoices", key: "invoices", permission: "invoices:read" },
   { href: "/taxpayers", label: "Taxpayer registry", key: "taxpayers", permission: "taxpayers:read" },
@@ -56,7 +57,7 @@ export async function AppShell({ active, permission, children }: { active: strin
         <header className="topbar">
           <div className="env-pill"><span className="pulse" /> Controlled pilot</div>
           <div className="user-block">
-            <div><strong>{user.displayName}</strong><span>{user.role.replaceAll("_", " ")}{user.isDevelopmentIdentity ? " · local identity" : ""}</span></div>
+            <div><strong>{user.displayName}</strong><span>{user.role.replaceAll("_", " ")}{user.isDevelopmentIdentity ? " - local identity" : ""}</span></div>
             <div className="avatar" aria-hidden="true">{initials(user.displayName)}</div>
           </div>
         </header>

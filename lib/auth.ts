@@ -82,6 +82,10 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
   NAMRA_AUDITOR: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read", "audit:read", "reconciliation:manage", "compliance:read", "cases:manage", "disputes:manage", "refunds:read", "risk:read", "risk:review"]),
   NAMRA_REFUND_OFFICER: new Set(["dashboard:read", "taxpayers:read", "returns:read", "compliance:read", "refunds:read", "refunds:review", "risk:read", "communications:manage"]),
   NAMRA_SUPERVISOR: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read", "reconciliation:manage", "compliance:read", "cases:manage", "disputes:manage", "refunds:read", "refunds:review", "risk:read", "risk:review", "communications:manage", "integrations:read", "integrations:manage", "reports:read", "reports:run", "platform:read", "payments:read", "audit:read"]),
+  NAMRA_SYSTEM_ADMIN: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "organisations:manage", "administration:read", "administration:manage"]),
+  SUPER_ADMIN: new Set(["dashboard:read", "platform:read", "platform:manage", "integrations:read", "integrations:manage", "security:read"]),
+  INFRASTRUCTURE_ADMIN: new Set(["dashboard:read", "platform:read", "platform:manage", "integrations:read", "security:read"]),
+  DEVELOPER_PARTNER: new Set(["dashboard:read", "developer:read", "developer:manage", "integrations:read"]),
   INTERNAL_AUDITOR: new Set(["dashboard:read", "audit:read"]),
   SECURITY_ANALYST: new Set(["dashboard:read", "security:read", "audit:read"]),
 };
@@ -97,7 +101,7 @@ export function requirePermission(user: UserContext, permission: string): void {
 }
 
 export function isNationalScope(user: UserContext): boolean {
-  return user.taxpayerId === null && ["PILOT_ADMIN", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "NAMRA_REFUND_OFFICER", "NAMRA_SUPERVISOR", "INTERNAL_AUDITOR", "SECURITY_ANALYST"].includes(user.role);
+  return user.taxpayerId === null && ["PILOT_ADMIN", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "NAMRA_REFUND_OFFICER", "NAMRA_SUPERVISOR", "NAMRA_SYSTEM_ADMIN", "INTERNAL_AUDITOR", "SECURITY_ANALYST"].includes(user.role);
 }
 
 export function requireTaxpayerScope(user: UserContext, taxpayerId: string): void {
