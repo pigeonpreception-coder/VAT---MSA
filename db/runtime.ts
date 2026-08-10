@@ -330,6 +330,98 @@ const SCHEMA_STATEMENTS = [
     submitted_at TEXT, acknowledged_at TEXT, last_error TEXT,
     UNIQUE (provider, request_reference)
   )`,
+  `CREATE TABLE IF NOT EXISTS consent_grants (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), granted_by TEXT NOT NULL REFERENCES app_users(id),
+    grantee_type TEXT NOT NULL, grantee_id TEXT NOT NULL, purpose TEXT NOT NULL,
+    data_categories TEXT NOT NULL, legal_basis TEXT NOT NULL, status TEXT NOT NULL,
+    valid_from TEXT NOT NULL, valid_to TEXT, revoked_at TEXT, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS delegations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), delegator_user_id TEXT NOT NULL REFERENCES app_users(id),
+    delegate_user_id TEXT NOT NULL REFERENCES app_users(id), scopes TEXT NOT NULL, status TEXT NOT NULL,
+    valid_from TEXT NOT NULL, valid_to TEXT, approved_by TEXT REFERENCES app_users(id),
+    approved_at TEXT, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_obligations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), obligation_type TEXT NOT NULL,
+    period_code TEXT NOT NULL, due_date TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL, status TEXT NOT NULL, source_system TEXT NOT NULL,
+    source_reference TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (taxpayer_id, obligation_type, period_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS communications (
+    id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id),
+    taxpayer_id TEXT REFERENCES taxpayers(id), channel TEXT NOT NULL, direction TEXT NOT NULL,
+    subject TEXT NOT NULL, content_summary TEXT NOT NULL, classification TEXT NOT NULL,
+    related_resource_type TEXT, related_resource_id TEXT, external_reference TEXT,
+    status TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES app_users(id), occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY, user_id TEXT REFERENCES app_users(id), taxpayer_id TEXT REFERENCES taxpayers(id),
+    notification_type TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL,
+    severity TEXT NOT NULL, status TEXT NOT NULL, action_url TEXT,
+    created_at TEXT NOT NULL, read_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_cases (
+    id TEXT PRIMARY KEY, case_number TEXT NOT NULL UNIQUE,
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    case_type TEXT NOT NULL, title TEXT NOT NULL, opening_reason TEXT NOT NULL,
+    risk_tier TEXT NOT NULL, status TEXT NOT NULL,
+    assigned_officer_id TEXT REFERENCES app_users(id), opened_by TEXT NOT NULL REFERENCES app_users(id),
+    opened_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_evidence (
+    id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
+    evidence_type TEXT NOT NULL, source_resource_type TEXT NOT NULL, source_resource_id TEXT NOT NULL,
+    document_id TEXT REFERENCES document_metadata(id), checksum_sha256 TEXT NOT NULL,
+    description TEXT NOT NULL, status TEXT NOT NULL,
+    added_by TEXT NOT NULL REFERENCES app_users(id), added_at TEXT NOT NULL,
+    UNIQUE (audit_case_id, source_resource_type, source_resource_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_findings (
+    id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
+    finding_code TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+    legal_reference TEXT, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL,
+    status TEXT NOT NULL, author_id TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, resolved_at TEXT,
+    UNIQUE (audit_case_id, finding_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS disputes (
+    id TEXT PRIMARY KEY, dispute_number TEXT NOT NULL UNIQUE,
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    audit_case_id TEXT REFERENCES audit_cases(id), disputed_resource_type TEXT NOT NULL,
+    disputed_resource_id TEXT NOT NULL, grounds TEXT NOT NULL,
+    disputed_amount_cents INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
+    filed_by TEXT NOT NULL REFERENCES app_users(id), assigned_officer_id TEXT REFERENCES app_users(id),
+    filed_at TEXT NOT NULL, decided_at TEXT, decision_summary TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS risk_indicators (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL, indicator_code TEXT NOT NULL, score_bps INTEGER NOT NULL,
+    severity TEXT NOT NULL, rationale TEXT NOT NULL, rule_version TEXT NOT NULL,
+    decision_effect TEXT NOT NULL, status TEXT NOT NULL, detected_at TEXT NOT NULL,
+    reviewed_by TEXT REFERENCES app_users(id), reviewed_at TEXT,
+    UNIQUE (subject_type, subject_id, indicator_code, rule_version)
+  )`,
+  `CREATE TABLE IF NOT EXISTS refund_claims (
+    id TEXT PRIMARY KEY, claim_number TEXT NOT NULL UNIQUE,
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    vat_return_version_id TEXT NOT NULL UNIQUE REFERENCES vat_return_versions(id),
+    amount_cents INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
+    evidence_status TEXT NOT NULL, risk_tier TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, payment_instruction_id TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS refund_reviews (
+    id TEXT PRIMARY KEY, refund_claim_id TEXT NOT NULL REFERENCES refund_claims(id),
+    stage TEXT NOT NULL, decision TEXT NOT NULL, findings TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL REFERENCES app_users(id), reviewed_at TEXT NOT NULL,
+    UNIQUE (refund_claim_id, stage)
+  )`,
   `CREATE TABLE IF NOT EXISTS invoice_lines (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id), line_number INTEGER NOT NULL,
     description TEXT NOT NULL, quantity TEXT NOT NULL, unit_code TEXT NOT NULL,
@@ -426,6 +518,14 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_vat_return_status_generated ON vat_return_versions(status, generated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_approval_queue ON approval_tasks(status, assigned_role, requested_at)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_return_submission_status ON vat_return_submissions(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_consent_taxpayer_status ON consent_grants(taxpayer_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_delegations_delegate_status ON delegations(delegate_user_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_communications_taxpayer_time ON communications(taxpayer_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(user_id, taxpayer_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_cases_status_risk ON audit_cases(status, risk_tier, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_disputes_status_filed ON disputes(status, filed_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_risk_taxpayer_status ON risk_indicators(taxpayer_id, status, severity)`,
+  `CREATE INDEX IF NOT EXISTS idx_refund_claim_status_risk ON refund_claims(status, risk_tier, requested_at)`,
 ];
 
 const SEED_STATEMENTS = [
@@ -758,6 +858,62 @@ const VAT_LIFECYCLE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('vat-lifecycle-v1','2026-08-09T11:30:00Z')`,
 ];
 
+const COMPLIANCE_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_REFUND_OFFICER','NamRA Refund Officer','NAMRA','HIGH','ACTIVE','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_SUPERVISOR','NamRA Supervisor','NAMRA','CRITICAL','ACTIVE','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('compliance:read','COMPLIANCE','READ','Read authorised obligations, communications and compliance posture','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('cases:manage','AUDIT_CASE','MANAGE','Open and manage controlled compliance cases','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('disputes:manage','DISPUTE','MANAGE','File and manage taxpayer disputes','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('refunds:read','REFUND','READ','Read authorised refund workflow records','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('refunds:request','REFUND','REQUEST','Request refund eligibility review','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('refunds:review','REFUND','REVIEW','Perform staged refund review','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('risk:read','RISK','READ','Read explainable advisory risk indicators','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('risk:review','RISK','REVIEW','Review advisory risk indicators without automated adverse action','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('communications:manage','COMMUNICATION','MANAGE','Record controlled taxpayer communications','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('consents:manage','CONSENT','MANAGE','Manage taxpayer consents and delegations','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+
+  `INSERT OR IGNORE INTO tax_obligations
+    (id,organisation_id,taxpayer_id,obligation_type,period_code,due_date,amount_cents,currency,status,source_system,source_reference,created_at,updated_at)
+    VALUES ('obligation-0001','org-0001','tp-0001','VAT_RETURN','2026-08','2026-09-25',937500,'NAD','PENDING_STATUTORY_FILING','VAT_MSA','returnv-0001','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_obligations
+    (id,organisation_id,taxpayer_id,obligation_type,period_code,due_date,amount_cents,currency,status,source_system,source_reference,created_at,updated_at)
+    VALUES ('obligation-0002','org-0002','tp-0002','VAT_RETURN','2026-08','2026-09-25',780000,'NAD','DRAFT','VAT_MSA','returnv-0002','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO consent_grants
+    (id,organisation_id,taxpayer_id,granted_by,grantee_type,grantee_id,purpose,data_categories,legal_basis,status,valid_from,valid_to,revoked_at,created_at)
+    VALUES ('consent-0001','org-0001','tp-0001','usr-tp1-owner','ROLE','TAXPAYER_ACCOUNTANT','VAT return preparation','["INVOICES","VAT_LEDGER","RETURNS"]','TAXPAYER_INSTRUCTION','ACTIVE','2026-08-01T00:00:00Z','2026-12-31T23:59:59Z',NULL,'2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO delegations
+    (id,organisation_id,taxpayer_id,delegator_user_id,delegate_user_id,scopes,status,valid_from,valid_to,approved_by,approved_at,created_at)
+    VALUES ('delegation-0001','org-0001','tp-0001','usr-tp1-owner','usr-local-admin','["returns:read","audit:read"]','ACTIVE','2026-08-01T00:00:00Z','2026-08-31T23:59:59Z','usr-tp1-owner','2026-08-01T00:00:00Z','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO communications
+    (id,organisation_id,taxpayer_id,channel,direction,subject,content_summary,classification,related_resource_type,related_resource_id,external_reference,status,actor_id,occurred_at)
+    VALUES ('communication-0001','org-0004','tp-0004','PORTAL','OUTBOUND','High-value transaction review opened','Secure notice advising that invoice KC-1041 requires compliance review.','TAX_CONFIDENTIAL','INVOICE','inv-0004',NULL,'DELIVERED','usr-local-admin','2026-08-10T07:05:00Z')`,
+  `INSERT OR IGNORE INTO notifications
+    (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
+    VALUES ('notification-0001',NULL,'tp-0004','CASE_UPDATE','Compliance review opened','A high-value transaction is under controlled human review.','HIGH','UNREAD','/cases','2026-08-10T07:05:00Z',NULL)`,
+  `INSERT OR IGNORE INTO audit_cases
+    (id,case_number,organisation_id,taxpayer_id,case_type,title,opening_reason,risk_tier,status,assigned_officer_id,opened_by,opened_at,updated_at,closed_at)
+    VALUES ('case-0001','CASE-2026-0001','org-0004','tp-0004','DESK_REVIEW','High-value advisory transaction review','Invoice KC-1041 exceeds the controlled high-value pilot threshold and requires evidence-led officer review.','CRITICAL','OPEN','usr-local-admin','usr-local-admin','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z',NULL)`,
+  `INSERT OR IGNORE INTO audit_evidence
+    (id,audit_case_id,evidence_type,source_resource_type,source_resource_id,document_id,checksum_sha256,description,status,added_by,added_at)
+    VALUES ('case-evidence-0001','case-0001','CERTIFIED_RECORD','INVOICE','inv-0004',NULL,'43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','Canonical invoice, certificate and VAT ledger references.','PRESERVED','usr-local-admin','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO audit_findings
+    (id,audit_case_id,finding_code,title,description,legal_reference,amount_cents,currency,status,author_id,created_at,resolved_at)
+    VALUES ('finding-0001','case-0001','EVIDENCE-REQUEST','Supporting evidence required','The transaction remains under review pending independently supplied engagement and delivery evidence.',NULL,18000000,'NAD','PRELIMINARY','usr-local-admin','2026-08-10T07:10:00Z',NULL)`,
+  `INSERT OR IGNORE INTO disputes
+    (id,dispute_number,organisation_id,taxpayer_id,audit_case_id,disputed_resource_type,disputed_resource_id,grounds,disputed_amount_cents,currency,status,filed_by,assigned_officer_id,filed_at,decided_at,decision_summary)
+    VALUES ('dispute-0001','DSP-2026-0001','org-0004','tp-0004','case-0001','AUDIT_FINDING','finding-0001','The taxpayer requests clarification of the evidence scope before responding to the preliminary finding.',18000000,'NAD','FILED','usr-local-admin',NULL,'2026-08-10T07:20:00Z',NULL,NULL)`,
+  `INSERT OR IGNORE INTO risk_indicators
+    (id,organisation_id,taxpayer_id,subject_type,subject_id,indicator_code,score_bps,severity,rationale,rule_version,decision_effect,status,detected_at,reviewed_by,reviewed_at)
+    VALUES ('risk-0001','org-0004','tp-0004','INVOICE','inv-0004','HIGH_VALUE_TRANSACTION',9200,'CRITICAL','Gross value exceeds the controlled pilot threshold; the indicator cannot impose an adverse decision.','RISK-PILOT-2026.1','ADVISORY_ONLY','UNDER_HUMAN_REVIEW','2026-08-06T09:32:11Z','usr-local-admin','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO refund_claims
+    (id,claim_number,organisation_id,taxpayer_id,vat_return_version_id,amount_cents,currency,status,evidence_status,risk_tier,requested_by,requested_at,approved_by,approved_at,payment_instruction_id)
+    VALUES ('refund-0001','RFD-2026-0001','org-0003','tp-0003','returnv-0003',1590000,'NAD','BLOCKED_RETURN_NOT_FILED','AWAITING_ITAS_ACKNOWLEDGEMENT','HIGH','usr-local-admin','2026-08-10T07:30:00Z',NULL,NULL,NULL)`,
+  `INSERT OR IGNORE INTO outbox_events
+    (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
+    VALUES ('out-case-0001','AUDIT_CASE','case-0001','AuditCaseOpened',1,'tp-0004','{"case_id":"case-0001","case_number":"CASE-2026-0001"}','PENDING',0,'2026-08-10T07:00:00Z','2026-08-10T07:00:00Z',NULL,NULL)`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('compliance-v1','2026-08-10T08:00:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -788,6 +944,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!businessSeed) await db.batch(BUSINESS_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const vatLifecycleSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("vat-lifecycle-v1").first();
     if (!vatLifecycleSeed) await db.batch(VAT_LIFECYCLE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const complianceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("compliance-v1").first();
+    if (!complianceSeed) await db.batch(COMPLIANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

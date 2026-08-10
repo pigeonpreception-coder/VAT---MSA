@@ -13,6 +13,9 @@ const navigation = [
   { href: "/operations", label: "Business operations", key: "operations", permission: "expenses:read" },
   { href: "/reconciliation", label: "Reconciliation", key: "reconciliation", permission: "exceptions:read" },
   { href: "/returns", label: "VAT returns", key: "returns", permission: "returns:read" },
+  { href: "/compliance", label: "Compliance & disputes", key: "compliance", permission: "compliance:read" },
+  { href: "/cases", label: "Audit cases & risk", key: "cases", permission: "cases:manage" },
+  { href: "/refunds", label: "Refund control", key: "refunds", permission: "refunds:read" },
   { href: "/audit", label: "Audit evidence", key: "audit", permission: "audit:read" },
   { href: "/security", label: "Security operations", key: "security", permission: "security:read" },
 ];

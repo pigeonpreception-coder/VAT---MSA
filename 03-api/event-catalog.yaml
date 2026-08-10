@@ -1,4 +1,4 @@
-catalog_version: 0.3.0
+catalog_version: 0.4.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,26 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.dispute.filed.v1
+    owner: Dispute Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records an immutable taxpayer challenge for independent review.
+  - type: na.vatmsa.refund.requested.v1
+    owner: Refund Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Starts staged evidence and risk review only after statutory filing eligibility.
+  - type: na.vatmsa.refund.request-blocked.v1
+    owner: Refund Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records a negative position that cannot advance because the return is not acknowledged as filed.
+  - type: na.vatmsa.refund.reviewed.v1
+    owner: Refund Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records one staged human review without creating a payment by itself.
   - type: na.vatmsa.return.approval-requested.v1
     owner: VAT Return Domain
     partition_key: taxpayer_id

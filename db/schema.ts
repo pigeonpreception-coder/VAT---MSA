@@ -788,6 +788,257 @@ export const vatReturnSubmissions = sqliteTable(
   ],
 );
 
+export const consentGrants = sqliteTable(
+  "consent_grants",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    grantedBy: text("granted_by").notNull().references(() => appUsers.id),
+    granteeType: text("grantee_type").notNull(),
+    granteeId: text("grantee_id").notNull(),
+    purpose: text("purpose").notNull(),
+    dataCategories: text("data_categories").notNull(),
+    legalBasis: text("legal_basis").notNull(),
+    status: text("status").notNull(),
+    validFrom: text("valid_from").notNull(),
+    validTo: text("valid_to"),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("idx_consent_taxpayer_status").on(table.taxpayerId, table.status)],
+);
+
+export const delegations = sqliteTable(
+  "delegations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    delegatorUserId: text("delegator_user_id").notNull().references(() => appUsers.id),
+    delegateUserId: text("delegate_user_id").notNull().references(() => appUsers.id),
+    scopes: text("scopes").notNull(),
+    status: text("status").notNull(),
+    validFrom: text("valid_from").notNull(),
+    validTo: text("valid_to"),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    approvedAt: text("approved_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("idx_delegations_delegate_status").on(table.delegateUserId, table.status)],
+);
+
+export const taxObligations = sqliteTable(
+  "tax_obligations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    obligationType: text("obligation_type").notNull(),
+    periodCode: text("period_code").notNull(),
+    dueDate: text("due_date").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    status: text("status").notNull(),
+    sourceSystem: text("source_system").notNull(),
+    sourceReference: text("source_reference"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_tax_obligation").on(table.taxpayerId, table.obligationType, table.periodCode)],
+);
+
+export const communications = sqliteTable(
+  "communications",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").references(() => taxpayers.id),
+    channel: text("channel").notNull(),
+    direction: text("direction").notNull(),
+    subject: text("subject").notNull(),
+    contentSummary: text("content_summary").notNull(),
+    classification: text("classification").notNull(),
+    relatedResourceType: text("related_resource_type"),
+    relatedResourceId: text("related_resource_id"),
+    externalReference: text("external_reference"),
+    status: text("status").notNull(),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (table) => [index("idx_communications_taxpayer_time").on(table.taxpayerId, table.occurredAt)],
+);
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => appUsers.id),
+    taxpayerId: text("taxpayer_id").references(() => taxpayers.id),
+    notificationType: text("notification_type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    severity: text("severity").notNull(),
+    status: text("status").notNull(),
+    actionUrl: text("action_url"),
+    createdAt: text("created_at").notNull(),
+    readAt: text("read_at"),
+  },
+  (table) => [index("idx_notifications_recipient_status").on(table.userId, table.taxpayerId, table.status)],
+);
+
+export const auditCases = sqliteTable(
+  "audit_cases",
+  {
+    id: text("id").primaryKey(),
+    caseNumber: text("case_number").notNull(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    caseType: text("case_type").notNull(),
+    title: text("title").notNull(),
+    openingReason: text("opening_reason").notNull(),
+    riskTier: text("risk_tier").notNull(),
+    status: text("status").notNull(),
+    assignedOfficerId: text("assigned_officer_id").references(() => appUsers.id),
+    openedBy: text("opened_by").notNull().references(() => appUsers.id),
+    openedAt: text("opened_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    closedAt: text("closed_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_audit_case_number").on(table.caseNumber),
+    index("idx_audit_cases_status_risk").on(table.status, table.riskTier, table.updatedAt),
+  ],
+);
+
+export const auditEvidence = sqliteTable(
+  "audit_evidence",
+  {
+    id: text("id").primaryKey(),
+    auditCaseId: text("audit_case_id").notNull().references(() => auditCases.id),
+    evidenceType: text("evidence_type").notNull(),
+    sourceResourceType: text("source_resource_type").notNull(),
+    sourceResourceId: text("source_resource_id").notNull(),
+    documentId: text("document_id").references(() => documentMetadata.id),
+    checksumSha256: text("checksum_sha256").notNull(),
+    description: text("description").notNull(),
+    status: text("status").notNull(),
+    addedBy: text("added_by").notNull().references(() => appUsers.id),
+    addedAt: text("added_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_audit_evidence_source").on(table.auditCaseId, table.sourceResourceType, table.sourceResourceId)],
+);
+
+export const auditFindings = sqliteTable(
+  "audit_findings",
+  {
+    id: text("id").primaryKey(),
+    auditCaseId: text("audit_case_id").notNull().references(() => auditCases.id),
+    findingCode: text("finding_code").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    legalReference: text("legal_reference"),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    status: text("status").notNull(),
+    authorId: text("author_id").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (table) => [uniqueIndex("ux_audit_finding_code").on(table.auditCaseId, table.findingCode)],
+);
+
+export const disputes = sqliteTable(
+  "disputes",
+  {
+    id: text("id").primaryKey(),
+    disputeNumber: text("dispute_number").notNull(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    auditCaseId: text("audit_case_id").references(() => auditCases.id),
+    disputedResourceType: text("disputed_resource_type").notNull(),
+    disputedResourceId: text("disputed_resource_id").notNull(),
+    grounds: text("grounds").notNull(),
+    disputedAmountCents: integer("disputed_amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    status: text("status").notNull(),
+    filedBy: text("filed_by").notNull().references(() => appUsers.id),
+    assignedOfficerId: text("assigned_officer_id").references(() => appUsers.id),
+    filedAt: text("filed_at").notNull(),
+    decidedAt: text("decided_at"),
+    decisionSummary: text("decision_summary"),
+  },
+  (table) => [
+    uniqueIndex("ux_dispute_number").on(table.disputeNumber),
+    index("idx_disputes_status_filed").on(table.status, table.filedAt),
+  ],
+);
+
+export const riskIndicators = sqliteTable(
+  "risk_indicators",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    indicatorCode: text("indicator_code").notNull(),
+    scoreBps: integer("score_bps").notNull(),
+    severity: text("severity").notNull(),
+    rationale: text("rationale").notNull(),
+    ruleVersion: text("rule_version").notNull(),
+    decisionEffect: text("decision_effect").notNull(),
+    status: text("status").notNull(),
+    detectedAt: text("detected_at").notNull(),
+    reviewedBy: text("reviewed_by").references(() => appUsers.id),
+    reviewedAt: text("reviewed_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_risk_indicator_subject").on(table.subjectType, table.subjectId, table.indicatorCode, table.ruleVersion),
+    index("idx_risk_taxpayer_status").on(table.taxpayerId, table.status, table.severity),
+  ],
+);
+
+export const refundClaims = sqliteTable(
+  "refund_claims",
+  {
+    id: text("id").primaryKey(),
+    claimNumber: text("claim_number").notNull(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    vatReturnVersionId: text("vat_return_version_id").notNull().references(() => vatReturnVersions.id),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    status: text("status").notNull(),
+    evidenceStatus: text("evidence_status").notNull(),
+    riskTier: text("risk_tier").notNull(),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    requestedAt: text("requested_at").notNull(),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    approvedAt: text("approved_at"),
+    paymentInstructionId: text("payment_instruction_id"),
+  },
+  (table) => [
+    uniqueIndex("ux_refund_claim_number").on(table.claimNumber),
+    uniqueIndex("ux_refund_return_version").on(table.vatReturnVersionId),
+    index("idx_refund_claim_status_risk").on(table.status, table.riskTier, table.requestedAt),
+  ],
+);
+
+export const refundReviews = sqliteTable(
+  "refund_reviews",
+  {
+    id: text("id").primaryKey(),
+    refundClaimId: text("refund_claim_id").notNull().references(() => refundClaims.id),
+    stage: text("stage").notNull(),
+    decision: text("decision").notNull(),
+    findings: text("findings").notNull(),
+    reviewerId: text("reviewer_id").notNull().references(() => appUsers.id),
+    reviewedAt: text("reviewed_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_refund_review_stage").on(table.refundClaimId, table.stage)],
+);
+
 export const invoices = sqliteTable(
   "invoices",
   {

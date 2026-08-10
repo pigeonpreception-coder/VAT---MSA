@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.4.0
+  version: 0.5.0
   summary: Controlled identity, business operations, VAT invoice certification and verification contract.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
@@ -25,6 +25,10 @@ tags:
   - name: VAT periods
   - name: VAT returns
   - name: Approvals
+  - name: Compliance
+  - name: Audit cases
+  - name: Disputes
+  - name: Refunds
   - name: Invoices
   - name: Certificates
   - name: Offline
@@ -334,6 +338,76 @@ paths:
       responses:
         '202': { description: Submission request recorded as ready or explicitly blocked. }
         '409': { $ref: '#/components/responses/Conflict' }
+  /v1/compliance:
+    get:
+      tags: [Compliance]
+      operationId: getComplianceWorkspace
+      summary: Retrieve obligations, cases, disputes, advisory risk, refunds, communications, notifications, consents and delegations in scope.
+      security: [{ oauth2: [compliance.read] }]
+      responses:
+        '200': { description: Authorised compliance workspace. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/audit-cases:
+    post:
+      tags: [Audit cases]
+      operationId: openAuditCase
+      summary: Open an evidence-led national compliance case.
+      security: [{ oauth2: [cases.manage] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CaseOpeningSubmission' } } }
+      responses:
+        '201': { description: Audit case opened and taxpayer notification queued. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/disputes:
+    post:
+      tags: [Disputes]
+      operationId: fileDispute
+      summary: File an immutable taxpayer dispute for independent review.
+      security: [{ oauth2: [disputes.manage] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DisputeSubmission' } } }
+      responses:
+        '201': { description: Dispute filed. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/refunds:
+    post:
+      tags: [Refunds]
+      operationId: requestRefund
+      summary: Request refund eligibility review for a negative return version.
+      description: An unfiled return creates a blocked record and cannot advance into review or payment.
+      security: [{ oauth2: [refunds.request] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefundRequestSubmission' } } }
+      responses:
+        '201': { description: Refund request recorded as eligible for review or explicitly blocked. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/refunds/{refund_claim_id}/reviews:
+    post:
+      tags: [Refunds]
+      operationId: reviewRefund
+      summary: Record a staged human refund review.
+      security: [{ oauth2: [refunds.review] }]
+      parameters:
+        - name: refund_claim_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefundReviewSubmission' } } }
+      responses:
+        '200': { description: Review stage recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /v1/invoices:
     post:
       tags: [Invoices]
@@ -480,6 +554,11 @@ components:
             returns.approve: Decide VAT approvals under maker-checker control.
             returns.submit: Request provider submission of an approved return.
             vat-adjustments.manage: Submit governed VAT adjustments.
+            compliance.read: Read authorised compliance records.
+            cases.manage: Open and manage evidence-led audit cases.
+            disputes.manage: File and manage disputes.
+            refunds.request: Request refund eligibility review.
+            refunds.review: Perform staged refund review.
             invoices.write: Submit fiscal documents.
             invoices.read: Read documents belonging to the authorised taxpayer.
             certificates.read: Retrieve certification receipts.
@@ -697,6 +776,46 @@ components:
       properties:
         decision: { type: string, enum: [APPROVE, REJECT] }
         comment: { type: string, minLength: 5, maxLength: 1000 }
+    CaseOpeningSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, taxpayer_id, case_type, title, opening_reason, risk_tier]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        taxpayer_id: { type: string, minLength: 2, maxLength: 100 }
+        case_type: { type: string, enum: [DESK_REVIEW, VAT_AUDIT, REFUND_VERIFICATION, INVESTIGATION] }
+        title: { type: string, minLength: 5, maxLength: 200 }
+        opening_reason: { type: string, minLength: 20, maxLength: 2000 }
+        risk_tier: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+    DisputeSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, disputed_resource_type, disputed_resource_id, grounds, disputed_amount_cents, currency]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        taxpayer_id: { type: string, minLength: 2, maxLength: 100 }
+        audit_case_id: { type: string, minLength: 2, maxLength: 100 }
+        disputed_resource_type: { type: string, enum: [AUDIT_FINDING, VAT_RETURN, REFUND_DECISION, OBLIGATION] }
+        disputed_resource_id: { type: string, minLength: 2, maxLength: 100 }
+        grounds: { type: string, minLength: 20, maxLength: 4000 }
+        disputed_amount_cents: { type: integer, minimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    RefundRequestSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, vat_return_version_id]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        vat_return_version_id: { type: string, minLength: 2, maxLength: 100 }
+    RefundReviewSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, stage, decision, findings]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        stage: { type: string, enum: [EVIDENCE, RISK, SUPERVISOR, PAYMENT_AUTHORISATION] }
+        decision: { type: string, enum: [APPROVE, REJECT, REQUEST_INFORMATION, HOLD] }
+        findings: { type: string, minLength: 10, maxLength: 2000 }
     SubmissionAccepted:
       type: object
       additionalProperties: false
