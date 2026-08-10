@@ -98,6 +98,13 @@ export type ProjectSubmission = {
   budget_cents?: number;
 };
 
+export type QuotationConversionSubmission = {
+  schema_version: "1.0.0";
+  invoice_number: string;
+  issue_date: string;
+  due_date?: string;
+};
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const CODE_PATTERN = /^[A-Z0-9][A-Z0-9._/-]{1,39}$/;
@@ -201,6 +208,19 @@ export function normalizeAndValidateQuotation(payload: unknown): NormalizedQuota
   if (!Number.isSafeInteger(subtotal + taxTotal)) messages.push({ code: "AMOUNT_OVERFLOW", path: "/lines", message: "Quotation totals exceed the supported integer range." });
   if (messages.length) throw new BusinessValidationError(messages);
   return { schema_version: "1.0.0", customer_party_id: customerPartyId, ...(branchId ? { branch_id: branchId } : {}), quotation_number: quotationNumber, currency, issue_date: issueDate, valid_until: validUntil, ...(notes ? { notes } : {}), lines, subtotal_cents: subtotal, tax_cents: taxTotal, total_cents: subtotal + taxTotal };
+}
+
+export function normalizeAndValidateQuotationConversion(payload: unknown): QuotationConversionSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const invoiceNumber = textField(input.invoice_number, "/invoice_number", "Invoice number", 2, 100, messages).toUpperCase();
+  if (invoiceNumber && !/^[A-Z0-9][A-Z0-9._/-]{1,99}$/.test(invoiceNumber)) messages.push({ code: "CODE_INVALID", path: "/invoice_number", message: "Invoice number contains unsupported characters." });
+  const issueDate = dateField(input.issue_date, "/issue_date", "Issue date", messages);
+  const dueDate = textValue(input.due_date) ? dateField(input.due_date, "/due_date", "Due date", messages) : undefined;
+  if (dueDate && dueDate < issueDate) messages.push({ code: "DATE_ORDER_INVALID", path: "/due_date", message: "Due date cannot be earlier than issue date." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", invoice_number: invoiceNumber, issue_date: issueDate, ...(dueDate ? { due_date: dueDate } : {}) };
 }
 
 export function normalizeAndValidateJournal(payload: unknown): JournalSubmission {

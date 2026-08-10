@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.6.0
-  summary: Controlled identity, business operations, VAT lifecycle, evidence and platform-edge contract.
+  version: 0.7.0
+  summary: Controlled identity, business operations, quotation conversion, VAT lifecycle, evidence and platform-edge contract.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
     error codes, signature formats, retention and service levels require NamRA approval.
@@ -158,6 +158,28 @@ paths:
         '200': { description: Quotation accepted. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /v1/quotations/{quotation_id}/convert:
+    post:
+      tags: [Quotations, Invoices]
+      operationId: convertQuotationToInvoice
+      summary: Certify an accepted quotation as an invoice and preserve its source lineage.
+      security: [{ oauth2: [quotations.manage, invoices.write] }]
+      parameters:
+        - name: quotation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/QuotationConversionSubmission' } } }
+      responses:
+        '201': { description: Invoice certified and quotation linked. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/accounting/journals:
     get:
       tags: [Accounting]
@@ -763,6 +785,15 @@ components:
               unit_price_cents: { type: integer, minimum: 0 }
               tax_category: { type: string, enum: [STANDARD, ZERO_RATED, EXEMPT, OUT_OF_SCOPE] }
               tax_rate_bps: { type: integer, minimum: 0, maximum: 10000 }
+    QuotationConversionSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, invoice_number, issue_date]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        invoice_number: { type: string, minLength: 2, maxLength: 100, pattern: '^[A-Za-z0-9][A-Za-z0-9._/-]{1,99}$' }
+        issue_date: { type: string, format: date }
+        due_date: { type: string, format: date }
     JournalSubmission:
       type: object
       additionalProperties: false

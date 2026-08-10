@@ -5,19 +5,56 @@ import {
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
+  normalizeAndValidateQuotationConversion,
   normalizeAndValidateStockMovement,
   type ExpenseSubmission,
   type JournalSubmission,
   type ProjectSubmission,
   type QuotationSubmission,
+  type QuotationConversionSubmission,
   type StockMovementSubmission,
 } from "@/lib/domain/business";
-import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import type { UserContext } from "@/lib/domain/types";
-import { RepositoryConflictError } from "./repository";
+import { centsToDecimal, sha256Hex, stableStringify } from "@/lib/domain/invoice";
+import type { InvoiceSubmission, UserContext } from "@/lib/domain/types";
+import type { RequestContext } from "@/lib/security/request";
+import { getInvoiceById, RepositoryConflictError, submitInvoice } from "./repository";
 
 type OrganisationContext = { id: string; taxpayer_id: string; legal_name: string; vat_number: string };
 type IdempotencyRow = { request_hash: string; resource_id: string };
+
+type ConvertibleQuotation = {
+  id: string;
+  organisation_id: string;
+  customer_party_id: string;
+  quotation_number: string;
+  currency: string;
+  issue_date: string;
+  status: string;
+  subtotal_cents: number;
+  tax_cents: number;
+  total_cents: number;
+  notes: string | null;
+  accepted_at: string | null;
+  converted_invoice_id: string | null;
+  customer_name: string;
+  customer_vat_number: string | null;
+  customer_tin: string | null;
+  supplier_name: string;
+  supplier_vat_number: string;
+};
+
+type ConvertibleQuotationLine = {
+  line_number: number;
+  product_id: string | null;
+  description: string;
+  quantity_micros: number;
+  unit_code: string;
+  unit_price_cents: number;
+  net_amount_cents: number;
+  tax_category: "STANDARD" | "ZERO_RATED" | "EXEMPT" | "OUT_OF_SCOPE";
+  tax_rate_bps: number;
+  tax_amount_cents: number;
+};
 
 export class BusinessResourceError extends Error {
   readonly status: number;
@@ -50,6 +87,12 @@ async function resolveOrganisation(user: UserContext, requestedOrganisationId?: 
 
 function validateIdempotencyKey(key: string) {
   if (key.length < 16 || key.length > 128) throw new BusinessResourceError("Idempotency-Key must contain 16 to 128 characters.");
+}
+
+function microsToDecimal(micros: number): string {
+  const whole = Math.floor(micros / 1_000_000);
+  const fraction = String(micros % 1_000_000).padStart(6, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : String(whole);
 }
 
 async function priorCommand(db: D1Database, actorId: string, type: string, key: string, hash: string): Promise<string | null> {
@@ -189,6 +232,106 @@ export async function acceptQuotation(id: string, actor: UserContext, idempotenc
     auditRecord(db, actor, audit, now),
   ]);
   return db.prepare("SELECT * FROM quotations WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+export async function convertQuotationToInvoice(
+  id: string,
+  payload: QuotationConversionSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  context: RequestContext,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const conversion = normalizeAndValidateQuotationConversion(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation_id: id, conversion }));
+  const prior = await priorCommand(db, actor.userId, "CONVERT_QUOTATION", idempotencyKey, requestHash);
+  if (prior) {
+    const existing = await getInvoiceById(prior, actor);
+    if (!existing) throw new RepositoryConflictError("The prior quotation-conversion response is unavailable.");
+    return existing;
+  }
+
+  const quotation = await db.prepare(`SELECT q.id,q.organisation_id,q.customer_party_id,q.quotation_number,q.currency,q.issue_date,
+    q.status,q.subtotal_cents,q.tax_cents,q.total_cents,q.notes,q.accepted_at,q.converted_invoice_id,
+    p.display_name AS customer_name,p.vat_number AS customer_vat_number,p.tin AS customer_tin,
+    t.legal_name AS supplier_name,t.vat_number AS supplier_vat_number
+    FROM quotations q
+    JOIN business_parties p ON p.id=q.customer_party_id AND p.organisation_id=q.organisation_id
+    JOIN organisations o ON o.id=q.organisation_id
+    JOIN taxpayers t ON t.id=o.taxpayer_id
+    WHERE q.id=? AND q.organisation_id=?`).bind(id, organisation.id).first<ConvertibleQuotation>();
+  if (!quotation) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  if (quotation.converted_invoice_id) {
+    const existing = await getInvoiceById(quotation.converted_invoice_id, actor);
+    if (!existing) throw new RepositoryConflictError("The converted invoice is no longer available.");
+    if (existing.invoiceNumber !== conversion.invoice_number || existing.issueDate !== conversion.issue_date) {
+      throw new RepositoryConflictError(`Quotation was already converted to invoice ${existing.invoiceNumber}.`);
+    }
+    return existing;
+  }
+  if (quotation.status !== "ACCEPTED") throw new RepositoryConflictError(`Only an accepted quotation can be converted; current status is ${quotation.status}.`);
+  if (conversion.issue_date < quotation.issue_date) throw new RepositoryConflictError("The invoice cannot be issued before the quotation.");
+
+  const lineResult = await db.prepare(`SELECT line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,
+    net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines WHERE quotation_id=? ORDER BY line_number`)
+    .bind(quotation.id).all<ConvertibleQuotationLine>();
+  if (!lineResult.results.length) throw new RepositoryConflictError("The quotation has no lines and cannot be converted.");
+  const customerIdentifier: InvoiceSubmission["customer"]["identifiers"][number] = quotation.customer_vat_number
+    ? { type: "VAT_NUMBER", value: quotation.customer_vat_number, country: "NA" }
+    : quotation.customer_tin
+      ? { type: "TIN", value: quotation.customer_tin, country: "NA" }
+      : { type: "OTHER", value: quotation.customer_party_id, country: "NA" };
+  const submittedAt = quotation.accepted_at ?? `${quotation.issue_date}T00:00:00.000Z`;
+  const invoicePayload: InvoiceSubmission = {
+    schema_version: "1.0.0",
+    document_type: "TAX_INVOICE",
+    source: { system_id: "VAT-MSA-QUOTATION", document_id: quotation.id, submitted_at: submittedAt },
+    supplier: { name: quotation.supplier_name, identifiers: [{ type: "VAT_NUMBER", value: quotation.supplier_vat_number, country: "NA" }] },
+    customer: { name: quotation.customer_name, identifiers: [customerIdentifier] },
+    invoice_number: conversion.invoice_number,
+    issue_date: conversion.issue_date,
+    ...(conversion.due_date ? { due_date: conversion.due_date } : {}),
+    currency: quotation.currency,
+    lines: lineResult.results.map((line) => ({
+      line_number: line.line_number,
+      ...(line.product_id ? { item_code: line.product_id } : {}),
+      description: line.description,
+      quantity: microsToDecimal(line.quantity_micros),
+      unit_code: line.unit_code,
+      unit_price: centsToDecimal(line.unit_price_cents),
+      net_amount: centsToDecimal(line.net_amount_cents),
+      tax: {
+        category: line.tax_category === "OUT_OF_SCOPE" ? "OUTSIDE_SCOPE" : line.tax_category,
+        rate: centsToDecimal(line.tax_rate_bps),
+        taxable_amount: centsToDecimal(line.net_amount_cents),
+        tax_amount: centsToDecimal(line.tax_amount_cents),
+      },
+    })),
+    totals: {
+      line_net_amount: centsToDecimal(quotation.subtotal_cents),
+      tax_exclusive_amount: centsToDecimal(quotation.subtotal_cents),
+      tax_amount: centsToDecimal(quotation.tax_cents),
+      tax_inclusive_amount: centsToDecimal(quotation.total_cents),
+      payable_amount: centsToDecimal(quotation.total_cents),
+    },
+    ...(quotation.notes ? { notes: [quotation.notes] } : {}),
+  };
+
+  // Invoice certification is independently idempotent. If this process stops after that
+  // commit, the same key reloads the certified invoice and safely finishes quotation linkage.
+  const invoice = await submitInvoice(invoicePayload, actor, idempotencyKey, context);
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "QUOTATION_CONVERTED", "QUOTATION", id, { organisationId: organisation.id, invoiceId: invoice.id, correlationId: context.correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE quotations SET status='CONVERTED',converted_invoice_id=?,updated_at=? WHERE id=? AND organisation_id=? AND status='ACCEPTED'").bind(invoice.id, now, id, organisation.id),
+    commandRecord(db, actor.userId, "CONVERT_QUOTATION", idempotencyKey, requestHash, "INVOICE", invoice.id, now),
+    outboxRecord(db, "QUOTATION", id, "QuotationConverted", organisation.id, { quotation_id: id, organisation_id: organisation.id, invoice_id: invoice.id, correlation_id: context.correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return invoice;
 }
 
 export async function postJournal(payload: JournalSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {

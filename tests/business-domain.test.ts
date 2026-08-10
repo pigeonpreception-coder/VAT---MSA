@@ -5,10 +5,15 @@ import {
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
+  normalizeAndValidateQuotationConversion,
   normalizeAndValidateStockMovement,
 } from "@/lib/domain/business";
 
 describe("business command validation", () => {
+  it("validates quotation conversion dates and invoice identifiers", () => {
+    expect(normalizeAndValidateQuotationConversion({ schema_version: "1.0.0", invoice_number: "inv-2026-9001", issue_date: "2026-08-10", due_date: "2026-09-10" })).toEqual({ schema_version: "1.0.0", invoice_number: "INV-2026-9001", issue_date: "2026-08-10", due_date: "2026-09-10" });
+    expect(() => normalizeAndValidateQuotationConversion({ schema_version: "1.0.0", invoice_number: "INV 1", issue_date: "2026-08-10", due_date: "2026-08-09" })).toThrow(BusinessValidationError);
+  });
   it("derives quotation totals from integer quantity micros and cents", () => {
     const quotation = normalizeAndValidateQuotation({
       schema_version: "1.0.0",

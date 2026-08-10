@@ -162,6 +162,8 @@ tbody tr:hover { background: #fafcfc; }
 .registration-form { margin-top: 18px; }
 .registration-form .alert { grid-column: 1 / -1; }
 .form-actions { display: flex; flex-direction: row; align-items: center; gap: 10px; }
+.quotation-conversion { display: grid; min-width: 190px; gap: 6px; }
+.quotation-conversion .field { min-width: 180px; }
 .form-success-actions { margin-top: 12px; }
 .status-buyer, .status-seller, .status-configured { color: var(--teal); background: var(--teal-pale); }
 .status-requires-itas-confirmation, .status-requires-security-decision, .status-awaiting-provider-contract, .status-pending-verification, .status-not-started { color: #9a6714; background: var(--amber-pale); }

@@ -1,4 +1,4 @@
-catalog_version: 0.5.0
+catalog_version: 0.6.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,11 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.quotation.converted.v1
+    owner: Commercial and Invoice Domains
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Links an accepted quotation to its independently certified fiscal invoice through recoverable idempotent processing.
   - type: na.vatmsa.invoice.corrected.v1
     owner: Invoice Domain
     partition_key: taxpayer_id
