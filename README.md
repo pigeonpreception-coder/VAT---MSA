@@ -4,7 +4,7 @@ This repository contains the working VAT-MSA operational pilot and its governed 
 
 ## Working system
 
-The application currently provides protected operations, taxpayer and organisation identity, registration intake, invoice certification, seller/output and buyer/input VAT ledger entries, reconciliation exceptions, VAT-period summaries, public certificate verification, audit evidence and security operations. See `IMPLEMENTATION.md` for the implemented capabilities and explicit production gates.
+The application currently provides protected operations, taxpayer and organisation identity, registration intake, commercial/accounting operations, quotation conversion, invoice certification and correction, seller/output and buyer/input VAT ledger entries, reconciliation, governed VAT returns and refunds, evidence quarantine, integration/offline/reporting controls, public certificate verification, audit evidence, security operations and separated role-based portals. See `IMPLEMENTATION.md` for the working-system guide and `ARCHITECTURE_IMPLEMENTATION_MATRIX.md` for the domain-by-domain evidence and production boundary.
 
 The identity foundation enforces one canonical organisation per taxpayer and models buyer/seller as dynamic transaction capabilities. ITAS federation and authoritative verification are represented by a disabled integration boundary; the application does not fabricate government protocols or decisions.
 
@@ -18,7 +18,7 @@ The identity foundation enforces one canonical organisation per taxpayer and mod
 ## Implementation artefacts
 
 - `02-diagrams/` - editable Mermaid sources for the principal architecture views.
-- `03-api/openapi.yaml` - starter OpenAPI contract for invoice submission, status and verification.
+- `03-api/openapi.yaml` - versioned OpenAPI contract for the implemented identity, business, VAT, compliance and platform-edge APIs.
 - `03-api/schemas/vat-msa-invoice.schema.json` - canonical invoice JSON Schema.
 - `03-api/event-catalog.yaml` - versioned business-event catalogue.
 - `04-data/core-schema.sql` - PostgreSQL reference schema for core VAT-MSA records.

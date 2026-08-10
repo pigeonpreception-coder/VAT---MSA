@@ -1,6 +1,6 @@
 # VAT-MSA Operational Pilot
 
-This repository now contains an executable operational pilot of the VAT-MSA platform. It implements the first controlled vertical slice from fiscal-document submission to certification, VAT sub-ledger posting, reconciliation, return aggregation and audit evidence.
+This repository now contains an executable operational pilot of the VAT-MSA platform. It implements controlled vertical slices across identity and organisations, business operations, fiscal-document certification, VAT sub-ledger and return governance, compliance/refunds, platform integrations, offline safety, reporting and separated role-based portals. See `ARCHITECTURE_IMPLEMENTATION_MATRIX.md` for the domain-by-domain completion boundary.
 
 ## Implemented capabilities
 
@@ -13,12 +13,17 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Idempotent taxpayer-registration intake with duplicate controls, append-only audit evidence, outbox event and an ITAS verification record that remains pending until the authoritative contract is confirmed.
 - Identity foundation, organisation detail and registration-intake portal experiences plus protected organisation/registration APIs.
 - Electronic invoice submission through the web portal and `POST /api/v1/invoices`.
+- Commercial parties, products and server-calculated quotations with guarded acceptance and recoverable idempotent conversion to certified invoices.
+- Credit-note and debit-note certification with immutable original-document lineage, reason controls, cumulative over-credit prevention and signed VAT ledger effects.
 - Exact integer-cent VAT calculation, document-total validation and duplicate controls.
 - Idempotent submission handling: an exact retry returns the original outcome; a changed payload is rejected.
 - Pilot certificate issuance with a public privacy-minimised verification route.
 - Linked seller output VAT and registered-buyer input VAT sub-ledger entries.
 - Configured risk classification and reconciliation exception creation.
 - Transaction-derived VAT period summaries.
+- Versioned VAT return generation, governed adjustments, maker-checker approval/rejection, locked periods and explicit blocked ITAS submission until authority is configured.
+- Compliance obligations, secure communication projections, audit cases, disputes, refund requests and segregated staged review.
+- Balanced general-ledger journals, expenses, inventory movements/balances and projects/budgets.
 - Hash-chained, append-only business audit events.
 - D1/SQLite schema, generated migration, indexes and synthetic pilot data.
 - Responsive, keyboard-accessible operational interface.
@@ -26,6 +31,10 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Bounded streaming JSON ingestion and multi-level actor, device, source, tenant and global rate controls.
 - Correlated structured security events, incident records and a Security Operations view.
 - Transactional outbox records for reliable asynchronous processing hand-off.
+- Provider/integration, API client, webhook, synchronization, bank import, payment instruction and service-component operational records.
+- Private R2 evidence quarantine with SHA-256 custody metadata and download denial before an approved clean scan.
+- Offline device/range/batch/conflict controls that reject untrusted submissions rather than granting provisional fiscal effect.
+- Governed report definitions/runs and buyer, seller, NamRA, NamRA Admin, Super Admin and developer portal projections.
 - Liveness/readiness endpoints and consistent edge security/cache headers.
 - Strict release gate: lint, TypeScript, unit/security tests, secret scan, CycloneDX SBOM and production build.
 - A complete security, hyperscale, HA/DR, observability and incident architecture pack under `07-security-resilience/`.
@@ -57,7 +66,7 @@ The pilot role exists only for local development. Production roles must be provi
 
 ## Database and integrity model
 
-The platform uses D1-compatible SQLite for the operational pilot. Migration `0002_silky_vanisher.sql` adds canonical organisations, taxpayer identifiers, branches, dynamic capabilities, memberships, identity links/providers, RBAC reference records and controlled registration/verification records. Monetary values are stored as integer cents. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
+The platform uses D1-compatible SQLite for the operational pilot. Reviewed migrations under `drizzle/` cover the canonical identity/organisation foundation, business operations, VAT lifecycle, compliance/refunds, platform-edge controls and invoice correction lineage. Monetary values are stored as integer cents and quantities as integer micros. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
 
 The generated migration is stored in `drizzle/`. The runtime initializer is an onboarding convenience for the local pilot; controlled hosted environments should apply reviewed migrations through the deployment pipeline.
 
