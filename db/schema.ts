@@ -1039,6 +1039,273 @@ export const refundReviews = sqliteTable(
   (table) => [uniqueIndex("ux_refund_review_stage").on(table.refundClaimId, table.stage)],
 );
 
+export const integrationConnections = sqliteTable(
+  "integration_connections",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    providerKey: text("provider_key").notNull(),
+    category: text("category").notNull(),
+    displayName: text("display_name").notNull(),
+    capabilities: text("capabilities").notNull(),
+    endpointReference: text("endpoint_reference"),
+    credentialReference: text("credential_reference"),
+    configurationStatus: text("configuration_status").notNull(),
+    operationalStatus: text("operational_status").notNull(),
+    dataClassification: text("data_classification").notNull(),
+    lastHealthCheckAt: text("last_health_check_at"),
+    lastHealthOutcome: text("last_health_outcome"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_integration_provider_org").on(table.providerKey, table.organisationId)],
+);
+
+export const apiClients = sqliteTable(
+  "api_clients",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    name: text("name").notNull(),
+    clientKey: text("client_key").notNull(),
+    scopes: text("scopes").notNull(),
+    credentialReference: text("credential_reference").notNull(),
+    status: text("status").notNull(),
+    rateLimitProfile: text("rate_limit_profile").notNull(),
+    lastRotatedAt: text("last_rotated_at"),
+    expiresAt: text("expires_at"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_api_client_key").on(table.clientKey)],
+);
+
+export const webhookSubscriptions = sqliteTable(
+  "webhook_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    apiClientId: text("api_client_id").notNull().references(() => apiClients.id),
+    eventTypes: text("event_types").notNull(),
+    endpointUrl: text("endpoint_url").notNull(),
+    signingKeyReference: text("signing_key_reference").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_webhook_endpoint_client").on(table.apiClientId, table.endpointUrl)],
+);
+
+export const webhookDeliveries = sqliteTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey(),
+    webhookSubscriptionId: text("webhook_subscription_id").notNull().references(() => webhookSubscriptions.id),
+    outboxEventId: text("outbox_event_id").notNull().references(() => outboxEvents.id),
+    status: text("status").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    responseStatus: integer("response_status"),
+    nextAttemptAt: text("next_attempt_at"),
+    deliveredAt: text("delivered_at"),
+    lastError: text("last_error"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_webhook_delivery_event").on(table.webhookSubscriptionId, table.outboxEventId)],
+);
+
+export const syncJobs = sqliteTable(
+  "sync_jobs",
+  {
+    id: text("id").primaryKey(),
+    integrationConnectionId: text("integration_connection_id").notNull().references(() => integrationConnections.id),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    jobType: text("job_type").notNull(),
+    direction: text("direction").notNull(),
+    status: text("status").notNull(),
+    cursor: text("cursor"),
+    recordsRead: integer("records_read").notNull().default(0),
+    recordsWritten: integer("records_written").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    requestedAt: text("requested_at").notNull(),
+    startedAt: text("started_at"),
+    completedAt: text("completed_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [index("idx_sync_jobs_status_requested").on(table.status, table.requestedAt)],
+);
+
+export const bankImports = sqliteTable(
+  "bank_imports",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    integrationConnectionId: text("integration_connection_id").references(() => integrationConnections.id),
+    documentId: text("document_id").references(() => documentMetadata.id),
+    bankName: text("bank_name").notNull(),
+    accountReferenceMasked: text("account_reference_masked").notNull(),
+    statementFrom: text("statement_from").notNull(),
+    statementTo: text("statement_to").notNull(),
+    currency: text("currency").notNull(),
+    transactionCount: integer("transaction_count").notNull().default(0),
+    status: text("status").notNull(),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("idx_bank_import_status_created").on(table.organisationId, table.status, table.createdAt)],
+);
+
+export const paymentInstructions = sqliteTable(
+  "payment_instructions",
+  {
+    id: text("id").primaryKey(),
+    refundClaimId: text("refund_claim_id").references(() => refundClaims.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    beneficiaryReferenceMasked: text("beneficiary_reference_masked").notNull(),
+    provider: text("provider").notNull(),
+    status: text("status").notNull(),
+    providerReference: text("provider_reference"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    approvedBy: text("approved_by").notNull().references(() => appUsers.id),
+    approvedAt: text("approved_at").notNull(),
+    submittedAt: text("submitted_at"),
+    settledAt: text("settled_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [uniqueIndex("ux_payment_instruction_key").on(table.provider, table.idempotencyKey)],
+);
+
+export const offlineDevices = sqliteTable(
+  "offline_devices",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    branchId: text("branch_id").references(() => branches.id),
+    deviceCode: text("device_code").notNull(),
+    displayName: text("display_name").notNull(),
+    publicKeyReference: text("public_key_reference"),
+    certificateFingerprint: text("certificate_fingerprint"),
+    status: text("status").notNull(),
+    enrolmentStatus: text("enrolment_status").notNull(),
+    lastAcceptedSequence: integer("last_accepted_sequence").notNull().default(0),
+    lastBatchHash: text("last_batch_hash"),
+    lastSeenAt: text("last_seen_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_offline_device_code").on(table.organisationId, table.deviceCode)],
+);
+
+export const offlineNumberRanges = sqliteTable(
+  "offline_number_ranges",
+  {
+    id: text("id").primaryKey(),
+    offlineDeviceId: text("offline_device_id").notNull().references(() => offlineDevices.id),
+    documentType: text("document_type").notNull(),
+    prefix: text("prefix").notNull(),
+    rangeStart: integer("range_start").notNull(),
+    rangeEnd: integer("range_end").notNull(),
+    nextNumber: integer("next_number").notNull(),
+    status: text("status").notNull(),
+    validFrom: text("valid_from").notNull(),
+    validTo: text("valid_to").notNull(),
+  },
+  (table) => [uniqueIndex("ux_offline_number_range").on(table.offlineDeviceId, table.documentType, table.prefix)],
+);
+
+export const offlineSyncBatches = sqliteTable(
+  "offline_sync_batches",
+  {
+    id: text("id").primaryKey(),
+    offlineDeviceId: text("offline_device_id").notNull().references(() => offlineDevices.id),
+    clientBatchId: text("client_batch_id").notNull(),
+    sequenceFrom: integer("sequence_from").notNull(),
+    sequenceTo: integer("sequence_to").notNull(),
+    previousBatchHash: text("previous_batch_hash"),
+    batchHash: text("batch_hash").notNull(),
+    signature: text("signature").notNull(),
+    documentCount: integer("document_count").notNull(),
+    status: text("status").notNull(),
+    receivedAt: text("received_at").notNull(),
+    processedAt: text("processed_at"),
+    rejectionReason: text("rejection_reason"),
+  },
+  (table) => [
+    uniqueIndex("ux_offline_client_batch").on(table.offlineDeviceId, table.clientBatchId),
+    uniqueIndex("ux_offline_batch_sequence").on(table.offlineDeviceId, table.sequenceFrom, table.sequenceTo),
+  ],
+);
+
+export const offlineConflicts = sqliteTable(
+  "offline_conflicts",
+  {
+    id: text("id").primaryKey(),
+    offlineSyncBatchId: text("offline_sync_batch_id").notNull().references(() => offlineSyncBatches.id),
+    conflictType: text("conflict_type").notNull(),
+    sourceDocumentId: text("source_document_id").notNull(),
+    existingResourceId: text("existing_resource_id"),
+    status: text("status").notNull(),
+    resolution: text("resolution"),
+    resolvedBy: text("resolved_by").references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (table) => [index("idx_offline_conflicts_status").on(table.status, table.createdAt)],
+);
+
+export const reportDefinitions = sqliteTable(
+  "report_definitions",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    audience: text("audience").notNull(),
+    description: text("description").notNull(),
+    classification: text("classification").notNull(),
+    queryVersion: text("query_version").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_report_definition_code").on(table.code)],
+);
+
+export const reportRuns = sqliteTable(
+  "report_runs",
+  {
+    id: text("id").primaryKey(),
+    reportDefinitionId: text("report_definition_id").notNull().references(() => reportDefinitions.id),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").references(() => taxpayers.id),
+    parameters: text("parameters").notNull(),
+    status: text("status").notNull(),
+    rowCount: integer("row_count"),
+    resultSummary: text("result_summary"),
+    outputDocumentId: text("output_document_id").references(() => documentMetadata.id),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    requestedAt: text("requested_at").notNull(),
+    completedAt: text("completed_at"),
+    expiresAt: text("expires_at"),
+    errorCode: text("error_code"),
+  },
+  (table) => [index("idx_report_runs_status_requested").on(table.status, table.requestedAt)],
+);
+
+export const serviceComponents = sqliteTable(
+  "service_components",
+  {
+    id: text("id").primaryKey(),
+    componentKey: text("component_key").notNull(),
+    displayName: text("display_name").notNull(),
+    componentType: text("component_type").notNull(),
+    criticality: text("criticality").notNull(),
+    configurationStatus: text("configuration_status").notNull(),
+    operationalStatus: text("operational_status").notNull(),
+    dependencySummary: text("dependency_summary").notNull(),
+    lastCheckedAt: text("last_checked_at"),
+    statusDetail: text("status_detail").notNull(),
+  },
+  (table) => [uniqueIndex("ux_service_component_key").on(table.componentKey)],
+);
+
 export const invoices = sqliteTable(
   "invoices",
   {

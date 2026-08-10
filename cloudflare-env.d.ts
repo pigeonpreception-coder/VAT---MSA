@@ -20,9 +20,26 @@ interface Fetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
+interface R2PutOptions {
+  httpMetadata?: { contentType?: string; contentDisposition?: string };
+  customMetadata?: Record<string, string>;
+}
+
+interface R2Object {
+  key: string;
+  size: number;
+  etag: string;
+}
+
+interface R2Bucket {
+  put(key: string, value: ArrayBuffer | ArrayBufferView | Blob | ReadableStream, options?: R2PutOptions): Promise<R2Object | null>;
+  delete(key: string): Promise<void>;
+}
+
 declare module "cloudflare:workers" {
   export const env: {
     DB: D1Database;
+    DOCUMENTS: R2Bucket;
     ASSETS?: Fetcher;
   };
 }

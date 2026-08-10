@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.5.0
-  summary: Controlled identity, business operations, VAT invoice certification and verification contract.
+  version: 0.6.0
+  summary: Controlled identity, business operations, VAT lifecycle, evidence and platform-edge contract.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
     error codes, signature formats, retention and service levels require NamRA approval.
@@ -31,6 +31,9 @@ tags:
   - name: Refunds
   - name: Invoices
   - name: Certificates
+  - name: Platform
+  - name: Documents
+  - name: Reports
   - name: Offline
   - name: Verification
 paths:
@@ -485,6 +488,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/CertificationReceipt'
         '404': { $ref: '#/components/responses/NotFound' }
+  /v1/platform:
+    get:
+      tags: [Platform]
+      operationId: getPlatformPosture
+      summary: Read authorised integration, API client, offline, reporting, document and service-component posture.
+      security:
+        - oauth2: [platform.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Role- and tenant-scoped platform posture. Credential values are never returned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/documents:
+    post:
+      tags: [Documents]
+      operationId: quarantineDocument
+      summary: Store a bounded evidence object in private quarantine and commit integrity metadata.
+      description: The object is unavailable for download until an external malware scanner records a clean result. No scan result is inferred by this service.
+      security:
+        - oauth2: [documents.upload]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/DocumentUpload' }
+      responses:
+        '201':
+          description: Evidence stored in private quarantine with SHA-256 integrity metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuarantinedDocumentResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/ValidationFailed' }
+        '415': { $ref: '#/components/responses/ValidationFailed' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/reports/{code}/runs:
+    post:
+      tags: [Reports]
+      operationId: runControlledReport
+      summary: Execute an allow-listed, tenant-scoped inline aggregate report.
+      description: Arbitrary SQL is never accepted. Large exports remain unavailable until a separate worker and clean-document pipeline are configured.
+      security:
+        - oauth2: [reports.run]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 80 }
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              maxProperties: 50
+      responses:
+        '201':
+          description: Inline report completed and registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InlineReportResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/offline/batches:
     post:
       tags: [Offline]
@@ -493,7 +570,7 @@ paths:
       security:
         - oauth2: [offline.sync]
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -502,11 +579,11 @@ paths:
               $ref: '#/components/schemas/OfflineBatch'
       responses:
         '202':
-          description: Batch accepted; individual document outcomes are processed independently.
+          description: Batch intake completed. Until device trust and signature verification are configured, the returned batch is REJECTED with an explicit reason and preserved as audit evidence.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SubmissionAccepted'
+                $ref: '#/components/schemas/OfflineBatchResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -562,6 +639,9 @@ components:
             invoices.write: Submit fiscal documents.
             invoices.read: Read documents belonging to the authorised taxpayer.
             certificates.read: Retrieve certification receipts.
+            platform.read: Read authorised platform, integration and service-component posture.
+            documents.upload: Store tenant-scoped evidence in private quarantine.
+            reports.run: Execute allow-listed, tenant-scoped inline reports.
             offline.sync: Synchronise enrolled offline devices.
   parameters:
     IdempotencyKey:
@@ -886,6 +966,93 @@ components:
           items:
             $ref: './schemas/vat-msa-invoice.schema.json'
         device_signature: { type: string }
+    OfflineBatchResponse:
+      type: object
+      additionalProperties: false
+      required: [batch]
+      properties:
+        batch:
+          type: object
+          additionalProperties: true
+          required: [id, client_batch_id, status, received_at]
+          properties:
+            id: { type: string, format: uuid }
+            client_batch_id: { type: string, format: uuid }
+            status: { type: string, enum: [REJECTED, ACCEPTED, PROCESSING, CONFLICT] }
+            rejection_reason: { type: [string, 'null'], maxLength: 200 }
+            received_at: { type: string, format: date-time }
+    DocumentUpload:
+      type: object
+      additionalProperties: false
+      required: [owner_domain, owner_resource_id, classification, file]
+      properties:
+        organisation_id: { type: string, minLength: 2, maxLength: 100 }
+        owner_domain: { type: string, enum: [EXPENSE, IMPORT, AUDIT_CASE, VAT_ADJUSTMENT, REFUND, BANK_IMPORT] }
+        owner_resource_id: { type: string, minLength: 2, maxLength: 100 }
+        classification: { type: string, enum: [INTERNAL, CONFIDENTIAL, TAX_CONFIDENTIAL, RESTRICTED] }
+        file:
+          type: string
+          format: binary
+          maxLength: 10485760
+    QuarantinedDocumentResponse:
+      type: object
+      additionalProperties: false
+      required: [document, next_action]
+      properties:
+        document:
+          type: object
+          additionalProperties: false
+          required: [id, owner_domain, owner_resource_id, file_name, content_type, size_bytes, checksum_sha256, classification, scan_status, status, uploaded_at]
+          properties:
+            id: { type: string, format: uuid }
+            owner_domain: { type: string }
+            owner_resource_id: { type: string }
+            file_name: { type: string, maxLength: 180 }
+            content_type: { type: string }
+            size_bytes: { type: integer, minimum: 1, maximum: 10485760 }
+            checksum_sha256: { type: string, pattern: '^[A-Fa-f0-9]{64}$' }
+            classification: { type: string }
+            scan_status: { type: string, const: PENDING_EXTERNAL_SCANNER }
+            status: { type: string, const: QUARANTINED }
+            uploaded_at: { type: string, format: date-time }
+        next_action: { type: string }
+    InlineReportResponse:
+      type: object
+      additionalProperties: false
+      required: [report_run]
+      properties:
+        report_run:
+          type: object
+          additionalProperties: false
+          required: [id, report_code, status, result_summary, requested_at]
+          properties:
+            id: { type: string, format: uuid }
+            report_code: { type: string }
+            status: { type: string, const: COMPLETED_INLINE }
+            result_summary:
+              type: object
+              additionalProperties: { type: integer }
+            requested_at: { type: string, format: date-time }
+    PlatformSnapshot:
+      type: object
+      additionalProperties: false
+      required: [integrations, clients, webhooks, syncJobs, bankImports, payments, devices, numberRanges, batches, conflicts, reportDefinitions, reportRuns, components, documents, outbox]
+      properties:
+        integrations: { type: array, items: { type: object, additionalProperties: true } }
+        clients: { type: array, items: { type: object, additionalProperties: true } }
+        webhooks: { type: array, items: { type: object, additionalProperties: true } }
+        syncJobs: { type: array, items: { type: object, additionalProperties: true } }
+        bankImports: { type: array, items: { type: object, additionalProperties: true } }
+        payments: { type: array, items: { type: object, additionalProperties: true } }
+        devices: { type: array, items: { type: object, additionalProperties: true } }
+        numberRanges: { type: array, items: { type: object, additionalProperties: true } }
+        batches: { type: array, items: { type: object, additionalProperties: true } }
+        conflicts: { type: array, items: { type: object, additionalProperties: true } }
+        reportDefinitions: { type: array, items: { type: object, additionalProperties: true } }
+        reportRuns: { type: array, items: { type: object, additionalProperties: true } }
+        components: { type: array, items: { type: object, additionalProperties: true } }
+        documents: { type: array, items: { type: object, additionalProperties: true } }
+        outbox: { type: array, items: { type: object, additionalProperties: true } }
     PublicVerification:
       type: object
       additionalProperties: false

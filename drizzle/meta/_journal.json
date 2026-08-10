@@ -43,6 +43,13 @@
       "when": 1786345879884,
       "tag": "0005_elite_puma",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786347299854,
+      "tag": "0006_colossal_ironclad",
+      "breakpoints": true
     }
   ]
 }

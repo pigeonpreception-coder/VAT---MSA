@@ -422,6 +422,104 @@ const SCHEMA_STATEMENTS = [
     reviewer_id TEXT NOT NULL REFERENCES app_users(id), reviewed_at TEXT NOT NULL,
     UNIQUE (refund_claim_id, stage)
   )`,
+  `CREATE TABLE IF NOT EXISTS integration_connections (
+    id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id), provider_key TEXT NOT NULL,
+    category TEXT NOT NULL, display_name TEXT NOT NULL, capabilities TEXT NOT NULL,
+    endpoint_reference TEXT, credential_reference TEXT, configuration_status TEXT NOT NULL,
+    operational_status TEXT NOT NULL, data_classification TEXT NOT NULL,
+    last_health_check_at TEXT, last_health_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (provider_key, organisation_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS api_clients (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), name TEXT NOT NULL,
+    client_key TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL, credential_reference TEXT NOT NULL,
+    status TEXT NOT NULL, rate_limit_profile TEXT NOT NULL, last_rotated_at TEXT,
+    expires_at TEXT, created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+    id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id), event_types TEXT NOT NULL,
+    endpoint_url TEXT NOT NULL, signing_key_reference TEXT NOT NULL, status TEXT NOT NULL,
+    created_at TEXT NOT NULL, UNIQUE (api_client_id, endpoint_url)
+  )`,
+  `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id TEXT PRIMARY KEY, webhook_subscription_id TEXT NOT NULL REFERENCES webhook_subscriptions(id),
+    outbox_event_id TEXT NOT NULL REFERENCES outbox_events(id), status TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0, response_status INTEGER,
+    next_attempt_at TEXT, delivered_at TEXT, last_error TEXT, created_at TEXT NOT NULL,
+    UNIQUE (webhook_subscription_id, outbox_event_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS sync_jobs (
+    id TEXT PRIMARY KEY, integration_connection_id TEXT NOT NULL REFERENCES integration_connections(id),
+    organisation_id TEXT REFERENCES organisations(id), job_type TEXT NOT NULL, direction TEXT NOT NULL,
+    status TEXT NOT NULL, cursor TEXT, records_read INTEGER NOT NULL DEFAULT 0,
+    records_written INTEGER NOT NULL DEFAULT 0, error_count INTEGER NOT NULL DEFAULT 0,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    started_at TEXT, completed_at TEXT, last_error TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS bank_imports (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    integration_connection_id TEXT REFERENCES integration_connections(id), document_id TEXT REFERENCES document_metadata(id),
+    bank_name TEXT NOT NULL, account_reference_masked TEXT NOT NULL,
+    statement_from TEXT NOT NULL, statement_to TEXT NOT NULL, currency TEXT NOT NULL,
+    transaction_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS payment_instructions (
+    id TEXT PRIMARY KEY, refund_claim_id TEXT REFERENCES refund_claims(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL, beneficiary_reference_masked TEXT NOT NULL, provider TEXT NOT NULL,
+    status TEXT NOT NULL, provider_reference TEXT, idempotency_key TEXT NOT NULL,
+    approved_by TEXT NOT NULL REFERENCES app_users(id), approved_at TEXT NOT NULL,
+    submitted_at TEXT, settled_at TEXT, last_error TEXT, UNIQUE (provider, idempotency_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS offline_devices (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    branch_id TEXT REFERENCES branches(id), device_code TEXT NOT NULL, display_name TEXT NOT NULL,
+    public_key_reference TEXT, certificate_fingerprint TEXT, status TEXT NOT NULL,
+    enrolment_status TEXT NOT NULL, last_accepted_sequence INTEGER NOT NULL DEFAULT 0,
+    last_batch_hash TEXT, last_seen_at TEXT, created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, device_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS offline_number_ranges (
+    id TEXT PRIMARY KEY, offline_device_id TEXT NOT NULL REFERENCES offline_devices(id),
+    document_type TEXT NOT NULL, prefix TEXT NOT NULL, range_start INTEGER NOT NULL,
+    range_end INTEGER NOT NULL, next_number INTEGER NOT NULL, status TEXT NOT NULL,
+    valid_from TEXT NOT NULL, valid_to TEXT NOT NULL,
+    UNIQUE (offline_device_id, document_type, prefix)
+  )`,
+  `CREATE TABLE IF NOT EXISTS offline_sync_batches (
+    id TEXT PRIMARY KEY, offline_device_id TEXT NOT NULL REFERENCES offline_devices(id),
+    client_batch_id TEXT NOT NULL, sequence_from INTEGER NOT NULL, sequence_to INTEGER NOT NULL,
+    previous_batch_hash TEXT, batch_hash TEXT NOT NULL, signature TEXT NOT NULL,
+    document_count INTEGER NOT NULL, status TEXT NOT NULL, received_at TEXT NOT NULL,
+    processed_at TEXT, rejection_reason TEXT,
+    UNIQUE (offline_device_id, client_batch_id), UNIQUE (offline_device_id, sequence_from, sequence_to)
+  )`,
+  `CREATE TABLE IF NOT EXISTS offline_conflicts (
+    id TEXT PRIMARY KEY, offline_sync_batch_id TEXT NOT NULL REFERENCES offline_sync_batches(id),
+    conflict_type TEXT NOT NULL, source_document_id TEXT NOT NULL, existing_resource_id TEXT,
+    status TEXT NOT NULL, resolution TEXT, resolved_by TEXT REFERENCES app_users(id),
+    created_at TEXT NOT NULL, resolved_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS report_definitions (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, audience TEXT NOT NULL,
+    description TEXT NOT NULL, classification TEXT NOT NULL, query_version TEXT NOT NULL,
+    status TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS report_runs (
+    id TEXT PRIMARY KEY, report_definition_id TEXT NOT NULL REFERENCES report_definitions(id),
+    organisation_id TEXT REFERENCES organisations(id), taxpayer_id TEXT REFERENCES taxpayers(id),
+    parameters TEXT NOT NULL, status TEXT NOT NULL, row_count INTEGER, result_summary TEXT,
+    output_document_id TEXT REFERENCES document_metadata(id),
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    completed_at TEXT, expires_at TEXT, error_code TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS service_components (
+    id TEXT PRIMARY KEY, component_key TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+    component_type TEXT NOT NULL, criticality TEXT NOT NULL,
+    configuration_status TEXT NOT NULL, operational_status TEXT NOT NULL,
+    dependency_summary TEXT NOT NULL, last_checked_at TEXT, status_detail TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS invoice_lines (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id), line_number INTEGER NOT NULL,
     description TEXT NOT NULL, quantity TEXT NOT NULL, unit_code TEXT NOT NULL,
@@ -526,6 +624,10 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_disputes_status_filed ON disputes(status, filed_at)`,
   `CREATE INDEX IF NOT EXISTS idx_risk_taxpayer_status ON risk_indicators(taxpayer_id, status, severity)`,
   `CREATE INDEX IF NOT EXISTS idx_refund_claim_status_risk ON refund_claims(status, risk_tier, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_requested ON sync_jobs(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_bank_import_status_created ON bank_imports(organisation_id, status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_report_runs_status_requested ON report_runs(status, requested_at)`,
 ];
 
 const SEED_STATEMENTS = [
@@ -914,6 +1016,63 @@ const COMPLIANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('compliance-v1','2026-08-10T08:00:00Z')`,
 ];
 
+const PLATFORM_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('integrations:read','INTEGRATION','READ','Read integration capability and health posture','RESTRICTED','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('integrations:manage','INTEGRATION','MANAGE','Manage governed integration configuration references','RESTRICTED','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('developer:read','DEVELOPER','READ','Read API client and webhook posture','RESTRICTED','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('developer:manage','DEVELOPER','MANAGE','Manage API clients without exposing credentials','RESTRICTED','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('offline:read','OFFLINE','READ','Read offline device, range, batch and conflict posture','RESTRICTED','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('offline:sync','OFFLINE','SYNC','Submit signed ordered offline batches','RESTRICTED','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('reports:read','REPORT','READ','Read governed report definitions and runs','CONFIDENTIAL','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('reports:run','REPORT','RUN','Run tenant-scoped governed reports','CONFIDENTIAL','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('platform:read','PLATFORM','READ','Read service component and queue posture','SECURITY','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('payments:read','PAYMENT','READ','Read governed payment instruction posture','CONFIDENTIAL','2026-08-10T08:30:00Z')`,
+
+  `INSERT OR IGNORE INTO integration_connections
+    (id,organisation_id,provider_key,category,display_name,capabilities,endpoint_reference,credential_reference,configuration_status,operational_status,data_classification,last_health_check_at,last_health_outcome,created_at,updated_at)
+    VALUES ('integration-itas',NULL,'ITAS','GOVERNMENT','ITAS statutory services','["IDENTITY_FEDERATION","TAXPAYER_VERIFICATION","RETURN_SUBMISSION"]',NULL,NULL,'REQUIRES_AUTHORITY_CONTRACT','DISABLED','TAX_CONFIDENTIAL',NULL,NULL,'2026-08-10T08:30:00Z','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO integration_connections
+    (id,organisation_id,provider_key,category,display_name,capabilities,endpoint_reference,credential_reference,configuration_status,operational_status,data_classification,last_health_check_at,last_health_outcome,created_at,updated_at)
+    VALUES ('integration-bipa',NULL,'BIPA','GOVERNMENT','BIPA company verification','["COMPANY_VERIFICATION"]',NULL,NULL,'REQUIRES_AUTHORITY_CONTRACT','DISABLED','RESTRICTED',NULL,NULL,'2026-08-10T08:30:00Z','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO integration_connections
+    (id,organisation_id,provider_key,category,display_name,capabilities,endpoint_reference,credential_reference,configuration_status,operational_status,data_classification,last_health_check_at,last_health_outcome,created_at,updated_at)
+    VALUES ('integration-bank-org1','org-0001','BANK_FILE_OR_API','BANKING','Bank statement intake','["STATEMENT_IMPORT","PAYMENT_RECONCILIATION"]',NULL,NULL,'REQUIRES_BANK_CONTRACT','DISABLED','CONFIDENTIAL',NULL,NULL,'2026-08-10T08:30:00Z','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO integration_connections
+    (id,organisation_id,provider_key,category,display_name,capabilities,endpoint_reference,credential_reference,configuration_status,operational_status,data_classification,last_health_check_at,last_health_outcome,created_at,updated_at)
+    VALUES ('integration-treasury',NULL,'TREASURY_PAYMENT','PAYMENT','Treasury refund payment','["REFUND_PAYMENT"]',NULL,NULL,'REQUIRES_TREASURY_CONTRACT','DISABLED','TAX_CONFIDENTIAL',NULL,NULL,'2026-08-10T08:30:00Z','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO api_clients
+    (id,organisation_id,name,client_key,scopes,credential_reference,status,rate_limit_profile,last_rotated_at,expires_at,created_by,created_at)
+    VALUES ('api-client-0001','org-0001','Namib Office ERP','erp_namib_office_01','["invoices.write","invoices.read"]','secret-manager://pending/api-client-0001','PENDING_CREDENTIAL_PROVISIONING','PILOT_STANDARD',NULL,NULL,'usr-local-admin','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO webhook_subscriptions
+    (id,api_client_id,event_types,endpoint_url,signing_key_reference,status,created_at)
+    VALUES ('webhook-0001','api-client-0001','["na.vatmsa.invoice.certified.v1"]','https://erp.namiboffice.example/webhooks/vat-msa','secret-manager://pending/webhook-0001','DISABLED_PENDING_VERIFICATION','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO sync_jobs
+    (id,integration_connection_id,organisation_id,job_type,direction,status,cursor,records_read,records_written,error_count,requested_by,requested_at,started_at,completed_at,last_error)
+    VALUES ('sync-0001','integration-itas',NULL,'RETURN_SUBMISSION','OUTBOUND','BLOCKED_CONFIGURATION',NULL,0,0,0,'usr-local-admin','2026-08-10T08:35:00Z',NULL,NULL,'ITAS authority contract is not configured.')`,
+  `INSERT OR IGNORE INTO bank_imports
+    (id,organisation_id,integration_connection_id,document_id,bank_name,account_reference_masked,statement_from,statement_to,currency,transaction_count,status,requested_by,created_at)
+    VALUES ('bank-import-0001','org-0001','integration-bank-org1',NULL,'Unconfigured bank','****0001','2026-08-01','2026-08-09','NAD',0,'EVIDENCE_REQUIRED','usr-local-admin','2026-08-10T08:35:00Z')`,
+  `INSERT OR IGNORE INTO offline_devices
+    (id,organisation_id,branch_id,device_code,display_name,public_key_reference,certificate_fingerprint,status,enrolment_status,last_accepted_sequence,last_batch_hash,last_seen_at,created_at)
+    VALUES ('offline-device-0001','org-0001','br-0001','POS-WHK-01','Windhoek POS 01',NULL,NULL,'PENDING','AWAITING_TRUST_BOOTSTRAP',0,NULL,NULL,'2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO offline_number_ranges
+    (id,offline_device_id,document_type,prefix,range_start,range_end,next_number,status,valid_from,valid_to)
+    VALUES ('offline-range-0001','offline-device-0001','TAX_INVOICE','WHK26',1,1000,1,'HELD_PENDING_ENROLMENT','2026-08-10T00:00:00Z','2026-12-31T23:59:59Z')`,
+  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-vat','VAT_POSITION','VAT position summary','BOTH','Latest controlled VAT positions and net aggregate.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-cases','COMPLIANCE_CASELOAD','Compliance caseload','NAMRA','Open and total compliance case counts.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-sales','SALES_VAT_SUMMARY','Sales and VAT summary','BOTH','Invoice count, gross value and VAT aggregate.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO report_runs
+    (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code)
+    VALUES ('report-run-0001','report-def-vat','org-0001','tp-0001','{}','COMPLETED_INLINE',2,'{"periods":2,"net_cents":937500}',NULL,'usr-local-admin','2026-08-10T08:40:00Z','2026-08-10T08:40:00Z','2026-08-11T08:40:00Z',NULL)`,
+  `INSERT OR IGNORE INTO service_components VALUES ('component-web','WEB_APP','VAT-MSA web application','APPLICATION','HIGH','CONFIGURED','OPERATIONAL','Cloudflare Worker/Vinext runtime','2026-08-10T08:45:00Z','Release gate and readiness checks passed.')`,
+  `INSERT OR IGNORE INTO service_components VALUES ('component-d1','D1','Structured transactional state','DATABASE','CRITICAL','CONFIGURED','OPERATIONAL','Cloudflare D1 binding DB','2026-08-10T08:45:00Z','Schema initialisation and prepared-query probe passed.')`,
+  `INSERT OR IGNORE INTO service_components VALUES ('component-r2','R2_DOCUMENTS','Private document quarantine','OBJECT_STORAGE','HIGH','CONFIGURED','QUARANTINE_ONLY','Cloudflare R2 binding DOCUMENTS','2026-08-10T08:45:00Z','Uploads remain quarantined pending an external malware scanner.')`,
+  `INSERT OR IGNORE INTO service_components VALUES ('component-itas','ITAS','ITAS statutory integration','EXTERNAL','CRITICAL','REQUIRES_AUTHORITY_CONTRACT','DISABLED','NamRA/ITAS contract, credentials and approved mappings','2026-08-10T08:45:00Z','No legal filing or taxpayer verification is claimed.')`,
+  `INSERT OR IGNORE INTO service_components VALUES ('component-hsm','SIGNING_HSM','Production certificate signing','SECURITY','CRITICAL','REQUIRES_SECURITY_CONTRACT','DISABLED','HSM/KMS keys and approved signature profile','2026-08-10T08:45:00Z','Development signatures are not production legal signatures.')`,
+  `INSERT OR IGNORE INTO service_components VALUES ('component-events','OUTBOX','Durable event outbox','MESSAGING','HIGH','CONFIGURED','PENDING_CONSUMER','D1 outbox table and external publisher','2026-08-10T08:45:00Z','Events are durable; external broker publisher is not configured.')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('platform-v1','2026-08-10T09:00:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -946,6 +1105,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!vatLifecycleSeed) await db.batch(VAT_LIFECYCLE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const complianceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("compliance-v1").first();
     if (!complianceSeed) await db.batch(COMPLIANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const platformSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("platform-v1").first();
+    if (!platformSeed) await db.batch(PLATFORM_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

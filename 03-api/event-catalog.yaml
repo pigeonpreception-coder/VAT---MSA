@@ -1,4 +1,4 @@
-catalog_version: 0.4.0
+catalog_version: 0.5.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,21 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.document.quarantined.v1
+    owner: Evidence Custody Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records the private object key, integrity checksum and pending external malware-scan state without making the object consumable.
+  - type: na.vatmsa.offline.batch-rejected.v1
+    owner: Offline Synchronisation Domain
+    partition_key: device_id
+    contains_tax_confidential_data: true
+    purpose: Preserves an untrusted, replayed, out-of-sequence or unverifiable batch attempt and its explicit rejection reason.
+  - type: na.vatmsa.report.completed-inline.v1
+    owner: Reporting Domain
+    partition_key: taxpayer_id
+    contains_tax_confidential_data: true
+    purpose: Records completion of a controlled tenant-scoped aggregate report without exposing its result payload to the event stream.
   - type: na.vatmsa.dispute.filed.v1
     owner: Dispute Domain
     partition_key: taxpayer_id
