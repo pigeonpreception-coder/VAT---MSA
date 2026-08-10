@@ -1,5 +1,11 @@
 # I-J. API and integration architecture
 
+## Extension contract groups
+
+The catalogue adds `/licensing`, organisation employee/administrator/structure resources, `/organisation-roles`, `/workflows`, `/access-governance`, `/navigation` and permission-aware `/search`. Every endpoint evaluates identity, organisation, role/permission, entitlement, security policy, workflow state and SoD independently. Upgrade and renewal endpoints initiate approved provider workflows; they do not accept a client-selected licence state.
+
+List APIs use server filtering and keyset pagination. High-cardinality role, employee, workflow and search results are never loaded wholesale at login. Entitlement-changing commands emit invalidation events; consumption counters use atomic reservation or durable reservation/compensation rather than a dashboard read.
+
 ## API principles
 
 All financial/tax commands are authenticated, authorized, tenant/capability-scoped, versioned, bounded, idempotent and correlated. Request IDs do not grant resource access. Machine integrations never authenticate as human users. API errors use `application/problem+json` with stable code, safe detail and correlation ID.

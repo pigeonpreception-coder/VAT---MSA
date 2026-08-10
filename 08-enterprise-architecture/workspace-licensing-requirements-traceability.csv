@@ -1,0 +1,43 @@
+Requirement_ID,Requirement,Architecture_Component,Data_or_Contract,Security_Boundary,Verification,Approval
+WLA-01,Integrate with approved baseline,Enterprise architecture,Extension package and ADRs,No parallel identity or control plane,Architecture diff review,Architecture Board
+WLA-02,One organisation one licensed administrator dynamic capabilities,Organisation and Licensing,OrganisationCapability and OrganisationAdministrator,Canonical taxpayer and tenant isolation,Identity and duplicate tests,NamRA plus Architecture
+WLA-03,Collapsible hierarchical workspace,Workspace Service,NavigationWorkspace Folder Item,Authorization rechecked on route,Keyboard responsive and state tests,Product UX
+WLA-04,Capability-grouped workspace catalogue,UX architecture,Workspace configuration catalogue,Protected classifications,Information architecture review,Product owners
+WLA-05,Dynamic workspace engine,Workspace and Policy,Navigation projection API,Backend visibility and action enforcement,Client manipulation and cache invalidation tests,CISO plus Architecture
+WLA-06,Organisation Portal Administrator,Organisation Administration,Administrator appointment,Separate from NamRA and platform roles,Provisioning and privilege tests,Product plus CISO
+WLA-07,Licence activation flow,Licensing and Identity,Subscription OrganisationLicense activation saga,Verified taxpayer VAT organisation and assurance,Idempotent failure and rollback tests,Commercial plus NamRA plus ITAS
+WLA-08,Licence based access,Entitlement Service,Feature and limit policy,Server side decision,Direct API bypass tests,Commercial plus CISO
+WLA-09,Entitlement engine,Policy architecture,Entitlement decision and usage reservation,Strictest denial wins,Concurrency and replay tests,Architecture Board
+WLA-10,Licence states and retention,Licensing and Records,State machine and retention policy,No silent record deletion,State transition retention and export tests,Legal plus Records plus Product
+WLA-11,Dynamic employee management,Organisation Administration,Employee Position Department Branch,Organisation scoped administration,Tenant and lifecycle tests,Product
+WLA-12,Job title engine,Organisation Administration,JobTitle and Position,Job title grants no access,Negative authorization tests,Product plus CISO
+WLA-13,Dynamic organisation roles,Organisation Authorization,OrganisationRole and PermissionSet,Protected catalogue and ceilings,Role escalation tests,CISO plus business owners
+WLA-14,Multi-dimensional permissions,Policy architecture,Permission scope threshold authority,Safe policy compiler and default deny,Scope threshold and fuzz tests,CISO
+WLA-15,Buyer seller capability model,Organisation domain,OrganisationCapability and UserCapability,One taxpayer identity,Capability and cross-role tests,NamRA plus Architecture
+WLA-16,Workflow designer,Workflow Service,Typed definition nodes conditions transitions,No executable tenant code,Compiler and transition tests,Architecture plus business owners
+WLA-17,Workflow version control,Workflow Service,Immutable WorkflowVersion and pinned instance,No historical rewrite,Mutation negative and replay tests,CISO plus Records
+WLA-18,Workflow security and SoD,Authorization and Workflow,SoDRule and Violation,Fail closed self-approval prevention,Create approve execute abuse tests,CISO plus Finance
+WLA-19,Access request approval,Access Governance,AccessRequest and AccessApproval,Effective scoped grant with audit,Workflow and bypass tests,Business owners
+WLA-20,Access certification,Access Governance,AccessReview and Certification,Reviewer scope and immutable history,Campaign dormancy excessive privilege tests,CISO plus HR
+WLA-21,Employee offboarding,Identity and Access Governance,Revocation and task reassignment saga,History preserved rapid revocation,Race replay and attribution tests,CISO plus HR
+WLA-22,Administrator hierarchy,Organisation Administration,AdministratorRole appointments,Least privilege and scope ceilings,Delegated admin breakout tests,CISO plus Product
+WLA-23,Multi administrator model,Organisation Administration,Primary and delegated appointments,No implicit organisation wide access,Hierarchy and conflict tests,CISO plus Product
+WLA-24,Security sensitive administrator operations,Privileged Access,Step up change approval audit,No silent privileged change,Assurance quorum and repudiation tests,CISO
+WLA-25,Configurable business controls,Configuration architecture,Configuration control matrix,Configuration is not security boundary,Static policy and negative tests,Architecture Board
+WLA-26,System enforced integrity controls,Security architecture,Identity tenant tax licence audit controls,Ordinary admins cannot weaken controls,Penetration and tamper tests,CISO plus NamRA
+WLA-27,Formal control classification,Governance,Configuration system matrix,Named authority per control,Architecture board review,Architecture Board
+WLA-28,Configuration cannot be security boundary,Zero Trust,Policy enforcement points,Server and data enforcement,Frontend manipulation tests,CISO
+WLA-29,Workspace user experience,UX architecture,Navigation search breadcrumb restricted states,Permission safe disclosure,WCAG usability and responsive tests,Product UX
+WLA-30,Permission aware global search,Search Service,Authorized indexes and query API,Tenant field masking and purpose,Inference enumeration and tenant tests,CISO plus Data
+WLA-31,Licence aware UX,Workspace and Licensing,Restriction reason projection,Commercial disclosure authorization,Persona and leakage tests,Commercial plus Product
+WLA-32,Administration command centre,Organisation Admin UX,Governed read models,No NamRA SOC or other tenant exposure,Persona E2E and accessibility tests,Product plus CISO
+WLA-33,Administrator security dashboard,Security read model,Organisation scoped security events,Minimised security data,Leakage and escalation tests,CISO
+WLA-34,Data model extensions,Data architecture,Updated ERD and logical dictionary,Tenant keys immutable versions and constraints,Schema invariant and migration tests,Data Architecture
+WLA-35,API extensions,API architecture,Updated API catalogue,Identity organisation role entitlement policy per endpoint,Contract auth and fuzz tests,API Governance
+WLA-36,Event extensions,Event architecture,Updated event catalogue,Minimised payload outbox and audit,Replay ordering and schema tests,Event Governance
+WLA-37,Security testing,Threat model,Abuse test catalogue,Explicit disposable environment authorization,Red team negative evidence,CISO
+WLA-38,Performance at enterprise cardinality,Scalability architecture,Indexes cache lazy pagination,No full authorization graph in browser,Load spike soak and invalidation tests,SRE plus Architecture
+WLA-39,Update architecture outputs,Architecture governance,All linked package artifacts,Approval gate preserved,Deliverable completeness check,Architecture Board
+WLA-40,Do not implement unapproved rules,Approval governance,Proposed requires approval register,No production authority inferred,Gate and release audit,Named authorities
+WLA-41,Business configuration versus system controls,Enterprise principles,Policy ownership and enforcement,Non-overridable integrity controls,Control mapping and bypass tests,Architecture Board plus CISO
+WLA-42,Integrated final architecture and impact decisions,Consolidated blueprint,Impact and dependency register,Canonical organisation retained,Architecture review and signoff,All named authorities

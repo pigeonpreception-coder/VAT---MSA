@@ -1,5 +1,13 @@
 # D, N-O. Portal, UX and UI design-system architecture
 
+## Hierarchical workspace extension
+
+The Buyer and Seller experiences become task emphasis inside one organisation workspace. Navigation is grouped into Home, Sales/Revenue, Procurement/Purchases, VAT/Tax, Accounting/Finance, Inventory/Operations, Projects, Documents/Records, Reporting/Analytics, Integrations, Administration and Licensing. The server returns only permitted/licensed items and safe restriction states.
+
+The shell uses a collapsible tree with one primary expanded workspace, preserved current-route ancestry, breadcrumbs, command search, favourites, recent functions and quick/contextual actions. Children load lazily. Preferences never grant access. `Access Restricted` differentiates missing permission, missing licence and step-up requirements only when disclosure is safe; sensitive functions remain hidden. Billing/upgrade detail is limited to authorised licence administrators.
+
+The Organisation Administration Command Centre gives scoped views of structure, users/seats, roles/access reviews, workflows/versions, licence/usage and organisation security posture without exposing NamRA/SOC internals. Keyboard tree semantics, responsive drawers and WCAG 2.2 AA remain release requirements.
+
 ## Experience model
 
 One authenticated user enters a workspace switchboard. Available experiences derive from memberships, organisation buyer/seller capabilities and official/technical roles. Switching portal changes task emphasis and allowed actions, not the underlying taxpayer identity or records.

@@ -1,4 +1,26 @@
-# VAT-MSA 45-deliverable architecture register
+# VAT-MSA baseline and workspace/licensing extension deliverable register
+
+## Workspace, organisation, licensing and workflow extension
+
+| # | Required extension output | Primary evidence | Document status |
+|---:|---|---|---|
+| 46 | Updated C4 architecture | `10-c4-enterprise-architecture.md`, updated L2/L3 and workspace component diagram | Complete for review |
+| 47 | Updated domain architecture | `02-domain-architecture.md`, `11-domain-capability-catalog.md`, domain map | Complete for review |
+| 48 | Updated organisation architecture | `30-workspace-organisation-licensing-workflow-architecture.md` | Complete for review; admin policy gated |
+| 49 | Updated IAM and RBAC/ABAC | `04-identity-rbac-abac.md`, `rbac-abac-matrix.csv`, ADR-018 | Complete for review; permission catalogue gated |
+| 50 | Licensing architecture | extension sections 4 and 15, ADR-017 | Complete for review; commercial/legal decisions gated |
+| 51 | Workflow architecture | extension section 7, workflow/SoD diagram, ADR-019 | Complete for review; transition catalogue gated |
+| 52 | Workspace/navigation architecture | extension section 5, ADR-016 | Complete for review; UX taxonomy gated |
+| 53 | Updated ERD and data dictionary | updated enterprise ERD, `13-logical-data-dictionary.md` | Complete logical model; physical migration gated |
+| 54 | Updated API catalogue | `api-catalog.yaml`, `15-api-contract-catalog.md` | Logical contract complete for review |
+| 55 | Updated event catalogue | `event-catalog.csv`, event architecture addendum | Complete for review |
+| 56 | Updated security architecture and threat model | extension sections 11/13, `17-threat-model-stride.md` | Complete initial control model; testing required |
+| 57 | Updated UX architecture | `03-portal-ux-design-system.md`, extension sections 5/12 | Complete for design review |
+| 58 | Updated requirements traceability | `workspace-licensing-requirements-traceability.csv` | All 42 enhancement sections mapped |
+| 59 | Updated ADRs | ADR-016 through ADR-019 | Proposed; explicit approvals required |
+| 60 | Updated implementation roadmap | `09-implementation-roadmap.md`, `28-detailed-roadmap.md` | Gated sequence complete for review |
+| 61 | Configuration versus enforcement classification | `configuration-system-control-matrix.csv` | Complete for security/governance review |
+| 62 | Impact, contradiction and dependency assessment | extension sections 14-16 | Complete; named decisions outstanding |
 
 All statuses describe documentation completeness, not production approval. Approval status is governed separately in `29-architecture-approval-gate.md`.
 

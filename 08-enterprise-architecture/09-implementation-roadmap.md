@@ -1,5 +1,9 @@
 # Phased implementation roadmap and acceptance boundaries
 
+## Architecture extension sequence
+
+After architecture approval, add a gated organisation-control runway before broad business-module expansion: (1) protected licence/entitlement and organisation-admin foundations; (2) permission catalogue and organisation-specific role model; (3) backend workspace projection and Administration Command Centre; (4) typed workflow/version/SoD runtime; (5) access request/certification/offboarding; and (6) permission-aware enterprise search and scale validation. Payment activation, production ITAS verification and statutory continuity behavior remain separately gated.
+
 This roadmap follows the approved sequence. Existing pilot capabilities are retained but do not justify skipping foundational acceptance.
 
 | Phase | Deliverable | Exit gate |

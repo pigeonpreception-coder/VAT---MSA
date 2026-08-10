@@ -1,11 +1,13 @@
 flowchart TD
   TAX["Verified taxpayer organisation"] --> EDGE["Protected edge / API gateway"]
+  ORGADMIN["Licensed Organisation Portal Administrator"] --> EDGE
   NAMRA["NamRA officials"] --> EDGE
   OPS["Platform / SRE / SOC"] --> EDGE
   SAAS["Approved SaaS / POS / ERP"] --> EDGE
   EDGE --> IAM["Identity federation and policy"]
   ITAS["ITAS / NamRA authority"] <--> IAM
-  IAM --> PORTALS["Buyer | Seller | NamRA | Admin portals"]
+  IAM --> PORTALS["Organisation Workspace | NamRA | Platform/Admin portals"]
+  SUBSCRIPTION["Approved subscription provider - gated"] -.-> EDGE
   PORTALS --> DOMAINS["Domain-modular application services"]
   DOMAINS --> TX["Operational transaction stores"]
   DOMAINS --> OUTBOX["Transactional outbox / event bus"]

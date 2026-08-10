@@ -1,0 +1,36 @@
+Function,Organisation_configurable,Platform_or_authority_configurable,System_enforced,Reason_and_boundary
+Job titles,Yes,Template catalogue only,No access implied,Organisation terminology cannot grant permission
+Positions and reporting lines,Yes,Validation schema,Organisation isolation,Employment structure is tenant specific
+Departments and business units,Yes,Reference constraints,Tenant foreign keys,Organisation structure is tenant specific
+Employee roles,Yes,System role templates and ceilings,Default deny and tenant scope,Role content varies by organisation
+Permission sets,Yes within grantable catalogue,Permission catalogue and protected actions,Server and data authorization,Configuration cannot create unknown or protected permissions
+Buyer and seller employee access,Yes within organisation capabilities,Capability types,Canonical organisation and entitlement checks,Dynamic function under one taxpayer
+Organisation capabilities,Requested by administrator,NamRA or product approval where regulated,Verified taxpayer and entitlement ceiling,Capability does not create identity
+Approval workflow,Yes through typed designer,Allowed node and condition catalogue,Published version and domain transition validation,Business specific but bounded
+Approval limits,Yes within ceilings,Maximums and regulated thresholds,Exact currency amount and SoD evaluation,Financial risk requires controlled bounds
+Workflow history,No,Retention and evidence policy,Append only and version pinned,Historical approvals cannot be rewritten
+Delegation and substitution,Yes scoped and time bounded,Delegation policy,No authority amplification and immutable evidence,Continuity without privilege escalation
+Segregation of duties,Limited rule strengthening,System policy and protected rules,Decision-time fail closed,Administrator cannot weaken mandatory SoD
+Navigation labels and order,Yes,Protected workspace definitions,Backend visibility authorization,UX configuration is not authorization
+Navigation visibility requests,Yes through role mappings,Protected item classifications,Server projection plus endpoint enforcement,Client cannot reveal protected functions
+Favourites and recent functions,Yes personal preference,Preference schema,Authorization rechecked,Preference grants no access
+Licence plans,No,Commercial authority,Immutable effective version,Users cannot create entitlements
+Feature entitlements,No,Commercial/product authority,Server decision and audit,Commercial integrity
+Subscription state,No,Approved provider or authorised back office,Signed/idempotent state transition,Prevents self-upgrade
+Usage limits,No,Commercial authority,Atomic reservation and reconciliation,Prevents quota bypass and race
+API access,Requested/configured within entitlement,Gateway scope and quota policy,Machine identity entitlement and rate enforcement,Security and licensing boundary
+Taxpayer identity,No,ITAS/NamRA authority,Canonical matching and uniqueness,Identity integrity
+VAT registration status,No,NamRA/ITAS authority,Verified effective-dated status,Statutory integrity
+VAT rules,No by organisation,NamRA controlled configuration,Signed version and calculation evidence,Tax integrity
+Invoice certification and correction,No ordinary override,NamRA controlled lifecycle,Immutable source and linked corrections,Legal record integrity
+Tenant isolation,No,Platform security authority,Service and data predicates,Organisation A cannot access B
+Authentication minimums,Limited stricter options,CISO policy,Secure protocol session and credential controls,Security boundary
+MFA for privileged actions,No weakening,CISO policy,Step-up and re-authentication,Privileged protection
+Encryption,No weakening,CISO and key authority,Encryption and key custody,Mandatory protection
+Audit logging,No,CISO/records policy,Tamper resistant actor-attributed evidence,Compliance and repudiation control
+Security monitoring,No,CISO/SOC authority,Independent telemetry and alerting,Ordinary admins cannot disable detection
+Data retention,Limited legal-hold requests,Legal/records authority,Policy execution and deletion blocks,Regulatory duty
+Search scope,No direct predicates,Search definitions and classification,Policy filtered indexes and masking,Prevents inference and tenant escape
+Primary administrator change,Request only,Organisation governance policy,Step-up approval and immutable event,Prevents takeover
+Privileged role grant,Request only,Grantable-role and quorum policy,Step-up SoD approval and expiry,Least privilege
+Offboarding task reassignment,Yes within approved targets,Protected ownership rules,Historical attribution and revocation,Continuity with evidence preservation

@@ -2,6 +2,12 @@
 
 ## What VAT-MSA is
 
+### Workspace, licensing and organisation-control extension
+
+The taxpayer experience evolves from static Buyer/Seller menus to one licence- and permission-aware workspace over the same organisation. A verified licence activation may provision one primary Organisation Portal Administrator, who can model employees, titles, positions, organisation roles, permission sets and versioned workflows within protected system ceilings. Buyer and Seller remain organisation capabilities, not accounts.
+
+The new License and Entitlement, Workspace/Navigation, Organisation Administration, Workflow and Access Governance components remain downstream of canonical identity and central policy. They cannot alter taxpayer identity, VAT rules, certified records, tenant boundaries, mandatory security, audit evidence or licence authority. Commercial plans, provider selection, expiry/statutory-continuity rules, administrator proofing and workflow policy remain `PROPOSED - REQUIRES APPROVAL`.
+
 VAT-MSA is the proposed national digital VAT transaction, taxpayer business, compliance and audit platform for Namibia. It gives each VAT-registered legal entity one verified taxpayer/organisation identity, lets that organisation act as Buyer, Seller or both, and connects commercial activity to electronic tax invoices, immutable VAT transactions, ledgers, reconciliation, returns and governed NamRA workflows.
 
 The platform solves fragmented invoice evidence, duplicate buyer/seller identities, delayed or inconsistent VAT records, manual reconciliation, weak integration governance and incomplete audit traceability. It also provides an extensible business layer—quotations, accounting, inventory, expense and project capabilities—without transferring statutory authority away from NamRA.

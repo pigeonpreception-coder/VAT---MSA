@@ -1,5 +1,23 @@
 # Formal Architecture Approval Gate
 
+## Workspace, licensing and workflow extension decision register
+
+| Component / decision | Proposed status | Conditions / decision required | Required approver |
+|---|---|---|---|
+| canonical organisation with dynamic Buyer/Seller capabilities | APPROVED WITH CONDITIONS | retain one taxpayer identity and validate capability terminology | Architecture + NamRA Tax |
+| Organisation Portal Administrator mapping | REQUIRES DECISION | confirm compatibility mapping from Taxpayer Administrator and proofing/change quorum | Product + CISO + NamRA |
+| administrator hierarchy and grantable permissions | REQUIRES DECISION | approve scopes, protected permissions, ceilings and recertification | CISO + Business Owners |
+| backend workspace/navigation engine | APPROVED WITH CONDITIONS | approve taxonomy, sensitive hiding, cache invalidation and WCAG evidence | Product + UX + CISO |
+| licence/entitlement bounded context | REQUIRES DECISION | approve plan authority, provider, state machine, metering and separation | Commercial + Finance + CISO |
+| expiry/suspension/downgrade statutory continuity | REQUIRES LEGAL/REGULATORY CONFIRMATION | define read/write/export/retention and legally required action policy | NamRA Tax + Legal + Records |
+| typed workflow designer/versioning | APPROVED WITH CONDITIONS | approve expression/transition catalogue, publication and migration policy | Architecture + Domain Owners + CISO |
+| mandatory SoD and emergency override | REQUIRES DECISION | approve rule catalogue; decide whether tightly controlled override exists | CISO + Finance Controls + Legal |
+| access request/certification/offboarding | APPROVED WITH CONDITIONS | approve review cadence, dormant threshold, task reassignment and revocation SLO | CISO + HR + Business Owners |
+| permission-aware enterprise search | APPROVED WITH CONDITIONS | approve indexing, masking, inference controls and purpose logging | CISO + Data + Privacy |
+| activation through ITAS/VAT verification | REQUIRES ITAS CONFIRMATION | authoritative attributes, assurance, lifecycle, SLA and sandbox | ITAS + NamRA |
+| payment/subscription activation | NOT READY | provider, sandbox, contracts, tax/refund/dispute and reconciliation absent | Commercial + Finance + Legal + CISO |
+| production implementation of extension | NOT READY | preceding applicable rows and ADR-016 to ADR-019 not signed | Architecture Board + Steering Committee |
+
 **Package status:** `REQUIRES DECISION` — architecture complete for review; production coding is not authorized by this document.
 
 ## Status vocabulary
@@ -60,4 +78,3 @@ Architecture/design work and disposable technical spikes may continue in isolate
 | Programme/Product owner |  |  |  |  |
 
 Any material change to identity, tenant isolation, tax calculation, certified record semantics, external authority, security zones, recovery targets or deployment topology reopens this gate and the affected ADRs.
-

@@ -1,6 +1,6 @@
 Role,Portal,Primary_permissions,Organisation_scope,Taxpayer_financial_data,NamRA_internal_risk,Platform_configuration,ABAC_obligations
 Director,Buyer+Seller,"dashboard,approvals,returns,reports,delegation",Own active memberships,Own organisation only,None,None,"capability,branch,workflow,MFA for submission"
-Taxpayer Administrator,Buyer+Seller,"organisation,users,roles,branches,consent,integrations",Own organisation,Metadata and explicitly granted business records,None,None,"no NamRA roles; approval and recertification"
+Organisation Portal Administrator (Taxpayer Administrator compatibility key),Organisation Workspace,"organisation,users,roles,branches,workflow,licensing metadata,consent,integrations",Own organisation,Metadata and explicitly granted business records,None,None,"no NamRA/platform roles; licence ceiling; approval; recertification; step-up"
 Finance Manager,Buyer+Seller,"accounting,invoices,expenses,returns,approvals,reports",Assigned organisations/branches,Approved financial scope,None,None,"period,branch,workflow,approval threshold"
 Accountant,Buyer+Seller,"journals,invoices,expenses,reconciliation,returns",Assigned organisations/periods,Approved financial scope,None,None,"period,status,segregation of duties"
 Finance Officer,Buyer+Seller,"invoices,purchases,receipts,payments",Assigned organisation/branches,Operational subset,None,None,"branch,amount threshold,workflow"
@@ -19,3 +19,9 @@ Super Administrator,Super Admin,"platform,features,APIs,integrations,deployment,
 Infrastructure Administrator,Super Admin,"infrastructure,capacity,recovery",Platform environment,None,None,Infrastructure only,"JIT,MFA,recorded session"
 Security Analyst,Super Admin/SOC,"security events,incidents,response,audit",Platform/security scope,Tokenized/minimal evidence only,Security indicators only,Security controls,"clearance,purpose,high-impact approval"
 Database Administrator,Super Admin,"database availability,backup,performance",Named data services,None by default,None,Data infrastructure,"JIT,query monitoring,break-glass approval"
+Finance Administrator,Organisation Administration,"finance employees,finance roles,finance workflows,assigned branches",Assigned branches/business units,Only separately granted finance scope,None,None,"delegated admin ceiling,SoD,step-up for privileged grants"
+User Access Administrator,Organisation Administration,"employees,invitations,role assignments,access reviews,offboarding",Own organisation or delegated unit,No financial scope by default,None,None,"grantable catalogue,approval,recertification,no authority amplification"
+Branch Administrator,Organisation Administration,"branch employees,branch roles,branch workflow assignments",Named branches,Branch metadata and separately granted records,None,None,"branch predicate,protected roles excluded"
+Workflow Administrator,Organisation Administration,"workflow draft,test,publication request,history read",Named domains/branches,No transaction approval by inheritance,None,None,"typed definitions,change approval,SoD,no self-publication where prohibited"
+Integration Administrator,Organisation Administration,"API clients,webhooks,connector configuration,usage",Named integrations,No tax records by default,None,None,"licence entitlement,step-up,credential references only,quota"
+Licence Administrator,Organisation Administration,"licence,entitlements,usage,billing metadata,renewal and change requests",Own organisation,No financial/tax records by inheritance,None,None,"commercial disclosure scope,cannot set licence state or limits"

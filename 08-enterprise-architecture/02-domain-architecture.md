@@ -1,5 +1,18 @@
 # C. Domain architecture
 
+## Added bounded contexts
+
+| Domain | Authoritative responsibilities | Publishes | Does not own |
+|---|---|---|---|
+| Licensing and Entitlements | plans, subscriptions, organisation licences, feature grants, limits, usage reservations and licence events | LicenseActivated, LicenseStateChanged, EntitlementChanged | taxpayer/VAT truth, payment-card data or security override |
+| Organisation Administration | employees, job titles, positions, departments, reporting lines and administrator appointments | EmployeeChanged, OrganisationAdminChanged | authentication, NamRA staff or licence state |
+| Organisation Authorization | organisation roles, permission sets, assignments, capabilities, scopes and financial authority | RoleChanged, PermissionGranted, PermissionRevoked | protected platform/NamRA permissions or policy ceilings |
+| Workflow | typed definitions, immutable versions, instances, decisions, delegation and escalation | WorkflowPublished, WorkflowDecisionRecorded, SoDViolationDetected | source transaction authority or historical mutation |
+| Access Governance | access requests, approvals, reviews, certifications, dormancy and offboarding orchestration | AccessRequested, AccessCertified, AccessRevoked | historical ownership deletion |
+| Workspace and Navigation | versioned hierarchy, policy-filtered projections and user preferences | NavigationConfigurationChanged | endpoint authorization or protected search records |
+
+Dependency order is `Identity/Taxpayer/Organisation -> Licensing -> Organisation Authorization -> Policy -> Workspace/Workflow/Domain action`. A denial from identity, tenant, security, tax or SoD cannot be overridden downstream.
+
 ## Bounded contexts and ownership
 
 See `diagrams/domain-map.mmd`.

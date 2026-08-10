@@ -1,5 +1,11 @@
 # A-B. Enterprise and solution architecture
 
+## Workspace and organisation-control extension
+
+The policy layer now consumes entitlement, usage, workflow authority and SoD facts in addition to identity/RBAC/ABAC. The experience layer receives a server-generated workspace projection; it does not own menu authorization. Domain services expose typed workflow extension points while retaining statutory and accounting invariants. New organisation-administration, licence, workflow and access-governance writes use the same audit/outbox pattern and organisation isolation as fiscal domains.
+
+At national scale, entitlement/policy projections use bounded caching with event-driven invalidation; workflow timeouts use a durable scheduler; permission-aware search uses rebuildable tenant/classification-safe indexes. None of these projections is authoritative.
+
 ## Mission and scope
 
 VAT-MSA is a national tax-transaction network and an integrated taxpayer business platform. It connects verified taxpayers, authorised users, NamRA/ITAS and approved software providers while preserving statutory authority, tax integrity and privacy. It is not one giant CRUD database and not a collection of disconnected portals.

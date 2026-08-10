@@ -1,0 +1,14 @@
+flowchart TD
+  D["Editable workflow draft"] --> V["Typed validation and simulation"]
+  V --> C["Change approval"]
+  C --> P["Immutable published WorkflowVersion"]
+  P --> N["New transaction pins version"]
+  N --> T["Authorized task assignment"]
+  T --> S{"SoD and authority decision"}
+  S -- Deny --> X["Violation evidence and remediation"]
+  S -- Allow --> A["Append-only approval decision"]
+  A --> Q{"Quorum or next condition"}
+  Q -- Continue --> T
+  Q -- Complete --> E["Authorized domain transition"]
+  P --> R["Retire for new transactions"]
+  R -.-> H["Existing instances retain pinned version and history"]

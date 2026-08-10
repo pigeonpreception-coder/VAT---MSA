@@ -4,6 +4,12 @@ The machine-readable logical route register is `api-catalog.yaml`. Detailed sche
 
 ## Common contract
 
+### Enterprise workspace extension
+
+New route families are listed in `api-catalog.yaml`: licence/entitlement/usage and approved upgrade/renewal initiation; organisation employees, invitations, administrators and structure; organisation roles/permissions/capabilities; workflow draft/test/publish/version/assign/decision; access request/review/certification/offboarding; navigation projection/children/actions/preferences; and permission-aware search.
+
+The common policy chain becomes `identity -> organisation -> active membership -> role/permission -> organisation capability -> licence/entitlement/usage -> workflow/financial authority -> SoD/security policy`. Reads compile policy predicates before storage/query execution. Financial, privileged, usage-consuming and lifecycle commands require idempotency and expected versions.
+
 | Item | Standard |
 |---|---|
 | Authentication | human federated session/token or named machine identity; public verification is explicitly anonymous/minimal |

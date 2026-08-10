@@ -1,7 +1,13 @@
 flowchart LR
   API["Invoice API Controller"] --> AUTH["Policy Enforcement"]
+  AUTH --> ENT["Licence + Entitlement Decision"]
+  AUTH --> SOD["SoD + Financial Authority"]
+  AUTH --> ORGSCOPE["Organisation / Branch / Record Scope"]
+  NAV["Navigation Projection"] --> AUTH
+  WF["Pinned Workflow Runtime"] --> AUTH
   AUTH --> CMD["Submit Invoice Command"]
   CMD --> RESOLVE["Taxpayer / Organisation Resolver"]
+  CMD --> WF
   CMD --> VALIDATE["Schema + Fiscal Validator"]
   VALIDATE --> RULES["Effective Tax Rule Resolver"]
   CMD --> NUMBER["Number / Offline Reservation Validator"]

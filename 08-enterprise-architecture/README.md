@@ -1,8 +1,14 @@
 # VAT-MSA complete enterprise architecture package
 
+## 2026-08 workspace, licensing and workflow extension
+
+The approved baseline is extended by `30-workspace-organisation-licensing-workflow-architecture.md`. It keeps one verified taxpayer organisation while adding a licensed Organisation Portal Administrator, configurable employees/job titles/roles, dynamic capability access, versioned workflows, access governance, server-side licence/usage enforcement and a collapsible permission-aware workspace.
+
+Review the extension with `configuration-system-control-matrix.csv`, `workspace-licensing-requirements-traceability.csv`, the new diagrams, ADR-016 through ADR-019 and the added decision rows in `29-architecture-approval-gate.md`. These artifacts update architecture only; they do not authorize payment integration, production licensing, ITAS verification or production implementation.
+
 Status: architecture-board draft for formal review. This package governs the evolution of the operational pilot into Namibia's national digital VAT infrastructure. It distinguishes the approved target, existing pilot evidence and production capabilities that still require NamRA/ITAS confirmation, legal approval, selected platforms and acceptance evidence. No production implementation is authorized by this package until the Architecture Approval Gate permits it.
 
-Start with the authoritative [45-deliverable register](00-deliverable-register.md), then review the consolidated [23-part enterprise blueprint](VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md) and [formal approval gate](29-architecture-approval-gate.md).
+Start with the authoritative [baseline and extension deliverable register](00-deliverable-register.md), then review the consolidated [enterprise blueprint](VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md), the [workspace/licensing/workflow extension](30-workspace-organisation-licensing-workflow-architecture.md) and the [formal approval gate](29-architecture-approval-gate.md).
 
 ## Architecture principles
 

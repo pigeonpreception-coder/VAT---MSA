@@ -1,5 +1,14 @@
 # VAT-MSA Architecture Decision Register
 
+## Workspace, licensing and workflow extension decisions
+
+| ID | Decision | Status | Consequence |
+|---|---|---|---|
+| ADR-016 | Build dynamic workspace/navigation as a backend-authorized projection. | Proposed | Configurable UX without treating the client as an authorization boundary. |
+| ADR-017 | Establish a separate licence/entitlement authority with server-side usage enforcement and non-destructive expiry. | Proposed | Commercial integrity while preserving statutory/security/retention controls. |
+| ADR-018 | Allow organisation-specific roles/permissions only under protected system policy ceilings. | Proposed | Dynamic workforce configuration without privilege escalation. |
+| ADR-019 | Use typed immutable workflow versions with decision-time SoD. | Proposed | Flexible approvals with historical and segregation integrity. |
+
 | ID | Decision | Status | Consequence |
 |---|---|---|---|
 | ADR-001 | VAT-MSA is the system of record for certified invoice transactions, VAT sub-ledger entries, matching outcomes and related audit evidence; ITAS remains authoritative for taxpayer accounts and statutory return outcomes. | Proposed | Avoids duplicating the tax administration system while enabling transaction-level control. |
@@ -21,4 +30,3 @@
 ## Decision workflow
 
 Each proposed ADR must be reviewed by the Architecture Review Board. Decisions affecting law, taxpayer rights, invoice validity, evidence, retention, data residency or inter-agency exchange also require legal/privacy/records approval. Superseded ADRs remain in the register and link to the replacement.
-

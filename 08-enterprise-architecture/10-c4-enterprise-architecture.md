@@ -2,6 +2,12 @@
 
 ## Level 1: System context
 
+### Workspace and organisation-control extension
+
+Level 2 adds Organisation Administration, License/Entitlement, Workflow, Access Governance, Workspace/Navigation and Permission-aware Search containers behind the same gateway and policy plane. Level 3 adds policy projection, entitlement/usage reservation, typed workflow compiler/runtime, SoD evaluator, access-review orchestrator and navigation projection builder components.
+
+These components use domain-owned relational records, transactional outbox, immutable audit/security evidence, bounded caches and rebuildable search projections. No browser or administrator writes protected policy, licence state, tax rules or audit records directly. See `diagrams/workspace-licensing-components.mmd`.
+
 VAT-MSA sits between verified taxpayer organisations, authorised NamRA/platform users and approved external systems. Relationships and trust boundaries are shown in `diagrams/c4-level-1-context.mmd`.
 
 - Humans: taxpayer authorised users, delegated accountants, NamRA officers, NamRA admins, Super Admin/SRE/SOC.

@@ -1,5 +1,19 @@
 # Detailed Implementation Roadmap
 
+## Workspace/licensing/workflow insertion plan
+
+This extension is inserted after Phase 2 canonical taxpayer/organisation foundations and before unrestricted Phase 4 business-module rollout:
+
+| Increment | Scope | Entry dependency | Exit evidence |
+|---|---|---|---|
+| 2A - authority and policy contract | approve plans/states, administrator proofing, grantable permissions, workflow vocabulary, SoD and retention | signed ADR-016 to ADR-019 | no unresolved critical policy ambiguity for the bounded increment |
+| 2B - licence and organisation administration | licence/entitlement service, employees/structure, primary/delegated admins, usage reservation | 2A plus verified identity contract | tenant, privilege, quota, state and retention tests |
+| 2C - dynamic authorization and workspace | organisation roles/scopes/capabilities, navigation projection, restricted states and command centre | 2B | frontend manipulation, cache invalidation, accessibility and cardinality tests |
+| 2D - workflow and access governance | designer/compiler, versions, tasks, SoD, access request/review/offboarding | 2C | self-approval, history immutability, timer recovery and revocation tests |
+| 2E - search and scale | permission-aware search, lazy/paginated administration and performance tuning | 2D | tenant inference, thousands-of-employees/permissions and hundreds-of-workflows load evidence |
+
+Production payment, live ITAS activation and commercial launch are separate gates and cannot be inferred from these increments.
+
 This roadmap starts only after the formal approval gate. Dates and budgets are intentionally absent until scope, procurement, authority and team capacity are confirmed. Each phase uses the same signed artifacts across environments and closes with demonstrable acceptance evidence.
 
 | Phase | Scope and key deliverables | Dependencies | Principal risks | Exit/acceptance gate |
@@ -28,4 +42,3 @@ This roadmap starts only after the formal approval gate. Dates and budgets are i
 ## Increment governance
 
 Each phase is decomposed into thin end-to-end increments. Entry requires approved scope, requirements/risks, contracts, data classification, owner and acceptance tests. Exit requires functional, financial, security, privacy, accessibility, performance, recovery and operational evidence proportional to risk. Defects affecting identity, tenant isolation, fiscal correctness, audit integrity or recovery are release blockers.
-

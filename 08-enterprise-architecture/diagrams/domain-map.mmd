@@ -1,9 +1,22 @@
 flowchart LR
   IAM["Identity & Access"] --> ORG["Taxpayer & Organisation"]
+  ORG --> LICENCE["Licensing & Entitlements"]
+  ORG --> ORGADMIN["Organisation Administration"]
+  ORGADMIN --> ORGAUTH["Organisation Authorization"]
+  LICENCE --> POLICY["Central Policy Decision"]
+  ORGAUTH --> POLICY
+  IAM --> POLICY
+  POLICY --> NAV["Workspace & Navigation"]
+  POLICY --> WORKFLOW["Workflow & SoD"]
+  POLICY --> ACCESSGOV["Access Governance"]
+  POLICY --> SEARCH["Permission-aware Search"]
   ORG --> PARTY["Customers & Suppliers"]
   ORG --> COMMERCIAL["Quotations & Invoices"]
   PARTY --> COMMERCIAL
   COMMERCIAL --> VAT["VAT & Tax Rules"]
+  WORKFLOW --> COMMERCIAL
+  WORKFLOW --> VAT
+  ACCESSGOV --> IAM
   COMMERCIAL --> ACCOUNTING["Accounting"]
   COMMERCIAL --> INVENTORY["Inventory"]
   COMMERCIAL --> EXPENSE["Expense"]

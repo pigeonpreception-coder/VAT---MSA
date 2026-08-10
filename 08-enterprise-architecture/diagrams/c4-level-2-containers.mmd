@@ -1,10 +1,27 @@
 flowchart TD
   CLIENTS["Web / Mobile responsive / Offline / SaaS clients"] --> EDGE["Protected Edge + API Gateway"]
   EDGE --> IAM["Identity + Policy Plane"]
+  IAM --> ENTITLEMENT["License + Entitlement"]
+  EDGE --> NAV["Workspace + Navigation"]
+  EDGE --> ORGADMIN["Organisation Administration"]
+  EDGE --> WORKFLOW["Workflow + Access Governance"]
+  EDGE --> SEARCH["Permission-aware Search"]
   EDGE --> UX["Portal / BFF Containers"]
   UX --> TAXPAYER["Taxpayer + Organisation"]
   UX --> BUSINESS["Commercial + Business"]
   UX --> TAX["VAT + Compliance"]
+  UX --> NAV
+  UX --> ORGADMIN
+  UX --> WORKFLOW
+  NAV --> IAM
+  ORGADMIN --> IAM
+  WORKFLOW --> IAM
+  SEARCH --> IAM
+  ORGADMIN --> OPDB
+  ENTITLEMENT --> OPDB
+  WORKFLOW --> OPDB
+  NAV --> OPDB
+  SEARCH --> ANALYTICS
   EDGE --> INTEGRATION["Integration + Developer Platform"]
   TAXPAYER --> OPDB[("Operational DB partitions")]
   BUSINESS --> OPDB

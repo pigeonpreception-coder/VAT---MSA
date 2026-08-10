@@ -4,6 +4,27 @@ This is a logical production schema, not a generated migration. Physical types, 
 
 ## Standards
 
+### Workspace, licensing and workflow entities
+
+| Entity family | Core fields and relationships | Integrity and classification |
+|---|---|---|
+| License / LicensePlan | immutable ID, code, version, effective range, commercial authority | plan versions append-only; INTERNAL_COMMERCIAL |
+| Subscription / OrganisationLicense | organisation, provider reference, plan version, state, effective range, state version | client cannot set state; RESTRICTED_COMMERCIAL |
+| Feature / Entitlement / LicenseUsage / LicenseEvent | feature key, grant/limit, metric period, reserved/actual amount, idempotency identity, event transition | atomic reservation; append-audited; RESTRICTED_COMMERCIAL |
+| OrganisationAdministrator / Role | organisation, user/employee, admin type, scope, effective range, appointment approval | one effective primary; privileged; RESTRICTED_IDENTITY |
+| Employee / JobTitle / Position | organisation, linked user, employee number, reporting line, employment state | job title grants no permission; CONFIDENTIAL |
+| Department / BusinessUnit / Branch | organisation, parent, name/code, effective state | tenant-scoped hierarchy; CONFIDENTIAL |
+| OrganisationRole / Permission / RolePermission / UserRole / UserCapability | organisation role, protected permission key, scopes, thresholds, effective range | protected catalogue and no cross-tenant FK; RESTRICTED_IDENTITY |
+| Workflow / WorkflowVersion | organisation, domain/action, status, version, definition hash, effective time, approval evidence | published version immutable; RESTRICTED_BUSINESS |
+| WorkflowNode / Transition / Condition | version, typed node/edge, allowlisted operator, operands | no executable code/SQL; RESTRICTED_BUSINESS |
+| WorkflowAssignment / Approval / Delegation | instance/version, actor/assignee, authority snapshot, decision, reason, time | completed decisions append-only; RESTRICTED_BUSINESS |
+| AccessRequest / AccessApproval | organisation, requester/subject, requested grant, reviewer, decision | grant effective only after complete approval; RESTRICTED_IDENTITY |
+| AccessReview / AccessCertification | campaign snapshot, reviewer, scope, findings, disposition, completion | immutable history; RESTRICTED_IDENTITY |
+| SegregationOfDutiesRule / SoDViolation | protected action combinations, scope, effective version, actor/transaction evidence | mandatory rules not tenant-weakenable; RESTRICTED_SECURITY |
+| NavigationWorkspace / Folder / Item / Permission | stable hierarchy IDs, label key, route/action ref, order, classification, policy/entitlement refs | typed references; no executable predicates; INTERNAL |
+
+High-cardinality access uses keyset pagination and indexes on organisation+status/name, organisation+role/subject/effective time, organisation+feature/state/effective time, organisation+metric+period, organisation+workflow+version/status, assignee+status+due time, and organisation+parent+order.
+
 - Primary keys are globally unique opaque IDs (UUIDv7/ULID or approved equivalent); externally meaningful numbers are alternate keys, never row IDs.
 - Mutable records include `created_at/by`, `updated_at/by`, `version`; effective-dated master/config records include `effective_from/to`; statutory/event/evidence records are append-only with `occurred_at`, actor, correlation and source.
 - Every tenant-owned row carries `organisation_id` and/or `taxpayer_id`; policy repositories require that predicate. Cross-taxpayer NamRA access uses explicit region/portfolio/case entitlement.

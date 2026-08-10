@@ -1,5 +1,13 @@
 # E-F. Identity architecture and RBAC/ABAC
 
+## Organisation-configured access extension
+
+Employee and JobTitle are not identities or grants. The organisation chain is `Employee -> Position -> OrganisationRole -> PermissionSet -> Capability -> record/amount/workflow scope`. Organisation-owned roles may use only grantable permissions and cannot include protected NamRA, platform, security-policy, licence-state or tax-rule actions.
+
+The authorization decision is extended with `active licence state + feature entitlement + reserved/actual usage + workflow authority + SoD`. The strictest denial wins. Primary, finance, user/access, branch, workflow and integration administrators are scoped appointments; none inherits taxpayer-financial, NamRA or platform rights automatically.
+
+Primary-admin changes, privileged grants, MFA/security-policy changes, workflow hierarchy publication, tax-sensitive grants and API credential creation require policy-defined step-up, reason, approval and immutable evidence. Offboarding revokes sessions/tokens/credentials, reassigns pending tasks under policy and preserves historical actor attribution.
+
 ## One-person and one-taxpayer resolution
 
 A user identity and a taxpayer identity are different. A person may authenticate through ITAS or standalone VAT-MSA and both provider subjects link to one internal user. That user receives time-bounded membership in one or more organisations. Each organisation maps one-to-one to one VAT-registered legal taxpayer; buyer/seller are capabilities on that organisation.

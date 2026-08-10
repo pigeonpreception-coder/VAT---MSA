@@ -1,5 +1,18 @@
 # Assumptions and Open Decisions
 
+## Workspace, licensing and workflow decisions required
+
+- Commercial plan catalogue, feature bundles, seat/branch/transaction/API/storage limits and plan-version authority.
+- Subscription/payment provider, sandbox contract, billing tax treatment, refund/dispute/reconciliation and provider failure semantics.
+- Trial, grace, pending-renewal, suspension, expiry, cancellation, upgrade and downgrade effective behavior.
+- Statutory continuity, record retention, retrieval/export and legally required corrective actions after licence restriction.
+- Primary Organisation Administrator proofing, replacement, recovery, quorum and escalation.
+- Grantable permission catalogue, protected roles, financial ceilings, SoD catalogue and emergency-override decision.
+- Workflow expression/transition catalogue, publication approval, version migration and durable timer recovery.
+- Access review cadence, dormant threshold, excessive privilege rules, offboarding task reassignment and revocation SLO.
+- Canonical workspace labels, restricted-state disclosure, multilingual terminology and licence-upgrade messaging.
+- ITAS taxpayer/VAT verification attributes, federation assurance, organisation status events, SLAs and sandbox.
+
 ## Confirmed public context (review date: 8 August 2026)
 
 - NamRA's ITAS already provides taxpayer e-filing, taxpayer account access and VAT return functions.

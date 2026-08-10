@@ -1,5 +1,21 @@
 # VAT-MSA Enterprise Architecture Blueprint
 
+## Part XXIV - Enterprise workspace, organisation administration and licensing
+
+The taxpayer portal becomes one hierarchical, permission- and licence-aware workspace over the canonical organisation. Navigation is a server-built projection evaluated from identity, organisation, licence, capabilities, roles, permissions and security policy. Buyer and Seller remain organisation capabilities. Organisation Portal Administrator is the canonical organisation-admin role; it is separate from NamRA and platform administration.
+
+A distinct License and Entitlement domain owns effective plans, subscriptions, feature grants, limits and usage. It can deny an unlicensed operation but can never override identity, tenant, tax, audit, security, SoD or retention controls. Expiry, suspension, cancellation and downgrade preserve taxpayer records and follow a separately approved statutory-continuity policy.
+
+Authoritative detail: [workspace, organisation, licensing and workflow extension](30-workspace-organisation-licensing-workflow-architecture.md), [configuration/control matrix](configuration-system-control-matrix.csv), ADRs [016](adr/ADR-016-backend-enforced-dynamic-workspace.md), [017](adr/ADR-017-license-entitlement-authority.md) and [018](adr/ADR-018-organisation-configured-access.md).
+
+## Part XXV - Versioned workflow and access governance
+
+Organisation administrators configure workflows from a typed, allowlisted vocabulary. Publication creates an immutable version; each transaction pins its original version; decisions are append-only. Domain services retain authority for legal transitions. Mandatory SoD evaluates at design, assignment and decision time, preventing self-approval and create/approve/execute combinations where policy prohibits them.
+
+Access request, certification and offboarding preserve immutable evidence, rapidly revoke sessions/tokens/credentials, reassign pending tasks under approved policy and never erase historical actor ownership.
+
+Authoritative detail: [workflow extension](30-workspace-organisation-licensing-workflow-architecture.md), [workflow diagram](diagrams/workflow-versioning-sod.mmd), ADR [019](adr/ADR-019-versioned-workflow-and-sod.md), and [extension traceability](workspace-licensing-requirements-traceability.csv).
+
 **Document state:** complete architecture-board review package; **not production authorization**. This consolidated blueprint is the controlled entry point to all 45 deliverables. Detailed specifications and machine-readable matrices are linked in each part.
 
 ## Part I — Executive Architecture
@@ -194,4 +210,3 @@ Authoritative detail: [formal approval gate](29-architecture-approval-gate.md).
 | 25 DevSecOps; 26 Testing | Part XVIII |
 | 27 ADRs; 28 Requirements Traceability | Parts XIX–XX |
 | 29 Risk; 30 Gap; 31 Roadmap | Parts XXI–XXII |
-

@@ -1,0 +1,15 @@
+flowchart TD
+  A["Verified VAT taxpayer selects plan"] --> B["Pending subscription"]
+  B --> C["Approved provider activation evidence"]
+  C --> D{"Taxpayer identity verified?"}
+  D -- No --> R["Review or reject; no organisation activation"]
+  D -- Yes --> E{"VAT registration active?"}
+  E -- No --> R
+  E -- Yes --> F["Resolve canonical organisation without duplicate"]
+  F --> G["Proof or link administrator identity with required assurance"]
+  G --> H["Assign effective organisation licence"]
+  H --> I["Materialise entitlements and initial usage counters"]
+  I --> J["Create primary Organisation Administrator appointment"]
+  J --> K["Emit activation and audit events"]
+  K --> L["Administration Command Centre"]
+  C -. "provider and commercial rules require approval" .-> P["PROPOSED - REQUIRES APPROVAL"]

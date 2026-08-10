@@ -1,0 +1,30 @@
+flowchart LR
+  UI["Taxpayer workspace shell"] --> NAV["Workspace and Navigation Service"]
+  UI --> ADMIN["Organisation Administration Service"]
+  UI --> FLOW["Workflow Service"]
+  UI --> ACCESS["Access Governance Service"]
+  UI --> SEARCH["Permission-aware Search"]
+  NAV --> PDP["Central Policy Decision Point"]
+  ADMIN --> PDP
+  FLOW --> PDP
+  ACCESS --> PDP
+  SEARCH --> PDP
+  PDP --> IAM["Identity and Session"]
+  PDP --> ORG["Canonical Taxpayer and Organisation"]
+  PDP --> ENT["License and Entitlement Service"]
+  PDP --> SOD["SoD and Security Policy"]
+  ADMIN --> ORGDB[("Organisation admin data")]
+  ENT --> LICDB[("Licence, subscription and usage")]
+  FLOW --> WFDB[("Versioned workflows and approvals")]
+  ACCESS --> GOVDB[("Access review and certification")]
+  NAV --> NAVDB[("Navigation configuration")]
+  SEARCH --> IDX[("Policy-filtered indexes")]
+  ADMIN --> OUTBOX["Transactional outbox"]
+  ENT --> OUTBOX
+  FLOW --> OUTBOX
+  ACCESS --> OUTBOX
+  OUTBOX --> AUDIT[("Immutable audit and security evidence")]
+  OUTBOX --> CACHE["Policy and projection invalidation"]
+  DOMAIN["Invoice, VAT, accounting and business domains"] --> FLOW
+  FLOW --> DOMAIN
+  PDP --> DOMAIN

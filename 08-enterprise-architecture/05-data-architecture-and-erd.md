@@ -1,5 +1,11 @@
 # G-H, T. Data architecture, database schema, ERD and governance
 
+## Workspace, licensing and workflow model extension
+
+The enterprise ERD now includes the licence/plan/subscription/feature/entitlement/usage/event family; organisation administrator/employee/job/position/department/business-unit family; organisation role/permission/user-role/capability family; workflow definition/version/node/transition/condition/assignment/approval/delegation family; access request/approval/review/certification family; SoD rule/violation family; and navigation workspace/folder/item/permission family.
+
+All tenant-owned records carry `organisation_id`. Published workflow versions, completed workflow approvals, licence events and certification history are append-only. Usage reservations use organisation+metric+period+idempotency uniqueness. Navigation conditions reference typed policy and entitlement IDs, never executable expressions. Exact entities and invariants are in `13-logical-data-dictionary.md` and the extension document.
+
 ## Data platforms and ownership
 
 | Store | Workload | Integrity/availability posture |

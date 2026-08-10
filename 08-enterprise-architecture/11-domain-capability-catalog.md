@@ -38,6 +38,17 @@ Commands change authoritative state; queries never grant scope beyond policy. AP
 
 ## Dependency rules
 
+### Added enterprise SaaS control domains
+
+| Domain | Capabilities | Aggregates | Commands / queries | Events / APIs | Owner and boundaries |
+|---|---|---|---|---|---|
+| Licensing and Entitlements | plans, subscriptions, feature grants, limits and usage | LicensePlan, Subscription, OrganisationLicense, Entitlement, LicenseUsage | Activate/Suspend/Upgrade/Renew; GetLicence/GetEntitlements/GetUsage | LicenseActivated/StateChanged; `/licensing` | Commercial platform; cannot override identity/tax/security/retention |
+| Organisation Administration | employees, structure and administrator appointments | Employee, Position, Department, BusinessUnit, OrganisationAdministrator | Invite/Activate/Suspend/TerminateEmployee; AppointAdministrator | EmployeeInvited/Terminated, OrganisationAdminChanged; organisation admin APIs | Organisation scoped; no NamRA/platform roles |
+| Organisation Authorization | roles, permission sets, capabilities and authority | OrganisationRole, RolePermission, UserRole, UserCapability | CreateRole/AssignPermission/GrantCapability | RoleChanged/PermissionGranted; role APIs | IAM; protected catalogue and ceilings |
+| Workflow | typed design, immutable publication, tasks, approvals, escalation and delegation | Workflow, WorkflowVersion, WorkflowInstance, WorkflowApproval | Create/Test/Publish/Assign/Decide/Delegate | WorkflowPublished/DecisionRecorded/SoDViolationDetected; `/workflows` | Domain transitions remain authoritative |
+| Access Governance | requests, approvals, reviews, certifications and offboarding | AccessRequest, AccessReview, AccessCertification | Request/Approve/Reject/Certify/Revoke/Offboard | AccessRequested/Certified/Revoked; `/access-governance` | Historical identity preserved |
+| Workspace and Navigation | hierarchy, safe restriction state and preferences | NavigationWorkspace, NavigationFolder, NavigationItem, NavigationPermission | GetWorkspace/GetChildren/GetActions/SavePreference | NavigationConfigurationChanged; `/navigation` | Projection only; endpoint authorization repeated |
+
 Identity and Taxpayer/Organisation are upstream foundations. Business domains may propose tax-relevant facts but only VAT/Transaction owns statutory classification and ledger. Returns consumes immutable VAT snapshots, not accounting balances directly. Risk/Analytics consume governed copies and never mutate operational records. Administration changes configuration through approved APIs/events and cannot write domain tables. Documents expose authorized opaque references; integrations translate external schemas through anti-corruption layers.
 
 ## Security rules common to every domain

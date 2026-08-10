@@ -1,5 +1,11 @@
 # P-S. Event, deployment, DevSecOps and testing architecture
 
+## Workspace, licence and workflow event extension
+
+The event catalogue now covers licence purchase/activation/state/plan change; organisation administrator and employee lifecycle; role/permission/capability changes; workflow create/publish/retire/decision; access request/approval/certification; SoD violations; privileged actions; and navigation changes. Events use the standard versioned envelope, transactional outbox, tenant/aggregate partition and minimal classified payload.
+
+Security testing must prove that manipulated clients cannot bypass licence, permission, workflow or tenant controls; concurrent quota commands cannot silently overrun limits; self-approval is denied; workflow/audit history cannot be rewritten; and suspension/offboarding revokes access within the approved bound. Performance tests cover thousands of employees/permissions and hundreds of workflows without loading the full graph into the browser.
+
 ## Event architecture
 
 The detailed catalogue is `event-catalog.csv`. Domain writes insert an outbox record in the same transaction. A relay publishes to the durable bus; consumers deduplicate by event ID and aggregate/version, enforce tenant scope and record checkpoint/outcome. Events contain references and minimal necessary data, not secrets or unrestricted document payloads.

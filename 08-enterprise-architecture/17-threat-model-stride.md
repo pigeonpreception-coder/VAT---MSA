@@ -2,6 +2,21 @@
 
 ## Method and scope
 
+### Workspace, licensing and workflow abuse cases
+
+| Threat | Abuse path | Required prevention/detection | Verification |
+|---|---|---|---|
+| Licence bypass | call hidden route or alter client entitlement | server entitlement decision, signed state transitions, audit | direct API and token/client manipulation |
+| Quota race | concurrent writes exceed seat/transaction/API limit | atomic reservation or durable compensation, anomaly detection | concurrency and replay tests |
+| Tenant escape | reference another organisation in employee, workflow, search or export | trusted tenant context, tenant FK/predicate/RLS defence | cross-tenant ID and search tests |
+| Role escalation | custom role includes protected permission | grantable catalogue, policy ceilings, privileged approval | role payload fuzz and protected-grant tests |
+| Self-approval | creator becomes approver through role/delegation | decision-time SoD and actor lineage | create/approve/execute combinations |
+| Workflow injection | tenant condition executes code or bypasses transition | typed allowlisted expression compiler and domain validation | malicious expression and transition tests |
+| History rewrite | administrator edits published version or approval | immutable versions/evidence and storage permissions | update/delete negative tests |
+| Delegated-admin breakout | branch/workflow admin grants organisation-wide privilege | scoped admin policy and no authority amplification | delegated admin abuse suite |
+| Navigation/search leakage | restricted item or record appears in search/menu | server projection, classification hiding and masked indexes | enumeration and inference tests |
+| Offboarding race | user acts between disable and revocation | idempotent orchestrator, urgent invalidation, decision-time active checks | session/token/API race tests |
+
 Initial architecture threat model across public/partner edge, identity, portals/APIs, offline client, workloads/eventing, operational/tax/document/analytics/evidence data, management/supply chain and DR. Ratings are qualitative pending environment-specific likelihood intelligence. Risk = likelihood × impact; Critical/High items require control evidence before pilot/production.
 
 ## STRIDE register

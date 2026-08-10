@@ -2,7 +2,7 @@ version: 1
 base_path: /api/v1
 common_controls:
   authentication: human OIDC/SAML session or registered machine identity
-  authorization: RBAC plus ABAC plus tenant/resource ownership
+  authorization: RBAC plus ABAC plus tenant/resource ownership plus entitlement workflow SoD and security policy
   correlation: X-Correlation-Id required or server-generated
   errors: application/problem+json
   idempotency: required for financial and tax commands
@@ -73,3 +73,43 @@ domains:
   operations:
     - { method: GET, path: /health/live, permission: platform-probe, status: implemented }
     - { method: GET, path: /health/ready, permission: platform-probe, status: implemented }
+  licensing:
+    - { method: GET, path: /licensing/license, permission: licensing:read, status: architecture-proposed-pending-approval }
+    - { method: GET, path: /licensing/entitlements, permission: licensing:entitlements:read, status: architecture-proposed-pending-approval }
+    - { method: GET, path: /licensing/usage, permission: licensing:usage:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: /licensing/upgrade-requests, permission: licensing:change:request, status: gated-by-commercial-provider }
+    - { method: POST, path: /licensing/renewal-requests, permission: licensing:change:request, status: gated-by-commercial-provider }
+  organisation_administration:
+    - { method: GET, path: "/organisations/{id}/employees", permission: organisation:employees:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/organisations/{id}/employees", permission: organisation:employees:create, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/organisations/{id}/invitations", permission: organisation:users:invite, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/organisations/{id}/employees/{employeeId}/disable", permission: organisation:employees:disable, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/organisations/{id}/employees/{employeeId}/terminate", permission: organisation:employees:terminate, status: architecture-proposed-pending-approval }
+    - { method: GET, path: "/organisations/{id}/administrators", permission: organisation:administrators:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/organisations/{id}/administrator-change-requests", permission: organisation:administrators:change:request, status: step-up-and-approval-required }
+    - { method: POST, path: "/organisations/{id}/job-titles", permission: organisation:job-titles:manage, status: architecture-proposed-pending-approval }
+  organisation_authorization:
+    - { method: GET, path: /organisation-roles, permission: organisation:roles:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: /organisation-roles, permission: organisation:roles:create, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/organisation-roles/{id}/permissions", permission: organisation:permissions:assign, status: protected-catalogue-required }
+    - { method: POST, path: "/users/{id}/organisation-roles", permission: organisation:roles:assign, status: privileged-grant-policy-required }
+    - { method: POST, path: "/users/{id}/capabilities", permission: organisation:capabilities:assign, status: entitlement-and-org-capability-required }
+  workflows:
+    - { method: POST, path: /workflows, permission: workflows:create, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/workflows/{id}/tests", permission: workflows:test, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/workflows/{id}/publication-requests", permission: workflows:publish:request, status: approval-required }
+    - { method: GET, path: "/workflows/{id}/versions", permission: workflows:versions:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/workflow-instances/{id}/decisions", permission: workflows:decide, status: sod-and-authority-required }
+    - { method: POST, path: "/workflow-assignments/{id}/delegations", permission: workflows:delegate, status: no-authority-amplification }
+  access_governance:
+    - { method: POST, path: /access-requests, permission: access:request, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/access-requests/{id}/decisions", permission: access:approve, status: workflow-and-sod-required }
+    - { method: GET, path: /access-reviews, permission: access-reviews:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/access-reviews/{id}/certifications", permission: access-reviews:certify, status: architecture-proposed-pending-approval }
+  navigation:
+    - { method: GET, path: /navigation/workspace, permission: navigation:read-effective, status: architecture-proposed-pending-approval }
+    - { method: GET, path: "/navigation/workspaces/{id}/children", permission: navigation:read-effective, status: architecture-proposed-pending-approval }
+    - { method: GET, path: /navigation/actions, permission: navigation:read-effective, status: architecture-proposed-pending-approval }
+    - { method: PUT, path: /navigation/preferences, permission: navigation:preferences:manage-own, status: architecture-proposed-pending-approval }
+  search:
+    - { method: GET, path: /search, permission: search:query-effective, status: architecture-proposed-pending-approval }
