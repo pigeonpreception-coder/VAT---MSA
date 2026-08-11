@@ -134,3 +134,32 @@ domains:
   country_readiness:
     - { method: GET, path: "/country-readiness/{countryCode}", permission: country-readiness:read, status: architecture-proposed-pending-approval }
     - { method: POST, path: "/country-readiness/{countryCode}/decisions", permission: country-readiness:decide, status: independent-approver-and-step-up-required }
+  security_profiles:
+    - { method: GET, path: "/security-profiles/{profileId}/versions", permission: security-profiles:versions:read, status: architecture-proposed-non-executable }
+    - { method: POST, path: "/security-profiles/{profileId}/validation", permission: security-profiles:validate, status: synthetic-validation-only }
+    - { method: POST, path: "/security-profiles/{profileId}/approval-requests", permission: security-profiles:approve:request, status: independent-quorum-step-up-and-signature-required }
+    - { method: POST, path: "/security-profiles/{profileId}/activation-requests", permission: security-profiles:activate:request, status: security-and-country-readiness-required }
+  privileged_access:
+    - { method: POST, path: /privileged-access-requests, permission: privileged-access:request, status: step-up-jit-and-independent-approval-required }
+    - { method: GET, path: "/privileged-access-requests/{id}", permission: privileged-access:read, status: purpose-and-scope-required }
+    - { method: POST, path: "/privileged-access-requests/{id}/decisions", permission: privileged-access:approve, status: no-self-approval-and-quorum-by-risk }
+  security_operations:
+    - { method: GET, path: /security/posture, permission: security-posture:read, status: evidence-freshness-and-role-projection-required }
+    - { method: GET, path: /security/detections, permission: security-detections:read, status: soc-purpose-and-clearance-required }
+    - { method: POST, path: /security/incidents, permission: security-incidents:declare, status: incident-authority-required }
+    - { method: POST, path: "/security/incidents/{id}/response-actions", permission: security-incidents:respond, status: bounded-playbook-or-human-approval-required }
+    - { method: GET, path: "/security/incidents/{id}/evidence", permission: security-evidence:read, status: chain-of-custody-purpose-and-legal-hold-required }
+  vulnerability_management:
+    - { method: GET, path: /security/vulnerabilities, permission: vulnerabilities:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/security/vulnerabilities/{id}/risk-decisions", permission: vulnerabilities:risk-decide, status: expiring-independent-approval-required }
+  privacy_governance:
+    - { method: GET, path: /privacy/processing-activities, permission: privacy-processing:read, status: privacy-purpose-required }
+    - { method: POST, path: /privacy/rights-requests, permission: privacy-rights:create, status: jurisdiction-and-identity-assurance-required }
+    - { method: POST, path: /privacy/impact-assessments, permission: privacy-impact:create, status: privacy-legal-review-required }
+    - { method: POST, path: /privacy/transfer-decisions, permission: privacy-transfer:decide, status: legal-privacy-security-approval-required }
+  compliance_evidence:
+    - { method: GET, path: "/compliance/controls/{controlId}/evidence", permission: compliance-evidence:read, status: read-only-purpose-and-classification-required }
+    - { method: POST, path: "/compliance/evidence/{evidenceId}/verification", permission: compliance-evidence:verify, status: independent-reviewer-required }
+  recovery_assurance:
+    - { method: GET, path: /recovery/assurance, permission: recovery-assurance:read, status: security-and-operations-purpose-required }
+    - { method: POST, path: /recovery/exercise-results, permission: recovery-exercises:record, status: signed-evidence-and-independent-signoff-required }

@@ -1,0 +1,31 @@
+flowchart TB
+  Internet["Internet and partner networks"]
+  Edge["Public edge zone: DNS, DDoS, CDN, WAF, bot, gateway"]
+  Identity["Identity zone: federation, MFA, sessions, PAM, workload trust"]
+  App["Application zone: BFFs, APIs and domain workers"]
+  Integration["Integration zone: ITAS, NamRA, SaaS and file adapters"]
+  Data["Data zone: operational DB, ledger, objects, queues and cache"]
+  Analytics["Analytics and search zone: governed views, DLP and exports"]
+  Management["Management zone: CI/CD, registry, orchestration, KMS and vault"]
+  Security["Security zone: collectors, SIEM, SOAR, cases and evidence"]
+  Recovery["Recovery zone: immutable vault, independent control plane and clean room"]
+
+  Internet --> Edge
+  Edge --> Identity
+  Edge --> App
+  Identity --> App
+  App --> Integration
+  Integration --> Internet
+  App --> Data
+  Data --> Analytics
+  Management --> App
+  Management --> Data
+  Edge --> Security
+  Identity --> Security
+  App --> Security
+  Integration --> Security
+  Data --> Security
+  Analytics --> Security
+  Management --> Security
+  Data --> Recovery
+  Security --> Recovery

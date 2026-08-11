@@ -1,5 +1,11 @@
 # VAT-MSA Namibia country compliance pack
 
+## Namibia security and privacy companion profile
+
+`security-profiles/NAM/manifest.yaml` is the non-executable security/privacy companion to this fiscal pack. It requires current gazetted legal verification, NamRA/ITAS security contracts, government identity/PKI, incident authority/contacts, privacy/residency/transfer/retention decisions, SOC/service-tier ownership and independent security assessment. It cannot activate this pack and remains `DRAFT_LEGAL_AND_REGULATORY_REVIEW`.
+
+Public legislative material is evidence of process, not proof that a bill is enacted or commenced. Namibia production must use a fresh legal opinion and authoritative gazetted/regulator/NamRA sources.
+
 ## 1. Pack declaration
 
 | Field | Architecture value |

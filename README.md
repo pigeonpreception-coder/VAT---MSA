@@ -10,8 +10,10 @@ The identity foundation enforces one canonical organisation per taxpayer and mod
 
 ## Authoritative deliverable
 
-- `08-enterprise-architecture/VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md` - consolidated 23-part, 45-deliverable enterprise architecture package.
+- `08-enterprise-architecture/VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md` - consolidated 27-part, 95-deliverable enterprise architecture and extension package.
 - `08-enterprise-architecture/29-architecture-approval-gate.md` - formal decisions, external confirmations and production blockers.
+- `08-enterprise-architecture/33-global-security-privacy-compliance-architecture.md` - unified zero-trust, privacy, resilience and evidence-based security control architecture.
+- `08-enterprise-architecture/security-control-matrix.csv` - master mapping from applicable sources to controls, implementation, evidence, tests, owners and status.
 - `VAT-MSA_Enterprise_Architecture_Blueprint.docx` - visually reviewed master blueprint.
 - `01-blueprint/VAT-MSA_Enterprise_Architecture_Blueprint.md` - maintainable source edition.
 

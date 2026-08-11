@@ -1,0 +1,23 @@
+flowchart LR
+  Source["Standard, framework, law, contract or regulator source"]
+  Applicability["Signed applicability and interpretation decision"]
+  Control["Stable VAT-MSA control objective and owner"]
+  Architecture["Trust boundary, component and enforcement design"]
+  Delivery["Code, infrastructure, configuration, policy and process"]
+  Telemetry["Runtime telemetry and audit event"]
+  Test["Automated, manual and independent verification"]
+  Evidence["Hashed evidence object with scope, freshness and retention"]
+  Assurance["Independent assessment and finding"]
+  Improve["Risk treatment and continual improvement"]
+
+  Source --> Applicability
+  Applicability --> Control
+  Control --> Architecture
+  Architecture --> Delivery
+  Delivery --> Telemetry
+  Delivery --> Test
+  Telemetry --> Evidence
+  Test --> Evidence
+  Evidence --> Assurance
+  Assurance --> Improve
+  Improve --> Applicability

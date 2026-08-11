@@ -1,5 +1,18 @@
 # Risk Register, Gap Assessment and Maturity Model
 
+## Global security, privacy and compliance risks and gaps
+
+| Risk / gap | Current state | Required treatment | Gate |
+|---|---|---|---|
+| false certification or compliance claim | architecture alignment only | claims policy, licensed standards, legal/independent assessment | ADR-025 and Legal/CISO approval |
+| identity/policy/PAM platform unknown | provider-neutral design | select and prove assurance, fail-closed decisions, JIT and revocation | security approval register |
+| security control operating evidence absent | logical controls/tests/evidence designed | implement collectors, tests, owners and independent review | no production security approval |
+| Namibia privacy/cyber/government duties unconfirmed | non-executable draft profile | current gazetted legal opinion and NamRA/ITAS contracts | country readiness CR-16/17 |
+| SOC tier, tools and staffing undecided | target operating model only | approve coverage/on-call/playbooks/contacts and exercise | CR-19 |
+| immutable backup/clean-room and scale unproven | architecture target only | funded topology, load/failure and repeated recovery evidence | CR-20 |
+| independent penetration/red-team outstanding | test catalogue only | authorized tests, remediation and retest | CR-18 |
+| PCI and AI scope | both disabled | separate applicability and architecture before activation | formal approval gate |
+
 ## Globalisation extension risks and gaps
 
 | Severity | Risk / gap | Required closure evidence |

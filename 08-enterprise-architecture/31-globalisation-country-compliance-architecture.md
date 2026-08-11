@@ -1,5 +1,11 @@
 # VAT-MSA globalisation and country-compliance architecture
 
+## Global security-profile integration
+
+The global security baseline and regional/country security profiles are governed by documents 33-38 and ADR-025 through ADR-029. A security profile is separate from, but release-linked to, the fiscal country pack. Both must be signed, effective, compatible, independently approved and readiness-approved before a country can operate. A country security profile may tighten but never weaken tenant isolation, authorization, cryptography, audit/evidence, secret protection, SoD, fiscal integrity or recovery floors.
+
+The profile drafts under `security-profiles/` are non-executable. Country activation now requires the security control, test, evidence, privacy/residency, incident/contact, independent penetration and recovery gates recorded in `country-readiness-framework.csv`.
+
 ## 1. Decision status and implementation boundary
 
 This document extends the approved VAT-MSA baseline into a global, multi-jurisdiction, multi-currency platform built from one global core plus signed country compliance packs and licensed deployment profiles.

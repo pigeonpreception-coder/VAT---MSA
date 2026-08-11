@@ -112,7 +112,7 @@ High-cardinality access uses keyset pagination and indexes on organisation+statu
 | Integration | `integration_id`; FK owner organisation/provider | type, environment, scopes, status | endpoint metadata | unique owner+type+environment | integration; RESTRICTED_IDENTITY |
 | SaaSApplication | `saas_application_id`; FK integration/provider | name, owner, environment, approval state | callback metadata | unique provider+name+environment | CONFIDENTIAL |
 | APIClient | `api_client_id`; FK application | client ID, auth mode, scopes, quota, status | certificate fingerprint | unique client ID; status | RESTRICTED_IDENTITY |
-| APIKey | `api_key_id`; FK client | secret reference, fingerprint, issued/expiry, status | revoked reason | unique fingerprint; expiry/status | SECRET value external; metadata restricted |
+| APIKey | `api_key_id`; FK client | secret reference, fingerprint, issued/expiry, status | revoked reason | unique fingerprint; expiry/status | HIGHLY_RESTRICTED value external; metadata restricted |
 | SyncRecord | `sync_record_id`; FK integration/org/device | source ID, cursor, hash, status, attempt | error code | unique integration+source ID; status+retry | RESTRICTED_TAX |
 | EventOutbox | `event_id`; FK aggregate reference | type/version, partition, payload ref, status, occurred/available | published/error | aggregate+version/type; status+available | classification minimized |
 | AuditLog | `audit_log_id`; FK actor/org/resource | action, before/after hashes, reason, outcome, correlation, occurred | approval | resource+occurred; actor+occurred | immutable RESTRICTED_TAX/IDENTITY |

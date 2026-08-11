@@ -1,0 +1,34 @@
+flowchart LR
+  U["Taxpayer and organisation users"]
+  R["NamRA and regulatory users"]
+  O["Platform, security and recovery operators"]
+  P["SaaS, POS and accounting clients"]
+  G["ITAS, NamRA and government systems"]
+  E["Protected edge: DDoS, CDN, WAF, bot and gateway"]
+  I["Identity, workload trust and PAM"]
+  Z["Policy decision and evidence plane"]
+  A["VAT-MSA global application core"]
+  C["Signed regional and country profiles"]
+  D["Tenant-isolated data, documents, events and analytics"]
+  S["SOC, SIEM, incident and forensic evidence"]
+  B["Immutable backup and clean-room recovery"]
+
+  U --> E
+  R --> E
+  P --> E
+  O --> I
+  G --> E
+  E --> I
+  I --> Z
+  E --> A
+  Z --> A
+  C --> Z
+  C --> A
+  A --> D
+  E --> S
+  I --> S
+  Z --> S
+  A --> S
+  D --> S
+  D --> B
+  S --> B

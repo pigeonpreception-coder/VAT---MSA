@@ -2,6 +2,12 @@
 
 This is an architecture and control specification only. It does not authorize application, migration or deployment implementation.
 
+## Global secure-delivery extension
+
+`38-secure-delivery-resilience-testing-roadmap.md` is the controlling extension for SSDF 1.1-aligned delivery, OWASP ASVS 5.0.0 verification, SBOM/provenance/signing/admission, vulnerability management, independent penetration, red/purple testing, evidence and phased security implementation. The mandatory logical suites are in `security-test-catalog.csv`.
+
+All profile, legal and standards artifacts remain non-executable until approval. Production implementation cannot treat a passing scanner as proof of secure design, tenant isolation, business-logic integrity, legal compliance or certification.
+
 ## Repository and dependency architecture
 
 Recommended target monorepo after approval:
@@ -74,4 +80,3 @@ Managed devices use disk encryption, EDR, MFA, least privilege, patched toolchai
 ## Definition of ready for coding
 
 Coding begins only after the approval gate identifies an approved scope, relevant ADRs are accepted, authoritative interfaces are confirmed or stub policy approved, schemas and acceptance tests exist, security/privacy threats have owners, and no critical component is `NOT READY`. This package intentionally stops at that gate.
-

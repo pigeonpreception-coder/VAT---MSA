@@ -191,7 +191,7 @@ The domain transaction requests a workflow instance. The engine resolves assignm
 
 SoD is a system policy evaluated at design validation, assignment and decision time. Rules can prohibit combinations such as create+approve, approve+execute or workflow-admin+own-change-approval for a protected transaction. A workflow administrator does not inherit approval rights. A primary administrator does not bypass SoD.
 
-A detected conflict fails closed, creates `SoDViolationDetected`, identifies the policy without exposing sensitive detection logic, and routes to approved remediation. Emergency override is **PROPOSED - REQUIRES APPROVAL** and, if allowed, requires narrow JIT authority, step-up, independent approval, expiry and retrospective review.
+A detected conflict fails closed, creates `SoDViolationDetected`, identifies the policy without exposing sensitive detection logic, and routes to approved remediation. Emergency SoD override is prohibited. Bounded technical break-glass may restore or contain service only under the separately governed PAM/incident policy; it cannot satisfy conflicting duties or approve fiscal/financial actions.
 
 ## 8. Access governance and employee lifecycle
 
@@ -286,8 +286,8 @@ The expanded formal classification is `configuration-system-control-matrix.csv`.
 - **PROPOSED - REQUIRES APPROVAL:** grace, suspension, expiry, downgrade and statutory-continuity behavior.
 - **PROPOSED - REQUIRES APPROVAL:** first/changed primary administrator proofing and approval quorum.
 - **PROPOSED - REQUIRES APPROVAL:** configurable financial thresholds and platform-enforced maximums.
-- **PROPOSED - REQUIRES APPROVAL:** emergency SoD override, if any.
-- **PROPOSED - REQUIRES APPROVAL:** access certification frequency and dormant-account thresholds.
+- **SYSTEM CONTROL:** emergency SoD override is disabled; approve only the bounded technical break-glass procedures that preserve independent duties.
+- **MANDATORY BASELINE:** access certification is at least quarterly; approve reviewer scope, any higher-risk frequency and dormant-account thresholds.
 - **PROPOSED - REQUIRES APPROVAL:** workflow expression vocabulary and which domain transitions are configurable.
 - **PROPOSED - REQUIRES APPROVAL:** navigation labels, multilingual terminology and licence-upgrade messaging.
 - **PROPOSED - REQUIRES ITAS/NAMRA/LEGAL CONFIRMATION:** authoritative verification and statutory access when licensing is restricted.

@@ -1,5 +1,28 @@
 # Formal Architecture Approval Gate
 
+## Global security, privacy and compliance decision register
+
+| Component / decision | Proposed status | Conditions / decision required | Required approver |
+|---|---|---|---|
+| unified security/privacy/compliance control framework | REQUIRES DECISION | accept ADR-025, control ownership, risk method, licensed standards register and claims policy | Architecture Board + CISO + Privacy + Legal |
+| continuous zero-trust decision/enforcement | APPROVED WITH CONDITIONS | accept ADR-026; select resilient identity/policy/workload trust and prove negative authorization | Architecture Board + CISO + Identity Authority |
+| IAM assurance, federation and recovery | REQUIRES DECISION | approve NIST-informed assurance selection, IdP, authenticator, recovery, accessibility and provider contracts | Identity Authority + CISO + Privacy |
+| PAM/JIT and break-glass boundary | REQUIRES DECISION | select PAM, approve session/privacy policy and retain no emergency SoD override | CISO + Operations + Legal/Privacy |
+| security profile hierarchy and signing | REQUIRES DECISION | accept ADR-028; approve schema, signer/HSM, quorum, anti-downgrade and conflict authority | Architecture Board + CISO + Country Authorities |
+| audit and compliance evidence architecture | APPROVED WITH CONDITIONS | accept ADR-027; select immutable store, time, retention/hold and independent access model | CISO + Records + Legal + Internal Audit |
+| application/API security baseline | APPROVED WITH CONDITIONS | adopt ASVS 5.0.0 verification and API catalogue; implement tests and independent assessment | AppSec + Engineering + CISO |
+| cloud/network/data/key/secret control platforms | REQUIRES DECISION | select provider/topology/KMS/HSM/vault/WAF/SIEM and approve shared-responsibility/residency | Architecture + CISO + Data + Procurement |
+| SOC/CSIRT operating tier and automated response | REQUIRES DECISION | approve staffing/on-call, severity, contacts, playbooks and bounded reversible automation | CISO + Executive + Legal/Privacy |
+| privacy management and regional applicability | REQUIRES LEGAL/REGULATORY CONFIRMATION | approve entity roles, processing, rights, DPIA, retention, residency, transfers and breach duties per country | Privacy + Legal + Country Authority |
+| Namibia security/privacy profile | REQUIRES NAMRA CONFIRMATION | verify gazetted law, NamRA/ITAS security contracts, government PKI, incident contacts and independent review | Namibia Legal + NamRA + ITAS + CISO + Privacy |
+| PCI DSS and payment security | NOT READY | payments disabled; complete formal CDE scope and architecture before any card/payment work | Finance + Payment Security + Legal + CISO |
+| AI security and ISO/IEC 42001 applicability | NOT READY | AI disabled; separate impact, security, privacy, model and human-oversight architecture required | AI Governance + CISO + Privacy + Legal |
+| security testing and independent penetration | NOT READY | implement mandatory catalogue; authorize and pass web/API/cloud/identity/tenant/business-logic tests | CISO + Independent Assessor + Release Authority |
+| security SLO, scale, SOC and recovery evidence | NOT READY | approve targets and prove representative load, detection, incident, restore and regional/cyber recovery | CISO + SRE + DR + Executive |
+| production security architecture implementation | NOT READY | ADR-025 through ADR-029 approved; scoped controls implemented/tested; no critical gate failure | Architecture Board + CISO + Steering Committee |
+
+**Security package status:** `REQUIRES DECISION`. The architecture artifacts and profiles are review-ready but non-executable and make no certification or compliance claim.
+
 ## Globalisation and country-compliance decision register
 
 | Component / decision | Proposed status | Conditions / decision required | Required approver |
@@ -30,7 +53,7 @@
 | licence/entitlement bounded context | REQUIRES DECISION | approve plan authority, provider, state machine, metering and separation | Commercial + Finance + CISO |
 | expiry/suspension/downgrade statutory continuity | REQUIRES LEGAL/REGULATORY CONFIRMATION | define read/write/export/retention and legally required action policy | NamRA Tax + Legal + Records |
 | typed workflow designer/versioning | APPROVED WITH CONDITIONS | approve expression/transition catalogue, publication and migration policy | Architecture + Domain Owners + CISO |
-| mandatory SoD and emergency override | REQUIRES DECISION | approve rule catalogue; decide whether tightly controlled override exists | CISO + Finance Controls + Legal |
+| mandatory SoD and no emergency override | APPROVED WITH CONDITIONS | approve rule catalogue and bounded technical break-glass procedures that preserve independent duties | CISO + Finance Controls + Legal |
 | access request/certification/offboarding | APPROVED WITH CONDITIONS | approve review cadence, dormant threshold, task reassignment and revocation SLO | CISO + HR + Business Owners |
 | permission-aware enterprise search | APPROVED WITH CONDITIONS | approve indexing, masking, inference controls and purpose logging | CISO + Data + Privacy |
 | activation through ITAS/VAT verification | REQUIRES ITAS CONFIRMATION | authoritative attributes, assurance, lifecycle, SLA and sandbox | ITAS + NamRA |
@@ -92,6 +115,10 @@ Architecture/design work and disposable technical spikes may continue in isolate
 | CISO/Security authority |  |  |  |  |
 | Privacy/Data Protection authority |  |  |  |  |
 | Legal/Regulatory authority |  |  |  |  |
+| Internal Audit/Independent assurance |  |  |  |  |
+| Identity/PAM authority |  |  |  |  |
+| Cryptographic/Key authority |  |  |  |  |
+| SOC/Incident-response authority |  |  |  |  |
 | Data owner |  |  |  |  |
 | Operations/DR owner |  |  |  |  |
 | Programme/Product owner |  |  |  |  |

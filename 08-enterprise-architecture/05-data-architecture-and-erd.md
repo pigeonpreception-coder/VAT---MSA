@@ -1,5 +1,11 @@
 # G-H, T. Data architecture, database schema, ERD and governance
 
+## Global security, privacy and evidence data addendum
+
+Documents `35-data-application-api-network-cloud-security.md` through `37-privacy-regional-compliance-architecture.md` govern classification, purpose, encryption, keys/secrets, DLP, audit/security evidence, PIMS, retention/legal hold, residency/transfer and forensic custody. The canonical top-level classes are PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED and HIGHLY_RESTRICTED; restricted subtype labels retain domain handling.
+
+Security/compliance profiles and evidence objects are immutable/versioned control records, not ordinary tenant configuration. The logical evidence schema is defined in `compliance-evidence-catalog.csv`; physical storage remains platform and records-policy gated.
+
 ## Global compliance data addendum
 
 The logical model adds Country, Currency, CountryPack, CountryPackVersion, RegulatorySource, TaxRuleVersion, JurisdictionAssignment, JurisdictionEvidence, ExchangeRateObservation, BusinessCalendarVersion, DocumentTemplateVersion, CountryReadinessAssessment and PackActivation. Every fiscal record persists country code, transaction currency, tax currency where distinct, pack version, selected rule versions and determination timestamp. See `diagrams/global-compliance-erd.mmd`; physical migration remains gated.

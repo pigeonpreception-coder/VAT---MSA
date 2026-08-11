@@ -2,6 +2,12 @@
 
 **Status:** architecture-board draft. Proposed RTO/RPO values require business-impact, NamRA, legal, ITAS and infrastructure approval.
 
+## Security and compliance extension
+
+The recovery security contract in `38-secure-delivery-resilience-testing-roadmap.md` requires encrypted immutable isolated copies, independent recovery identities/keys, signed known-safe artifacts, a clean control plane, evidence preservation and fiscal/tenant/audit reconciliation before reopening writes. Recovery placement must satisfy the signed country residency/transfer policy; failover cannot silently create an unlawful region or support-access path.
+
+RTO/RPO and availability values remain proposed until repeated representative exercises prove them. A backup-job success message is not recovery evidence; required evidence includes deletion resistance, restore hashes, authorization tests, control totals, event replay, audit continuity, achieved timings and independent sign-off.
+
 ## Continuity priorities
 
 1. Protect people, credentials, cryptographic material and evidence.
@@ -68,4 +74,3 @@ Failback is a separate approved change, not an automatic reversal.
 | after material change | targeted recovery regression | changed dependency restored and verified |
 
 Tests use anonymized/synthetic data unless formally authorized. A pass requires achieved RTO/RPO, no unauthorized access, matched ledger/control totals, verified audit continuity, stakeholder sign-off and tracked remediation. Critical failures block production expansion.
-

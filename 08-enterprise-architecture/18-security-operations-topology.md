@@ -1,5 +1,11 @@
 # Deliverables 17, 19-20 — Security, SOC and infrastructure topology
 
+## Global security-operations extension
+
+The detailed SOC/CSIRT, correlation, cyber/fraud separation, incident, forensics, vulnerability and supplier operating model is `36-soc-incident-forensics-fraud-security-operations.md`. It is supported by `security-event-evidence-flow.mmd`, `incident-response-lifecycle.mmd`, `security-slo-catalog.csv` and `compliance-evidence-catalog.csv`.
+
+Automated response remains limited to approved, high-confidence, reversible and bounded actions. Broad suspension, statutory/payment action, regional failover, irreversible deletion and external notification require named human authority. Architecture completion does not assert that a 24x7 SOC, SIEM/SOAR, EDR/XDR, WAF or other platform is deployed.
+
 ## Defence-in-depth zones
 
 See `diagrams/security-zones.mmd` and `diagrams/infrastructure-topology.mmd`.

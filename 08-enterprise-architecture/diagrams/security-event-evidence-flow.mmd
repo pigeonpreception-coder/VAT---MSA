@@ -1,0 +1,25 @@
+flowchart LR
+  Sources["Identity, edge, API, application, data, cloud, endpoint, CI/CD and privacy sources"]
+  Collect["Authenticated collectors with schema validation, redaction and durable buffering"]
+  Lake["Separately administered security lake and immutable audit evidence"]
+  Detect["Detection-as-code, correlation, behavior and threat intelligence"]
+  Case["SOC triage and incident or linked fraud case"]
+  Respond["Governed human playbook or bounded reversible automation"]
+  Forensics["Hash-verified evidence and chain of custody"]
+  Recover["Eradication, clean recovery and fiscal reconciliation"]
+  Improve["Lessons, control, policy, detection and test update"]
+  Assurance["Read-only compliance evidence and independent assurance"]
+
+  Sources --> Collect
+  Collect --> Lake
+  Lake --> Detect
+  Detect --> Case
+  Case --> Respond
+  Case --> Forensics
+  Respond --> Recover
+  Forensics --> Recover
+  Recover --> Improve
+  Improve --> Detect
+  Lake --> Assurance
+  Case --> Assurance
+  Recover --> Assurance

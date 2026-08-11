@@ -17,4 +17,4 @@ Sequential, parallel, conditional, amount/branch/department/role approvals, esca
 
 ## Acceptance
 
-Approve configurable transition boundaries, expression vocabulary, publication quorum, delegation rules, timer/recovery SLOs, SoD catalogue and whether a tightly controlled emergency override exists.
+Approve configurable transition boundaries, expression vocabulary, publication quorum, delegation rules, timer/recovery SLOs and the SoD catalogue. Emergency SoD override remains prohibited; any technical break-glass must preserve independent duties and cannot approve fiscal or financial actions.

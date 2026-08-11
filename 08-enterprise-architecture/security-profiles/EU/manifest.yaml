@@ -1,0 +1,27 @@
+apiVersion: vat-msa.security/v1alpha1
+kind: RegionalSecurityApplicabilityTemplate
+metadata:
+  id: VAT-MSA-SEC-EU
+  region: EU_EEA
+  version: EU-SEC-DRAFT-0.1.0
+  status: APPLICABILITY_TEMPLATE_ONLY
+  reviewedAt: 2026-08-11
+  executable: false
+  productionEnabled: false
+  inherits: VAT-MSA-SEC-GLOBAL@GLOBAL-DRAFT-1.0.0
+spec:
+  mayWeakenGlobalBaseline: false
+  requiresCountryProfile: true
+  gdprApplicability: REQUIRES_ENTITY_ROLE_TERRITORIAL_AND_PROCESSING_ASSESSMENT
+  nis2Applicability: REQUIRES_ENTITY_SERVICE_SECTOR_SIZE_DESIGNATION_AND_MEMBER_STATE_ASSESSMENT
+  trustAndElectronicIdentity: REQUIRES_SERVICE_AND_COUNTRY_ASSESSMENT
+  financialOperationalResilience: REQUIRES_REGULATED_ENTITY_AND_SERVICE_ASSESSMENT
+  transfers: REQUIRES_APPROVED_CHAPTER_V_AND_LOCAL_LAW_DECISION
+  prohibitedAssumptions:
+    - ALL_EU_ENTITIES_ARE_NIS2_COVERED
+    - NIS2_IS_AN_ISO_STANDARD
+    - ISO_ALIGNMENT_PROVES_GDPR_COMPLIANCE
+assurance:
+  applicabilityMatrix: regional-compliance-applicability.csv
+  localLegalOpinionRequired: true
+  memberStateProfileRequired: true

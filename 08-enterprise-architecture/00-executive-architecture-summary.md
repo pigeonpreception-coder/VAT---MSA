@@ -1,5 +1,13 @@
 # Deliverable 01 — Executive architecture summary
 
+## Global security, privacy and compliance extension
+
+VAT-MSA now has a unified, evidence-oriented control architecture that maps applicable standards, frameworks and jurisdictional obligations to architecture, implementation requirements, telemetry, tests, evidence, owners and review. It uses NIST CSF 2.0 for operating outcomes; applicable ISO/IEC, NIST SP and OWASP materials for management/control/verification guidance; PCI DSS only if payment-card scope is established; and country law only after formal applicability and interpretation.
+
+Zero-trust decisions cover people, workloads, devices, tenants, resources, countries, classifications, workflows, licences and risk. Privileged changes require phishing-resistant step-up, JIT/PAM and independent approval. Tenant isolation, authorization, audit integrity, secret protection, SoD and fiscal integrity remain non-bypassable. Lower-level policy may tighten but not weaken the signed global baseline.
+
+The architecture package is documents 33-38 plus the security control, standards, CSF, regional, threat, test, evidence, SLO and traceability catalogues. It is designed to align with applicable standards; it is not a certification, attestation, accreditation or production-readiness claim. Production security controls and country profiles require the formal gate, platform choices, implementation, exercises and independent assurance.
+
 ## What VAT-MSA is
 
 ### Globalisation extension

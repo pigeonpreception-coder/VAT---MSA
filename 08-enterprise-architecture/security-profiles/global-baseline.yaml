@@ -1,0 +1,81 @@
+apiVersion: vat-msa.security/v1alpha1
+kind: GlobalSecurityBaseline
+metadata:
+  id: VAT-MSA-SEC-GLOBAL
+  version: GLOBAL-DRAFT-1.0.0
+  status: PROPOSED_REQUIRES_FORMAL_APPROVAL
+  reviewedAt: 2026-08-11
+  executable: false
+  productionEnabled: false
+  contentHash: null
+  signatureRef: null
+spec:
+  inheritance:
+    childMayTighten: true
+    childMayWeakenMandatory: false
+    conflictBehavior: DENY_AND_OPEN_GOVERNED_EXCEPTION
+    unknownMandatoryBehavior: DENY
+  identity:
+    authenticationRequired: true
+    workloadIdentityRequired: true
+    privilegedPhishingResistantStepUpRequired: true
+    privilegedJitRequired: true
+    selfApprovalAllowed: false
+    emergencySodOverrideAllowed: false
+  access:
+    defaultDecision: DENY
+    rbacAndAbacRequired: true
+    trustedResourceOwnershipRequired: true
+    tenantIsolationRequired: true
+    privilegedReviewCadence: QUARTERLY_OR_MORE_FREQUENT
+  data:
+    classificationRequired: true
+    encryptionInTransitRequired: true
+    encryptionAtRestRequiredForRestricted: true
+    productionDataInLowerEnvironments: FORBIDDEN_BY_DEFAULT
+    residencyUnknownBehavior: DENY_PLACEMENT
+  cryptography:
+    centralizedKeyManagementRequired: true
+    durableSecretsInSourceAllowed: false
+    keyPurposeSeparationRequired: true
+    keyUseLoggingRequired: true
+  application:
+    serverAuthorizationRequired: true
+    inputAndSchemaValidationRequired: true
+    resourceBudgetsRequired: true
+    untrustedFileQuarantineRequired: true
+    unrestrictedServerEgressAllowed: false
+  audit:
+    required: true
+    appendOnlyInterfaceRequired: true
+    separateEvidenceAdministrationRequired: true
+    secretsInLogsAllowed: false
+  response:
+    automatedActionsMustBeReversibleAndBounded: true
+    irreversibleAutomatedActionAllowed: false
+    statutoryAutomatedDecisionAllowed: false
+  resilience:
+    encryptedBackupRequired: true
+    immutableIsolatedRecoveryCopyRequired: true
+    cleanRoomRecoveryRequiredForCriticalServices: true
+    failOpenAuthorizationAllowed: false
+  licensing:
+    expiryDeletesRecords: false
+    expiryMayBypassRetentionOrStatutoryContinuity: false
+  prohibitedUntilSeparatelyApproved:
+    - REAL_PAYMENTS
+    - CARDHOLDER_DATA_PROCESSING
+    - LIVE_ITAS_NAMRA_INTEGRATION
+    - UNAPPROVED_STATUTORY_RULES
+    - AI_ML_PROCESSING
+assurance:
+  standardsBaseline: standards-applicability-crosswalk.csv
+  controls: security-control-matrix.csv
+  tests: security-test-catalog.csv
+  evidence: compliance-evidence-catalog.csv
+  approvalsRequired:
+    - ARCHITECTURE_BOARD
+    - CISO
+    - PRIVACY_AUTHORITY
+    - LEGAL
+    - INTERNAL_AUDIT_REVIEW

@@ -1,5 +1,13 @@
 # VAT-MSA complete enterprise architecture package
 
+## 2026-08 global security, privacy and compliance architecture extension
+
+The mandatory security architecture layer is `33-global-security-privacy-compliance-architecture.md`, supported by the detailed zero-trust/IAM/PAM, data/application/API/network/cloud, SOC/incident/forensics/fraud, privacy/regional-compliance, and secure-delivery/resilience/testing specifications in documents 34-38.
+
+The authoritative architecture artifacts are `security-control-matrix.csv`, `standards-applicability-crosswalk.csv`, `nist-csf-2-crosswalk.csv`, `regional-compliance-applicability.csv`, `security-threat-register.csv`, `security-test-catalog.csv`, `compliance-evidence-catalog.csv`, `security-slo-catalog.csv`, `security-requirements-traceability.csv`, non-executable drafts under `security-profiles/`, the new security diagrams, and ADR-025 through ADR-029.
+
+The package is designed to align with applicable standards; it is not certification, attestation, accreditation or a legal compliance claim. All profile manifests are non-executable. Production security implementation, real payments/card processing, live ITAS/NamRA integration, AI/ML and unapproved statutory rules remain disabled or approval-gated.
+
 ## 2026-08 globalisation and country-compliance extension
 
 The baseline now separates a reusable global platform core from signed, versioned country compliance packs. The governing specification is `31-globalisation-country-compliance-architecture.md`; Namibia is the first non-executable reference pack in `32-namibia-country-compliance-pack.md` and `country-packs/NAM/manifest.yaml`.
@@ -45,15 +53,15 @@ Start with the authoritative [baseline and extension deliverable register](00-de
 | H | Database Schema | `05-data-architecture-and-erd.md`, `diagrams/enterprise-erd.mmd` |
 | I | API Architecture | `06-api-integration-architecture.md`, `api-catalog.yaml` |
 | J | Integration Architecture | `06-api-integration-architecture.md` |
-| K | Security Architecture | `07-security-scale-recovery.md`, `17-threat-model-stride.md`, `18-security-operations-topology.md` |
+| K | Security Architecture | documents `33`-`38`, `07-security-scale-recovery.md`, threat/control/test/evidence matrices |
 | L | Scalability Architecture | `07-security-scale-recovery.md` |
-| M | Disaster Recovery Architecture | `07-security-scale-recovery.md` |
+| M | Disaster Recovery Architecture | `20-dr-business-continuity.md`, document `38`, recovery controls/tests |
 | N | UX Architecture | `03-portal-ux-design-system.md` |
 | O | UI Design System | `03-portal-ux-design-system.md` |
 | P | Event Architecture | `08-event-deployment-devsecops-testing.md`, `event-catalog.csv` |
 | Q | Deployment Architecture | `08-event-deployment-devsecops-testing.md` |
-| R | DevSecOps Architecture | `08-event-deployment-devsecops-testing.md` |
-| S | Testing Strategy | `08-event-deployment-devsecops-testing.md` |
+| R | DevSecOps Architecture | `08-event-deployment-devsecops-testing.md`, document `38` |
+| S | Testing Strategy | `08-event-deployment-devsecops-testing.md`, `security-test-catalog.csv` |
 | T | Data Governance | `05-data-architecture-and-erd.md`, `data-classification-retention.csv` |
 
 ## Proposed decisions

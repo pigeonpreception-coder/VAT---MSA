@@ -1,5 +1,20 @@
 # Detailed Implementation Roadmap
 
+## Global security, privacy and compliance insertion plan
+
+| Increment | Scope | Entry dependency | Exit evidence |
+|---|---|---|---|
+| S0 - approve control model | ADR-025 through ADR-029, standards register, risk method, control owners and claims policy | architecture/security/privacy/legal review | signed decisions and accountable roles |
+| S1 - identity/policy/evidence foundations | separated identities, decision contract, classification, audit schema, key/secret and tenant test harness | S0 | synthetic identity, policy, tenant and evidence conformance |
+| S2 - secure supply chain | protected pipeline, scans, SBOM, provenance, signing and admission | S0-S1 and signing authority | clean immutable artifact and tamper/revocation evidence |
+| S3 - runtime enforcement | edge/API/app/data/cloud controls, PAM/JIT, DLP/export and signed-profile validation | S1-S2 and platform decisions | negative authorization, ASVS/API, tenant and rollback evidence |
+| S4 - SOC/PIMS operations | telemetry, SIEM/detections, incident/forensics, privacy/rights/retention and suppliers | S3 plus legal/operating owners | exercises, DPIA/applicability, coverage and independent review |
+| S5 - resilience assurance | immutable backup, clean room, zone/region failure and fiscal reconciliation | S3-S4 and funded topology | repeated approved RTO/RPO and cyber-recovery evidence |
+| S6 - country security activation | signed local security/privacy profile, legal duties, government contracts and readiness | S0-S5 plus country authority | country security readiness `APPROVED` and explicit release |
+| S7 - continuous assurance | quarterly access/control review, recurring testing, audit and improvement | production-authorized scope | fresh operating evidence and verified remediation |
+
+No security increment activates payments/card data, live ITAS/NamRA, unapproved statutory rules or AI. Each requires a separate approved scope.
+
 ## Globalisation and country onboarding insertion plan
 
 This sequence starts with architecture and governance. It does not authorize country-specific production implementation.

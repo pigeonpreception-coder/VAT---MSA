@@ -1,5 +1,11 @@
 # K-M. Security, scalability and disaster-recovery architecture
 
+## Unified security and compliance control addendum
+
+The governing security layer is documents `33-global-security-privacy-compliance-architecture.md` through `38-secure-delivery-resilience-testing-roadmap.md`. `security-control-matrix.csv` is the stable logical control catalogue; `standards-applicability-crosswalk.csv` and `nist-csf-2-crosswalk.csv` map sources and outcomes; `security-test-catalog.csv` and `compliance-evidence-catalog.csv` bind controls to verification and evidence.
+
+This document's original target patterns remain valid where consistent with that layer. The extension makes explicit that security-profile policy is monotonic and signed, privileged actions require phishing-resistant step-up/JIT/independent approval, there is no self-approval or emergency SoD override, and no architecture artifact constitutes certification or operating evidence.
+
 ## Country-pack and residency security addendum
 
 Country-pack artifacts are canonicalized, hashed, signed by an approved authority, stored immutably and verified before load and use. The runtime rejects missing, expired, incompatible, downgraded or unauthorized packs. Regulatory authoring, approval, activation and signing keys are separated; key use is HSM/KMS-backed. Country data-plane placement and cross-border transfer are selected only from an approved residency/privacy policy, with fail-closed routing and country-scoped recovery evidence.

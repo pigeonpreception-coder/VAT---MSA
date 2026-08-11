@@ -1,5 +1,11 @@
 # E-F. Identity architecture and RBAC/ABAC
 
+## Global zero-trust, IAM and PAM addendum
+
+`34-zero-trust-iam-pam-architecture.md` is the controlling identity/security extension. It adds NIST SP 800-207/207A-aligned continuous decisions; risk-based NIST SP 800-63-4 guidance; human, workload, API and device identity classes; strict federation; phishing-resistant privileged step-up; JIT/PAM; decision-time SoD; no self-approval or emergency SoD override; quarterly access reviews; and bounded break-glass that cannot grant fiscal authority.
+
+New security/privacy/evidence/profile roles are listed in `rbac-abac-matrix.csv`. They do not inherit taxpayer, NamRA, platform, key, evidence or fiscal authority outside their explicit ABAC scope.
+
 ## Country regulatory administration addendum
 
 Regulatory administration uses separate Country Pack Author, Reviewer, Approver, Country Release Authority, Jurisdiction Case Officer, Currency Policy Reviewer and Country Readiness roles. ABAC includes assigned country, pack/version, environment, evidence purpose and effective interval. Pack approval, activation, jurisdiction migration and manual FX decisions require step-up authentication and independent approval; authors cannot approve or activate their own work. Privileged access remains subject to quarterly recertification with no emergency SoD override.
@@ -54,7 +60,7 @@ Policy decisions return allow/deny, policy ID/version, reason and obligations su
 
 ## Lifecycle and privileged access
 
-Joiner/mover/leaver events flow from authoritative sources, require approval and generate evidence. Access is recertified at least quarterly for privileged/NamRA scope and on material role change. Delegations expire automatically. Privileged access is separate, JIT, MFA-bound, approved, recorded and revocable; emergency access has narrow expiry and retrospective review.
+Joiner/mover/leaver events flow from authoritative sources, require approval and generate evidence. Access is recertified at least quarterly for privileged/NamRA scope and on material role change. Delegations expire automatically. Privileged access is separate, JIT, MFA-bound, approved, recorded and revocable; technical break-glass has narrow expiry and retrospective review but cannot override SoD or grant fiscal authority.
 
 ## Failure and recovery
 

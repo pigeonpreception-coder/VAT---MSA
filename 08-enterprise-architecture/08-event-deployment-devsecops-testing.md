@@ -1,5 +1,11 @@
 # P-S. Event, deployment, DevSecOps and testing architecture
 
+## Global security, evidence and secure-delivery addendum
+
+`event-catalog.csv` now includes signed security-profile, JIT privileged-access, incident/response, forensic evidence, privacy/DPIA, vulnerability, recovery and control-state events. Payloads are minimized, classified and immutable enough for risk; credentials, full sensitive documents and unnecessary PII are prohibited.
+
+`38-secure-delivery-resilience-testing-roadmap.md` and ADR-029 govern SSDF 1.1-aligned gates, ASVS 5.0.0 verification, SBOM/provenance/signing/admission, independent testing and release evidence. A scanner pass or signed artifact does not replace authorization, tenant/business-logic, legal or recovery evidence.
+
 ## Globalisation addendum
 
 The event catalogue now includes country-pack, jurisdiction, currency-rate, tax-selection, document-template, business-calendar, residency and readiness events. CI validates schemas, official-source references, deterministic golden cases, locale/currency formatting, compatibility, signatures and downgrade protection. Promotion is by immutable pack digest and environment-scoped activation record; application deployment does not implicitly activate a country pack.

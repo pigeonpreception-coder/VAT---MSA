@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  actor Subject as User or machine principal
+  participant PEP as Edge or service enforcement point
+  participant ID as Identity and risk services
+  participant PIP as Authoritative attribute sources
+  participant PDP as Policy decision point
+  participant Domain as Domain and resource store
+  participant Audit as Audit and security evidence
+
+  Subject->>PEP: Request with credential and resource reference
+  PEP->>ID: Validate issuer, credential, assurance, session and device risk
+  ID-->>PEP: Authenticated subject/workload context
+  PEP->>Domain: Load trusted resource tenant, owner and state
+  Domain-->>PEP: Authoritative resource attributes
+  PEP->>PIP: Resolve membership, role, licence, country, classification and workflow
+  PIP-->>PEP: Versioned attributes and provenance
+  PEP->>PDP: Evaluate action and full context
+  PDP-->>PEP: ALLOW, DENY, CHALLENGE or REQUIRE_APPROVAL plus obligations
+  PEP->>Audit: Record decision, versions, reason and correlation
+  alt Allowed and obligations satisfied
+    PEP->>Domain: Execute domain-authorized action
+    Domain-->>PEP: Minimized result and durable evidence reference
+    PEP-->>Subject: Safe response
+  else Challenge or approval required
+    PEP-->>Subject: Step-up or governed approval required
+  else Denied, missing or conflicting policy
+    PEP-->>Subject: Safe denial
+  end

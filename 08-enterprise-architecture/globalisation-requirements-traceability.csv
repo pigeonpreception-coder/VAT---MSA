@@ -39,3 +39,6 @@ GLOB-037,IAM/RBAC/ABAC updated,31 section 13; ADR-024,Security review,COMPLETE_F
 GLOB-038,API/event architecture updated,31 section 15; catalogues,Contract review,COMPLETE_FOR_REVIEW
 GLOB-039,Security/infrastructure/docs/reporting updated,31 sections 12 and 17-19,Architecture reviews,COMPLETE_FOR_REVIEW
 GLOB-040,Implementation roadmap gated,31 section 22 and 28 roadmap,Steering approval,COMPLETE_FOR_REVIEW
+GLOB-041,Country fiscal pack paired with non-weakenable security profile,31 security-profile integration; documents 33-38; ADR-028,Profile signature merge and readiness tests,PROPOSED
+GLOB-042,Namibia security and privacy profile remains non-executable,32 companion profile; security-profiles/NAM/manifest.yaml,Namibia legal NamRA ITAS CISO privacy and independent review,NOT_READY
+GLOB-043,Country activation requires independent security and cyber-recovery evidence,country-readiness CR-16 through CR-20; security-test-catalog.csv,Readiness audit and current penetration/DR evidence,NOT_READY

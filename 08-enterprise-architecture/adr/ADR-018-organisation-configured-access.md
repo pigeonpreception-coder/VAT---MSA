@@ -17,4 +17,4 @@ Organisations can model their workforce without source changes. Policy compilati
 
 ## Acceptance
 
-Approve the grantable permission catalogue, administrator hierarchy, financial thresholds/ceilings, access review cadence, dormant definition and revocation SLO.
+Approve the grantable permission catalogue, administrator hierarchy, financial thresholds/ceilings, reviewer scope, any higher-risk review frequency, dormant definition and revocation SLO. Protected and privileged access review remains at least quarterly.

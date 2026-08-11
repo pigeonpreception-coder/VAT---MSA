@@ -7,9 +7,9 @@
 - Trial, grace, pending-renewal, suspension, expiry, cancellation, upgrade and downgrade effective behavior.
 - Statutory continuity, record retention, retrieval/export and legally required corrective actions after licence restriction.
 - Primary Organisation Administrator proofing, replacement, recovery, quorum and escalation.
-- Grantable permission catalogue, protected roles, financial ceilings, SoD catalogue and emergency-override decision.
+- Grantable permission catalogue, protected roles, financial ceilings, SoD catalogue and bounded technical break-glass procedures; emergency SoD override is prohibited.
 - Workflow expression/transition catalogue, publication approval, version migration and durable timer recovery.
-- Access review cadence, dormant threshold, excessive privilege rules, offboarding task reassignment and revocation SLO.
+- Access-review campaign scope and reviewers (with quarterly minimum), dormant threshold, excessive privilege rules, offboarding task reassignment and revocation SLO.
 - Canonical workspace labels, restricted-state disclosure, multilingual terminology and licence-upgrade messaging.
 - ITAS taxpayer/VAT verification attributes, federation assurance, organisation status events, SLAs and sandbox.
 
@@ -63,3 +63,11 @@ The globalisation extension treats the official NamRA VAT Act, official NamRA/IT
 Open decisions include the authoritative jurisdiction evidence hierarchy; taxpayer migration and cross-border rules; registration thresholds and identifier validation; exemptions and zero-rating; rounding and exchange-rate policy; tax-period assignment and deadlines; invoice numbering and correction; return schemas and submission receipts; statutory retention, privacy, residency and transfer; ITAS/NamRA machine interfaces; country-pack signing authority; emergency revocation; and final country-readiness quorum.
 
 The reference Namibia pack is deliberately non-executable. Real payments, live ITAS integration, production statutory rules and production activation remain disabled.
+
+## Global security, privacy and compliance open decisions (reviewed 2026-08-11)
+
+Architecture documents 33-38 and ADR-025 through ADR-029 define the proposed global security layer. They are not certification, compliance or operating-effectiveness evidence.
+
+Open decisions include the ISMS/PIMS scope and control owners; licensed standards register and Statement of Applicability process; security risk appetite and exception authority; identity provider and authentication assurance; PAM/JIT platform and lawful session recording; KMS/HSM/vault and cryptographic profiles; WAF/SIEM/SOAR/EDR/cloud/network platforms; SOC tier, staffing and incident contacts; approved security SLOs; immutable evidence/backup platforms; country privacy, residency, transfer, retention and notification duties; Namibia gazetted legal status and government security/PKI requirements; penetration/red-team authorization; funded HA/DR topology; and any future PCI DSS or AI scope.
+
+The global, Namibia, EU and USA security profile manifests are deliberately `executable: false` and `productionEnabled: false`. Payments/card data, AI/ML, live ITAS/NamRA and unapproved statutory rules remain disabled. No self-approval or emergency SoD override is permitted; privileged changes require step-up and independent approval; access reviews remain at least quarterly; licence expiry remains non-destructive.

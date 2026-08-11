@@ -1,5 +1,15 @@
 # VAT-MSA Enterprise Architecture Blueprint
 
+## Part XXVII - Global security, privacy and compliance control architecture
+
+VAT-MSA uses one unified control framework that translates applicable standards, cybersecurity/privacy frameworks and jurisdictional obligations into control objectives, architecture mechanisms, code/infrastructure/process requirements, telemetry, tests, evidence, ownership and continual improvement. NIST CSF 2.0 organizes the operating outcomes. ISO/IEC, NIST SP, OWASP and conditional PCI materials are applied according to a recorded applicability assessment; legal requirements remain jurisdiction-specific.
+
+The security baseline is zero trust, defense in depth, privacy by design, secure by default and evidence gated. Mandatory floors include server-side RBAC/ABAC/resource authorization, cross-layer tenant isolation, step-up/JIT privileged access, no self-approval or emergency SoD override, managed keys/secrets, immutable fiscal/audit evidence, governed automated response, quarterly access review and non-destructive licence expiry. Signed regional/country profiles may tighten but cannot weaken the global baseline.
+
+Authoritative detail: [global security architecture](33-global-security-privacy-compliance-architecture.md), [zero-trust/IAM/PAM](34-zero-trust-iam-pam-architecture.md), [data/application/API/network/cloud security](35-data-application-api-network-cloud-security.md), [SOC/incident/forensics/fraud operations](36-soc-incident-forensics-fraud-security-operations.md), [privacy/regional compliance](37-privacy-regional-compliance-architecture.md), [secure delivery/resilience/testing roadmap](38-secure-delivery-resilience-testing-roadmap.md), and ADRs [025](adr/ADR-025-unified-security-privacy-compliance-control-framework.md) through [029](adr/ADR-029-evidence-gated-secure-delivery-and-response-automation.md).
+
+This is architecture designed to align with applicable standards. It is not certification, attestation, accreditation, proof of operating effectiveness or production authorization.
+
 ## Part XXVI - Global core and country compliance packs
 
 VAT-MSA is extended from a Namibia-shaped baseline into a global platform core with isolated, signed and effective-dated country compliance packs. The global core owns identity, tenancy, workflow, exact money, documents, audit, APIs/events and operational controls. A country pack supplies only jurisdiction-authorized tax, identifier, document, filing, calendar, retention, localization and government-adapter configuration. Jurisdiction is resolved authoritatively and pinned with the selected country-pack and rule versions on every fiscal determination.
@@ -205,7 +215,7 @@ Authoritative detail: [formal approval gate](29-architecture-approval-gate.md).
 
 ## Blueprint completeness index
 
-Globalisation coverage adds the global core, country-pack lifecycle, multi-currency, Namibia reference pack and country-readiness framework in Part XXVI and artifacts 31-32.
+Globalisation coverage adds the global core, country-pack lifecycle, multi-currency, Namibia reference pack and country-readiness framework in Part XXVI and artifacts 31-32. Security coverage adds the unified control framework, zero trust/IAM/PAM, data/application/API/network/cloud security, SOC/incident/forensics/fraud operations, privacy/regional profiles, secure delivery/resilience/testing, crosswalks, evidence and roadmap in Part XXVII and artifacts 33-38.
 
 | Required blueprint content | Location |
 |---:|---|

@@ -1,5 +1,11 @@
 # I-J. API and integration architecture
 
+## Global security API addendum
+
+`35-data-application-api-network-cloud-security.md` governs API authentication, resource authorization, schema/resource budgets, idempotency/replay, outbound validation, egress and government trust. `api-catalog.yaml` now includes non-executable security-profile, PAM, SOC/incident, vulnerability, privacy, compliance-evidence and recovery-assurance contracts. Each remains architecture-proposed and cannot create production authority.
+
+Government adapters remain disabled until official identity, mTLS/private-key, message, signature, receipt, retry, reconciliation, incident and sandbox contracts are approved. A public ITAS web flow is not an API contract.
+
 ## Global contract addendum
 
 Fiscal commands and events carry resolved `countryCode`, `countryPackVersion`, ISO `currencyCode`, exact amount representation, rule references and correlation/provenance metadata. APIs never accept an unverified client-selected jurisdiction as authoritative. Country-pack, readiness, jurisdiction, currency-rate, tax-preview and template endpoints are catalogued in `api-catalog.yaml`; all activation and live government-adapter operations remain gated.

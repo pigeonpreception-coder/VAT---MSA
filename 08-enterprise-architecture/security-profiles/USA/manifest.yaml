@@ -1,0 +1,28 @@
+apiVersion: vat-msa.security/v1alpha1
+kind: CountrySecurityApplicabilityTemplate
+metadata:
+  id: VAT-MSA-SEC-USA
+  countryCode: USA
+  version: USA-SEC-DRAFT-0.1.0
+  status: APPLICABILITY_TEMPLATE_ONLY
+  reviewedAt: 2026-08-11
+  executable: false
+  productionEnabled: false
+  inherits: VAT-MSA-SEC-GLOBAL@GLOBAL-DRAFT-1.0.0
+spec:
+  mayWeakenGlobalBaseline: false
+  nistCsf: VOLUNTARY_REFERENCE_UNLESS_CONTRACT_OR_LAW_REQUIRES
+  nist80053: SELECT_AND_TAILOR_TO_SCOPE
+  nist800171: CONDITIONAL_ON_CUI_CONTRACT_SCOPE
+  fismaFedramp: CONDITIONAL_ON_US_FEDERAL_AUTHORIZATION_CONTEXT
+  statePrivacyAndBreach: REQUIRES_STATE_ENTITY_THRESHOLD_DATA_AND_ACTIVITY_ASSESSMENT
+  soc2: OPTIONAL_INDEPENDENT_ATTESTATION_NOT_CERTIFICATION
+  pciDss: CONDITIONAL_CARDHOLDER_DATA_ENVIRONMENT_SCOPE_PAYMENTS_DISABLED
+  prohibitedAssumptions:
+    - ONE_US_PRIVACY_LAW_APPLIES_TO_ALL_DEPLOYMENTS
+    - NIST_GUIDANCE_IS_AUTOMATICALLY_MANDATORY
+    - SOC2_IS_A_CERTIFICATION
+assurance:
+  applicabilityMatrix: regional-compliance-applicability.csv
+  legalOpinionRequired: true
+  contractAssessmentRequired: true

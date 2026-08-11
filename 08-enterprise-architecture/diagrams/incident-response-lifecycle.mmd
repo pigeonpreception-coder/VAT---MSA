@@ -1,0 +1,21 @@
+flowchart LR
+  Prepare["Prepare: authority, inventory, contacts, playbooks and exercises"]
+  Detect["Detect and validate"]
+  Classify["Classify severity, scope and legal contexts"]
+  Contain["Contain with least blast radius and preserve evidence"]
+  Investigate["Investigate timeline, root cause and impact"]
+  Eradicate["Eradicate persistence and revoke compromised trust"]
+  Recover["Recover cleanly and reconcile fiscal, tenant and audit integrity"]
+  Notify["Execute approved notifications and communications"]
+  Review["Review, remediate, test and improve"]
+
+  Prepare --> Detect
+  Detect --> Classify
+  Classify --> Contain
+  Contain --> Investigate
+  Investigate --> Eradicate
+  Eradicate --> Recover
+  Classify --> Notify
+  Recover --> Notify
+  Notify --> Review
+  Review --> Prepare

@@ -1,5 +1,11 @@
 # Deliverable 18 — Formal threat model (STRIDE, abuse cases and attack trees)
 
+## Global security extension
+
+`security-threat-register.csv` is the expanded authoritative initial threat register covering authentication, taxpayer registration, tenancy, invoices, tax rules, returns, accounting, payments/refunds, ITAS/NamRA, employees, administration, reporting, uploads, APIs, offline synchronization, country profiles, licensing, delivery, cloud, evidence, backup/recovery, privacy, insider risk, fraud convergence and conditional AI. The register maps prevention, detection, response, owner and readiness; this narrative retains the core attack-tree and abuse-case rationale.
+
+Threat review occurs at least quarterly and on every material trust boundary, data purpose, country, integration, payment, AI, cryptographic, recovery or privilege change. A critical tenant, fiscal, audit, key or supply-chain threat without tested controls blocks the affected release.
+
 ## Method and scope
 
 ### Workspace, licensing and workflow abuse cases

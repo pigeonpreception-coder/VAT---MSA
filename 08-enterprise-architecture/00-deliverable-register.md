@@ -1,4 +1,31 @@
-# VAT-MSA baseline and workspace/licensing extension deliverable register
+# VAT-MSA baseline and extension deliverable register
+
+## Global security, privacy and compliance architecture extension
+
+| # | Required security output | Primary evidence | Document status |
+|---:|---|---|---|
+| 76 | A. Complete enterprise security architecture | `33-global-security-privacy-compliance-architecture.md` | Complete for architecture review; implementation gated |
+| 77 | B. Zero Trust architecture | `34-zero-trust-iam-pam-architecture.md`, zero-trust diagram, ADR-026 | Complete for review; platform decision gated |
+| 78 | C-D. IAM and PAM architecture | document 34, `rbac-abac-matrix.csv` | Complete for review; IAM/PAM contracts gated |
+| 79 | E. Data security architecture | `35-data-application-api-network-cloud-security.md` | Complete for review; platform/legal decisions gated |
+| 80 | F. Network security architecture | document 35, defence-in-depth diagram | Complete for review; provider/topology gated |
+| 81 | G-H. Application and API security architecture | document 35, `security-test-catalog.csv` | Complete for review; implementation/testing gated |
+| 82 | I. Cloud security architecture | document 35 and SEC-CLD controls | Complete provider-neutral design; provider gated |
+| 83 | J. SOC architecture | `36-soc-incident-forensics-fraud-security-operations.md` | Complete reference; platform/staffing gated |
+| 84 | K. Incident-response architecture | document 36 and incident lifecycle diagram | Complete reference; contacts/exercises gated |
+| 85 | L. Disaster-recovery security architecture | `38-secure-delivery-resilience-testing-roadmap.md`, document 20 | Complete reference; topology/exercises not ready |
+| 86 | M. Privacy architecture | `37-privacy-regional-compliance-architecture.md` | Complete reference; country legal review required |
+| 87 | N. Compliance and regional architecture | document 37, `regional-compliance-applicability.csv`, profiles | Complete templates; no regional auto-activation |
+| 88 | O. Security governance | document 33, ADR-025 through ADR-029 | Proposed; formal approval required |
+| 89 | P. Global security control matrix | `security-control-matrix.csv` | Complete logical catalogue; operation not asserted |
+| 90 | Q. Formal domain threat model | `security-threat-register.csv`, document 17 | Complete initial model; recurring review required |
+| 91 | R. Security testing strategy | `security-test-catalog.csv`, document 38 | Designed; independent production tests outstanding |
+| 92 | S. Security operations model | document 36, `security-slo-catalog.csv` | Designed; 24x7 tier/staffing decision outstanding |
+| 93 | T. Security roadmap | document 38 | Complete gated sequence; production not authorized |
+| 94 | Standards, NIST CSF and legal applicability crosswalks | `standards-applicability-crosswalk.csv`, `nist-csf-2-crosswalk.csv` | Complete for review; licensed/legal validation required |
+| 95 | Compliance evidence and end-to-end traceability | `compliance-evidence-catalog.csv`, `security-requirements-traceability.csv` | Complete logical model; evidence operation pending |
+
+This extension is an architecture and control baseline. It does not claim certification or operating effectiveness and does not authorize production implementation.
 
 ## Globalisation and country-compliance extension
 

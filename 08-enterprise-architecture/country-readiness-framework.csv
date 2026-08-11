@@ -14,3 +14,8 @@ CR-12,Pack security,schema hash signatures key custody rollback and SoD,NOT_READ
 CR-13,Country compliance tests,all golden cases conformance and regression,NOT_READY,NOT_READY,QA plus regulator
 CR-14,Operational readiness,SLO monitoring SOC DR support ownership and runbooks,NOT_READY,IN_DEVELOPMENT,SRE/CISO/business
 CR-15,Production decision,all critical gates approved and signed release,NO_PRODUCTION_ACTIVATION,UNDER_REGULATORY_REVIEW,Country Readiness Board
+CR-16,Security and legal applicability,"signed standards legal sector entity service data and territorial applicability decisions",NOT_READY,NOT_READY,CISO plus privacy/legal plus country authority
+CR-17,Country security and privacy profile,"signed non-downgradable profile with approved identity encryption retention residency transfer breach and supplier controls",NOT_READY,NOT_READY,CISO plus privacy/legal plus regulator
+CR-18,Independent security assurance,"current web API cloud identity PAM tenant business-logic and profile penetration evidence with critical findings closed",NOT_READY,NOT_READY,CISO plus independent assessor
+CR-19,SOC incident and forensic readiness,"approved service tier telemetry coverage detections contacts playbooks bounded automation and custody exercise",NOT_READY,NOT_READY,CISO plus CSIRT plus legal/privacy
+CR-20,Cyber recovery and security scale,"representative load control-plane failure immutable backup clean-room restore and achieved RTO/RPO evidence",NOT_READY,NOT_READY,SRE plus CISO plus DR/business owners
