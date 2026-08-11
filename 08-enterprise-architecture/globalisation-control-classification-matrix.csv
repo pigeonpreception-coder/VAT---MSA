@@ -1,0 +1,34 @@
+Component,System_enforced,Regulatory_configuration,Organisation_configuration,User_configuration,Approval_and_change_boundary
+Tenant isolation,Yes,No,No,No,CISO-controlled deployment only
+Authentication and session security,Yes,Country may strengthen minimums,Limited stricter policy,No weakening,CISO/security approval
+Cryptography and key custody,Yes,Country may require stronger profile,No,No,CISO and key authority
+Audit integrity,Yes,Country retention/access profile,No,No,CISO/records/regulator
+Licence enforcement,Yes,Country entitlement metadata,Request only,No,Commercial authority plus security
+Jurisdiction resolution,Yes,Identifier/registration authority rules,Migration request only,No,Regulator/legal approval
+Country pack schema and signature,Yes,Pack content,No,No,Architecture security regulator approvals
+Country readiness state,Yes,Evidence and country decision,No,No,Readiness board
+VAT/GST/sales-tax rates,No,Yes,No,No,Regulatory maker-checker and activation
+Tax categories and exemptions,No,Yes,No,No,Regulator/legal review
+Tax periods and deadlines,Deadline engine enforced,Yes,Authority assignment only,No,Regulator and calendar approval
+Tax calculation primitives,Yes,Rules and parameters,No,No,Architecture plus regulator
+Historical rule binding,Yes,Effective rule version,No,No,Immutable after transaction commit
+Currency catalogue,Exact-code enforcement,Yes,Functional currency limited by legal profile,Presentation preference only,Finance/regulatory approval
+FX rate ledger,Exact immutable arithmetic,Source/timing policy,Authorised rate request,Presentation only,Finance maker-checker
+Original monetary amount,Immutable,No,No,No,No overwrite permitted
+Tax identifier type,Format/tenant controls,Yes,No,No,Issuing authority/regulator
+Tax identifier value,Canonical uniqueness,Verification policy,Submission only,No,Authority verification
+Invoice statutory fields,Schema enforcement,Yes,Brand extension zones,No,Regulator/legal approval
+Document templates,Signed version enforcement,Yes,Branding in allowed zones,Language preference,Regulator/template approval
+Government integrations,Trust boundary and protocol security,Official country contract,No,No,Authority and CISO acceptance
+Data residency,Placement enforcement,Yes,No,No,Legal/privacy/architecture approval
+Privacy obligations,Security baseline enforced,Yes,Limited organisation policy,User consent where lawful,Privacy/legal approval
+Record retention,Deletion and hold enforcement,Yes,Longer retention request only,No,Legal/records/regulator
+Business calendar,Deterministic deadline engine,Yes,No,Display preference only,Regulator/calendar approval
+Legal terminology,Protected resource lookup,Yes,No,Interface language preference,Regulator/legal translation approval
+Employee roles,Permission ceilings,No,Yes,No,Organisation admin within catalogue
+Departments/job titles,Isolation and validation,No,Yes,No,Organisation administration
+Approval workflows,Typed engine and mandatory SoD,Regulatory workflows protected,Yes within catalogue,Task preference only,Organisation approval plus protected policy
+Navigation,Backend authorisation,Protected country destinations,Labels/order within bounds,Favourites/recent,Configuration never grants access
+Reports,Jurisdiction/currency metadata enforced,Statutory definitions,Operational report layouts,Presentation preference,Regulator for statutory reports
+Security monitoring,Yes,Country notification/retention overlays,No,No,CISO/SOC
+Emergency SoD override,Disabled,No,No,No,Architecture/security exception required to change

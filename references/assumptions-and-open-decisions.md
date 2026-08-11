@@ -56,3 +56,10 @@
 - National hosting, network, IAM, PKI/HSM and SOC constraints.
 - Measured or forecast transaction volumes by taxpayer segment and channel.
 - NamRA operating model, segregation-of-duties policy and audit/refund workflows.
+## Globalisation and Namibia open decisions (reviewed 2026-08-11)
+
+The globalisation extension treats the official NamRA VAT Act, official NamRA/ITAS taxpayer material and Bank of Namibia currency material as source evidence, not as self-activating executable policy. The architecture currently records `NAD` as the monetary code, `N$` as the Namibia display symbol and 15% as a cited standard-rate reference. Any rule that changes a fiscal result remains `REQUIRES NAMIBIAN REGULATORY CONFIRMATION` until an authorized reviewer approves its interpretation, effective dates, precedence and golden cases.
+
+Open decisions include the authoritative jurisdiction evidence hierarchy; taxpayer migration and cross-border rules; registration thresholds and identifier validation; exemptions and zero-rating; rounding and exchange-rate policy; tax-period assignment and deadlines; invoice numbering and correction; return schemas and submission receipts; statutory retention, privacy, residency and transfer; ITAS/NamRA machine interfaces; country-pack signing authority; emergency revocation; and final country-readiness quorum.
+
+The reference Namibia pack is deliberately non-executable. Real payments, live ITAS integration, production statutory rules and production activation remain disabled.

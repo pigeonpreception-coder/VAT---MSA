@@ -1,0 +1,22 @@
+flowchart TB
+  users["Licensed organisations and authorised users"]
+  regulators["Country regulators and legal reviewers"]
+  gov["Verified government systems"]
+  fx["Approved exchange-rate authorities"]
+  core["VAT-MSA Global Core"]
+  registry["Signed Country Pack Registry"]
+  readiness["Country Readiness Board"]
+  na["Namibia Deployment Profile (not production enabled)"]
+  other["Future country profile"]
+
+  users --> core
+  regulators -->|"approve regulatory content"| registry
+  readiness -->|"production-enable decision"| registry
+  registry -->|"verified pack versions"| core
+  core -->|"country adapter"| gov
+  fx -->|"versioned rates"| core
+  core --> na
+  core --> other
+
+  classDef blocked fill:#fff3cd,stroke:#9a6714,color:#4b3a12
+  class na,other blocked

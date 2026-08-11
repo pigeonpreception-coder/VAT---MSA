@@ -2,6 +2,10 @@
 
 ## ITAS capability map and confirmation boundary
 
+### Country-adapter boundary
+
+ITAS/NamRA integration is the disabled Namibia implementation of a generic Government Revenue Adapter contract, not a global-core dependency. The Namibia adapter cannot load until its official API, identity, sandbox, receipt, retry, support and security contracts are confirmed. Other countries receive separate adapters, credentials, quotas, data mappings and readiness decisions; no adapter inherits Namibia assumptions.
+
 VAT-MSA treats ITAS/NamRA as the preferred authority only for interfaces explicitly confirmed by the ITAS technical/business owners.
 
 | Candidate interface | VAT-MSA use | Required confirmation | Failure/reconciliation |

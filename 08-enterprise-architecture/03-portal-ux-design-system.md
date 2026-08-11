@@ -1,5 +1,9 @@
 # D, N-O. Portal, UX and UI design-system architecture
 
+## Country-adaptive experience
+
+The server-provided effective context supplies country, locale, time zone, currency, country-pack version and document/calendar capabilities. Components format exact `Money` values through the locale catalogue while preserving the ISO currency code; Namibia displays `N$` and never an ambiguous bare `$`. Missing translations, templates, pack versions or jurisdiction evidence produce explicit unavailable/review states rather than a guessed fallback.
+
 ## Hierarchical workspace extension
 
 The Buyer and Seller experiences become task emphasis inside one organisation workspace. Navigation is grouped into Home, Sales/Revenue, Procurement/Purchases, VAT/Tax, Accounting/Finance, Inventory/Operations, Projects, Documents/Records, Reporting/Analytics, Integrations, Administration and Licensing. The server returns only permitted/licensed items and safe restriction states.

@@ -1,5 +1,9 @@
 # C. Domain architecture
 
+## Globalisation addendum
+
+The domain map adds Jurisdiction, Country Compliance, Money/FX, Localization, Business Calendar and Regulatory Administration contexts. Tax, Documents, Reporting and Integration consume immutable country-pack contracts; they do not embed country branches or own regulatory policy. Country-pack failure is isolated by country/version/environment and fails closed for affected fiscal commands. Detailed ownership and dependencies are in `31-globalisation-country-compliance-architecture.md`.
+
 ## Added bounded contexts
 
 | Domain | Authoritative responsibilities | Publishes | Does not own |

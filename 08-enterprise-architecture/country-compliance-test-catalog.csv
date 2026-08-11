@@ -1,0 +1,24 @@
+Test_ID,Scope,Automated_test,Required_oracle,Pre_activation_result,Namibia_status
+CCT-001,Every pack,Manifest/schema/operator allow-list validation,Global pack schema and security policy,Fail build,DESIGNED_NOT_IMPLEMENTED
+CCT-002,Every pack,Canonical content hash and signature verification,Approved signing trust policy,Reject pack,DESIGNED_NOT_IMPLEMENTED
+CCT-003,Every pack,Effective-date overlap/gap and deterministic rule selection,Approved rule-version catalogue,Fail build,DESIGNED_NOT_IMPLEMENTED
+CCT-004,Every pack,Historical transaction replay uses original pack/rule versions,Committed golden transaction snapshots,Fail readiness,DESIGNED_NOT_IMPLEMENTED
+CCT-005,Every pack,Jurisdiction conflict and missing evidence fail closed,Authoritative jurisdiction policy,Block fiscal command,DESIGNED_NOT_IMPLEMENTED
+CCT-006,Every pack,Locale/currency formatting across UI PDF spreadsheet CSV notification and API metadata,Approved country currency/locale profile,Fail readiness,DESIGNED_NOT_IMPLEMENTED
+CCT-007,Namibia,Display N$ and reject ambiguous bare dollar in fiscal presentation,Approved Namibia presentation profile,Fail readiness,DESIGNED_NOT_IMPLEMENTED
+CCT-008,Namibia,NAD minor-unit exact arithmetic and rounding,Approved Namibia monetary/rounding policy,Fail readiness,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-009,Namibia,VAT category/rate/calculation golden cases,Regulator-approved effective tax rules,Block rule activation,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-010,Namibia,Tax invoice field numbering wording and rendering conformance,Regulator-approved document specification,Block template activation,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-011,Namibia,Credit-note and debit-note linkage/calculation conformance,Regulator-approved adjustment specification,Block adjustment activation,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-012,Namibia,Taxpayer/company identifier syntax lifecycle and authority verification,Official identifier catalogue and sandbox,Block registration activation,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-013,Namibia,VAT return schema formulas validations and amendment workflow,Official return contract and golden returns,Block filing activation,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-014,Namibia,Tax-period assignment deadline holiday and submission-window calculation,Official period/calendar rules,Block obligation activation,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-015,Namibia,Import/export/cross-border determination and evidence,Approved tax/customs rules and cases,Block cross-border determination,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-016,Namibia,FX source timing direction precision exception approval and replay,Approved NamRA/finance/customs FX policy,Block foreign-currency tax determination,REQUIRES_NAMIBIAN_CONFIRMATION
+CCT-017,Every pack,Statutory report metadata totals currency separation and traceability,Approved report definitions,Fail readiness,DESIGNED_NOT_IMPLEMENTED
+CCT-018,Every pack,API/event country currency pack and rule metadata contract,Versioned API/event schemas,Fail build,DESIGNED_NOT_IMPLEMENTED
+CCT-019,Every pack,Legal-entity/tenant/country isolation and consolidated-view boundaries,Global security and entity model,Fail build and release,DESIGNED_NOT_IMPLEMENTED
+CCT-020,Every pack,Country configuration cannot weaken authentication authorization encryption audit or SoD,Global mandatory security baseline,Fail build and security gate,DESIGNED_NOT_IMPLEMENTED
+CCT-021,Every pack,Author reviewer approver activator separation and step-up authentication,Approved regulatory IAM policy,Fail readiness,DESIGNED_NOT_IMPLEMENTED
+CCT-022,Every pack,Activation downgrade rollback cache invalidation and failure isolation,Approved release/rollback policy,Fail readiness,DESIGNED_NOT_IMPLEMENTED
+CCT-023,Every new pack,Global regression across Namibia and all active packs,Approved regression baselines,Fail release,DESIGNED_NOT_IMPLEMENTED

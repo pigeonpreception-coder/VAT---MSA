@@ -1,0 +1,41 @@
+Requirement_ID,Requirement,Architecture_evidence,Verification_or_gate,Status
+GLOB-001,One global core with country packs,31 sections 2-4 and ADR-020,C4 and second-country regression,PROPOSED
+GLOB-002,Namibia reference implementation,32 Namibia pack,Country Readiness Gate,UNDER_REGULATORY_REVIEW
+GLOB-003,N$ and NAD throughout Namibia,31 section 9; 32 sections 1 and 4; manifest; CCT-006/007,Currency-format automated tests,ARCHITECTURE_DEFINED
+GLOB-004,No ambiguous dollar for Namibia,31 section 9; Namibia manifest; CCT-007,UI/document/export scan,ARCHITECTURE_DEFINED
+GLOB-005,ISO-extensible currency catalogue,31 section 9 and ADR-021,Catalogue/schema tests,PROPOSED
+GLOB-006,Functional transaction tax and presentation currencies,31 section 9 and ADR-021,Exact monetary golden cases,PROPOSED
+GLOB-007,Original foreign amount retained,31 section 9 and ADR-021,Immutability tests,PROPOSED
+GLOB-008,Controlled FX service,31 section 9 and ADR-021,Maker-checker/race/audit tests,PROPOSED
+GLOB-009,Authoritative country detection,31 section 5 and ADR-022,Conflict and fail-closed tests,PROPOSED
+GLOB-010,Country entitlement in licence,31 section 6,Policy decision tests,PROPOSED
+GLOB-011,Controlled jurisdiction change,31 sections 5 and 10,Migration-case acceptance,PROPOSED
+GLOB-012,Versioned signed country packs,31 section 7 and ADR-023,Tamper/signature/rollback tests,PROPOSED
+GLOB-013,Global deterministic tax engine,31 section 8,Golden and property tests,PROPOSED
+GLOB-014,No country rates in core/UI,31 sections 2 and 8,Static and configuration scans,PROPOSED
+GLOB-015,Separate regulatory administration,31 sections 13-14 and ADR-024,IAM/SoD tests,PROPOSED
+GLOB-016,NamRA privileged governance,32 sections 13-14; ADR-024,NamRA role approval,REQUIRES_NAMIBIAN_CONFIRMATION
+GLOB-017,Country identifier framework,31 section 11,Country conformance tests,PROPOSED
+GLOB-018,Country-aware invoice documents,31 section 12; 32 section 8,Template conformance tests,PROPOSED
+GLOB-019,Localisation and protected legal terminology,31 section 12,Locale/fallback tests,PROPOSED
+GLOB-020,Jurisdiction business calendar,31 section 12,Deadline golden cases,PROPOSED
+GLOB-021,Privacy and residency overlays,31 section 17,Legal and placement evidence,NOT_READY
+GLOB-022,Government integration framework,31 section 18; 32 section 13,Official contract/sandbox conformance,NOT_READY
+GLOB-023,Historical tax integrity,31 sections 2 and 8; ADR-022,Historical-version regression,PROPOSED
+GLOB-024,Multi-country organisations keep legal entities separate,31 section 10,Isolation/consolidation tests,PROPOSED
+GLOB-025,Cross-border rule selection,31 section 8,Cross-border golden cases,NOT_READY
+GLOB-026,Jurisdiction-aware reports and APIs,31 sections 15 and 19,Catalogue/report metadata tests,PROPOSED
+GLOB-027,Global security cannot be weakened,31 sections 2 and 17; classification matrix,Negative configuration tests,PROPOSED
+GLOB-028,Formal Country Readiness Gate,31 section 21 and ADR-023,Readiness evidence audit,PROPOSED
+GLOB-029,Namibia statutory facts not invented,32 sections 2-16,Legal/NamRA review,CONTROL_ACTIVE
+GLOB-030,Namibia 15 percent reference,32 sections 3 and 5,Approval plus golden cases,DISABLED_PENDING_APPROVAL
+GLOB-031,Namibia periods/deadline reference,32 sections 3 and 7,Authority/calendar confirmation,UNDER_REGULATORY_REVIEW
+GLOB-032,Namibia invoice particulars reference,32 sections 3 and 8,Template legal conformance,UNDER_REGULATORY_REVIEW
+GLOB-033,Namibia retention reference,32 sections 3 and 11,Records/legal conformance,UNDER_REGULATORY_REVIEW
+GLOB-034,Namibia ITAS integration remains disabled,32 sections 9 and 13,Official contract and sandbox,NOT_READY
+GLOB-035,Adding a country cannot break Namibia,31 sections 22-23; CCT-023,Global regression suite,PROPOSED
+GLOB-036,C4/domain/data/ERD updated,31 sections 3-4 and 16; diagrams,Architecture review,COMPLETE_FOR_REVIEW
+GLOB-037,IAM/RBAC/ABAC updated,31 section 13; ADR-024,Security review,COMPLETE_FOR_REVIEW
+GLOB-038,API/event architecture updated,31 section 15; catalogues,Contract review,COMPLETE_FOR_REVIEW
+GLOB-039,Security/infrastructure/docs/reporting updated,31 sections 12 and 17-19,Architecture reviews,COMPLETE_FOR_REVIEW
+GLOB-040,Implementation roadmap gated,31 section 22 and 28 roadmap,Steering approval,COMPLETE_FOR_REVIEW

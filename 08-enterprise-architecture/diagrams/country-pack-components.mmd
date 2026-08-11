@@ -1,0 +1,19 @@
+flowchart LR
+  resolver["Jurisdiction Resolver"] --> verifier["Pack Signature Verifier"]
+  licence["Country Licence Entitlement"] --> resolver
+  identity["Verified Legal Entity and Tax Registration"] --> resolver
+  verifier --> pack["Approved Effective Country Pack"]
+  pack --> tax["Tax Rule Engine"]
+  pack --> money["Currency and FX Engine"]
+  pack --> ids["Identifier Validator"]
+  pack --> docs["Document Template Engine"]
+  pack --> calendar["Business Calendar"]
+  pack --> privacy["Privacy and Residency Resolver"]
+  pack --> adapters["Government Adapter Registry"]
+  tax --> evidence["Pinned Transaction Decision Evidence"]
+  money --> evidence
+  docs --> evidence
+  calendar --> evidence
+
+  controls["System controls: tenant isolation, auth, audit, crypto, licence enforcement"]
+  controls -. "cannot be weakened by pack" .-> pack

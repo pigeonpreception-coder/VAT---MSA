@@ -1,5 +1,22 @@
 # Detailed Implementation Roadmap
 
+## Globalisation and country onboarding insertion plan
+
+This sequence starts with architecture and governance. It does not authorize country-specific production implementation.
+
+| Increment | Scope | Entry dependency | Exit evidence |
+|---|---|---|---|
+| G0 - approve global model | ADR-020 through ADR-024, ownership, source hierarchy and country-readiness policy | architecture review | signed decisions and accountable owners |
+| G1 - global primitives | exact Money, currency catalogue, jurisdiction context, locale/calendar abstractions and pack contracts | G0 | property tests, contract tests and threat review |
+| G2 - pack supply chain | authoring schema, linting, signing, immutable registry, compatibility and rollback | G1 plus signing authority | provenance, tamper, downgrade and rollback evidence |
+| G3 - Namibia pack verification | convert the non-executable reference pack into reviewed candidate rules using official evidence | regulatory/legal access | signed confirmation register and fiscal golden cases |
+| G4 - synthetic Namibia execution | isolated test activation, N$/NAD presentation, documents, periods, reports and offline rules | G2-G3 | synthetic end-to-end, replay, security and accessibility evidence |
+| G5 - disabled adapter conformance | ITAS/NamRA contract adapter tested only against an approved sandbox/stub | official technical contract | contract, timeout, duplicate, reconciliation and receipt evidence |
+| G6 - country readiness decision | legal, tax, privacy, security, operations, data, UX and support gates | G4-G5 | all mandatory controls approved; no critical exception |
+| G7 - bounded activation | explicit country/version/environment activation with monitoring and rollback | G6 and release authority | signed release record, operational acceptance and rollback rehearsal |
+
+Future countries repeat G3-G7 independently. Failure or withdrawal of one country pack must not modify another country's rules or historical records.
+
 ## Workspace/licensing/workflow insertion plan
 
 This extension is inserted after Phase 2 canonical taxpayer/organisation foundations and before unrestricted Phase 4 business-module rollout:

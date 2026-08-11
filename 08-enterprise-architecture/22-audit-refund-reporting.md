@@ -1,5 +1,9 @@
 # Audit, Refund, Reporting and Business Intelligence Architecture
 
+## Global reporting addendum
+
+Operational, statutory and analytical outputs are partitioned by authoritative jurisdiction and include country, pack/rule versions, transaction and reporting currency, FX source/time, locale and document-template version. Consolidation translates into a selected reporting currency without erasing original amounts. Cross-country comparisons expose rule/version differences and never merge statutory totals as if they shared one legal basis.
+
 ## Audit case architecture
 
 Audit management is a bounded domain separated from taxpayer self-service and from risk scoring. A risk signal may recommend a case, but only an authorized officer or approved policy creates/opens it. Case access combines role, assignment, office, sensitivity, conflict checks and purpose; privileged search is logged and periodically reviewed.
@@ -47,4 +51,3 @@ Every report states as-of time, source freshness, filters, currency basis, tax-r
 BI workspaces separate development, certified and personal analyses. Certified metrics require owner, definition, lineage, test, refresh SLO and change approval. Row/column security is enforced at the data layer as well as the UI.
 
 AI is advisory for anomaly detection, document assistance, support and workload prioritization. Models require lawful purpose, representative data, documented limitations, explainability, drift/bias monitoring, human review and versioned decisions. AI cannot invent tax rules, silently change liability, issue final adverse decisions or bypass evidence and appeal rights. Prompts, outputs and model versions are protected and retained only as approved.
-

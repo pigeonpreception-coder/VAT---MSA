@@ -1,5 +1,9 @@
 # P-S. Event, deployment, DevSecOps and testing architecture
 
+## Globalisation addendum
+
+The event catalogue now includes country-pack, jurisdiction, currency-rate, tax-selection, document-template, business-calendar, residency and readiness events. CI validates schemas, official-source references, deterministic golden cases, locale/currency formatting, compatibility, signatures and downgrade protection. Promotion is by immutable pack digest and environment-scoped activation record; application deployment does not implicitly activate a country pack.
+
 ## Workspace, licence and workflow event extension
 
 The event catalogue now covers licence purchase/activation/state/plan change; organisation administrator and employee lifecycle; role/permission/capability changes; workflow create/publish/retire/decision; access request/approval/certification; SoD violations; privileged actions; and navigation changes. Events use the standard versioned envelope, transactional outbox, tenant/aggregate partition and minimal classified payload.

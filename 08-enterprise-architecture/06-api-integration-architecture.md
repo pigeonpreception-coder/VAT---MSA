@@ -1,5 +1,9 @@
 # I-J. API and integration architecture
 
+## Global contract addendum
+
+Fiscal commands and events carry resolved `countryCode`, `countryPackVersion`, ISO `currencyCode`, exact amount representation, rule references and correlation/provenance metadata. APIs never accept an unverified client-selected jurisdiction as authoritative. Country-pack, readiness, jurisdiction, currency-rate, tax-preview and template endpoints are catalogued in `api-catalog.yaml`; all activation and live government-adapter operations remain gated.
+
 ## Extension contract groups
 
 The catalogue adds `/licensing`, organisation employee/administrator/structure resources, `/organisation-roles`, `/workflows`, `/access-governance`, `/navigation` and permission-aware `/search`. Every endpoint evaluates identity, organisation, role/permission, entitlement, security policy, workflow state and SoD independently. Upgrade and renewal endpoints initiate approved provider workflows; they do not accept a client-selected licence state.

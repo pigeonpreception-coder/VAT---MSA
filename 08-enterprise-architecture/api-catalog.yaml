@@ -113,3 +113,24 @@ domains:
     - { method: PUT, path: /navigation/preferences, permission: navigation:preferences:manage-own, status: architecture-proposed-pending-approval }
   search:
     - { method: GET, path: /search, permission: search:query-effective, status: architecture-proposed-pending-approval }
+  jurisdiction:
+    - { method: GET, path: /jurisdictions/effective, permission: jurisdiction:read-effective, status: architecture-proposed-pending-approval }
+    - { method: POST, path: /jurisdiction-migration-cases, permission: jurisdiction:migration:request, status: regulatory-approval-required }
+    - { method: POST, path: "/jurisdiction-migration-cases/{id}/decisions", permission: jurisdiction:migration:approve, status: sod-and-regulatory-approval-required }
+  country_packs:
+    - { method: GET, path: "/country-packs/{countryCode}/versions", permission: country-packs:versions:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/country-packs/{countryCode}/validation", permission: country-packs:validate, status: synthetic-validation-only }
+    - { method: POST, path: "/country-packs/{countryCode}/approval-requests", permission: country-packs:approve:request, status: step-up-sod-and-signature-required }
+    - { method: POST, path: "/country-packs/{countryCode}/activation-requests", permission: country-packs:activate:request, status: country-readiness-gate-required }
+  currencies:
+    - { method: GET, path: /currencies, permission: currencies:read, status: architecture-proposed-pending-approval }
+    - { method: GET, path: /currency-rates, permission: currency-rates:read, status: source-policy-required }
+    - { method: POST, path: /currency-rates/manual-requests, permission: currency-rates:manual:request, status: dual-approval-required }
+  tax_determination:
+    - { method: POST, path: /tax-determinations/preview, permission: tax-determinations:preview, status: synthetic-only-until-country-approved }
+    - { method: GET, path: "/tax-rule-versions/{id}", permission: tax-rules:versions:read, status: architecture-proposed-pending-approval }
+  document_templates:
+    - { method: GET, path: /document-templates/effective, permission: document-templates:read-effective, status: country-version-required }
+  country_readiness:
+    - { method: GET, path: "/country-readiness/{countryCode}", permission: country-readiness:read, status: architecture-proposed-pending-approval }
+    - { method: POST, path: "/country-readiness/{countryCode}/decisions", permission: country-readiness:decide, status: independent-approver-and-step-up-required }

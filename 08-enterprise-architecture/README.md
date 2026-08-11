@@ -1,5 +1,13 @@
 # VAT-MSA complete enterprise architecture package
 
+## 2026-08 globalisation and country-compliance extension
+
+The baseline now separates a reusable global platform core from signed, versioned country compliance packs. The governing specification is `31-globalisation-country-compliance-architecture.md`; Namibia is the first non-executable reference pack in `32-namibia-country-compliance-pack.md` and `country-packs/NAM/manifest.yaml`.
+
+Review ADR-020 through ADR-024, `globalisation-control-classification-matrix.csv`, `globalisation-requirements-traceability.csv`, `country-readiness-framework.csv`, the globalisation diagrams, and the added rows in `29-architecture-approval-gate.md`. Country activation remains disabled. The Namibia pack uses `N$` for presentation and `NAD` for storage and interchange, but no tax rule, filing integration, residency policy or statutory deadline is production-authoritative until its named Namibia regulatory confirmation and country-readiness gates are satisfied.
+
+The mandatory automation contract for any future executable pack is `country-compliance-test-catalog.csv`; its Namibia statutory oracles remain blocked pending regulatory confirmation.
+
 ## 2026-08 workspace, licensing and workflow extension
 
 The approved baseline is extended by `30-workspace-organisation-licensing-workflow-architecture.md`. It keeps one verified taxpayer organisation while adding a licensed Organisation Portal Administrator, configurable employees/job titles/roles, dynamic capability access, versioned workflows, access governance, server-side licence/usage enforcement and a collapsible permission-aware workspace.

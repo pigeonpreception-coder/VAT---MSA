@@ -1,5 +1,18 @@
 # Risk Register, Gap Assessment and Maturity Model
 
+## Globalisation extension risks and gaps
+
+| Severity | Risk / gap | Required closure evidence |
+|---|---|---|
+| CRITICAL | an unsigned, unapproved or wrong-country pack affects a fiscal result | signature/provenance verification, authoritative jurisdiction tests, readiness gate and rollback rehearsal |
+| CRITICAL | Namibia statutory interpretation is treated as executable before NamRA/legal approval | signed confirmation register, effective-dated rules and regulator-approved golden cases |
+| HIGH | country data is placed or transferred contrary to an unknown residency/privacy duty | approved country privacy/residency profile and deployment-routing tests |
+| HIGH | cross-border or FX logic invents a tax outcome | approved place-of-supply and exchange-rate policy with replayable evidence |
+| HIGH | country administrative privilege permits author/approve/activate concentration | separated roles, step-up authentication, no self-approval and quarterly access-review evidence |
+| MEDIUM | runtime-dependent currency formatting emits `NAD` or a bare `$` instead of the approved Namibia `N$` pattern | pack-driven formatter contract and UI/PDF/export accessibility tests before country execution |
+
+Globalisation maturity is **Initial/Designed**: architecture artifacts exist, but there is no approved executable country pack, signing service, country-rule runtime, readiness decision or production adapter evidence.
+
 ## Enterprise risk register
 
 Probability/impact: Low, Medium, High, Critical. Residual rating assumes listed treatment is implemented and evidenced.
@@ -74,4 +87,3 @@ Scale: **Initial** (ad hoc/pilot), **Developing** (design and partial controls),
 | programme/change/support | Initial | Defined | phased roadmap exists; staffed operating model and adoption plan needed |
 
 Overall current maturity is **Developing**: the pilot and architecture establish direction, but national production is not approved. Reassessment occurs at every phase gate using test, operational and audit evidence rather than document completion alone.
-

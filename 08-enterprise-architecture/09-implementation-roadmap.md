@@ -1,5 +1,9 @@
 # Phased implementation roadmap and acceptance boundaries
 
+## Globalisation sequencing
+
+The detailed roadmap adds G0-G7: approve the global model; implement global primitives; establish the signed pack supply chain; verify the Namibia pack; run synthetic Namibia execution; test only approved sandbox/stub adapters; make the country-readiness decision; and perform a separately authorized bounded activation. No production statutory rule or live ITAS integration is inferred from architecture completion. See `28-detailed-roadmap.md`.
+
 ## Architecture extension sequence
 
 After architecture approval, add a gated organisation-control runway before broad business-module expansion: (1) protected licence/entitlement and organisation-admin foundations; (2) permission catalogue and organisation-specific role model; (3) backend workspace projection and Administration Command Centre; (4) typed workflow/version/SoD runtime; (5) access request/certification/offboarding; and (6) permission-aware enterprise search and scale validation. Payment activation, production ITAS verification and statutory continuity behavior remain separately gated.

@@ -1,5 +1,25 @@
 # VAT-MSA baseline and workspace/licensing extension deliverable register
 
+## Globalisation and country-compliance extension
+
+| # | Required extension output | Primary evidence | Document status |
+|---:|---|---|---|
+| 63 | Global core and country-pack architecture | `31-globalisation-country-compliance-architecture.md`, ADR-020 | Complete for architecture review; activation disabled |
+| 64 | Namibia reference compliance pack | `32-namibia-country-compliance-pack.md`, `country-packs/NAM/manifest.yaml` | Under regulatory review; non-executable |
+| 65 | Multi-currency and monetary model | globalisation architecture section 8, ADR-021 | Complete for review; FX policy confirmation required |
+| 66 | Jurisdiction and tax-rule binding | globalisation architecture sections 5 and 7, ADR-022 | Complete for review; regulatory rules unapproved |
+| 67 | Country-pack assurance and readiness | ADR-023, `country-readiness-framework.csv` | Framework complete; Namibia not ready |
+| 68 | Regulatory IAM and administration separation | globalisation architecture section 12, ADR-024, `rbac-abac-matrix.csv` | Complete for review; role appointments gated |
+| 69 | Global data model and ERD | globalisation architecture section 15, `diagrams/global-compliance-erd.mmd` | Logical model complete; physical migration gated |
+| 70 | Global API and event contracts | `api-catalog.yaml`, `event-catalog.csv` | Logical contracts complete; adapters disabled |
+| 71 | Global security, infrastructure and residency | globalisation architecture sections 16-17, deployment diagrams | Complete for review; hosting/residency decisions outstanding |
+| 72 | Localisation, documents, calendars and reporting | globalisation architecture sections 10-11 and 18 | Complete for review; templates/rules unapproved |
+| 73 | Global traceability and control classification | `globalisation-requirements-traceability.csv`, `globalisation-control-classification-matrix.csv` | Complete for review |
+| 74 | Globalisation ADR and roadmap update | ADR-020 through ADR-024, `28-detailed-roadmap.md` | Proposed; approval gates outstanding |
+| 75 | Country compliance and global regression test contract | `country-compliance-test-catalog.csv`, globalisation architecture section 23 | Designed; automation awaits approved executable packs |
+
+These are architecture deliverables, not country-production authorization. Each country remains unavailable until its readiness decision is `APPROVED` and a signed executable pack is explicitly activated.
+
 ## Workspace, organisation, licensing and workflow extension
 
 | # | Required extension output | Primary evidence | Document status |

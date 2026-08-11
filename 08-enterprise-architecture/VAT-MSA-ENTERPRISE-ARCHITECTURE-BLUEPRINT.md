@@ -1,5 +1,13 @@
 # VAT-MSA Enterprise Architecture Blueprint
 
+## Part XXVI - Global core and country compliance packs
+
+VAT-MSA is extended from a Namibia-shaped baseline into a global platform core with isolated, signed and effective-dated country compliance packs. The global core owns identity, tenancy, workflow, exact money, documents, audit, APIs/events and operational controls. A country pack supplies only jurisdiction-authorized tax, identifier, document, filing, calendar, retention, localization and government-adapter configuration. Jurisdiction is resolved authoritatively and pinned with the selected country-pack and rule versions on every fiscal determination.
+
+Namibia is the first reference pack. Its presentation symbol is `N$` and its persisted/interchange currency code is `NAD`; a bare `$` is prohibited in fiscal interfaces. The reference pack remains non-executable and `UNDER REGULATORY REVIEW`. Tax rates, deadlines, invoice semantics, retention, ITAS integration and other statutory behavior require the explicit confirmations recorded in the pack and the formal country-readiness gate.
+
+Authoritative detail: [globalisation and country-compliance architecture](31-globalisation-country-compliance-architecture.md), [Namibia reference pack](32-namibia-country-compliance-pack.md), [country readiness framework](country-readiness-framework.csv), [globalisation traceability](globalisation-requirements-traceability.csv), and ADRs [020](adr/ADR-020-global-core-country-pack-model.md) through [024](adr/ADR-024-regulatory-administration-separation.md).
+
 ## Part XXIV - Enterprise workspace, organisation administration and licensing
 
 The taxpayer portal becomes one hierarchical, permission- and licence-aware workspace over the canonical organisation. Navigation is a server-built projection evaluated from identity, organisation, licence, capabilities, roles, permissions and security policy. Buyer and Seller remain organisation capabilities. Organisation Portal Administrator is the canonical organisation-admin role; it is separate from NamRA and platform administration.
@@ -167,6 +175,8 @@ ADRs 001–012 cover taxpayer identity, dynamic buyer/seller, ITAS identity, sta
 
 Authoritative detail: [ADR directory](adr/).
 
+The extension record is ADR-016 through ADR-024: workspace/licensing/workflow, global core and country packs, exact money, jurisdiction binding, pack signing/readiness, and regulatory-administration separation. These ADRs remain proposed until the approval gate records their acceptance.
+
 ## Part XX — Requirements Traceability Matrix
 
 Every master requirement section 1–112 maps to architecture component, service/module, data store, API/event, security control, business process and verification method. Requirement 101 and 112 enforce the no-production-coding approval gate.
@@ -194,6 +204,8 @@ Sign-off requires Executive Sponsor, Architecture Board, NamRA Tax Policy, ITAS,
 Authoritative detail: [formal approval gate](29-architecture-approval-gate.md).
 
 ## Blueprint completeness index
+
+Globalisation coverage adds the global core, country-pack lifecycle, multi-currency, Namibia reference pack and country-readiness framework in Part XXVI and artifacts 31-32.
 
 | Required blueprint content | Location |
 |---:|---|

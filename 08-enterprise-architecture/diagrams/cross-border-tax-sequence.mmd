@@ -1,0 +1,30 @@
+sequenceDiagram
+  actor Licensed user
+  participant API as Global API
+  participant JR as Jurisdiction Resolver
+  participant PR as Pack Registry
+  participant FX as Monetary/FX Service
+  participant TE as Tax Rule Engine
+  participant DB as Fiscal Store
+
+  actor->>API: Submit transaction with seller/buyer/supply/currency facts
+  API->>JR: Resolve verified legal entities and registrations
+  JR->>PR: Resolve approved effective packs
+  alt evidence conflict or pack not production enabled
+    PR-->>API: JURISDICTION_UNRESOLVED
+    API-->>actor: Fail closed / human review
+  else jurisdiction resolved
+    PR-->>JR: Pack and rule catalogue versions
+    JR-->>API: Immutable jurisdiction context
+    API->>FX: Resolve approved rate and exact conversions
+    FX-->>API: Original/functional/tax amounts plus rate provenance
+    API->>TE: Determine rule using supply facts and effective versions
+    alt rule ambiguous or unavailable
+      TE-->>API: HUMAN_REVIEW_REQUIRED
+      API-->>actor: No guessed tax treatment
+    else deterministic rule
+      TE-->>API: Tax result, explanation, version and decision hash
+      API->>DB: Atomic transaction plus jurisdiction/rule/monetary snapshots
+      DB-->>actor: Durable receipt with country and currency metadata
+    end
+  end

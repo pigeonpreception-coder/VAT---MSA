@@ -2,6 +2,10 @@
 
 ## Level 1: System context
 
+### Globalisation extension
+
+At Level 1, VAT-MSA serves organizations and authorities across explicitly onboarded jurisdictions. At Level 2 it adds Country Compliance Registry, Jurisdiction, Money/FX, Localization/Calendar and Regulatory Administration containers while country-specific government systems remain behind isolated adapters. At Level 3 the Tax runtime resolves and pins a signed pack/rule version before calculation. See `diagrams/global-country-context.mmd`, `diagrams/country-pack-components.mmd` and `diagrams/multi-country-deployment.mmd`.
+
 ### Workspace and organisation-control extension
 
 Level 2 adds Organisation Administration, License/Entitlement, Workflow, Access Governance, Workspace/Navigation and Permission-aware Search containers behind the same gateway and policy plane. Level 3 adds policy projection, entitlement/usage reservation, typed workflow compiler/runtime, SoD evaluator, access-review orchestrator and navigation projection builder components.

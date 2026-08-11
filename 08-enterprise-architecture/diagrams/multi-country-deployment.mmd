@@ -1,0 +1,22 @@
+flowchart TB
+  global["Global Control Plane\nPack metadata, signatures, readiness"]
+  group["Global Enterprise"]
+  naEntity["Namibia Legal Entity\nJurisdiction NA / Currency NAD"]
+  zaEntity["South Africa Legal Entity\nSeparate jurisdiction / currency ZAR"]
+  futureEntity["Future-country Legal Entity\nSeparate registration and pack"]
+  naPlane["Approved Namibia Data Plane"]
+  zaPlane["Approved South Africa Data Plane"]
+  futurePlane["Approved Future-country Data Plane"]
+
+  global -->|"signed pack + production decision"| naPlane
+  global -->|"signed pack + production decision"| zaPlane
+  global -->|"signed pack + production decision"| futurePlane
+  group --> naEntity --> naPlane
+  group --> zaEntity --> zaPlane
+  group --> futureEntity --> futurePlane
+  naPlane -. "explicit converted consolidation projection" .-> group
+  zaPlane -. "explicit converted consolidation projection" .-> group
+  futurePlane -. "explicit converted consolidation projection" .-> group
+
+  classDef isolated fill:#edf7fa,stroke:#176b78,color:#0b3046
+  class naPlane,zaPlane,futurePlane isolated

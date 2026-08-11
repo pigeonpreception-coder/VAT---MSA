@@ -1,0 +1,21 @@
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Validated: schema + source + golden cases
+  Validated --> ComplianceReviewed: independent legal/tax review
+  ComplianceReviewed --> SecurityReviewed: integrity and control review
+  SecurityReviewed --> Approved: regulatory approver signature
+  Approved --> Scheduled: release operator selects effective window
+  Scheduled --> Active: signature and readiness rechecked
+  Active --> Retired: new approved version effective
+  Validated --> Rejected
+  ComplianceReviewed --> Rejected
+  SecurityReviewed --> Rejected
+  Approved --> Revoked: evidence invalidated before activation
+  Active --> Suspended: security/integrity incident
+  Suspended --> Active: approved recovery only
+  Retired --> [*]
+
+  note right of Active
+    Existing transactions remain pinned.
+    Rollback affects new selection only.
+  end note

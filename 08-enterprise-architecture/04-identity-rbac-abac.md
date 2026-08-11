@@ -1,5 +1,9 @@
 # E-F. Identity architecture and RBAC/ABAC
 
+## Country regulatory administration addendum
+
+Regulatory administration uses separate Country Pack Author, Reviewer, Approver, Country Release Authority, Jurisdiction Case Officer, Currency Policy Reviewer and Country Readiness roles. ABAC includes assigned country, pack/version, environment, evidence purpose and effective interval. Pack approval, activation, jurisdiction migration and manual FX decisions require step-up authentication and independent approval; authors cannot approve or activate their own work. Privileged access remains subject to quarterly recertification with no emergency SoD override.
+
 ## Organisation-configured access extension
 
 Employee and JobTitle are not identities or grants. The organisation chain is `Employee -> Position -> OrganisationRole -> PermissionSet -> Capability -> record/amount/workflow scope`. Organisation-owned roles may use only grantable permissions and cannot include protected NamRA, platform, security-policy, licence-state or tax-rule actions.

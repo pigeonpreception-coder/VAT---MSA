@@ -1,0 +1,47 @@
+schemaVersion: vat-msa.country-pack.architecture/v1
+kind: CountryCompliancePackReference
+metadata:
+  packId: VAT-MSA-NAM
+  version: NAM-DRAFT-1.0.0
+  status: UNDER_REGULATORY_REVIEW
+  executable: false
+  productionEnabled: false
+country:
+  name: Namibia
+  code: NA
+  jurisdictionId: NAMIBIA_VAT
+currency:
+  code: NAD
+  name: Namibian Dollar
+  symbol: N$
+  minorUnits: 2
+  defaultPattern: "N$1,000.00"
+  ambiguousDollarAllowed: false
+authority:
+  taxAuthority: Namibia Revenue Agency
+  taxPortal: ITAS
+frameworks:
+  - code: NAMIBIA_VAT
+    referenceStandardRate: "15%"
+    activation: DISABLED_PENDING_REGULATORY_APPROVAL
+modules:
+  taxRules: NOT_LOADED
+  identifierRules: NOT_LOADED
+  invoiceRules: UNDER_REGULATORY_REVIEW
+  returnRules: NOT_LOADED
+  fxPolicy: NOT_LOADED
+  businessCalendar: NOT_LOADED
+  privacyPolicy: NOT_LOADED
+  residencyPolicy: NOT_LOADED
+  governmentIntegrations: NOT_LOADED
+integrity:
+  contentHash: NOT_GENERATED_ARCHITECTURE_REFERENCE
+  signature: NOT_SIGNED
+  approvalReference: NOT_APPROVED
+sources:
+  - https://www.namra.org.na/documents/cms/uploaded/valueadded-tax-act-10-of-2000-0d8c7ed7fc.pdf
+  - https://www.itas.namra.org.na/taxes
+  - https://www.bon.com.na/Currency/Learn/Explore-Currency.aspx
+warnings:
+  - REQUIRES NAMIBIAN REGULATORY CONFIRMATION
+  - NOT FOR TAX CALCULATION OR PRODUCTION USE

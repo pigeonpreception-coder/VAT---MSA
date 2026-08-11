@@ -1,5 +1,24 @@
 # Formal Architecture Approval Gate
 
+## Globalisation and country-compliance decision register
+
+| Component / decision | Proposed status | Conditions / decision required | Required approver |
+|---|---|---|---|
+| global core plus isolated country-pack model | APPROVED WITH CONDITIONS | accept ADR-020 and retain fail-closed pack selection | Architecture Board + CISO |
+| authoritative jurisdiction resolution | REQUIRES DECISION | approve evidence precedence, conflicts, migrations and cross-border responsibility | Tax Policy + Legal + Data |
+| exact monetary model using ISO 4217 codes | APPROVED WITH CONDITIONS | accept ADR-021 and prohibit binary floating point and ambiguous currency symbols | Architecture Board + Finance Controls |
+| exchange-rate source and VAT conversion policy | REQUIRES NAMRA CONFIRMATION | approve sources, timestamps, fallbacks, corrections and audit evidence | NamRA Tax + Finance + Legal |
+| Namibia pack `VAT-MSA-NAM` | REQUIRES NAMRA CONFIRMATION | complete every confirmation item in the Namibia pack and approve source evidence | NamRA Tax + Legal + Records |
+| Namibia presentation `N$`; interchange `NAD` | APPROVED WITH CONDITIONS | confirm document-specific display rules; persist currency code on every amount | Product + Finance + NamRA Tax |
+| Namibia tax, invoice, period, return and retention rules | REQUIRES LEGAL/REGULATORY CONFIRMATION | approve effective versions and golden cases; legislation references alone do not activate code | NamRA Tax + Legal + Records |
+| ITAS/NamRA country adapter | REQUIRES ITAS CONFIRMATION | obtain official API, sandbox, identity, receipt, retry and support contracts | ITAS + Integration Owner + CISO |
+| signed country-pack lifecycle and readiness gate | APPROVED WITH CONDITIONS | accept ADR-023; select signing authority/HSM and evidence retention | Architecture Board + CISO + Release Authority |
+| regulatory administration separation | APPROVED WITH CONDITIONS | accept ADR-024; appoint independent roles and approve quorum/review policy | CISO + NamRA + Internal Audit |
+| Namibia residency/privacy/cross-border transfer profile | REQUIRES LEGAL/REGULATORY CONFIRMATION | approve lawful basis, hosting, residency, transfer, retention and disposal rules | Privacy + Legal + Records + CISO |
+| production activation of any country pack | NOT READY | all country readiness controls, signed ADRs, acceptance evidence and explicit release decision required | Architecture Board + Country Regulatory Authority + Steering Committee |
+
+**Globalisation package status:** `REQUIRES DECISION`. The Namibia pack is documentation-only, non-executable and not authorized for production activation.
+
 ## Workspace, licensing and workflow extension decision register
 
 | Component / decision | Proposed status | Conditions / decision required | Required approver |

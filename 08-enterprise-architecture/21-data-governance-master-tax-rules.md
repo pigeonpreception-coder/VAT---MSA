@@ -2,6 +2,10 @@
 
 ## Authority and stewardship
 
+### Country-pack rule governance
+
+Tax rules are namespaced by country and published only as immutable, signed, effective-dated country-pack versions. Every rule records official source, interpretation owner, approval evidence, effective interval, precedence, calculation/rounding semantics and golden tests. A source citation alone never activates a rule. Runtime selection pins jurisdiction, pack and rule versions; later amendments do not silently recompute historical transactions.
+
 | Data object | System of record | VAT-MSA role | Required confirmation |
 |---|---|---|---|
 | legal taxpayer registration, TIN and VAT status | ITAS, subject to confirmed interface | consumes verified identity/status; stores source reference and snapshot | **REQUIRES ITAS/NAMRA CONFIRMATION** |
@@ -66,4 +70,3 @@ Lineage spans source payload/hash, gateway request, normalized command, rule dec
 - Rules for correction, cancellation, objection, refund and evidence disclosure.
 
 Until confirmed, affected components are **APPROVED WITH CONDITIONS** or **REQUIRES LEGAL/REGULATORY CONFIRMATION**, never assumed production-ready.
-

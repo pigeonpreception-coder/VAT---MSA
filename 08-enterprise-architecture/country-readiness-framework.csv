@@ -1,0 +1,16 @@
+Gate_ID,Gate,Required_evidence,Fail_closed_result,Namibia_status,Required_approver
+CR-01,Country legal identity,official country/jurisdiction authority and legal basis,NOT_READY,TECHNICALLY_READY,Legal plus regulator
+CR-02,Currency,official code symbol minor units and presentation,NOT_READY,TECHNICALLY_READY,Finance plus regulator
+CR-03,Tax framework,current consolidated laws notices rulings and legal interpretation,UNDER_REGULATORY_REVIEW,UNDER_REGULATORY_REVIEW,NamRA tax plus legal
+CR-04,Tax rules,complete signed effective rules and golden cases,NOT_READY,NOT_READY,NamRA tax policy
+CR-05,Registration and identifiers,official formats authority lifecycle and verification contract,NOT_READY,NOT_READY,NamRA identity/data
+CR-06,Invoice and adjustment documents,approved field/template/numbering/signature rules,NOT_READY,UNDER_REGULATORY_REVIEW,NamRA tax plus legal
+CR-07,Returns periods and deadlines,official schema formulas category assignment calendar and acknowledgements,NOT_READY,NOT_READY,NamRA/ITAS
+CR-08,Cross-border/import/export,complete sourced determination and customs interfaces,NOT_READY,NOT_READY,NamRA customs/tax plus legal
+CR-09,FX policy,approved source timing precision and overrides,NOT_READY,NOT_READY,Finance plus NamRA/customs
+CR-10,Privacy and residency,legal opinion regions transfers access retention,NOT_READY,NOT_READY,Privacy/legal/CISO
+CR-11,Government integrations,official specifications sandbox SLA and credentials,NOT_READY,NOT_READY,NamRA/ITAS/Customs
+CR-12,Pack security,schema hash signatures key custody rollback and SoD,NOT_READY,IN_DEVELOPMENT,CISO plus regulator
+CR-13,Country compliance tests,all golden cases conformance and regression,NOT_READY,NOT_READY,QA plus regulator
+CR-14,Operational readiness,SLO monitoring SOC DR support ownership and runbooks,NOT_READY,IN_DEVELOPMENT,SRE/CISO/business
+CR-15,Production decision,all critical gates approved and signed release,NO_PRODUCTION_ACTIVATION,UNDER_REGULATORY_REVIEW,Country Readiness Board

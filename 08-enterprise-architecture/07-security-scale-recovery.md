@@ -1,5 +1,9 @@
 # K-M. Security, scalability and disaster-recovery architecture
 
+## Country-pack and residency security addendum
+
+Country-pack artifacts are canonicalized, hashed, signed by an approved authority, stored immutably and verified before load and use. The runtime rejects missing, expired, incompatible, downgraded or unauthorized packs. Regulatory authoring, approval, activation and signing keys are separated; key use is HSM/KMS-backed. Country data-plane placement and cross-border transfer are selected only from an approved residency/privacy policy, with fail-closed routing and country-scoped recovery evidence.
+
 The existing pilot control, threat, SLO, incident, capacity and recovery pack is `../07-security-resilience/`. This document binds and extends those controls for the complete enterprise domain/portal architecture.
 
 ## Zero-trust domain enforcement

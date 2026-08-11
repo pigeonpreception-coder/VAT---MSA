@@ -2,6 +2,10 @@
 
 ## What VAT-MSA is
 
+### Globalisation extension
+
+The target now comprises a jurisdiction-neutral global core plus independently governed country compliance packs. Namibia is the first reference pack, using `NAD` as the currency code and `N$` for human presentation. The pack is non-executable until regulatory confirmation, signature, readiness and bounded activation succeed. See `31-globalisation-country-compliance-architecture.md` and `32-namibia-country-compliance-pack.md`.
+
 ### Workspace, licensing and organisation-control extension
 
 The taxpayer experience evolves from static Buyer/Seller menus to one licence- and permission-aware workspace over the same organisation. A verified licence activation may provision one primary Organisation Portal Administrator, who can model employees, titles, positions, organisation roles, permission sets and versioned workflows within protected system ceilings. Buyer and Seller remain organisation capabilities, not accounts.
