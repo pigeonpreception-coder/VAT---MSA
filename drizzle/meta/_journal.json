@@ -57,6 +57,13 @@
       "when": 1786366552473,
       "tag": "0007_moaning_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786397281053,
+      "tag": "0008_flimsy_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

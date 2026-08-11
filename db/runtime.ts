@@ -585,6 +585,226 @@ const SCHEMA_STATEMENTS = [
     payload TEXT NOT NULL, status TEXT NOT NULL, publish_attempts INTEGER NOT NULL DEFAULT 0,
     occurred_at TEXT NOT NULL, available_at TEXT NOT NULL, published_at TEXT, last_error TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS license_plans (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, version INTEGER NOT NULL,
+    status TEXT NOT NULL, effective_from TEXT NOT NULL, effective_to TEXT, created_at TEXT NOT NULL,
+    UNIQUE (code, version)
+  )`,
+  `CREATE TABLE IF NOT EXISTS license_features (
+    feature_key TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
+    metric_key TEXT, protected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS license_plan_entitlements (
+    id TEXT PRIMARY KEY, license_plan_id TEXT NOT NULL REFERENCES license_plans(id),
+    feature_key TEXT NOT NULL REFERENCES license_features(feature_key), enabled INTEGER NOT NULL DEFAULT 1,
+    limit_value INTEGER, configuration TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (license_plan_id, feature_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS subscriptions (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    provider TEXT NOT NULL, provider_reference TEXT NOT NULL, status TEXT NOT NULL,
+    activated_at TEXT, current_period_start TEXT NOT NULL, current_period_end TEXT NOT NULL,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (provider, provider_reference)
+  )`,
+  `CREATE TABLE IF NOT EXISTS organisation_licenses (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    subscription_id TEXT NOT NULL REFERENCES subscriptions(id), license_plan_id TEXT NOT NULL REFERENCES license_plans(id),
+    state TEXT NOT NULL, state_version INTEGER NOT NULL DEFAULT 1, effective_from TEXT NOT NULL,
+    effective_to TEXT, grace_ends_at TEXT, retention_policy TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS license_usage (
+    id TEXT PRIMARY KEY, organisation_license_id TEXT NOT NULL REFERENCES organisation_licenses(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), metric_key TEXT NOT NULL,
+    period_key TEXT NOT NULL, used_value INTEGER NOT NULL DEFAULT 0, reserved_value INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, metric_key, period_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS license_events (
+    id TEXT PRIMARY KEY, organisation_license_id TEXT NOT NULL REFERENCES organisation_licenses(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), event_type TEXT NOT NULL,
+    from_state TEXT, to_state TEXT NOT NULL, authority TEXT NOT NULL, reason TEXT NOT NULL, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS departments (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), code TEXT NOT NULL,
+    name TEXT NOT NULL, parent_department_id TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS business_units (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), code TEXT NOT NULL,
+    name TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS job_titles (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), code TEXT NOT NULL,
+    name TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS positions (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    job_title_id TEXT NOT NULL REFERENCES job_titles(id), department_id TEXT REFERENCES departments(id),
+    business_unit_id TEXT REFERENCES business_units(id), branch_id TEXT REFERENCES branches(id),
+    code TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL, UNIQUE (organisation_id, code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS employees (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), user_id TEXT REFERENCES app_users(id),
+    employee_number TEXT NOT NULL, full_name TEXT NOT NULL, email TEXT NOT NULL,
+    position_id TEXT REFERENCES positions(id), job_title_id TEXT REFERENCES job_titles(id),
+    department_id TEXT REFERENCES departments(id), business_unit_id TEXT REFERENCES business_units(id),
+    branch_id TEXT REFERENCES branches(id), manager_employee_id TEXT, status TEXT NOT NULL,
+    invited_at TEXT, activated_at TEXT, terminated_at TEXT, last_activity_at TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, employee_number), UNIQUE (organisation_id, email)
+  )`,
+  `CREATE TABLE IF NOT EXISTS organisation_administrator_roles (
+    code TEXT PRIMARY KEY, name TEXT NOT NULL, maximum_scope TEXT NOT NULL,
+    protected INTEGER NOT NULL DEFAULT 1
+  )`,
+  `CREATE TABLE IF NOT EXISTS organisation_administrators (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    user_id TEXT NOT NULL REFERENCES app_users(id), employee_id TEXT REFERENCES employees(id),
+    administrator_role_code TEXT NOT NULL REFERENCES organisation_administrator_roles(code),
+    scope TEXT NOT NULL, is_primary INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT, appointed_by TEXT NOT NULL, approval_reference TEXT NOT NULL,
+    UNIQUE (organisation_id, user_id, administrator_role_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS organisation_roles (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    name TEXT NOT NULL, description TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+    branch_scope TEXT NOT NULL DEFAULT '[]', approval_limit_cents INTEGER, status TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, name, version)
+  )`,
+  `CREATE TABLE IF NOT EXISTS organisation_role_permissions (
+    id TEXT PRIMARY KEY, organisation_role_id TEXT NOT NULL REFERENCES organisation_roles(id),
+    permission_code TEXT NOT NULL REFERENCES access_permissions(code), record_scope TEXT NOT NULL,
+    effect TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (organisation_role_id, permission_code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS user_role_assignments (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    user_id TEXT NOT NULL REFERENCES app_users(id), employee_id TEXT REFERENCES employees(id),
+    organisation_role_id TEXT NOT NULL REFERENCES organisation_roles(id), status TEXT NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT, assigned_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS user_capability_assignments (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    user_id TEXT NOT NULL REFERENCES app_users(id), capability TEXT NOT NULL, status TEXT NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT, assigned_by TEXT NOT NULL REFERENCES app_users(id),
+    UNIQUE (organisation_id, user_id, capability)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    name TEXT NOT NULL, domain_action TEXT NOT NULL, status TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, name)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_versions (
+    id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), version_number INTEGER NOT NULL,
+    status TEXT NOT NULL, definition_hash TEXT NOT NULL, definition TEXT NOT NULL,
+    effective_from TEXT, published_by TEXT REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
+    published_at TEXT, retired_at TEXT, created_at TEXT NOT NULL, UNIQUE (workflow_id, version_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_nodes (
+    id TEXT PRIMARY KEY, workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id),
+    node_key TEXT NOT NULL, node_type TEXT NOT NULL, label TEXT NOT NULL,
+    assignee_type TEXT, assignee_reference TEXT, sequence INTEGER NOT NULL,
+    UNIQUE (workflow_version_id, node_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_transitions (
+    id TEXT PRIMARY KEY, workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id),
+    from_node_key TEXT NOT NULL, to_node_key TEXT NOT NULL, sequence INTEGER NOT NULL,
+    UNIQUE (workflow_version_id, from_node_key, to_node_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_conditions (
+    id TEXT PRIMARY KEY, workflow_transition_id TEXT NOT NULL REFERENCES workflow_transitions(id),
+    field TEXT NOT NULL, operator TEXT NOT NULL, comparison_value TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_instances (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id), resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL, initiated_by TEXT NOT NULL REFERENCES app_users(id), status TEXT NOT NULL,
+    current_node_key TEXT NOT NULL, context_snapshot TEXT NOT NULL, started_at TEXT NOT NULL, completed_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_assignments (
+    id TEXT PRIMARY KEY, workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(id),
+    node_key TEXT NOT NULL, assigned_user_id TEXT REFERENCES app_users(id),
+    assigned_role_id TEXT REFERENCES organisation_roles(id), status TEXT NOT NULL,
+    due_at TEXT, assigned_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_approvals (
+    id TEXT PRIMARY KEY, workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(id),
+    workflow_assignment_id TEXT NOT NULL UNIQUE REFERENCES workflow_assignments(id),
+    workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id), actor_id TEXT NOT NULL REFERENCES app_users(id),
+    decision TEXT NOT NULL, reason TEXT NOT NULL, authority_snapshot TEXT NOT NULL, decided_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS workflow_delegations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    delegator_user_id TEXT NOT NULL REFERENCES app_users(id), delegate_user_id TEXT NOT NULL REFERENCES app_users(id),
+    workflow_id TEXT REFERENCES workflows(id), scope TEXT NOT NULL, status TEXT NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT NOT NULL, approved_by TEXT NOT NULL REFERENCES app_users(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_requests (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    requested_by TEXT NOT NULL REFERENCES app_users(id), subject_user_id TEXT NOT NULL REFERENCES app_users(id),
+    organisation_role_id TEXT NOT NULL REFERENCES organisation_roles(id), justification TEXT NOT NULL,
+    status TEXT NOT NULL, requested_at TEXT NOT NULL, completed_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_approvals (
+    id TEXT PRIMARY KEY, access_request_id TEXT NOT NULL REFERENCES access_requests(id),
+    reviewer_id TEXT NOT NULL REFERENCES app_users(id), reviewer_stage TEXT NOT NULL,
+    decision TEXT NOT NULL, reason TEXT NOT NULL, decided_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_reviews (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    name TEXT NOT NULL, review_type TEXT NOT NULL, status TEXT NOT NULL,
+    period_start TEXT NOT NULL, due_at TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, completed_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_certifications (
+    id TEXT PRIMARY KEY, access_review_id TEXT NOT NULL REFERENCES access_reviews(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), subject_user_id TEXT NOT NULL REFERENCES app_users(id),
+    reviewer_id TEXT NOT NULL REFERENCES app_users(id), snapshot TEXT NOT NULL,
+    disposition TEXT NOT NULL, finding TEXT, certified_at TEXT NOT NULL,
+    UNIQUE (access_review_id, subject_user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS sod_rules (
+    id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id), code TEXT NOT NULL,
+    name TEXT NOT NULL, action_set TEXT NOT NULL, scope TEXT NOT NULL,
+    mandatory INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL, effective_from TEXT NOT NULL,
+    created_at TEXT NOT NULL, UNIQUE (code, organisation_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS sod_violations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    sod_rule_id TEXT NOT NULL REFERENCES sod_rules(id), actor_id TEXT NOT NULL REFERENCES app_users(id),
+    resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, status TEXT NOT NULL,
+    evidence TEXT NOT NULL, detected_at TEXT NOT NULL, resolved_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS navigation_workspaces (
+    id TEXT PRIMARY KEY, workspace_key TEXT NOT NULL UNIQUE, label TEXT NOT NULL,
+    description TEXT NOT NULL, sort_order INTEGER NOT NULL, status TEXT NOT NULL, classification TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS navigation_folders (
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES navigation_workspaces(id),
+    parent_folder_id TEXT, folder_key TEXT NOT NULL, label TEXT NOT NULL,
+    sort_order INTEGER NOT NULL, status TEXT NOT NULL, UNIQUE (workspace_id, folder_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS navigation_items (
+    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES navigation_workspaces(id),
+    folder_id TEXT NOT NULL REFERENCES navigation_folders(id), item_key TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL, href TEXT NOT NULL, feature_key TEXT, capability TEXT,
+    required_permission TEXT NOT NULL, sort_order INTEGER NOT NULL, status TEXT NOT NULL,
+    classification TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS navigation_permissions (
+    id TEXT PRIMARY KEY, navigation_item_id TEXT NOT NULL REFERENCES navigation_items(id),
+    policy_key TEXT NOT NULL, effect TEXT NOT NULL, safe_restriction_reason TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS navigation_preferences (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_users(id),
+    organisation_id TEXT REFERENCES organisations(id), preference_type TEXT NOT NULL,
+    value TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (user_id, organisation_id, preference_type)
+  )`,
   `CREATE TABLE IF NOT EXISTS seed_state (key TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_status_issue_date ON invoices(status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_taxpayer_identifiers_taxpayer ON taxpayer_identifiers(taxpayer_id, status)`,
@@ -635,6 +855,45 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_bank_import_status_created ON bank_imports(organisation_id, status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_report_runs_status_requested ON report_runs(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
+  `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_departments_org_status ON departments(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_employees_org_status_name ON employees(organisation_id, status, full_name)`,
+  `CREATE INDEX IF NOT EXISTS idx_org_admins_org_status ON organisation_administrators(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_org_roles_status ON organisation_roles(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_roles_subject_effective ON user_role_assignments(organisation_id, user_id, status, effective_from)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflows_org_status ON workflows(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflow_versions_effective ON workflow_versions(organisation_id, status, effective_from)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflow_instances_resource ON workflow_instances(organisation_id, resource_type, resource_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflow_assignments_queue ON workflow_assignments(assigned_user_id, status, due_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflow_delegations_effective ON workflow_delegations(organisation_id, delegate_user_id, status, effective_from)`,
+  `CREATE INDEX IF NOT EXISTS idx_access_requests_org_status ON access_requests(organisation_id, status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_access_reviews_org_status ON access_reviews(organisation_id, status, due_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_sod_violations_org_status ON sod_violations(organisation_id, status, detected_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_navigation_folders_parent ON navigation_folders(workspace_id, parent_folder_id, sort_order)`,
+  `CREATE INDEX IF NOT EXISTS idx_navigation_items_folder ON navigation_items(folder_id, sort_order)`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_employee_seat_limit_insert
+    BEFORE INSERT ON employees WHEN NEW.status IN ('ACTIVE','INVITED')
+    BEGIN
+      SELECT CASE WHEN
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')) >=
+        COALESCE((SELECT pe.limit_value FROM organisation_licenses ol
+          JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),0)
+        THEN RAISE(ABORT,'USER_SEAT_LIMIT_EXCEEDED') END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_employee_seat_limit_update
+    BEFORE UPDATE OF status,organisation_id ON employees
+    WHEN NEW.status IN ('ACTIVE','INVITED') AND OLD.status NOT IN ('ACTIVE','INVITED')
+    BEGIN
+      SELECT CASE WHEN
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')) >=
+        COALESCE((SELECT pe.limit_value FROM organisation_licenses ol
+          JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),0)
+        THEN RAISE(ABORT,'USER_SEAT_LIMIT_EXCEEDED') END;
+    END`,
 ];
 
 const SEED_STATEMENTS = [
@@ -1103,6 +1362,184 @@ const PORTAL_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('portal-separation-v1','2026-08-10T09:30:00Z')`,
 ];
 
+const CONTROL_PLANE_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('workspace:read','WORKSPACE','READ','Read the effective hierarchical workspace','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('search:read','SEARCH','READ','Use permission-filtered workspace and record search','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('licensing:read','LICENSING','READ','Read organisation licence entitlements and usage','COMMERCIAL','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('licensing:request','LICENSING','REQUEST','Request an approved licence change without changing state','COMMERCIAL','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('employees:read','EMPLOYEE','READ','Read authorised organisation employees','CONFIDENTIAL','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('employees:manage','EMPLOYEE','MANAGE','Invite suspend and offboard authorised employees','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('roles:read','ORGANISATION_ROLE','READ','Read organisation-specific roles','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('roles:manage','ORGANISATION_ROLE','MANAGE','Create roles from the protected permission catalogue','SECURITY','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('workflows:read','WORKFLOW','READ','Read versioned organisation workflows','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('workflows:manage','WORKFLOW','MANAGE','Create test and request publication of typed workflows','SECURITY','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('workflows:decide','WORKFLOW','DECIDE','Decide only assigned workflow tasks under segregation of duties','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('access-governance:read','ACCESS_GOVERNANCE','READ','Read access requests reviews and certifications','RESTRICTED','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('access-governance:manage','ACCESS_GOVERNANCE','MANAGE','Decide access requests and certify or revoke access','SECURITY','2026-08-10T10:00:00Z')`,
+
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at)
+    VALUES ('plan-pilot-professional-v1','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('CORE_VAT','Core VAT management','Controlled invoice VAT reconciliation and return workspaces',NULL,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','USER_SEATS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','USER_SEATS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BRANCHES','Branches','Active operating branches','BRANCHES',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','WORKFLOWS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ACCOUNTING','Accounting','General ledger and financial controls',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('INVENTORY','Inventory','Inventory and warehouse controls',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PROJECTS','Projects','Project costing budgets and reports',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ANALYTICS','Analytics','Advanced governed reports and analytics','REPORT_RUNS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('API_ACCESS','API access','Scoped API clients webhooks and usage','API_REQUESTS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-core','plan-pilot-professional-v1','CORE_VAT',1,NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-admin','plan-pilot-professional-v1','ADMINISTRATION',1,NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-seats','plan-pilot-professional-v1','USER_SEATS',1,25,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-branches','plan-pilot-professional-v1','BRANCHES',1,5,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-workflow','plan-pilot-professional-v1','ADVANCED_WORKFLOW',1,20,'{"max_nodes":30}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-accounting','plan-pilot-professional-v1','ACCOUNTING',1,NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-inventory','plan-pilot-professional-v1','INVENTORY',1,NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-projects','plan-pilot-professional-v1','PROJECTS',1,NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-analytics','plan-pilot-professional-v1','ANALYTICS',1,1000,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-api','plan-pilot-professional-v1','API_ACCESS',1,100000,'{}')`,
+  `INSERT OR IGNORE INTO subscriptions
+    (id,organisation_id,provider,provider_reference,status,activated_at,current_period_start,current_period_end,created_at,updated_at)
+    VALUES ('sub-org1-pilot','org-0001','LOCAL_SYNTHETIC','synthetic-subscription-org1','ACTIVE','2026-08-01T00:00:00Z','2026-08-01','2026-10-31','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_licenses
+    (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
+    VALUES ('olic-org1','org-0001','sub-org1-pilot','plan-pilot-professional-v1','ACTIVE',1,'2026-08-01T00:00:00Z',NULL,NULL,'NON_DESTRUCTIVE_TAX_RETENTION','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_usage VALUES ('usage-seats-org1','olic-org1','org-0001','USER_SEATS','2026-Q3',3,0,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_usage VALUES ('usage-branches-org1','olic-org1','org-0001','BRANCHES','2026-Q3',1,0,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_usage VALUES ('usage-workflows-org1','olic-org1','org-0001','WORKFLOWS','2026-Q3',1,0,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_usage VALUES ('usage-api-org1','olic-org1','org-0001','API_REQUESTS','2026-08',142,0,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_events VALUES ('levent-org1-active','olic-org1','org-0001','LicenseActivated',NULL,'ACTIVE','LOCAL_SYNTHETIC_APPROVAL','Architecture-approved local staging activation','2026-08-01T00:00:00Z')`,
+
+  `INSERT OR IGNORE INTO departments VALUES ('dept-finance','org-0001','FIN','Finance','', 'ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO departments VALUES ('dept-procurement','org-0001','PROC','Procurement','', 'ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO departments VALUES ('dept-sales','org-0001','SALES','Sales','', 'ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO business_units VALUES ('bu-core','org-0001','CORE','Core Operations','ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO job_titles VALUES ('job-director','org-0001','DIR','Managing Director','Employment title only; access is assigned separately.','ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO job_titles VALUES ('job-finance-manager','org-0001','FIN-MGR','Finance Manager','Employment title only; access is assigned separately.','ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO job_titles VALUES ('job-procurement','org-0001','PROC-OFF','Procurement Officer','Employment title only; access is assigned separately.','ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO positions VALUES ('pos-director','org-0001','job-director','dept-finance','bu-core','br-0001','POS-DIR','Managing Director','ACTIVE')`,
+  `INSERT OR IGNORE INTO positions VALUES ('pos-finance','org-0001','job-finance-manager','dept-finance','bu-core','br-0001','POS-FIN','Finance Manager','ACTIVE')`,
+  `INSERT OR IGNORE INTO positions VALUES ('pos-procurement','org-0001','job-procurement','dept-procurement','bu-core','br-0001','POS-PROC','Procurement Officer','ACTIVE')`,
+  `INSERT OR IGNORE INTO app_users VALUES ('usr-tp1-finance','demo-tp1-finance','finance.manager@namiboffice.example','Ester Amutenya','TAXPAYER_ACCOUNTANT','tp-0001','ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO app_users VALUES ('usr-tp1-procurement','demo-tp1-procurement','procurement@namiboffice.example','Petrus Shikongo','TAXPAYER_STAFF','tp-0001','ACTIVE','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO employees
+    (id,organisation_id,user_id,employee_number,full_name,email,position_id,job_title_id,department_id,business_unit_id,branch_id,manager_employee_id,status,invited_at,activated_at,terminated_at,last_activity_at,created_at,updated_at)
+    VALUES ('emp-owner','org-0001','usr-tp1-owner','EMP-001','Namib Office Owner','owner@namiboffice.example','pos-director','job-director','dept-finance','bu-core','br-0001',NULL,'ACTIVE','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z',NULL,'2026-08-10T09:30:00Z','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO employees
+    (id,organisation_id,user_id,employee_number,full_name,email,position_id,job_title_id,department_id,business_unit_id,branch_id,manager_employee_id,status,invited_at,activated_at,terminated_at,last_activity_at,created_at,updated_at)
+    VALUES ('emp-finance','org-0001','usr-tp1-finance','EMP-002','Ester Amutenya','finance.manager@namiboffice.example','pos-finance','job-finance-manager','dept-finance','bu-core','br-0001','emp-owner','ACTIVE','2026-08-02T00:00:00Z','2026-08-02T00:00:00Z',NULL,'2026-08-09T16:20:00Z','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO employees
+    (id,organisation_id,user_id,employee_number,full_name,email,position_id,job_title_id,department_id,business_unit_id,branch_id,manager_employee_id,status,invited_at,activated_at,terminated_at,last_activity_at,created_at,updated_at)
+    VALUES ('emp-procurement','org-0001','usr-tp1-procurement','EMP-003','Petrus Shikongo','procurement@namiboffice.example','pos-procurement','job-procurement','dept-procurement','bu-core','br-0001','emp-owner','ACTIVE','2026-08-03T00:00:00Z','2026-08-03T00:00:00Z',NULL,'2026-05-01T08:00:00Z','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_memberships
+    (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+    VALUES ('mem-finance','org-0001','usr-tp1-finance','TAXPAYER_ACCOUNTANT','br-0001','ACTIVE','2026-08-02T00:00:00Z',NULL,'usr-tp1-owner','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_memberships
+    (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+    VALUES ('mem-procurement','org-0001','usr-tp1-procurement','TAXPAYER_STAFF','br-0001','ACTIVE','2026-08-03T00:00:00Z',NULL,'usr-tp1-owner','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_administrator_roles VALUES ('PRIMARY','Primary Organisation Administrator','ORGANISATION',1)`,
+  `INSERT OR IGNORE INTO organisation_administrator_roles VALUES ('FINANCE','Finance Administrator','FINANCE_SCOPE',1)`,
+  `INSERT OR IGNORE INTO organisation_administrator_roles VALUES ('USER_ACCESS','User and Access Administrator','IDENTITY_SCOPE',1)`,
+  `INSERT OR IGNORE INTO organisation_administrator_roles VALUES ('BRANCH','Branch Administrator','BRANCH_SCOPE',1)`,
+  `INSERT OR IGNORE INTO organisation_administrator_roles VALUES ('WORKFLOW','Workflow Administrator','WORKFLOW_SCOPE',1)`,
+  `INSERT OR IGNORE INTO organisation_administrator_roles VALUES ('INTEGRATION','Integration Administrator','INTEGRATION_SCOPE',1)`,
+  `INSERT OR IGNORE INTO organisation_administrators
+    (id,organisation_id,user_id,employee_id,administrator_role_code,scope,is_primary,status,effective_from,effective_to,appointed_by,approval_reference)
+    VALUES ('oadmin-primary-org1','org-0001','usr-tp1-owner','emp-owner','PRIMARY','{"organisation_id":"org-0001"}',1,'ACTIVE','2026-08-01T00:00:00Z',NULL,'SYSTEM_LICENSE_ACTIVATION','synthetic-license-activation')`,
+
+  `INSERT OR IGNORE INTO organisation_roles
+    (id,organisation_id,name,description,version,branch_scope,approval_limit_cents,status,created_by,created_at,updated_at)
+    VALUES ('orole-finance','org-0001','Financial Controller','Accounting VAT reporting and staged approval authority.',1,'["br-0001"]',10000000,'ACTIVE','usr-tp1-owner','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_roles
+    (id,organisation_id,name,description,version,branch_scope,approval_limit_cents,status,created_by,created_at,updated_at)
+    VALUES ('orole-procurement','org-0001','Senior Procurement Officer','Procurement work with a controlled approval threshold.',1,'["br-0001"]',1000000,'ACTIVE','usr-tp1-owner','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-read','orole-finance','accounting:read','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-post','orole-finance','accounting:post','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-returns','orole-finance','returns:read','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-workflow','orole-finance','workflows:decide','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-proc-exp','orole-procurement','expenses:manage','BRANCH','ALLOW','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO user_role_assignments VALUES ('ura-finance','org-0001','usr-tp1-finance','emp-finance','orole-finance','ACTIVE','2026-08-02T00:00:00Z',NULL,'usr-tp1-owner','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO user_role_assignments VALUES ('ura-procurement','org-0001','usr-tp1-procurement','emp-procurement','orole-procurement','ACTIVE','2026-08-03T00:00:00Z',NULL,'usr-tp1-owner','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO user_capability_assignments VALUES ('uca-owner-buyer','org-0001','usr-tp1-owner','BUYER','ACTIVE','2026-08-01T00:00:00Z',NULL,'usr-local-admin')`,
+  `INSERT OR IGNORE INTO user_capability_assignments VALUES ('uca-owner-seller','org-0001','usr-tp1-owner','SELLER','ACTIVE','2026-08-01T00:00:00Z',NULL,'usr-local-admin')`,
+  `INSERT OR IGNORE INTO user_capability_assignments VALUES ('uca-finance-buyer','org-0001','usr-tp1-finance','BUYER','ACTIVE','2026-08-02T00:00:00Z',NULL,'usr-tp1-owner')`,
+  `INSERT OR IGNORE INTO user_capability_assignments VALUES ('uca-finance-seller','org-0001','usr-tp1-finance','SELLER','ACTIVE','2026-08-02T00:00:00Z',NULL,'usr-tp1-owner')`,
+  `INSERT OR IGNORE INTO user_capability_assignments VALUES ('uca-procurement-buyer','org-0001','usr-tp1-procurement','BUYER','ACTIVE','2026-08-03T00:00:00Z',NULL,'usr-tp1-owner')`,
+
+  `INSERT OR IGNORE INTO workflows VALUES ('workflow-purchase-org1','org-0001','Purchase request approval','PURCHASE_REQUEST','ACTIVE','usr-tp1-owner','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO workflow_versions
+    (id,workflow_id,organisation_id,version_number,status,definition_hash,definition,effective_from,published_by,approved_by,published_at,retired_at,created_at)
+    VALUES ('workflow-purchase-v1','workflow-purchase-org1','org-0001',1,'PUBLISHED','sha256:synthetic-purchase-workflow-v1','{"name":"Purchase request approval","domainAction":"PURCHASE_REQUEST","nodes":[{"id":"start","type":"START","label":"Submitted"},{"id":"finance","type":"APPROVAL","assigneeType":"ROLE","assigneeRef":"orole-finance","label":"Finance review"},{"id":"end","type":"END","label":"Complete"}],"transitions":[{"from":"start","to":"finance"},{"from":"finance","to":"end"}]}','2026-08-01T00:00:00Z','usr-tp1-owner','usr-tp1-finance','2026-08-01T00:00:00Z',NULL,'2026-08-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO workflow_nodes VALUES ('wn-start','workflow-purchase-v1','start','START','Submitted',NULL,NULL,1)`,
+  `INSERT OR IGNORE INTO workflow_nodes VALUES ('wn-finance','workflow-purchase-v1','finance','APPROVAL','Finance review','ROLE','orole-finance',2)`,
+  `INSERT OR IGNORE INTO workflow_nodes VALUES ('wn-end','workflow-purchase-v1','end','END','Complete',NULL,NULL,3)`,
+  `INSERT OR IGNORE INTO workflow_transitions VALUES ('wt-start-fin','workflow-purchase-v1','start','finance',1)`,
+  `INSERT OR IGNORE INTO workflow_transitions VALUES ('wt-fin-end','workflow-purchase-v1','finance','end',2)`,
+  `INSERT OR IGNORE INTO workflow_instances VALUES ('wfi-pr-001','org-0001','workflow-purchase-v1','PURCHASE_REQUEST','PR-2026-001','usr-tp1-procurement','IN_PROGRESS','finance','{"amount_cents":750000,"branch_id":"br-0001"}','2026-08-10T09:00:00Z',NULL)`,
+  `INSERT OR IGNORE INTO workflow_assignments VALUES ('wfa-pr-001','wfi-pr-001','finance','usr-tp1-finance','orole-finance','PENDING','2026-08-11T12:00:00Z','2026-08-10T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_requests VALUES ('areq-fin-workflow','org-0001','usr-tp1-finance','usr-tp1-finance','orole-finance','Quarterly confirmation of finance control duties.','PENDING_MANAGER','2026-08-10T09:10:00Z',NULL)`,
+  `INSERT OR IGNORE INTO access_reviews VALUES ('areview-q3-org1','org-0001','Q3 privileged and dormant access review','QUARTERLY','OPEN','2026-07-01','2026-09-30T23:59:59Z','usr-tp1-owner','2026-08-10T09:15:00Z',NULL)`,
+  `INSERT OR IGNORE INTO access_certifications VALUES ('acert-owner-q3','areview-q3-org1','org-0001','usr-tp1-owner','usr-tp1-finance','{"roles":["TAXPAYER_OWNER"],"administrator":"PRIMARY"}','RETAIN',NULL,'2026-08-10T09:20:00Z')`,
+  `INSERT OR IGNORE INTO sod_rules VALUES ('sod-no-self-approval','org-0001','NO_SELF_APPROVAL','No self approval','["CREATE","APPROVE"]','ALL_PROTECTED_WORKFLOWS',1,'ACTIVE','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO sod_rules VALUES ('sod-no-create-approve-execute','org-0001','NO_CREATE_APPROVE_EXECUTE','Separate create approve and execute','["CREATE","APPROVE","EXECUTE"]','PAYMENT_AND_TAX_SENSITIVE',1,'ACTIVE','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z')`,
+
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-home','home','Home / Command Centre','Executive operational VAT and task posture',10,'ACTIVE','INTERNAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-sales','sales','Sales & Revenue','Customers quotations invoices and output VAT',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-procurement','procurement','Procurement & Purchases','Suppliers expenses purchases and input VAT',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-vat','vat','VAT & Tax Management','VAT reconciliation returns and compliance',40,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-accounting','accounting','Accounting & Finance','General ledger and financial control',50,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-inventory','inventory','Inventory & Operations','Inventory expenses and operating controls',60,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-projects','projects','Project Management','Project cost revenue and budget control',70,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-documents','documents','Documents & Records','Evidence documents and immutable records',80,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-reporting','reporting','Reporting & Analytics','Governed reports and performance analysis',90,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-integrations','integrations','Integrations','ITAS SaaS API and developer controls',100,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-administration','administration','Administration','Organisation people access workflow and security',110,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-licensing','licensing','Licensing & Subscription','Licence entitlements usage and renewal posture',120,'ACTIVE','COMMERCIAL')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-home-dashboard','nav-home',NULL,'dashboard','Dashboard',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-sales-main','nav-sales',NULL,'sales','Sales',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-proc-main','nav-procurement',NULL,'procurement','Procurement',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-vat-main','nav-vat',NULL,'vat-management','VAT Management',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-accounting-main','nav-accounting',NULL,'accounting','Accounting',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-inventory-main','nav-inventory',NULL,'inventory','Inventory & Operations',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-projects-main','nav-projects',NULL,'projects','Projects',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-documents-main','nav-documents',NULL,'documents','Documents & Records',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-reporting-main','nav-reporting',NULL,'reports','Reports & Analytics',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-integrations-main','nav-integrations',NULL,'integrations','Integrations & Developer',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-administration-main','nav-administration',NULL,'organisation-admin','Organisation Administration',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-licensing-main','nav-licensing',NULL,'subscription','Subscription',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-dashboard','nav-home','folder-home-dashboard','dashboard','Operations dashboard','/','CORE_VAT',NULL,'dashboard:read',10,'ACTIVE','INTERNAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-portals','nav-home','folder-home-dashboard','portals','Portal switchboard','/portals','CORE_VAT',NULL,'dashboard:read',20,'ACTIVE','INTERNAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-search','nav-home','folder-home-dashboard','search','Workspace search','/workspace-search','ADMINISTRATION',NULL,'search:read',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-commercial','nav-sales','folder-sales-main','commercial','Customers & quotations','/commercial','CORE_VAT','SELLER','commercial:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-invoices','nav-sales','folder-sales-main','invoices','Tax invoices','/invoices','CORE_VAT','SELLER','invoices:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-invoice','nav-sales','folder-sales-main','new-invoice','Submit tax invoice','/invoices/new','CORE_VAT','SELLER','invoices:submit',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-operations','nav-procurement','folder-proc-main','operations','Purchases & expenses','/operations','CORE_VAT','BUYER','expenses:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-reconciliation','nav-vat','folder-vat-main','reconciliation','VAT reconciliation','/reconciliation','CORE_VAT',NULL,'exceptions:read',10,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-returns','nav-vat','folder-vat-main','returns','VAT returns','/returns','CORE_VAT',NULL,'returns:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-compliance','nav-vat','folder-vat-main','compliance','Compliance & disputes','/compliance','CORE_VAT',NULL,'compliance:read',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-cases','nav-vat','folder-vat-main','cases','Audit cases & risk','/cases','CORE_VAT',NULL,'cases:manage',40,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-refunds','nav-vat','folder-vat-main','refunds','Refund control','/refunds','CORE_VAT',NULL,'refunds:read',50,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-accounting','nav-accounting','folder-accounting-main','accounting','General ledger','/accounting','ACCOUNTING',NULL,'accounting:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-inventory','nav-inventory','folder-inventory-main','inventory','Inventory operations','/operations','INVENTORY',NULL,'inventory:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-projects','nav-projects','folder-projects-main','projects','Projects','/operations','PROJECTS',NULL,'projects:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-documents','nav-documents','folder-documents-main','documents','Evidence documents','/documents','CORE_VAT',NULL,'documents:read',10,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-audit','nav-documents','folder-documents-main','audit','Audit evidence','/audit','CORE_VAT',NULL,'audit:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-offline','nav-documents','folder-documents-main','offline','Offline continuity','/offline','CORE_VAT',NULL,'offline:read',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-reports','nav-reporting','folder-reporting-main','reports','Reports & analytics','/reports','ANALYTICS',NULL,'reports:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-integrations','nav-integrations','folder-integrations-main','integrations','Integration health','/integrations','API_ACCESS',NULL,'integrations:read',10,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-developer','nav-integrations','folder-integrations-main','developer','Developer & webhooks','/developer','API_ACCESS',NULL,'developer:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-administration','nav-administration','folder-administration-main','administration','Administration command centre','/administration','ADMINISTRATION',NULL,'administration:read',10,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-organisations','nav-administration','folder-administration-main','organisations','Organisation identity','/organisations','ADMINISTRATION',NULL,'identity:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-taxpayers','nav-administration','folder-administration-main','taxpayers','Taxpayer registry','/taxpayers','ADMINISTRATION',NULL,'taxpayers:read',25,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-registrations','nav-administration','folder-administration-main','registrations','Registration intake','/registrations','ADMINISTRATION',NULL,'registrations:read',27,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-security','nav-administration','folder-administration-main','security','Security posture','/security','ADMINISTRATION',NULL,'security:read',30,'ACTIVE','SECURITY')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-licensing','nav-licensing','folder-licensing-main','licensing','Current licence & usage','/administration#licensing','ADMINISTRATION',NULL,'licensing:read',10,'ACTIVE','COMMERCIAL')`,
+  `INSERT OR IGNORE INTO navigation_permissions VALUES ('navperm-admin','nitem-administration','organisation-admin-access','ALLOW','Organisation administration permission is required.')`,
+  `INSERT OR IGNORE INTO navigation_permissions VALUES ('navperm-licence','nitem-licensing','licence-admin-access','ALLOW','Licence administrator permission is required.')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('control-plane-v1','2026-08-10T10:00:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -1139,6 +1576,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!platformSeed) await db.batch(PLATFORM_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const portalSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("portal-separation-v1").first();
     if (!portalSeed) await db.batch(PORTAL_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const controlPlaneSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("control-plane-v1").first();
+    if (!controlPlaneSeed) await db.batch(CONTROL_PLANE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

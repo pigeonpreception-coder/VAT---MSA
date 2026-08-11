@@ -12,6 +12,9 @@ type UserRow = {
   status: string;
 };
 
+type MembershipRow = { organisation_id: string };
+type CodeRow = { code: string };
+
 export class AccessDeniedError extends Error {
   readonly status: number;
 
@@ -20,6 +23,42 @@ export class AccessDeniedError extends Error {
     this.name = "AccessDeniedError";
     this.status = status;
   }
+}
+
+async function buildUserContext(db: D1Database, row: UserRow, isDevelopmentIdentity: boolean): Promise<UserContext> {
+  const membership = await db
+    .prepare("SELECT organisation_id FROM organisation_memberships WHERE user_id=? AND status='ACTIVE' ORDER BY created_at LIMIT 1")
+    .bind(row.id)
+    .first<MembershipRow>();
+  const organisationId = membership?.organisation_id ?? null;
+  const capabilities = organisationId
+    ? (await db
+        .prepare("SELECT capability_code AS code FROM user_capability_assignments WHERE user_id=? AND organisation_id=? AND status='ACTIVE'")
+        .bind(row.id, organisationId)
+        .all<CodeRow>()).results.map((item) => item.code)
+    : [];
+  const dynamicPermissions = organisationId
+    ? (await db
+        .prepare(`SELECT DISTINCT rp.permission_code AS code
+          FROM user_role_assignments ura
+          JOIN organisation_roles r ON r.id=ura.organisation_role_id AND r.status='ACTIVE'
+          JOIN organisation_role_permissions rp ON rp.organisation_role_id=r.id
+          WHERE ura.user_id=? AND ura.organisation_id=? AND ura.status='ACTIVE'`)
+        .bind(row.id, organisationId)
+        .all<CodeRow>()).results.map((item) => item.code)
+    : [];
+
+  return {
+    userId: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    role: row.role,
+    taxpayerId: row.taxpayer_id,
+    organisationId,
+    capabilities,
+    dynamicPermissions,
+    isDevelopmentIdentity,
+  };
 }
 
 export async function getCurrentUser(): Promise<UserContext> {
@@ -37,14 +76,7 @@ export async function getCurrentUser(): Promise<UserContext> {
     if (!row) {
       throw new AccessDeniedError("Your identity is authenticated but has not been provisioned for VAT-MSA.");
     }
-    return {
-      userId: row.id,
-      email: row.email,
-      displayName: row.display_name,
-      role: row.role,
-      taxpayerId: row.taxpayer_id,
-      isDevelopmentIdentity: false,
-    };
+    return buildUserContext(db, row, false);
   }
 
   if (process.env.NODE_ENV === "production") {
@@ -56,14 +88,7 @@ export async function getCurrentUser(): Promise<UserContext> {
     JOIN identity_providers p ON p.id=l.provider_id AND p.status='ACTIVE'
     WHERE u.status='ACTIVE' AND p.provider_key='SITES_WORKSPACE' AND l.subject='local-demo-user' LIMIT 1`).first<UserRow>();
   if (!row) throw new AccessDeniedError("The local pilot identity is unavailable.", 500);
-  return {
-    userId: row.id,
-    email: row.email,
-    displayName: row.display_name,
-    role: row.role,
-    taxpayerId: row.taxpayer_id,
-    isDevelopmentIdentity: true,
-  };
+  return buildUserContext(db, row, true);
 }
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
@@ -90,8 +115,36 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
   SECURITY_ANALYST: new Set(["dashboard:read", "security:read", "audit:read"]),
 };
 
+const WORKSPACE_READ = ["workspace:read", "search:read", "licensing:read"];
+const ORGANISATION_CONTROL = [
+  ...WORKSPACE_READ,
+  "licensing:request",
+  "administration:read",
+  "administration:manage",
+  "employees:read",
+  "employees:manage",
+  "roles:read",
+  "roles:manage",
+  "workflows:read",
+  "workflows:manage",
+  "workflows:decide",
+  "access-governance:read",
+  "access-governance:manage",
+];
+const CONTROL_PLANE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
+  PILOT_ADMIN: new Set(ORGANISATION_CONTROL),
+  TAXPAYER_OWNER: new Set(ORGANISATION_CONTROL),
+  TAXPAYER_ADMIN: new Set(ORGANISATION_CONTROL),
+  TAXPAYER_ACCOUNTANT: new Set([...WORKSPACE_READ, "employees:read", "roles:read", "workflows:read", "workflows:decide", "access-governance:read"]),
+  TAXPAYER_STAFF: new Set(["workspace:read", "search:read"]),
+  TAXPAYER_VIEWER: new Set(["workspace:read", "search:read"]),
+  NAMRA_SYSTEM_ADMIN: new Set(ORGANISATION_CONTROL),
+};
+
 export function hasPermission(user: UserContext, permission: string): boolean {
-  return ROLE_PERMISSIONS[user.role]?.has(permission) ?? false;
+  return (ROLE_PERMISSIONS[user.role]?.has(permission) ?? false)
+    || (CONTROL_PLANE_PERMISSIONS[user.role]?.has(permission) ?? false)
+    || user.dynamicPermissions.includes(permission);
 }
 
 export function requirePermission(user: UserContext, permission: string): void {

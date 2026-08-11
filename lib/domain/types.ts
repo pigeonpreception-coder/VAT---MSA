@@ -101,6 +101,9 @@ export type UserContext = {
   displayName: string;
   role: string;
   taxpayerId: string | null;
+  organisationId: string | null;
+  capabilities: string[];
+  dynamicPermissions: string[];
   isDevelopmentIdentity: boolean;
 };
 

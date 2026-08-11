@@ -1579,6 +1579,579 @@ export const outboxEvents = sqliteTable(
   ],
 );
 
+export const licensePlans = sqliteTable(
+  "license_plans",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    version: integer("version").notNull(),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_license_plan_code_version").on(table.code, table.version)],
+);
+
+export const licenseFeatures = sqliteTable("license_features", {
+  key: text("feature_key").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  metricKey: text("metric_key"),
+  protected: integer("protected").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+});
+
+export const licensePlanEntitlements = sqliteTable(
+  "license_plan_entitlements",
+  {
+    id: text("id").primaryKey(),
+    licensePlanId: text("license_plan_id").notNull().references(() => licensePlans.id),
+    featureKey: text("feature_key").notNull().references(() => licenseFeatures.key),
+    enabled: integer("enabled").notNull().default(1),
+    limitValue: integer("limit_value"),
+    configuration: text("configuration").notNull().default("{}"),
+  },
+  (table) => [uniqueIndex("ux_plan_entitlement_feature").on(table.licensePlanId, table.featureKey)],
+);
+
+export const subscriptions = sqliteTable(
+  "subscriptions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    provider: text("provider").notNull(),
+    providerReference: text("provider_reference").notNull(),
+    status: text("status").notNull(),
+    activatedAt: text("activated_at"),
+    currentPeriodStart: text("current_period_start").notNull(),
+    currentPeriodEnd: text("current_period_end").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_subscription_provider_ref").on(table.provider, table.providerReference), index("idx_subscription_org_status").on(table.organisationId, table.status)],
+);
+
+export const organisationLicenses = sqliteTable(
+  "organisation_licenses",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    subscriptionId: text("subscription_id").notNull().references(() => subscriptions.id),
+    licensePlanId: text("license_plan_id").notNull().references(() => licensePlans.id),
+    state: text("state").notNull(),
+    stateVersion: integer("state_version").notNull().default(1),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    graceEndsAt: text("grace_ends_at"),
+    retentionPolicy: text("retention_policy").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_organisation_license_effective").on(table.organisationId, table.state, table.effectiveFrom)],
+);
+
+export const licenseUsage = sqliteTable(
+  "license_usage",
+  {
+    id: text("id").primaryKey(),
+    organisationLicenseId: text("organisation_license_id").notNull().references(() => organisationLicenses.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    metricKey: text("metric_key").notNull(),
+    periodKey: text("period_key").notNull(),
+    usedValue: integer("used_value").notNull().default(0),
+    reservedValue: integer("reserved_value").notNull().default(0),
+    version: integer("version").notNull().default(0),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_license_usage_metric_period").on(table.organisationId, table.metricKey, table.periodKey)],
+);
+
+export const licenseEvents = sqliteTable(
+  "license_events",
+  {
+    id: text("id").primaryKey(),
+    organisationLicenseId: text("organisation_license_id").notNull().references(() => organisationLicenses.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    eventType: text("event_type").notNull(),
+    fromState: text("from_state"),
+    toState: text("to_state").notNull(),
+    authority: text("authority").notNull(),
+    reason: text("reason").notNull(),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (table) => [index("idx_license_events_org_time").on(table.organisationId, table.occurredAt)],
+);
+
+export const departments = sqliteTable(
+  "departments",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    parentDepartmentId: text("parent_department_id"),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_departments_org_code").on(table.organisationId, table.code), index("idx_departments_org_status").on(table.organisationId, table.status)],
+);
+
+export const businessUnits = sqliteTable(
+  "business_units",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_business_units_org_code").on(table.organisationId, table.code)],
+);
+
+export const jobTitles = sqliteTable(
+  "job_titles",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_job_titles_org_code").on(table.organisationId, table.code)],
+);
+
+export const positions = sqliteTable(
+  "positions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    jobTitleId: text("job_title_id").notNull().references(() => jobTitles.id),
+    departmentId: text("department_id").references(() => departments.id),
+    businessUnitId: text("business_unit_id").references(() => businessUnits.id),
+    branchId: text("branch_id").references(() => branches.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    status: text("status").notNull(),
+  },
+  (table) => [uniqueIndex("ux_positions_org_code").on(table.organisationId, table.code)],
+);
+
+export const employees = sqliteTable(
+  "employees",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    userId: text("user_id").references(() => appUsers.id),
+    employeeNumber: text("employee_number").notNull(),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    positionId: text("position_id").references(() => positions.id),
+    jobTitleId: text("job_title_id").references(() => jobTitles.id),
+    departmentId: text("department_id").references(() => departments.id),
+    businessUnitId: text("business_unit_id").references(() => businessUnits.id),
+    branchId: text("branch_id").references(() => branches.id),
+    managerEmployeeId: text("manager_employee_id"),
+    status: text("status").notNull(),
+    invitedAt: text("invited_at"),
+    activatedAt: text("activated_at"),
+    terminatedAt: text("terminated_at"),
+    lastActivityAt: text("last_activity_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_employees_org_number").on(table.organisationId, table.employeeNumber), uniqueIndex("ux_employees_org_email").on(table.organisationId, table.email), index("idx_employees_org_status_name").on(table.organisationId, table.status, table.fullName)],
+);
+
+export const organisationAdministratorRoles = sqliteTable("organisation_administrator_roles", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+  maximumScope: text("maximum_scope").notNull(),
+  protected: integer("protected").notNull().default(1),
+});
+
+export const organisationAdministrators = sqliteTable(
+  "organisation_administrators",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    userId: text("user_id").notNull().references(() => appUsers.id),
+    employeeId: text("employee_id").references(() => employees.id),
+    administratorRoleCode: text("administrator_role_code").notNull().references(() => organisationAdministratorRoles.code),
+    scope: text("scope").notNull(),
+    isPrimary: integer("is_primary").notNull().default(0),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    appointedBy: text("appointed_by").notNull(),
+    approvalReference: text("approval_reference").notNull(),
+  },
+  (table) => [index("idx_org_admins_org_status").on(table.organisationId, table.status), uniqueIndex("ux_org_admin_user_role").on(table.organisationId, table.userId, table.administratorRoleCode)],
+);
+
+export const organisationRoles = sqliteTable(
+  "organisation_roles",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    version: integer("version").notNull().default(1),
+    branchScope: text("branch_scope").notNull().default("[]"),
+    approvalLimitCents: integer("approval_limit_cents"),
+    status: text("status").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_org_roles_name_version").on(table.organisationId, table.name, table.version), index("idx_org_roles_status").on(table.organisationId, table.status)],
+);
+
+export const organisationRolePermissions = sqliteTable(
+  "organisation_role_permissions",
+  {
+    id: text("id").primaryKey(),
+    organisationRoleId: text("organisation_role_id").notNull().references(() => organisationRoles.id),
+    permissionCode: text("permission_code").notNull().references(() => accessPermissions.code),
+    recordScope: text("record_scope").notNull(),
+    effect: text("effect").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_org_role_permission").on(table.organisationRoleId, table.permissionCode)],
+);
+
+export const userRoleAssignments = sqliteTable(
+  "user_role_assignments",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    userId: text("user_id").notNull().references(() => appUsers.id),
+    employeeId: text("employee_id").references(() => employees.id),
+    organisationRoleId: text("organisation_role_id").notNull().references(() => organisationRoles.id),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    assignedBy: text("assigned_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("idx_user_roles_subject_effective").on(table.organisationId, table.userId, table.status, table.effectiveFrom)],
+);
+
+export const userCapabilityAssignments = sqliteTable(
+  "user_capability_assignments",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    userId: text("user_id").notNull().references(() => appUsers.id),
+    capability: text("capability").notNull(),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to"),
+    assignedBy: text("assigned_by").notNull().references(() => appUsers.id),
+  },
+  (table) => [uniqueIndex("ux_user_capability").on(table.organisationId, table.userId, table.capability)],
+);
+
+export const workflows = sqliteTable(
+  "workflows",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    name: text("name").notNull(),
+    domainAction: text("domain_action").notNull(),
+    status: text("status").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_workflows_org_name").on(table.organisationId, table.name), index("idx_workflows_org_status").on(table.organisationId, table.status)],
+);
+
+export const workflowVersions = sqliteTable(
+  "workflow_versions",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id").notNull().references(() => workflows.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    versionNumber: integer("version_number").notNull(),
+    status: text("status").notNull(),
+    definitionHash: text("definition_hash").notNull(),
+    definition: text("definition").notNull(),
+    effectiveFrom: text("effective_from"),
+    publishedBy: text("published_by").references(() => appUsers.id),
+    approvedBy: text("approved_by").references(() => appUsers.id),
+    publishedAt: text("published_at"),
+    retiredAt: text("retired_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_workflow_versions_number").on(table.workflowId, table.versionNumber), index("idx_workflow_versions_effective").on(table.organisationId, table.status, table.effectiveFrom)],
+);
+
+export const workflowNodes = sqliteTable(
+  "workflow_nodes",
+  {
+    id: text("id").primaryKey(),
+    workflowVersionId: text("workflow_version_id").notNull().references(() => workflowVersions.id),
+    nodeKey: text("node_key").notNull(),
+    nodeType: text("node_type").notNull(),
+    label: text("label").notNull(),
+    assigneeType: text("assignee_type"),
+    assigneeReference: text("assignee_reference"),
+    sequence: integer("sequence").notNull(),
+  },
+  (table) => [uniqueIndex("ux_workflow_node_key").on(table.workflowVersionId, table.nodeKey)],
+);
+
+export const workflowTransitions = sqliteTable(
+  "workflow_transitions",
+  {
+    id: text("id").primaryKey(),
+    workflowVersionId: text("workflow_version_id").notNull().references(() => workflowVersions.id),
+    fromNodeKey: text("from_node_key").notNull(),
+    toNodeKey: text("to_node_key").notNull(),
+    sequence: integer("sequence").notNull(),
+  },
+  (table) => [uniqueIndex("ux_workflow_transition").on(table.workflowVersionId, table.fromNodeKey, table.toNodeKey)],
+);
+
+export const workflowConditions = sqliteTable("workflow_conditions", {
+  id: text("id").primaryKey(),
+  workflowTransitionId: text("workflow_transition_id").notNull().references(() => workflowTransitions.id),
+  field: text("field").notNull(),
+  operator: text("operator").notNull(),
+  comparisonValue: text("comparison_value").notNull(),
+});
+
+export const workflowInstances = sqliteTable(
+  "workflow_instances",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    workflowVersionId: text("workflow_version_id").notNull().references(() => workflowVersions.id),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    initiatedBy: text("initiated_by").notNull().references(() => appUsers.id),
+    status: text("status").notNull(),
+    currentNodeKey: text("current_node_key").notNull(),
+    contextSnapshot: text("context_snapshot").notNull(),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [index("idx_workflow_instances_resource").on(table.organisationId, table.resourceType, table.resourceId)],
+);
+
+export const workflowAssignments = sqliteTable(
+  "workflow_assignments",
+  {
+    id: text("id").primaryKey(),
+    workflowInstanceId: text("workflow_instance_id").notNull().references(() => workflowInstances.id),
+    nodeKey: text("node_key").notNull(),
+    assignedUserId: text("assigned_user_id").references(() => appUsers.id),
+    assignedRoleId: text("assigned_role_id").references(() => organisationRoles.id),
+    status: text("status").notNull(),
+    dueAt: text("due_at"),
+    assignedAt: text("assigned_at").notNull(),
+  },
+  (table) => [index("idx_workflow_assignments_queue").on(table.assignedUserId, table.status, table.dueAt)],
+);
+
+export const workflowApprovals = sqliteTable(
+  "workflow_approvals",
+  {
+    id: text("id").primaryKey(),
+    workflowInstanceId: text("workflow_instance_id").notNull().references(() => workflowInstances.id),
+    workflowAssignmentId: text("workflow_assignment_id").notNull().references(() => workflowAssignments.id),
+    workflowVersionId: text("workflow_version_id").notNull().references(() => workflowVersions.id),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    decision: text("decision").notNull(),
+    reason: text("reason").notNull(),
+    authoritySnapshot: text("authority_snapshot").notNull(),
+    decidedAt: text("decided_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_workflow_approval_assignment").on(table.workflowAssignmentId)],
+);
+
+export const workflowDelegations = sqliteTable(
+  "workflow_delegations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    delegatorUserId: text("delegator_user_id").notNull().references(() => appUsers.id),
+    delegateUserId: text("delegate_user_id").notNull().references(() => appUsers.id),
+    workflowId: text("workflow_id").references(() => workflows.id),
+    scope: text("scope").notNull(),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    effectiveTo: text("effective_to").notNull(),
+    approvedBy: text("approved_by").notNull().references(() => appUsers.id),
+  },
+  (table) => [index("idx_workflow_delegations_effective").on(table.organisationId, table.delegateUserId, table.status, table.effectiveFrom)],
+);
+
+export const accessRequests = sqliteTable(
+  "access_requests",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    subjectUserId: text("subject_user_id").notNull().references(() => appUsers.id),
+    organisationRoleId: text("organisation_role_id").notNull().references(() => organisationRoles.id),
+    justification: text("justification").notNull(),
+    status: text("status").notNull(),
+    requestedAt: text("requested_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [index("idx_access_requests_org_status").on(table.organisationId, table.status, table.requestedAt)],
+);
+
+export const accessApprovals = sqliteTable("access_approvals", {
+  id: text("id").primaryKey(),
+  accessRequestId: text("access_request_id").notNull().references(() => accessRequests.id),
+  reviewerId: text("reviewer_id").notNull().references(() => appUsers.id),
+  reviewerStage: text("reviewer_stage").notNull(),
+  decision: text("decision").notNull(),
+  reason: text("reason").notNull(),
+  decidedAt: text("decided_at").notNull(),
+});
+
+export const accessReviews = sqliteTable(
+  "access_reviews",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    name: text("name").notNull(),
+    reviewType: text("review_type").notNull(),
+    status: text("status").notNull(),
+    periodStart: text("period_start").notNull(),
+    dueAt: text("due_at").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [index("idx_access_reviews_org_status").on(table.organisationId, table.status, table.dueAt)],
+);
+
+export const accessCertifications = sqliteTable(
+  "access_certifications",
+  {
+    id: text("id").primaryKey(),
+    accessReviewId: text("access_review_id").notNull().references(() => accessReviews.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    subjectUserId: text("subject_user_id").notNull().references(() => appUsers.id),
+    reviewerId: text("reviewer_id").notNull().references(() => appUsers.id),
+    snapshot: text("snapshot").notNull(),
+    disposition: text("disposition").notNull(),
+    finding: text("finding"),
+    certifiedAt: text("certified_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_access_certification_subject").on(table.accessReviewId, table.subjectUserId)],
+);
+
+export const sodRules = sqliteTable(
+  "sod_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    actionSet: text("action_set").notNull(),
+    scope: text("scope").notNull(),
+    mandatory: integer("mandatory").notNull().default(1),
+    status: text("status").notNull(),
+    effectiveFrom: text("effective_from").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_sod_rule_code_org").on(table.code, table.organisationId)],
+);
+
+export const sodViolations = sqliteTable(
+  "sod_violations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    sodRuleId: text("sod_rule_id").notNull().references(() => sodRules.id),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    status: text("status").notNull(),
+    evidence: text("evidence").notNull(),
+    detectedAt: text("detected_at").notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (table) => [index("idx_sod_violations_org_status").on(table.organisationId, table.status, table.detectedAt)],
+);
+
+export const navigationWorkspaces = sqliteTable(
+  "navigation_workspaces",
+  {
+    id: text("id").primaryKey(),
+    key: text("workspace_key").notNull(),
+    label: text("label").notNull(),
+    description: text("description").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    status: text("status").notNull(),
+    classification: text("classification").notNull(),
+  },
+  (table) => [uniqueIndex("ux_navigation_workspace_key").on(table.key)],
+);
+
+export const navigationFolders = sqliteTable(
+  "navigation_folders",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => navigationWorkspaces.id),
+    parentFolderId: text("parent_folder_id"),
+    key: text("folder_key").notNull(),
+    label: text("label").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    status: text("status").notNull(),
+  },
+  (table) => [uniqueIndex("ux_navigation_folder_key").on(table.workspaceId, table.key), index("idx_navigation_folders_parent").on(table.workspaceId, table.parentFolderId, table.sortOrder)],
+);
+
+export const navigationItems = sqliteTable(
+  "navigation_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => navigationWorkspaces.id),
+    folderId: text("folder_id").notNull().references(() => navigationFolders.id),
+    key: text("item_key").notNull(),
+    label: text("label").notNull(),
+    href: text("href").notNull(),
+    featureKey: text("feature_key"),
+    capability: text("capability"),
+    requiredPermission: text("required_permission").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    status: text("status").notNull(),
+    classification: text("classification").notNull(),
+  },
+  (table) => [uniqueIndex("ux_navigation_item_key").on(table.key), index("idx_navigation_items_folder").on(table.folderId, table.sortOrder)],
+);
+
+export const navigationPermissions = sqliteTable("navigation_permissions", {
+  id: text("id").primaryKey(),
+  navigationItemId: text("navigation_item_id").notNull().references(() => navigationItems.id),
+  policyKey: text("policy_key").notNull(),
+  effect: text("effect").notNull(),
+  safeRestrictionReason: text("safe_restriction_reason").notNull(),
+});
+
+export const navigationPreferences = sqliteTable(
+  "navigation_preferences",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => appUsers.id),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    preferenceType: text("preference_type").notNull(),
+    value: text("value").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_navigation_preference").on(table.userId, table.organisationId, table.preferenceType)],
+);
+
 export const seedState = sqliteTable("seed_state", {
   key: text("key").primaryKey(),
   appliedAt: text("applied_at").notNull(),
