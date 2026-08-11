@@ -1,10 +1,14 @@
 export function formatMoney(cents: number, currency = "NAD"): string {
-  return new Intl.NumberFormat("en-NA", {
+  const currencyCode = currency.toUpperCase();
+  const parts = new Intl.NumberFormat("en-NA", {
     style: "currency",
-    currency,
+    currency: currencyCode,
+    currencyDisplay: currencyCode === "NAD" ? "code" : "symbol",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(cents / 100);
+  }).formatToParts(cents / 100);
+
+  return parts.map((part) => part.type === "currency" && currencyCode === "NAD" ? "N$" : part.value).join("");
 }
 
 export function formatDate(value: string): string {
@@ -30,4 +34,3 @@ export function maskInvoiceNumber(value: string): string {
   if (value.length <= 4) return "****";
   return `${value.slice(0, 2)}${"*".repeat(Math.min(8, value.length - 4))}${value.slice(-2)}`;
 }
-
