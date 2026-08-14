@@ -10,6 +10,25 @@ export class BusinessValidationError extends Error {
   }
 }
 
+export type BusinessPartyRelationship = "CUSTOMER" | "SUPPLIER";
+
+export type BusinessPartySubmission = {
+  schema_version: "1.0.0";
+  display_name: string;
+  legal_name?: string;
+  vat_number?: string;
+  tin?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  relationships: BusinessPartyRelationship[];
+};
+
+export type BusinessPartyDeactivationSubmission = {
+  schema_version: "1.0.0";
+  reason: string;
+};
+
 export type QuotationLineInput = {
   product_id?: string;
   description: string;
@@ -112,6 +131,7 @@ const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$/;
 const TAX_CATEGORIES = new Set(["STANDARD", "ZERO_RATED", "EXEMPT", "OUT_OF_SCOPE"]);
 const STOCK_MOVEMENT_TYPES = new Set(["RECEIPT", "ISSUE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT_IN", "ADJUSTMENT_OUT"]);
+const PARTY_RELATIONSHIPS = new Set<BusinessPartyRelationship>(["CUSTOMER", "SUPPLIER"]);
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -166,6 +186,65 @@ function currencyField(value: unknown, messages: BusinessValidationMessage[]): s
 
 function schemaVersion(input: Record<string, unknown>, messages: BusinessValidationMessage[]) {
   if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+}
+
+export function normalizeAndValidateBusinessParty(payload: unknown): BusinessPartySubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const displayName = textField(input.display_name, "/display_name", "Display name", 2, 200, messages);
+  const legalName = optionalText(input.legal_name, "/legal_name", "Legal name", 200, messages);
+  const vatNumber = optionalText(input.vat_number, "/vat_number", "VAT number", 40, messages)?.toUpperCase();
+  const tin = optionalText(input.tin, "/tin", "TIN", 40, messages)?.toUpperCase();
+  const email = optionalText(input.email, "/email", "Email", 254, messages)?.toLowerCase();
+  const phone = optionalText(input.phone, "/phone", "Phone", 40, messages);
+  const address = optionalText(input.address, "/address", "Address", 1_000, messages);
+
+  if (vatNumber && !/^[A-Z0-9][A-Z0-9 ._/-]{1,39}$/.test(vatNumber)) {
+    messages.push({ code: "VAT_NUMBER_INVALID", path: "/vat_number", message: "VAT number contains unsupported characters." });
+  }
+  if (tin && !/^[A-Z0-9][A-Z0-9 ._/-]{1,39}$/.test(tin)) {
+    messages.push({ code: "TIN_INVALID", path: "/tin", message: "TIN contains unsupported characters." });
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    messages.push({ code: "EMAIL_INVALID", path: "/email", message: "Email must be a valid address." });
+  }
+  if (phone && !/^\+?[0-9][0-9 ()-]{5,39}$/.test(phone)) {
+    messages.push({ code: "PHONE_INVALID", path: "/phone", message: "Phone contains unsupported characters." });
+  }
+
+  const rawRelationships = Array.isArray(input.relationships) ? input.relationships : [];
+  const relationships = [...new Set(rawRelationships.map((value) => textValue(value).toUpperCase()))];
+  if (relationships.length < 1) {
+    messages.push({ code: "RELATIONSHIP_REQUIRED", path: "/relationships", message: "Select at least one customer or supplier relationship." });
+  }
+  for (const relationship of relationships) {
+    if (!PARTY_RELATIONSHIPS.has(relationship as BusinessPartyRelationship)) {
+      messages.push({ code: "RELATIONSHIP_INVALID", path: "/relationships", message: `${relationship || "Empty relationship"} is not supported.` });
+    }
+  }
+
+  if (messages.length) throw new BusinessValidationError(messages);
+  return {
+    schema_version: "1.0.0",
+    display_name: displayName,
+    ...(legalName ? { legal_name: legalName } : {}),
+    ...(vatNumber ? { vat_number: vatNumber } : {}),
+    ...(tin ? { tin } : {}),
+    ...(email ? { email } : {}),
+    ...(phone ? { phone } : {}),
+    ...(address ? { address } : {}),
+    relationships: relationships as BusinessPartyRelationship[],
+  };
+}
+
+export function normalizeAndValidateBusinessPartyDeactivation(payload: unknown): BusinessPartyDeactivationSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const reason = textField(input.reason, "/reason", "Deactivation reason", 5, 500, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", reason };
 }
 
 export function normalizeAndValidateQuotation(payload: unknown): NormalizedQuotation {

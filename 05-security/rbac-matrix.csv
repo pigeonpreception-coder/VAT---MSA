@@ -1,18 +1,22 @@
 role,resource,action,scope,approval_required,segregation_of_duties_note
 SELLER_ADMIN,organisation_users,manage,own_taxpayer,no,Cannot grant NamRA or platform roles
+SELLER_ADMIN,customer_parties,manage,own_taxpayer,no,Deactivation preserves historical fiscal records
 SELLER_ADMIN,invoices,submit,own_taxpayer,no,Cannot alter accepted/certified invoices
 SELLER_ADMIN,invoices,read,own_taxpayer,no,Buyer data minimised to authorised business purpose
 SELLER_ADMIN,certificates,read,own_taxpayer,no,
 SELLER_ADMIN,integrations,manage,own_taxpayer,yes,Client credential issuance requires re-authentication
 SELLER_OPERATOR,invoices,submit,own_taxpayer,no,Cannot manage organisation users or API clients
+SELLER_OPERATOR,customer_parties,manage,own_taxpayer,no,Cannot use inactive parties on new transactions
 SELLER_OPERATOR,invoices,read,own_taxpayer,no,
 SELLER_OPERATOR,exceptions,respond,own_taxpayer,no,Cannot close NamRA exception
 SELLER_VIEWER,invoices,read,own_taxpayer,no,Read only
 SELLER_VIEWER,reports,read,own_taxpayer,no,Export is audited
 BUYER_ADMIN,organisation_users,manage,own_taxpayer,no,Cannot grant NamRA or platform roles
+BUYER_ADMIN,supplier_parties,manage,own_taxpayer,no,Deactivation preserves historical accounting records
 BUYER_ADMIN,purchases,read,own_taxpayer,no,
 BUYER_ADMIN,input_vat_candidates,review,own_taxpayer,no,Cannot override tax rule
 BUYER_USER,purchases,read,own_taxpayer,no,
+BUYER_USER,supplier_parties,manage,own_taxpayer,no,Cannot use inactive parties on new transactions
 BUYER_USER,input_vat_candidates,respond,own_taxpayer,no,
 NAMRA_COMPLIANCE_OFFICER,taxpayers,read,assigned_portfolio,no,Tax identifiers masked unless purpose requires full value
 NAMRA_COMPLIANCE_OFFICER,invoices,read,assigned_portfolio,no,
@@ -45,4 +49,3 @@ PLATFORM_OPERATOR,service_health,manage,environment,no,Cannot query tax-confiden
 INTERNAL_AUDITOR,audit_events,read,national,no,Read-only and independent
 INTERNAL_AUDITOR,access_reviews,read,national,no,Cannot administer reviewed identities
 BREAK_GLASS_ADMIN,platform_emergency,manage,declared_incident,yes,Time-bound dual approval session recorded and reviewed within 24 hours
-

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
@@ -16,8 +17,9 @@ export default async function CommercialPage() {
   const snapshot = await getBusinessPlatformSnapshot(user);
   const canManageQuotations = hasPermission(user, "quotations:manage");
   const canConvertQuotations = canManageQuotations && hasPermission(user, "invoices:submit");
+  const canManageParties = hasPermission(user, "parties:manage");
   return <AppShell active="commercial" permission="commercial:read">
-    <PageHeader eyebrow="Commercial domain" title="Parties, products and quotations" description="Tenant-scoped commercial records feed invoicing without bypassing fiscal certification. Quotation totals and VAT are calculated from immutable integer inputs." />
+    <PageHeader eyebrow="Commercial domain" title="Parties, products and quotations" description="Tenant-scoped commercial records feed invoicing without bypassing fiscal certification. Quotation totals and VAT are calculated from immutable integer inputs." actions={canManageParties ? <Link className="btn btn-secondary" href="/commercial/parties">Manage customers & suppliers</Link> : null} />
     <section className="metric-grid">
       <article className="metric"><div className="metric-top"><span className="metric-label">Business parties</span><span className="metric-icon">P</span></div><div className="metric-value">{Number(snapshot.metrics.parties ?? 0)}</div><div className="metric-foot">Customer and supplier relationships</div></article>
       <article className="metric"><div className="metric-top"><span className="metric-label">Quotations</span><span className="metric-icon">Q</span></div><div className="metric-value">{Number(snapshot.metrics.quotations ?? 0)}</div><div className="metric-foot">Versioned commercial offers</div></article>

@@ -14,6 +14,7 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Identity foundation, organisation detail and registration-intake portal experiences plus protected organisation/registration APIs.
 - Electronic invoice submission through the web portal and `POST /api/v1/invoices`.
 - Commercial parties, products and server-calculated quotations with guarded acceptance and recoverable idempotent conversion to certified invoices.
+- Governed customer and supplier lifecycle with tenant-scoped create/update, duplicate VAT/TIN checks, active relationship enforcement, non-destructive deactivation, audit/outbox evidence and a dedicated workspace register.
 - Credit-note and debit-note certification with immutable original-document lineage, reason controls, cumulative over-credit prevention and signed VAT ledger effects.
 - Exact integer-cent VAT calculation, document-total validation and duplicate controls.
 - Idempotent submission handling: an exact retry returns the original outcome; a changed payload is rejected.

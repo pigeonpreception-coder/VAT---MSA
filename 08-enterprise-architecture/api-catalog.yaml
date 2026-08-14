@@ -22,6 +22,11 @@ domains:
   users:
     - { method: GET, path: /users, permission: users:read, status: planned }
     - { method: POST, path: "/users/{id}/role-assignments", permission: users:roles:manage, status: planned }
+  business_parties:
+    - { method: GET, path: /business-parties, permission: parties:manage, status: implemented }
+    - { method: POST, path: /business-parties, permission: parties:manage, status: implemented }
+    - { method: PATCH, path: "/business-parties/{id}", permission: parties:manage-and-resource-scope, status: implemented }
+    - { method: POST, path: "/business-parties/{id}/deactivation", permission: parties:manage-and-resource-scope, status: implemented-non-destructive }
   quotations:
     - { method: POST, path: /quotations, permission: quotations:create, status: phase-5 }
     - { method: POST, path: "/quotations/{id}/convert", permission: invoices:submit, status: phase-5 }

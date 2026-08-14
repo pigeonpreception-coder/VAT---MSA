@@ -3,20 +3,23 @@ import {
   acceptQuotation,
   BusinessResourceError,
   convertQuotationToInvoice,
+  createBusinessParty,
   createExpense,
   createProject,
   createQuotation,
   getBusinessPlatformSnapshot,
   postJournal,
   recordStockMovement,
+  deactivateBusinessParty,
+  updateBusinessParty,
 } from "@/lib/data/business-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { BusinessValidationError } from "@/lib/domain/business";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
-export type BusinessSection = "quotations" | "journals" | "expenses" | "balances" | "projects";
-export type BusinessCommand = "CREATE_QUOTATION" | "ACCEPT_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT";
+export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "ACCEPT_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -74,7 +77,16 @@ export async function handleBusinessPost(request: Request, permission: string, c
       resource = await acceptQuotation(resourceId, user, idempotencyKey, context.correlationId, organisationId);
     } else {
       const payload = await readBoundedJson<never>(request, 262_144);
-      if (command === "CREATE_QUOTATION") resource = await createQuotation(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      if (command === "CREATE_BUSINESS_PARTY") resource = await createBusinessParty(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "UPDATE_BUSINESS_PARTY") {
+        if (!resourceId) throw new BusinessResourceError("Business party id is required.", 400);
+        resource = await updateBusinessParty(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
+      else if (command === "DEACTIVATE_BUSINESS_PARTY") {
+        if (!resourceId) throw new BusinessResourceError("Business party id is required.", 400);
+        resource = await deactivateBusinessParty(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
+      else if (command === "CREATE_QUOTATION") resource = await createQuotation(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "CONVERT_QUOTATION") {
         if (!resourceId) throw new BusinessResourceError("Quotation id is required.", 400);
         requirePermission(user, "invoices:submit");
@@ -87,7 +99,8 @@ export async function handleBusinessPost(request: Request, permission: string, c
     }
     if (!resource) throw new RepositoryConflictError("The idempotent resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    return Response.json({ resource }, { status: command === "ACCEPT_QUOTATION" ? 200 : 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY"].includes(command) ? 200 : 201;
+    return Response.json({ resource }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
     if (error instanceof RequestGuardError) return problem(error.status, error.code, error.status === 429 ? "Rate limited" : "Bad request", error.message, context.correlationId, undefined, error.retryAfter);

@@ -1,6 +1,6 @@
 # VAT-MSA Architecture Implementation Matrix
 
-**Evidence date:** 2026-08-10  
+**Evidence date:** 2026-08-14
 **Repository scope:** executable controlled pilot and production-oriented application foundation  
 **Governing architecture:** `08-enterprise-architecture/` and its approval gate
 
@@ -22,8 +22,8 @@ This matrix is the truthful completion record for the approved architecture. It 
 | 3 | Organisation | One taxpayer/one organisation constraint, branches, memberships and effective-dated buyer/seller capabilities | VERIFIED PILOT | NamRA lifecycle authority and enterprise policy enforcement evidence |
 | 4 | User management | Users, memberships, roles, permissions, grants and separated privileged portal projections | CONTROLLED FOUNDATION | Enterprise provisioning, invitation/suspension workflows, PAM and periodic access certification |
 | 5 | Buyer/Seller | Dynamic organisation capabilities and transaction-context roles without duplicate taxpayer identities | VERIFIED PILOT | Legal terminology and operating-policy approval |
-| 6 | Customer | Organisation-scoped business parties, customer relationships and identifier snapshots used by quotations/invoices | CONTROLLED FOUNDATION | Full governed create/update/deactivate workflow and authoritative lookup conformance |
-| 7 | Supplier | Organisation-scoped supplier relationships and VAT/TIN snapshots | CONTROLLED FOUNDATION | Supplier verification adapter and lifecycle commands |
+| 6 | Customer | Tenant-scoped create/update and non-destructive deactivate lifecycle, duplicate identifier checks, active-relationship enforcement, audit/outbox evidence and immutable transaction snapshots | VERIFIED PILOT | Authoritative customer lookup/verification contract and conformance evidence |
+| 7 | Supplier | Tenant-scoped create/update and non-destructive deactivate lifecycle, VAT/TIN snapshots, duplicate identifier checks and active-relationship enforcement for new expenses | VERIFIED PILOT | Authoritative supplier lookup/verification adapter and conformance evidence |
 | 8 | Quotation | Server-calculated issue, expiry guard, acceptance and recoverable idempotent conversion to a certified invoice | VERIFIED PILOT | Edit/reject/explicit-expire policy, approval thresholds and UAT |
 | 9 | Tax invoice | Submission, validation, duplicate/idempotency controls, certification, public verification, credit/debit correction lineage and certificates | VERIFIED PILOT | Legal particulars, official numbering/reservations, cancellation policy and HSM signature profile |
 | 10 | VAT | Exact integer calculation, tax categories/rates, eligibility behavior and versioned rule-model foundation | CONTROLLED FOUNDATION | NamRA-owned rule catalogue, effective dates, golden cases and approval/rollback workflow |
@@ -63,10 +63,10 @@ This matrix is the truthful completion record for the approved architecture. It 
 
 ## Verified release evidence
 
-The canonical release gate passed on 2026-08-10:
+The canonical release gate passed on 2026-08-14:
 
 - ESLint and TypeScript completed without errors.
-- 47 unit/security/policy tests passed across eight test files.
+- 59 unit/security/policy tests passed across ten test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
 - The production build completed and exposed all application and API routes.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.

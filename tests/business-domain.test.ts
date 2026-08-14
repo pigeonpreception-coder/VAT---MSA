@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BusinessValidationError,
+  normalizeAndValidateBusinessParty,
+  normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
@@ -10,6 +12,34 @@ import {
 } from "@/lib/domain/business";
 
 describe("business command validation", () => {
+  it("normalizes a governed customer and supplier record", () => {
+    expect(normalizeAndValidateBusinessParty({
+      schema_version: "1.0.0",
+      display_name: "  Synthetic Trade Partner  ",
+      legal_name: "Synthetic Trade Partner (Pty) Ltd",
+      vat_number: "vat-1000999",
+      tin: "tin-1000999",
+      email: "ACCOUNTS@EXAMPLE.TEST",
+      phone: "+264 61 000 999",
+      relationships: ["supplier", "CUSTOMER", "SUPPLIER"],
+    })).toMatchObject({
+      display_name: "Synthetic Trade Partner",
+      vat_number: "VAT-1000999",
+      tin: "TIN-1000999",
+      email: "accounts@example.test",
+      relationships: ["SUPPLIER", "CUSTOMER"],
+    });
+  });
+
+  it("rejects unsupported party relationships and short deactivation reasons", () => {
+    expect(() => normalizeAndValidateBusinessParty({
+      schema_version: "1.0.0",
+      display_name: "Synthetic Partner",
+      relationships: ["TAX_AUTHORITY"],
+    })).toThrowError(BusinessValidationError);
+    expect(() => normalizeAndValidateBusinessPartyDeactivation({ schema_version: "1.0.0", reason: "No" })).toThrowError(BusinessValidationError);
+  });
+
   it("validates quotation conversion dates and invoice identifiers", () => {
     expect(normalizeAndValidateQuotationConversion({ schema_version: "1.0.0", invoice_number: "inv-2026-9001", issue_date: "2026-08-10", due_date: "2026-09-10" })).toEqual({ schema_version: "1.0.0", invoice_number: "INV-2026-9001", issue_date: "2026-08-10", due_date: "2026-09-10" });
     expect(() => normalizeAndValidateQuotationConversion({ schema_version: "1.0.0", invoice_number: "INV 1", issue_date: "2026-08-10", due_date: "2026-08-09" })).toThrow(BusinessValidationError);

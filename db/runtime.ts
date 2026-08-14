@@ -1051,6 +1051,7 @@ const IDENTITY_SEED_STATEMENTS = [
 
 const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('commercial:read','COMMERCIAL','READ','Read customer, supplier, product and quotation records','RESTRICTED','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('parties:manage','BUSINESS_PARTY','MANAGE','Create update and non-destructively deactivate customer and supplier records','CONFIDENTIAL','2026-08-14T09:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('quotations:manage','QUOTATION','MANAGE','Create and transition authorised quotations','RESTRICTED','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('accounting:read','ACCOUNTING','READ','Read the authorised chart and journals','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('accounting:post','ACCOUNTING','POST','Post balanced journals','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
@@ -1066,6 +1067,7 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('documents:upload','DOCUMENT','UPLOAD','Upload governed evidence into quarantine','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
 
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-cr','TAXPAYER_OWNER','commercial:read','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-party','TAXPAYER_OWNER','parties:manage','ALLOW','{"scope":"own-organisation"}','2026-08-14T09:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-qm','TAXPAYER_OWNER','quotations:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ar','TAXPAYER_OWNER','accounting:read','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ap','TAXPAYER_OWNER','accounting:post','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
@@ -1512,6 +1514,7 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-portals','nav-home','folder-home-dashboard','portals','Portal switchboard','/portals','CORE_VAT',NULL,'dashboard:read',20,'ACTIVE','INTERNAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-search','nav-home','folder-home-dashboard','search','Workspace search','/workspace-search','ADMINISTRATION',NULL,'search:read',30,'ACTIVE','RESTRICTED')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-commercial','nav-sales','folder-sales-main','commercial','Customers & quotations','/commercial','CORE_VAT','SELLER','commercial:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-parties','nav-sales','folder-sales-main','parties','Customers & suppliers','/commercial/parties','CORE_VAT',NULL,'parties:manage',15,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-invoices','nav-sales','folder-sales-main','invoices','Tax invoices','/invoices','CORE_VAT','SELLER','invoices:read',20,'ACTIVE','RESTRICTED')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-invoice','nav-sales','folder-sales-main','new-invoice','Submit tax invoice','/invoices/new','CORE_VAT','SELLER','invoices:submit',30,'ACTIVE','RESTRICTED')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-operations','nav-procurement','folder-proc-main','operations','Purchases & expenses','/operations','CORE_VAT','BUYER','expenses:read',10,'ACTIVE','CONFIDENTIAL')`,
@@ -1538,6 +1541,13 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO navigation_permissions VALUES ('navperm-admin','nitem-administration','organisation-admin-access','ALLOW','Organisation administration permission is required.')`,
   `INSERT OR IGNORE INTO navigation_permissions VALUES ('navperm-licence','nitem-licensing','licence-admin-access','ALLOW','Licence administrator permission is required.')`,
   `INSERT OR IGNORE INTO seed_state VALUES ('control-plane-v1','2026-08-10T10:00:00Z')`,
+];
+
+const PARTY_LIFECYCLE_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('parties:manage','BUSINESS_PARTY','MANAGE','Create update and non-destructively deactivate customer and supplier records','CONFIDENTIAL','2026-08-14T09:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-party','TAXPAYER_OWNER','parties:manage','ALLOW','{"scope":"own-organisation"}','2026-08-14T09:00:00Z')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-parties','nav-sales','folder-sales-main','parties','Customers & suppliers','/commercial/parties','CORE_VAT',NULL,'parties:manage',15,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('business-party-lifecycle-v1','2026-08-14T09:00:00Z')`,
 ];
 
 let initialization: Promise<void> | null = null;
@@ -1578,6 +1588,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!portalSeed) await db.batch(PORTAL_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const controlPlaneSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("control-plane-v1").first();
     if (!controlPlaneSeed) await db.batch(CONTROL_PLANE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const partyLifecycleSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("business-party-lifecycle-v1").first();
+    if (!partyLifecycleSeed) await db.batch(PARTY_LIFECYCLE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

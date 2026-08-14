@@ -1,12 +1,17 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import {
+  normalizeAndValidateBusinessParty,
+  normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateStockMovement,
+  type BusinessPartyDeactivationSubmission,
+  type BusinessPartyRelationship,
+  type BusinessPartySubmission,
   type ExpenseSubmission,
   type JournalSubmission,
   type ProjectSubmission,
@@ -141,6 +146,42 @@ async function requireOwnedReference(db: D1Database, table: string, id: string |
   if (!row) throw new BusinessResourceError(`${label} does not exist in the authorised organisation.`);
 }
 
+async function requirePartyRelationship(
+  db: D1Database,
+  id: string | undefined,
+  organisationId: string,
+  relationship: BusinessPartyRelationship,
+  label: string,
+) {
+  if (!id) return;
+  const row = await db.prepare(`SELECT p.id FROM business_parties p
+    JOIN party_relationships r ON r.party_id=p.id AND r.organisation_id=p.organisation_id
+    WHERE p.id=? AND p.organisation_id=? AND p.status='ACTIVE' AND r.relationship=? AND r.status='ACTIVE'`)
+    .bind(id, organisationId, relationship).first<{ id: string }>();
+  if (!row) throw new BusinessResourceError(`${label} is not an active ${relationship.toLowerCase()} in the authorised organisation.`);
+}
+
+async function getBusinessParty(db: D1Database, id: string, organisationId: string) {
+  return db.prepare(`SELECT p.*,GROUP_CONCAT(r.relationship, ',') AS relationships FROM business_parties p
+    LEFT JOIN party_relationships r ON r.party_id=p.id AND r.organisation_id=p.organisation_id AND r.status='ACTIVE'
+    WHERE p.id=? AND p.organisation_id=? GROUP BY p.id`).bind(id, organisationId).first<Record<string, unknown>>();
+}
+
+async function assertBusinessPartyIdentifiersAvailable(
+  db: D1Database,
+  organisationId: string,
+  party: BusinessPartySubmission,
+  excludedId?: string,
+) {
+  if (!party.vat_number && !party.tin) return;
+  const duplicate = await db.prepare(`SELECT id,display_name FROM business_parties
+    WHERE organisation_id=? AND status='ACTIVE' AND id<>COALESCE(?, '')
+      AND ((? IS NOT NULL AND vat_number=?) OR (? IS NOT NULL AND tin=?)) LIMIT 1`)
+    .bind(organisationId, excludedId ?? null, party.vat_number ?? null, party.vat_number ?? null, party.tin ?? null, party.tin ?? null)
+    .first<{ id: string; display_name: string }>();
+  if (duplicate) throw new RepositoryConflictError(`An active business party already uses that VAT number or TIN (${duplicate.display_name}, ${duplicate.id}).`);
+}
+
 export async function getBusinessPlatformSnapshot(user: UserContext, requestedOrganisationId?: string | null) {
   const db = await ensureDatabase();
   const organisation = await resolveOrganisation(user, requestedOrganisationId);
@@ -180,6 +221,148 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
   return { organisation, metrics: metrics ?? {}, parties: parties.results, products: products.results, quotations: quotations.results, accounts: accounts.results, journals: journals.results, expenses: expenses.results, balances: balances.results, projects: projects.results, imports: imports.results, categories: categories.results, warehouses: warehouses.results };
 }
 
+export async function createBusinessParty(
+  payload: BusinessPartySubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const party = normalizeAndValidateBusinessParty(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_BUSINESS_PARTY", idempotencyKey, requestHash);
+  if (prior) return getBusinessParty(db, prior, organisation.id);
+  await assertBusinessPartyIdentifiersAvailable(db, organisation.id, party);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "BUSINESS_PARTY_CREATED", "BUSINESS_PARTY", id, {
+    organisationId: organisation.id,
+    relationships: party.relationships,
+    correlationId,
+  }, now);
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO business_parties
+      (id,organisation_id,display_name,legal_name,vat_number,tin,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'LOCAL',NULL,'ACTIVE',?,?)`).bind(
+      id, organisation.id, party.display_name, party.legal_name ?? null, party.vat_number ?? null, party.tin ?? null,
+      party.email ?? null, party.phone ?? null, party.address ?? null, now, now,
+    ),
+  ];
+  for (const relationship of party.relationships) {
+    statements.push(db.prepare(`INSERT INTO party_relationships
+      (id,organisation_id,party_id,relationship,status,effective_from,effective_to,created_at)
+      VALUES (?,?,?,?,'ACTIVE',?,NULL,?)`).bind(crypto.randomUUID(), organisation.id, id, relationship, now, now));
+  }
+  statements.push(commandRecord(db, actor.userId, "CREATE_BUSINESS_PARTY", idempotencyKey, requestHash, "BUSINESS_PARTY", id, now));
+  statements.push(outboxRecord(db, "BUSINESS_PARTY", id, "BusinessPartyCreated", organisation.id, {
+    party_id: id, organisation_id: organisation.id, relationships: party.relationships, correlation_id: correlationId,
+  }, now));
+  statements.push(auditRecord(db, actor, audit, now));
+  await db.batch(statements);
+  return getBusinessParty(db, id, organisation.id);
+}
+
+export async function updateBusinessParty(
+  id: string,
+  payload: BusinessPartySubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const party = normalizeAndValidateBusinessParty(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party_id: id, party }));
+  const prior = await priorCommand(db, actor.userId, "UPDATE_BUSINESS_PARTY", idempotencyKey, requestHash);
+  if (prior) return getBusinessParty(db, prior, organisation.id);
+  const existing = await db.prepare("SELECT id,status FROM business_parties WHERE id=? AND organisation_id=?")
+    .bind(id, organisation.id).first<{ id: string; status: string }>();
+  if (!existing) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  if (existing.status !== "ACTIVE") throw new RepositoryConflictError("An inactive business party cannot be edited. Create a new active relationship record if trading resumes.");
+  await assertBusinessPartyIdentifiersAvailable(db, organisation.id, party, id);
+
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "BUSINESS_PARTY_UPDATED", "BUSINESS_PARTY", id, {
+    organisationId: organisation.id,
+    relationships: party.relationships,
+    correlationId,
+  }, now);
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`UPDATE business_parties SET display_name=?,legal_name=?,vat_number=?,tin=?,email=?,phone=?,address=?,updated_at=?
+      WHERE id=? AND organisation_id=? AND status='ACTIVE'`).bind(
+      party.display_name, party.legal_name ?? null, party.vat_number ?? null, party.tin ?? null,
+      party.email ?? null, party.phone ?? null, party.address ?? null, now, id, organisation.id,
+    ),
+  ];
+  for (const relationship of ["CUSTOMER", "SUPPLIER"] as const) {
+    if (party.relationships.includes(relationship)) {
+      statements.push(db.prepare(`INSERT INTO party_relationships
+        (id,organisation_id,party_id,relationship,status,effective_from,effective_to,created_at)
+        VALUES (?,?,?,?,'ACTIVE',?,NULL,?)
+        ON CONFLICT(organisation_id,party_id,relationship) DO UPDATE SET
+          status='ACTIVE',
+          effective_from=CASE WHEN party_relationships.status='ACTIVE' THEN party_relationships.effective_from ELSE excluded.effective_from END,
+          effective_to=NULL`)
+        .bind(crypto.randomUUID(), organisation.id, id, relationship, now, now));
+    } else {
+      statements.push(db.prepare(`UPDATE party_relationships SET status='INACTIVE',effective_to=?
+        WHERE organisation_id=? AND party_id=? AND relationship=? AND status='ACTIVE'`).bind(now, organisation.id, id, relationship));
+    }
+  }
+  statements.push(commandRecord(db, actor.userId, "UPDATE_BUSINESS_PARTY", idempotencyKey, requestHash, "BUSINESS_PARTY", id, now));
+  statements.push(outboxRecord(db, "BUSINESS_PARTY", id, "BusinessPartyUpdated", organisation.id, {
+    party_id: id, organisation_id: organisation.id, relationships: party.relationships, correlation_id: correlationId,
+  }, now));
+  statements.push(auditRecord(db, actor, audit, now));
+  await db.batch(statements);
+  return getBusinessParty(db, id, organisation.id);
+}
+
+export async function deactivateBusinessParty(
+  id: string,
+  payload: BusinessPartyDeactivationSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const deactivation = normalizeAndValidateBusinessPartyDeactivation(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party_id: id, deactivation }));
+  const prior = await priorCommand(db, actor.userId, "DEACTIVATE_BUSINESS_PARTY", idempotencyKey, requestHash);
+  if (prior) return getBusinessParty(db, prior, organisation.id);
+  const existing = await db.prepare("SELECT id,status FROM business_parties WHERE id=? AND organisation_id=?")
+    .bind(id, organisation.id).first<{ id: string; status: string }>();
+  if (!existing) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  if (existing.status !== "ACTIVE") throw new RepositoryConflictError("Business party is already inactive.");
+
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "BUSINESS_PARTY_DEACTIVATED", "BUSINESS_PARTY", id, {
+    organisationId: organisation.id,
+    reason: deactivation.reason,
+    correlationId,
+    recordsPreserved: true,
+  }, now);
+  await db.batch([
+    db.prepare("UPDATE business_parties SET status='INACTIVE',updated_at=? WHERE id=? AND organisation_id=? AND status='ACTIVE'").bind(now, id, organisation.id),
+    db.prepare("UPDATE party_relationships SET status='INACTIVE',effective_to=? WHERE party_id=? AND organisation_id=? AND status='ACTIVE'").bind(now, id, organisation.id),
+    commandRecord(db, actor.userId, "DEACTIVATE_BUSINESS_PARTY", idempotencyKey, requestHash, "BUSINESS_PARTY", id, now),
+    outboxRecord(db, "BUSINESS_PARTY", id, "BusinessPartyDeactivated", organisation.id, {
+      party_id: id, organisation_id: organisation.id, records_preserved: true, correlation_id: correlationId,
+    }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return getBusinessParty(db, id, organisation.id);
+}
+
 export async function createQuotation(payload: QuotationSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
   const quotation = normalizeAndValidateQuotation(payload);
@@ -188,7 +371,7 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation }));
   const prior = await priorCommand(db, actor.userId, "CREATE_QUOTATION", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
-  await requireOwnedReference(db, "business_parties", quotation.customer_party_id, organisation.id, "Customer party");
+  await requirePartyRelationship(db, quotation.customer_party_id, organisation.id, "CUSTOMER", "Customer party");
   await requireOwnedReference(db, "branches", quotation.branch_id, organisation.id, "Branch");
   for (const line of quotation.lines) await requireOwnedReference(db, "products", line.product_id, organisation.id, "Product");
   const duplicate = await db.prepare("SELECT id FROM quotations WHERE organisation_id=? AND quotation_number=?").bind(organisation.id, quotation.quotation_number).first<{ id: string }>();
@@ -372,7 +555,7 @@ export async function createExpense(payload: ExpenseSubmission, actor: UserConte
   const prior = await priorCommand(db, actor.userId, "CREATE_EXPENSE", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
   await requireOwnedReference(db, "expense_categories", expense.category_id, organisation.id, "Expense category");
-  await requireOwnedReference(db, "business_parties", expense.supplier_party_id, organisation.id, "Supplier party");
+  await requirePartyRelationship(db, expense.supplier_party_id, organisation.id, "SUPPLIER", "Supplier party");
   await requireOwnedReference(db, "projects", expense.project_id, organisation.id, "Project");
   await requireOwnedReference(db, "branches", expense.branch_id, organisation.id, "Branch");
   const id = crypto.randomUUID();
@@ -430,7 +613,7 @@ export async function createProject(payload: ProjectSubmission, actor: UserConte
   const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, project }));
   const prior = await priorCommand(db, actor.userId, "CREATE_PROJECT", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM projects WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
-  await requireOwnedReference(db, "business_parties", project.customer_party_id, organisation.id, "Customer party");
+  await requirePartyRelationship(db, project.customer_party_id, organisation.id, "CUSTOMER", "Customer party");
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "PROJECT_CREATED", "PROJECT", id, { organisationId: organisation.id, code: project.code, correlationId }, now);
