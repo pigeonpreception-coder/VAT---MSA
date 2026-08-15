@@ -87,6 +87,21 @@ events:
     partition_key: organisation_id
     contains_tax_confidential_data: true
     purpose: Records the authorised acceptance of an unexpired quotation.
+  - type: na.vatmsa.quotation.edited.v1
+    owner: Commercial Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Announces a new immutable hashed revision of an unexpired issued quotation.
+  - type: na.vatmsa.quotation.rejected.v1
+    owner: Commercial Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Records terminal rejection of an unexpired issued quotation while retaining its reason in protected audit evidence.
+  - type: na.vatmsa.quotation.expired.v1
+    owner: Commercial Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Records the explicit terminal expiry of an issued quotation after its valid-until date.
   - type: na.vatmsa.journal.posted.v1
     owner: Accounting Domain
     partition_key: organisation_id

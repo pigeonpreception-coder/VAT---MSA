@@ -398,6 +398,26 @@ export const quotationLines = sqliteTable(
   (table) => [uniqueIndex("ux_quotation_lines_number").on(table.quotationId, table.lineNumber)],
 );
 
+export const quotationRevisions = sqliteTable(
+  "quotation_revisions",
+  {
+    id: text("id").primaryKey(),
+    quotationId: text("quotation_id").notNull().references(() => quotations.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    revisionNumber: integer("revision_number").notNull(),
+    action: text("action").notNull(),
+    status: text("status").notNull(),
+    snapshotHash: text("snapshot_hash").notNull(),
+    snapshot: text("snapshot").notNull(),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_quotation_revisions_number").on(table.quotationId, table.revisionNumber),
+    index("idx_quotation_revisions_organisation").on(table.organisationId, table.quotationId, table.createdAt),
+  ],
+);
+
 export const chartOfAccounts = sqliteTable(
   "chart_of_accounts",
   {

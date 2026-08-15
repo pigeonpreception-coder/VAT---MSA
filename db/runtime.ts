@@ -173,6 +173,13 @@ const SCHEMA_STATEMENTS = [
     net_amount_cents INTEGER NOT NULL, tax_category TEXT NOT NULL, tax_rate_bps INTEGER NOT NULL,
     tax_amount_cents INTEGER NOT NULL, UNIQUE (quotation_id, line_number)
   )`,
+  `CREATE TABLE IF NOT EXISTS quotation_revisions (
+    id TEXT PRIMARY KEY, quotation_id TEXT NOT NULL REFERENCES quotations(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), revision_number INTEGER NOT NULL,
+    action TEXT NOT NULL, status TEXT NOT NULL, snapshot_hash TEXT NOT NULL, snapshot TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL,
+    UNIQUE (quotation_id, revision_number)
+  )`,
   `CREATE TABLE IF NOT EXISTS chart_of_accounts (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     code TEXT NOT NULL, name TEXT NOT NULL, account_type TEXT NOT NULL, currency TEXT NOT NULL,
@@ -831,6 +838,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
   `CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id, journal_entry_id)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
@@ -873,6 +881,16 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_sod_violations_org_status ON sod_violations(organisation_id, status, detected_at)`,
   `CREATE INDEX IF NOT EXISTS idx_navigation_folders_parent ON navigation_folders(workspace_id, parent_folder_id, sort_order)`,
   `CREATE INDEX IF NOT EXISTS idx_navigation_items_folder ON navigation_items(folder_id, sort_order)`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_quotation_revision_update
+    BEFORE UPDATE ON quotation_revisions
+    BEGIN
+      SELECT RAISE(ABORT,'QUOTATION_REVISION_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_quotation_revision_delete
+    BEFORE DELETE ON quotation_revisions
+    BEGIN
+      SELECT RAISE(ABORT,'QUOTATION_REVISION_IMMUTABLE');
+    END`,
   `CREATE TRIGGER IF NOT EXISTS enforce_employee_seat_limit_insert
     BEFORE INSERT ON employees WHEN NEW.status IN ('ACTIVE','INVITED')
     BEGIN

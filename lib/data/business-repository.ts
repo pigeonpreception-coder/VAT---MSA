@@ -1,6 +1,7 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import {
+  evaluateQuotationLifecycle,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
@@ -8,13 +9,16 @@ import {
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
+  normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
   type BusinessPartyDeactivationSubmission,
   type BusinessPartyRelationship,
   type BusinessPartySubmission,
   type ExpenseSubmission,
   type JournalSubmission,
+  type NormalizedQuotation,
   type ProjectSubmission,
+  type QuotationRejectionSubmission,
   type QuotationSubmission,
   type QuotationConversionSubmission,
   type StockMovementSubmission,
@@ -27,6 +31,41 @@ import { getInvoiceById, RepositoryConflictError, submitInvoice } from "./reposi
 type OrganisationContext = { id: string; taxpayer_id: string; legal_name: string; vat_number: string };
 type IdempotencyRow = { request_hash: string; resource_id: string };
 
+type QuotationRecord = {
+  id: string;
+  organisation_id: string;
+  branch_id: string | null;
+  customer_party_id: string;
+  quotation_number: string;
+  currency: string;
+  issue_date: string;
+  valid_until: string;
+  status: string;
+  subtotal_cents: number;
+  tax_cents: number;
+  total_cents: number;
+  notes: string | null;
+  created_by: string;
+  approved_by: string | null;
+  accepted_at: string | null;
+  converted_invoice_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type QuotationLineRecord = {
+  line_number: number;
+  product_id: string | null;
+  description: string;
+  quantity_micros: number;
+  unit_code: string;
+  unit_price_cents: number;
+  net_amount_cents: number;
+  tax_category: "STANDARD" | "ZERO_RATED" | "EXEMPT" | "OUT_OF_SCOPE";
+  tax_rate_bps: number;
+  tax_amount_cents: number;
+};
+
 type ConvertibleQuotation = {
   id: string;
   organisation_id: string;
@@ -34,6 +73,7 @@ type ConvertibleQuotation = {
   quotation_number: string;
   currency: string;
   issue_date: string;
+  valid_until: string;
   status: string;
   subtotal_cents: number;
   tax_cents: number;
@@ -138,6 +178,69 @@ function outboxRecord(db: D1Database, aggregateType: string, aggregateId: string
   );
 }
 
+function quotationSnapshot(quotation: NormalizedQuotation, status: string) {
+  return {
+    schema_version: quotation.schema_version,
+    customer_party_id: quotation.customer_party_id,
+    ...(quotation.branch_id ? { branch_id: quotation.branch_id } : {}),
+    quotation_number: quotation.quotation_number,
+    currency: quotation.currency,
+    issue_date: quotation.issue_date,
+    valid_until: quotation.valid_until,
+    status,
+    ...(quotation.notes ? { notes: quotation.notes } : {}),
+    lines: quotation.lines,
+    subtotal_cents: quotation.subtotal_cents,
+    tax_cents: quotation.tax_cents,
+    total_cents: quotation.total_cents,
+  };
+}
+
+function storedQuotationSnapshot(quotation: QuotationRecord, lines: QuotationLineRecord[]) {
+  return {
+    schema_version: "1.0.0",
+    customer_party_id: quotation.customer_party_id,
+    ...(quotation.branch_id ? { branch_id: quotation.branch_id } : {}),
+    quotation_number: quotation.quotation_number,
+    currency: quotation.currency,
+    issue_date: quotation.issue_date,
+    valid_until: quotation.valid_until,
+    status: quotation.status,
+    ...(quotation.notes ? { notes: quotation.notes } : {}),
+    lines,
+    subtotal_cents: quotation.subtotal_cents,
+    tax_cents: quotation.tax_cents,
+    total_cents: quotation.total_cents,
+  };
+}
+
+async function quotationRevisionRecord(
+  db: D1Database,
+  input: {
+    quotationId: string;
+    organisationId: string;
+    revisionNumber: number;
+    action: "ISSUE" | "EDIT";
+    status: string;
+    snapshot: Record<string, unknown>;
+    previousHash: string | null;
+    actorId: string;
+    now: string;
+  },
+) {
+  const snapshot = stableStringify({ previous_hash: input.previousHash, state: input.snapshot });
+  const hash = await sha256Hex(snapshot);
+  return {
+    hash,
+    statement: db.prepare(`INSERT INTO quotation_revisions
+      (id,quotation_id,organisation_id,revision_number,action,status,snapshot_hash,snapshot,created_by,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+      crypto.randomUUID(), input.quotationId, input.organisationId, input.revisionNumber, input.action,
+      input.status, hash, snapshot, input.actorId, input.now,
+    ),
+  };
+}
+
 async function requireOwnedReference(db: D1Database, table: string, id: string | undefined, organisationId: string, label: string) {
   if (!id) return;
   const allowedTables = new Set(["business_parties", "branches", "products", "warehouses", "projects", "expense_categories", "chart_of_accounts"]);
@@ -219,6 +322,20 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
     db.prepare("SELECT * FROM warehouses WHERE organisation_id=? AND status='ACTIVE' ORDER BY name").bind(org).all<Record<string, string | number>>(),
   ]);
   return { organisation, metrics: metrics ?? {}, parties: parties.results, products: products.results, quotations: quotations.results, accounts: accounts.results, journals: journals.results, expenses: expenses.results, balances: balances.results, projects: projects.results, imports: imports.results, categories: categories.results, warehouses: warehouses.results };
+}
+
+export async function getQuotationForEdit(id: string, actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const quotation = await db.prepare(`SELECT q.*,p.display_name AS customer_name,
+    (SELECT COUNT(*) FROM quotation_revisions r WHERE r.quotation_id=q.id) AS revision_count
+    FROM quotations q JOIN business_parties p ON p.id=q.customer_party_id AND p.organisation_id=q.organisation_id
+    WHERE q.id=? AND q.organisation_id=?`).bind(id, organisation.id).first<Record<string, string | number | null>>();
+  if (!quotation) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  const lines = await db.prepare(`SELECT line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,
+    net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines
+    WHERE quotation_id=? ORDER BY line_number`).bind(id).all<Record<string, string | number | null>>();
+  return { organisation, quotation, lines: lines.results };
 }
 
 export async function createBusinessParty(
@@ -379,6 +496,17 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "QUOTATION_ISSUED", "QUOTATION", id, { organisationId: organisation.id, quotationNumber: quotation.quotation_number, totalCents: quotation.total_cents, correlationId }, now);
+  const revision = await quotationRevisionRecord(db, {
+    quotationId: id,
+    organisationId: organisation.id,
+    revisionNumber: 1,
+    action: "ISSUE",
+    status: "ISSUED",
+    snapshot: quotationSnapshot(quotation, "ISSUED"),
+    previousHash: null,
+    actorId: actor.userId,
+    now,
+  });
   const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO quotations
       (id,organisation_id,branch_id,customer_party_id,quotation_number,currency,issue_date,valid_until,status,subtotal_cents,tax_cents,total_cents,notes,created_by,approved_by,accepted_at,converted_invoice_id,created_at,updated_at)
@@ -387,11 +515,152 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   for (const line of quotation.lines) statements.push(db.prepare(`INSERT INTO quotation_lines
     (id,quotation_id,line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), id, line.line_number, line.product_id ?? null, line.description, line.quantity_micros, line.unit_code, line.unit_price_cents, line.net_amount_cents, line.tax_category, line.tax_rate_bps, line.tax_amount_cents));
+  statements.push(revision.statement);
   statements.push(commandRecord(db, actor.userId, "CREATE_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now));
   statements.push(outboxRecord(db, "QUOTATION", id, "QuotationIssued", organisation.id, { quotation_id: id, organisation_id: organisation.id, total_cents: quotation.total_cents, correlation_id: correlationId }, now));
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM quotations WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+export async function updateQuotation(
+  id: string,
+  payload: QuotationSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const quotation = normalizeAndValidateQuotation(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation_id: id, quotation }));
+  const prior = await priorCommand(db, actor.userId, "UPDATE_QUOTATION", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<QuotationRecord>();
+  if (!existing) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  const transition = evaluateQuotationLifecycle({ status: existing.status, action: "EDIT", validUntil: existing.valid_until, today: new Date().toISOString().slice(0, 10) });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
+  if (quotation.quotation_number !== existing.quotation_number) throw new RepositoryConflictError("Quotation number is immutable after issue.");
+  await requirePartyRelationship(db, quotation.customer_party_id, organisation.id, "CUSTOMER", "Customer party");
+  await requireOwnedReference(db, "branches", quotation.branch_id, organisation.id, "Branch");
+  for (const line of quotation.lines) await requireOwnedReference(db, "products", line.product_id, organisation.id, "Product");
+
+  const existingLines = await db.prepare(`SELECT line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,
+    net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines WHERE quotation_id=? ORDER BY line_number`)
+    .bind(id).all<QuotationLineRecord>();
+  const priorRevision = await db.prepare(`SELECT revision_number,snapshot_hash FROM quotation_revisions
+    WHERE quotation_id=? ORDER BY revision_number DESC LIMIT 1`).bind(id).first<{ revision_number: number; snapshot_hash: string }>();
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  let revisionNumber = (priorRevision?.revision_number ?? 0) + 1;
+  let previousHash = priorRevision?.snapshot_hash ?? null;
+  if (!priorRevision) {
+    const baseline = await quotationRevisionRecord(db, {
+      quotationId: id,
+      organisationId: organisation.id,
+      revisionNumber: 1,
+      action: "ISSUE",
+      status: existing.status,
+      snapshot: storedQuotationSnapshot(existing, existingLines.results),
+      previousHash: null,
+      actorId: existing.created_by,
+      now: existing.created_at,
+    });
+    statements.push(baseline.statement);
+    previousHash = baseline.hash;
+    revisionNumber = 2;
+  }
+  const revision = await quotationRevisionRecord(db, {
+    quotationId: id,
+    organisationId: organisation.id,
+    revisionNumber,
+    action: "EDIT",
+    status: "ISSUED",
+    snapshot: quotationSnapshot(quotation, "ISSUED"),
+    previousHash,
+    actorId: actor.userId,
+    now,
+  });
+  const audit = await auditEnvelope(db, actor, "QUOTATION_EDITED", "QUOTATION", id, {
+    organisationId: organisation.id,
+    revisionNumber,
+    previousTotalCents: existing.total_cents,
+    totalCents: quotation.total_cents,
+    correlationId,
+  }, now);
+  statements.push(db.prepare(`UPDATE quotations SET branch_id=?,customer_party_id=?,currency=?,issue_date=?,valid_until=?,
+    subtotal_cents=?,tax_cents=?,total_cents=?,notes=?,updated_at=? WHERE id=? AND organisation_id=? AND status='ISSUED'`).bind(
+    quotation.branch_id ?? null, quotation.customer_party_id, quotation.currency, quotation.issue_date, quotation.valid_until,
+    quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, now, id, organisation.id,
+  ));
+  statements.push(db.prepare("DELETE FROM quotation_lines WHERE quotation_id=?").bind(id));
+  for (const line of quotation.lines) statements.push(db.prepare(`INSERT INTO quotation_lines
+    (id,quotation_id,line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), id, line.line_number, line.product_id ?? null, line.description, line.quantity_micros, line.unit_code, line.unit_price_cents, line.net_amount_cents, line.tax_category, line.tax_rate_bps, line.tax_amount_cents));
+  statements.push(revision.statement);
+  statements.push(commandRecord(db, actor.userId, "UPDATE_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now));
+  statements.push(outboxRecord(db, "QUOTATION", id, "QuotationEdited", organisation.id, {
+    quotation_id: id, organisation_id: organisation.id, revision_number: revisionNumber, total_cents: quotation.total_cents, correlation_id: correlationId,
+  }, now));
+  statements.push(auditRecord(db, actor, audit, now));
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
+}
+
+export async function rejectQuotation(
+  id: string,
+  payload: QuotationRejectionSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const rejection = normalizeAndValidateQuotationRejection(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation_id: id, rejection }));
+  const prior = await priorCommand(db, actor.userId, "REJECT_QUOTATION", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,status,valid_until FROM quotations WHERE id=? AND organisation_id=?")
+    .bind(id, organisation.id).first<{ id: string; status: string; valid_until: string }>();
+  if (!existing) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  const transition = evaluateQuotationLifecycle({ status: existing.status, action: "REJECT", validUntil: existing.valid_until, today: new Date().toISOString().slice(0, 10) });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "QUOTATION_REJECTED", "QUOTATION", id, { organisationId: organisation.id, reason: rejection.reason, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE quotations SET status='REJECTED',updated_at=? WHERE id=? AND organisation_id=? AND status='ISSUED'").bind(now, id, organisation.id),
+    commandRecord(db, actor.userId, "REJECT_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now),
+    outboxRecord(db, "QUOTATION", id, "QuotationRejected", organisation.id, { quotation_id: id, organisation_id: organisation.id, reason_recorded: true, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
+}
+
+export async function expireQuotation(id: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation_id: id, action: "EXPIRE" }));
+  const prior = await priorCommand(db, actor.userId, "EXPIRE_QUOTATION", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,status,valid_until FROM quotations WHERE id=? AND organisation_id=?")
+    .bind(id, organisation.id).first<{ id: string; status: string; valid_until: string }>();
+  if (!existing) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  const transition = evaluateQuotationLifecycle({ status: existing.status, action: "EXPIRE", validUntil: existing.valid_until, today: new Date().toISOString().slice(0, 10) });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "QUOTATION_EXPIRED", "QUOTATION", id, { organisationId: organisation.id, validUntil: existing.valid_until, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE quotations SET status='EXPIRED',updated_at=? WHERE id=? AND organisation_id=? AND status='ISSUED'").bind(now, id, organisation.id),
+    commandRecord(db, actor.userId, "EXPIRE_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now),
+    outboxRecord(db, "QUOTATION", id, "QuotationExpired", organisation.id, { quotation_id: id, organisation_id: organisation.id, valid_until: existing.valid_until, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
 }
 
 export async function acceptQuotation(id: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
@@ -403,9 +672,9 @@ export async function acceptQuotation(id: string, actor: UserContext, idempotenc
   if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
   const quotation = await db.prepare("SELECT id,status,valid_until FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<{ id: string; status: string; valid_until: string }>();
   if (!quotation) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
-  if (quotation.status !== "ISSUED") throw new RepositoryConflictError(`Only an issued quotation can be accepted; current status is ${quotation.status}.`);
   const today = new Date().toISOString().slice(0, 10);
-  if (quotation.valid_until < today) throw new RepositoryConflictError("The quotation has expired and cannot be accepted.");
+  const transition = evaluateQuotationLifecycle({ status: quotation.status, action: "ACCEPT", validUntil: quotation.valid_until, today });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "QUOTATION_ACCEPTED", "QUOTATION", id, { organisationId: organisation.id, correlationId }, now);
   await db.batch([
@@ -437,7 +706,7 @@ export async function convertQuotationToInvoice(
     return existing;
   }
 
-  const quotation = await db.prepare(`SELECT q.id,q.organisation_id,q.customer_party_id,q.quotation_number,q.currency,q.issue_date,
+  const quotation = await db.prepare(`SELECT q.id,q.organisation_id,q.customer_party_id,q.quotation_number,q.currency,q.issue_date,q.valid_until,
     q.status,q.subtotal_cents,q.tax_cents,q.total_cents,q.notes,q.accepted_at,q.converted_invoice_id,
     p.display_name AS customer_name,p.vat_number AS customer_vat_number,p.tin AS customer_tin,
     t.legal_name AS supplier_name,t.vat_number AS supplier_vat_number
@@ -455,7 +724,8 @@ export async function convertQuotationToInvoice(
     }
     return existing;
   }
-  if (quotation.status !== "ACCEPTED") throw new RepositoryConflictError(`Only an accepted quotation can be converted; current status is ${quotation.status}.`);
+  const transition = evaluateQuotationLifecycle({ status: quotation.status, action: "CONVERT", validUntil: quotation.valid_until, today: new Date().toISOString().slice(0, 10) });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
   if (conversion.issue_date < quotation.issue_date) throw new RepositoryConflictError("The invoice cannot be issued before the quotation.");
 
   const lineResult = await db.prepare(`SELECT line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,

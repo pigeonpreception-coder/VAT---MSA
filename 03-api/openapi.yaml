@@ -141,6 +141,28 @@ paths:
         '201': { description: Quotation issued. }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/quotations/{quotation_id}:
+    patch:
+      tags: [Quotations]
+      operationId: updateQuotation
+      summary: Append an immutable revision and update an unexpired issued quotation.
+      security: [{ oauth2: [quotations.manage] }]
+      parameters:
+        - name: quotation_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/QuotationSubmission' } } }
+      responses:
+        '200': { description: Quotation updated and immutable revision appended. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/quotations/{quotation_id}/accept:
     post:
       tags: [Quotations]
@@ -156,6 +178,46 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': { description: Quotation accepted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/quotations/{quotation_id}/rejection:
+    post:
+      tags: [Quotations]
+      operationId: rejectQuotation
+      summary: Reject an unexpired issued quotation with a protected reason.
+      security: [{ oauth2: [quotations.manage] }]
+      parameters:
+        - name: quotation_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/QuotationRejectionSubmission' } } }
+      responses:
+        '200': { description: Quotation rejected without deleting its history. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/quotations/{quotation_id}/expiration:
+    post:
+      tags: [Quotations]
+      operationId: expireQuotation
+      summary: Explicitly expire an issued quotation after its valid-until date.
+      security: [{ oauth2: [quotations.manage] }]
+      parameters:
+        - name: quotation_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Overdue quotation explicitly expired. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
   /v1/quotations/{quotation_id}/convert:
@@ -794,6 +856,13 @@ components:
         invoice_number: { type: string, minLength: 2, maxLength: 100, pattern: '^[A-Za-z0-9][A-Za-z0-9._/-]{1,99}$' }
         issue_date: { type: string, format: date }
         due_date: { type: string, format: date }
+    QuotationRejectionSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, reason]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        reason: { type: string, minLength: 5, maxLength: 500 }
     JournalSubmission:
       type: object
       additionalProperties: false

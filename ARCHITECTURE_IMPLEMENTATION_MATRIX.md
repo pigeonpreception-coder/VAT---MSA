@@ -24,7 +24,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 | 5 | Buyer/Seller | Dynamic organisation capabilities and transaction-context roles without duplicate taxpayer identities | VERIFIED PILOT | Legal terminology and operating-policy approval |
 | 6 | Customer | Tenant-scoped create/update and non-destructive deactivate lifecycle, duplicate identifier checks, active-relationship enforcement, audit/outbox evidence and immutable transaction snapshots | VERIFIED PILOT | Authoritative customer lookup/verification contract and conformance evidence |
 | 7 | Supplier | Tenant-scoped create/update and non-destructive deactivate lifecycle, VAT/TIN snapshots, duplicate identifier checks and active-relationship enforcement for new expenses | VERIFIED PILOT | Authoritative supplier lookup/verification adapter and conformance evidence |
-| 8 | Quotation | Server-calculated issue, expiry guard, acceptance and recoverable idempotent conversion to a certified invoice | VERIFIED PILOT | Edit/reject/explicit-expire policy, approval thresholds and UAT |
+| 8 | Quotation | Server-calculated issue, hash-chained immutable edit revisions, rejection reasons, explicit overdue expiry, acceptance guards and recoverable idempotent conversion to a certified invoice | VERIFIED PILOT | Configurable approval-threshold contract and UAT |
 | 9 | Tax invoice | Submission, validation, duplicate/idempotency controls, certification, public verification, credit/debit correction lineage and certificates | VERIFIED PILOT | Legal particulars, official numbering/reservations, cancellation policy and HSM signature profile |
 | 10 | VAT | Exact integer calculation, tax categories/rates, eligibility behavior and versioned rule-model foundation | CONTROLLED FOUNDATION | NamRA-owned rule catalogue, effective dates, golden cases and approval/rollback workflow |
 | 11 | VAT transaction | Atomic invoice/certificate/VAT ledger writes, signed correction effects, adjustments, audit and outbox | VERIFIED PILOT | Enterprise ledger reconciliation and target-load recovery evidence |
@@ -66,7 +66,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 The canonical release gate passed on 2026-08-14:
 
 - ESLint and TypeScript completed without errors.
-- 59 unit/security/policy tests passed across ten test files.
+- 61 unit/security/policy tests passed across ten test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
 - The production build completed and exposed all application and API routes.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.

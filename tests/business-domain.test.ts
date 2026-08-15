@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BusinessValidationError,
+  evaluateQuotationLifecycle,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
@@ -8,6 +9,7 @@ import {
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
+  normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
 } from "@/lib/domain/business";
 
@@ -43,6 +45,23 @@ describe("business command validation", () => {
   it("validates quotation conversion dates and invoice identifiers", () => {
     expect(normalizeAndValidateQuotationConversion({ schema_version: "1.0.0", invoice_number: "inv-2026-9001", issue_date: "2026-08-10", due_date: "2026-09-10" })).toEqual({ schema_version: "1.0.0", invoice_number: "INV-2026-9001", issue_date: "2026-08-10", due_date: "2026-09-10" });
     expect(() => normalizeAndValidateQuotationConversion({ schema_version: "1.0.0", invoice_number: "INV 1", issue_date: "2026-08-10", due_date: "2026-08-09" })).toThrow(BusinessValidationError);
+  });
+
+  it("enforces immutable quotation lifecycle boundaries", () => {
+    expect(evaluateQuotationLifecycle({ status: "ISSUED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(true);
+    expect(evaluateQuotationLifecycle({ status: "ISSUED", action: "EXPIRE", validUntil: "2026-08-13", today: "2026-08-14" })).toMatchObject({ allowed: true, targetStatus: "EXPIRED" });
+    expect(evaluateQuotationLifecycle({ status: "ISSUED", action: "ACCEPT", validUntil: "2026-08-13", today: "2026-08-14" }).allowed).toBe(false);
+    expect(evaluateQuotationLifecycle({ status: "ACCEPTED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+    expect(evaluateQuotationLifecycle({ status: "ACCEPTED", action: "CONVERT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(true);
+    expect(evaluateQuotationLifecycle({ status: "CONVERTED", action: "REJECT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+  });
+
+  it("requires a meaningful quotation rejection reason", () => {
+    expect(normalizeAndValidateQuotationRejection({ schema_version: "1.0.0", reason: "Customer selected another proposal." })).toEqual({
+      schema_version: "1.0.0",
+      reason: "Customer selected another proposal.",
+    });
+    expect(() => normalizeAndValidateQuotationRejection({ schema_version: "1.0.0", reason: "No" })).toThrowError(BusinessValidationError);
   });
   it("derives quotation totals from integer quantity micros and cents", () => {
     const quotation = normalizeAndValidateQuotation({

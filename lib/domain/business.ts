@@ -124,6 +124,20 @@ export type QuotationConversionSubmission = {
   due_date?: string;
 };
 
+export type QuotationRejectionSubmission = {
+  schema_version: "1.0.0";
+  reason: string;
+};
+
+export type QuotationLifecycleAction = "EDIT" | "ACCEPT" | "REJECT" | "EXPIRE" | "CONVERT";
+export type QuotationLifecycleStatus = "ISSUED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "CONVERTED";
+
+export type QuotationLifecycleEvaluation = {
+  allowed: boolean;
+  targetStatus: QuotationLifecycleStatus;
+  reason: string;
+};
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const CODE_PATTERN = /^[A-Z0-9][A-Z0-9._/-]{1,39}$/;
@@ -300,6 +314,48 @@ export function normalizeAndValidateQuotationConversion(payload: unknown): Quota
   if (dueDate && dueDate < issueDate) messages.push({ code: "DATE_ORDER_INVALID", path: "/due_date", message: "Due date cannot be earlier than issue date." });
   if (messages.length) throw new BusinessValidationError(messages);
   return { schema_version: "1.0.0", invoice_number: invoiceNumber, issue_date: issueDate, ...(dueDate ? { due_date: dueDate } : {}) };
+}
+
+export function normalizeAndValidateQuotationRejection(payload: unknown): QuotationRejectionSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const reason = textField(input.reason, "/reason", "Rejection reason", 5, 500, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}
+
+export function evaluateQuotationLifecycle(input: {
+  status: string;
+  action: QuotationLifecycleAction;
+  validUntil: string;
+  today: string;
+}): QuotationLifecycleEvaluation {
+  const targetStatus: Record<QuotationLifecycleAction, QuotationLifecycleStatus> = {
+    EDIT: "ISSUED",
+    ACCEPT: "ACCEPTED",
+    REJECT: "REJECTED",
+    EXPIRE: "EXPIRED",
+    CONVERT: "CONVERTED",
+  };
+  if (input.action === "CONVERT") {
+    return input.status === "ACCEPTED"
+      ? { allowed: true, targetStatus: "CONVERTED", reason: "Accepted quotation may be converted." }
+      : { allowed: false, targetStatus: "CONVERTED", reason: `Only an accepted quotation can be converted; current status is ${input.status}.` };
+  }
+  if (input.status !== "ISSUED") {
+    return { allowed: false, targetStatus: targetStatus[input.action], reason: `Only an issued quotation can be ${input.action.toLowerCase()}ed; current status is ${input.status}.` };
+  }
+  const overdue = input.validUntil < input.today;
+  if (input.action === "EXPIRE") {
+    return overdue
+      ? { allowed: true, targetStatus: "EXPIRED", reason: "The issued quotation is overdue and may be explicitly expired." }
+      : { allowed: false, targetStatus: "EXPIRED", reason: "A quotation cannot be expired before its valid-until date has passed." };
+  }
+  if (overdue) {
+    return { allowed: false, targetStatus: targetStatus[input.action], reason: "The quotation validity period has ended; expire it instead." };
+  }
+  return { allowed: true, targetStatus: targetStatus[input.action], reason: `The issued quotation may be ${input.action.toLowerCase()}ed.` };
 }
 
 export function normalizeAndValidateJournal(payload: unknown): JournalSubmission {
