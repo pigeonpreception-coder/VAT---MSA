@@ -1,10 +1,12 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import {
+  evaluateExpenseDecision,
   evaluateQuotationLifecycle,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
+  normalizeAndValidateExpenseDecision,
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
@@ -15,6 +17,7 @@ import {
   type BusinessPartyRelationship,
   type BusinessPartySubmission,
   type ExpenseSubmission,
+  type ExpenseDecisionSubmission,
   type JournalSubmission,
   type NormalizedQuotation,
   type ProjectSubmission,
@@ -30,6 +33,15 @@ import { getInvoiceById, RepositoryConflictError, submitInvoice } from "./reposi
 
 type OrganisationContext = { id: string; taxpayer_id: string; legal_name: string; vat_number: string };
 type IdempotencyRow = { request_hash: string; resource_id: string };
+
+type ExpenseRecord = {
+  id: string;
+  organisation_id: string;
+  expense_number: string;
+  status: string;
+  total_cents: number;
+  created_by: string;
+};
 
 type QuotationRecord = {
   id: string;
@@ -296,7 +308,7 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
       (SELECT COUNT(*) FROM expenses WHERE organisation_id=?) AS expenses,
       (SELECT COUNT(*) FROM projects WHERE organisation_id=? AND status IN ('PLANNED','ACTIVE')) AS projects,
       (SELECT COALESCE(SUM(total_cents),0) FROM quotations WHERE organisation_id=? AND status IN ('ISSUED','ACCEPTED','CONVERTED')) AS quoted_value_cents,
-      (SELECT COALESCE(SUM(total_cents),0) FROM expenses WHERE organisation_id=? AND status<>'VOID') AS expense_value_cents`)
+      (SELECT COALESCE(SUM(total_cents),0) FROM expenses WHERE organisation_id=? AND status='APPROVED') AS expense_value_cents`)
       .bind(org, org, org, org, org, org).first<Record<string, number>>(),
     db.prepare(`SELECT p.*,GROUP_CONCAT(r.relationship, ',') AS relationships FROM business_parties p
       LEFT JOIN party_relationships r ON r.party_id=p.id AND r.status='ACTIVE'
@@ -840,6 +852,59 @@ export async function createExpense(payload: ExpenseSubmission, actor: UserConte
     auditRecord(db, actor, audit, now),
   ]);
   return db.prepare("SELECT * FROM expenses WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+export async function decideExpense(
+  id: string,
+  payload: ExpenseDecisionSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const decision = normalizeAndValidateExpenseDecision(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: id, decision }));
+  const prior = await priorCommand(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const expense = await db.prepare("SELECT id,organisation_id,expense_number,status,total_cents,created_by FROM expenses WHERE id=? AND organisation_id=?")
+    .bind(id, organisation.id).first<ExpenseRecord>();
+  if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
+  const policy = evaluateExpenseDecision({ status: expense.status, createdBy: expense.created_by, actorId: actor.userId, decision: decision.decision });
+  if (!policy.allowed) throw new RepositoryConflictError(policy.reason);
+  const now = new Date().toISOString();
+  const eventType = decision.decision === "APPROVE" ? "ExpenseApproved" : "ExpenseRejected";
+  const audit = await auditEnvelope(db, actor, `EXPENSE_${decision.decision}D`, "EXPENSE", id, {
+    organisationId: organisation.id,
+    expenseNumber: expense.expense_number,
+    totalCents: expense.total_cents,
+    reason: decision.reason,
+    correlationId,
+  }, now);
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO expense_decisions
+        (id,expense_id,organisation_id,decision,reason,decided_by,decided_at) VALUES (?,?,?,?,?,?,?)`)
+        .bind(crypto.randomUUID(), id, organisation.id, decision.decision, decision.reason, actor.userId, now),
+      commandRecord(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash, "EXPENSE", id, now),
+      outboxRecord(db, "EXPENSE", id, eventType, organisation.id, {
+        expense_id: id,
+        organisation_id: organisation.id,
+        decision: decision.decision,
+        total_cents: expense.total_cents,
+        correlation_id: correlationId,
+      }, now),
+      auditRecord(db, actor, audit, now),
+    ]);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("EXPENSE_")) {
+      throw new RepositoryConflictError("The expense is no longer eligible for this independent decision.");
+    }
+    throw error;
+  }
+  return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
 }
 
 export async function recordStockMovement(payload: StockMovementSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {

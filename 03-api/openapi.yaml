@@ -286,6 +286,28 @@ paths:
         '201': { description: Draft expense recorded. }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses/{expense_id}/decision:
+    post:
+      tags: [Expenses]
+      operationId: decideExpense
+      summary: Independently approve or reject a draft expense and append immutable decision evidence.
+      security: [{ oauth2: [expenses.approve] }]
+      parameters:
+        - name: expense_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExpenseDecisionSubmission' } } }
+      responses:
+        '200': { description: Independent decision recorded and draft expense transitioned. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/inventory/movements:
     get:
       tags: [Inventory]
@@ -707,6 +729,7 @@ components:
             accounting.post: Post balanced journals.
             expenses.read: Read expenses.
             expenses.manage: Record and transition expenses.
+            expenses.approve: Independently approve or reject draft expenses.
             inventory.read: Read inventory balances.
             inventory.manage: Record stock movements.
             projects.read: Read projects.
@@ -909,6 +932,14 @@ components:
         net_cents: { type: integer, minimum: 0 }
         tax_cents: { type: integer, minimum: 0 }
         total_cents: { type: integer, minimum: 0 }
+    ExpenseDecisionSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, decision, reason]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        reason: { type: string, minLength: 5, maxLength: 500 }
     StockMovementSubmission:
       type: object
       additionalProperties: false

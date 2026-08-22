@@ -57,8 +57,9 @@ domains:
     - { method: GET, path: /stock-movements, permission: inventory:read, status: planned }
     - { method: POST, path: /stock-movements, permission: inventory:move, status: planned }
   expenses:
-    - { method: POST, path: /expenses, permission: expenses:create, status: planned }
-    - { method: POST, path: "/expenses/{id}/approve", permission: expenses:approve, status: planned }
+    - { method: GET, path: /expenses, permission: expenses:read, status: implemented }
+    - { method: POST, path: /expenses, permission: expenses:manage, status: implemented-draft-only }
+    - { method: POST, path: "/expenses/{id}/decision", permission: expenses:approve, status: implemented-no-self-approval }
   projects:
     - { method: GET, path: /projects, permission: projects:read, status: planned }
     - { method: POST, path: /projects, permission: projects:create, status: planned }

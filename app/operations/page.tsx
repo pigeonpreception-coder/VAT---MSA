@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
 import { getBusinessPlatformSnapshot } from "@/lib/data/business-repository";
 import { formatMoney } from "@/lib/format";
+import { ExpenseDecisionActions } from "./ExpenseDecisionActions";
 
 export const metadata: Metadata = { title: "Business operations" };
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export default async function OperationsPage() {
   const user = await getCurrentUser();
   requirePermission(user, "expenses:read");
   const snapshot = await getBusinessPlatformSnapshot(user);
+  const canDecideExpenses = hasPermission(user, "expenses:approve");
   return <AppShell active="operations" permission="expenses:read">
     <PageHeader eyebrow="Operational domains" title="Expenses, inventory, projects and imports" description="Operational evidence remains linked to the organisation, branch, project and source document so VAT treatment and accounting postings can be reconstructed rather than inferred." />
     <section className="metric-grid">
@@ -25,7 +27,18 @@ export default async function OperationsPage() {
       <article className="metric"><div className="metric-top"><span className="metric-label">Import declarations</span><span className="metric-icon">C</span></div><div className="metric-value">{snapshot.imports.length}</div><div className="metric-foot warning">Evidence-gated input VAT</div></article>
     </section>
     <div className="grid-equal">
-      <section className="panel"><div className="panel-head"><div><h2 className="panel-title">Expense register</h2><div className="panel-meta">Approval and receipt status preserved</div></div></div><div className="table-wrap"><table><thead><tr><th>Expense</th><th>Date</th><th>Category / supplier</th><th>Description</th><th>Total</th><th>Status</th></tr></thead><tbody>{snapshot.expenses.map((item) => <tr key={String(item.id)}><td><strong>{String(item.expense_number)}</strong></td><td>{String(item.expense_date)}</td><td>{String(item.category_name)}<div className="muted">{String(item.supplier_name ?? "No supplier")}</div></td><td>{String(item.description)}</td><td className="amount">{formatMoney(Number(item.total_cents), String(item.currency))}</td><td><StatusBadge value={String(item.status)} /></td></tr>)}</tbody></table></div></section>
+      <section className="panel">
+        <div className="panel-head"><div><h2 className="panel-title">Expense register</h2><div className="panel-meta">Independent maker-checker decisions with immutable evidence</div></div></div>
+        <div className="table-wrap"><table><thead><tr><th>Expense</th><th>Date</th><th>Category / supplier</th><th>Description</th><th>Total</th><th>Status</th><th>Independent review</th></tr></thead><tbody>{snapshot.expenses.map((item) => <tr key={String(item.id)}>
+          <td><strong>{String(item.expense_number)}</strong></td>
+          <td>{String(item.expense_date)}</td>
+          <td>{String(item.category_name)}<div className="muted">{String(item.supplier_name ?? "No supplier")}</div></td>
+          <td>{String(item.description)}</td>
+          <td className="amount">{formatMoney(Number(item.total_cents), String(item.currency))}</td>
+          <td><StatusBadge value={String(item.status)} /></td>
+          <td><ExpenseDecisionActions id={String(item.id)} organisationId={snapshot.organisation.id} status={String(item.status)} createdBy={String(item.created_by)} actorId={user.userId} canDecide={canDecideExpenses} /></td>
+        </tr>)}</tbody></table></div>
+      </section>
       <section className="panel"><div className="panel-head"><div><h2 className="panel-title">Inventory balances</h2><div className="panel-meta">Signed stock movements update versioned balances</div></div></div><div className="table-wrap"><table><thead><tr><th>Warehouse</th><th>Product</th><th>SKU</th><th>On hand</th><th>Average cost</th><th>Version</th></tr></thead><tbody>{snapshot.balances.map((item) => <tr key={String(item.id)}><td>{String(item.warehouse_name)}</td><td><strong>{String(item.product_name)}</strong></td><td className="mono">{String(item.sku)}</td><td className="amount">{quantity(item.quantity_micros)}</td><td className="amount">{formatMoney(Number(item.average_cost_cents))}</td><td>{Number(item.version)}</td></tr>)}</tbody></table></div></section>
     </div>
     <div className="grid-equal" style={{ marginTop: 20 }}>

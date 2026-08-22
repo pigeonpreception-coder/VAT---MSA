@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   BusinessValidationError,
+  evaluateExpenseDecision,
   evaluateQuotationLifecycle,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
+  normalizeAndValidateExpenseDecision,
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
@@ -128,6 +130,21 @@ describe("business command validation", () => {
       tax_cents: 1_500,
       total_cents: 11_499,
     })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes expense decisions and disables emergency overrides", () => {
+    expect(normalizeAndValidateExpenseDecision({ schema_version: "1.0.0", decision: "approve", reason: "Evidence and totals independently reviewed." })).toEqual({
+      schema_version: "1.0.0",
+      decision: "APPROVE",
+      reason: "Evidence and totals independently reviewed.",
+    });
+    expect(() => normalizeAndValidateExpenseDecision({ schema_version: "1.0.0", decision: "REJECT", reason: "Evidence missing.", emergency_override: true })).toThrowError(BusinessValidationError);
+  });
+
+  it("enforces independent draft-only expense decisions", () => {
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "checker", decision: "APPROVE" })).toMatchObject({ allowed: true, targetStatus: "APPROVED" });
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "maker", decision: "APPROVE" }).allowed).toBe(false);
+    expect(evaluateExpenseDecision({ status: "APPROVED", createdBy: "maker", actorId: "checker", decision: "REJECT" }).allowed).toBe(false);
   });
 
   it("normalizes outbound inventory as a signed movement", () => {

@@ -93,6 +93,18 @@ export type ExpenseSubmission = {
   total_cents: number;
 };
 
+export type ExpenseDecisionSubmission = {
+  schema_version: "1.0.0";
+  decision: "APPROVE" | "REJECT";
+  reason: string;
+};
+
+export type ExpenseDecisionEvaluation = {
+  allowed: boolean;
+  targetStatus: "APPROVED" | "REJECTED";
+  reason: string;
+};
+
 export type StockMovementSubmission = {
   schema_version: "1.0.0";
   warehouse_id: string;
@@ -413,6 +425,30 @@ export function normalizeAndValidateExpense(payload: unknown): ExpenseSubmission
   if (netCents + taxCents !== totalCents) messages.push({ code: "TOTAL_MISMATCH", path: "/total_cents", message: "Total cents must equal net cents plus tax cents." });
   if (messages.length) throw new BusinessValidationError(messages);
   return { schema_version: "1.0.0", category_id: categoryId, ...(supplierPartyId ? { supplier_party_id: supplierPartyId } : {}), ...(projectId ? { project_id: projectId } : {}), ...(branchId ? { branch_id: branchId } : {}), expense_number: expenseNumber, expense_date: expenseDate, description, currency, net_cents: netCents, tax_cents: taxCents, total_cents: totalCents };
+}
+
+export function normalizeAndValidateExpenseDecision(payload: unknown): ExpenseDecisionSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const decision = textValue(input.decision).toUpperCase() as ExpenseDecisionSubmission["decision"];
+  if (!new Set(["APPROVE", "REJECT"]).has(decision)) messages.push({ code: "DECISION_INVALID", path: "/decision", message: "Decision must be APPROVE or REJECT." });
+  const reason = textField(input.reason, "/reason", "Decision reason", 5, 500, messages);
+  if (input.emergency_override === true) messages.push({ code: "EMERGENCY_OVERRIDE_DISABLED", path: "/emergency_override", message: "Emergency segregation-of-duties override is disabled." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", decision, reason };
+}
+
+export function evaluateExpenseDecision(input: {
+  status: string;
+  createdBy: string;
+  actorId: string;
+  decision: "APPROVE" | "REJECT";
+}): ExpenseDecisionEvaluation {
+  const targetStatus = input.decision === "APPROVE" ? "APPROVED" : "REJECTED";
+  if (input.status !== "DRAFT") return { allowed: false, targetStatus, reason: `Only a draft expense may be decided; current status is ${input.status}.` };
+  if (input.createdBy === input.actorId) return { allowed: false, targetStatus, reason: "The expense creator cannot approve or reject their own expense." };
+  return { allowed: true, targetStatus, reason: `The independent reviewer may ${input.decision.toLowerCase()} this draft expense.` };
 }
 
 export function normalizeAndValidateStockMovement(payload: unknown): StockMovementSubmission {

@@ -507,6 +507,23 @@ export const expenses = sqliteTable(
   ],
 );
 
+export const expenseDecisions = sqliteTable(
+  "expense_decisions",
+  {
+    id: text("id").primaryKey(),
+    expenseId: text("expense_id").notNull().references(() => expenses.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    decision: text("decision").notNull(),
+    reason: text("reason").notNull(),
+    decidedBy: text("decided_by").notNull().references(() => appUsers.id),
+    decidedAt: text("decided_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_expense_decisions_expense").on(table.expenseId),
+    index("idx_expense_decisions_organisation").on(table.organisationId, table.decidedAt),
+  ],
+);
+
 export const inventoryBalances = sqliteTable(
   "inventory_balances",
   {

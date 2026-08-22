@@ -8,6 +8,7 @@
 | Taxpayer identifier | NamRA Data Stewardship | Effective-dated reference; tokenised lookup and masked display | Highly Restricted | Source/legal schedule |
 | Invoice and line | VAT-MSA Invoice Domain | Authoritative for the submitted/certified canonical fiscal document | Tax Confidential | Legal schedule; no in-place deletion |
 | Quotation revision | VAT-MSA Commercial Domain | Immutable hash-chained snapshot of each issued commercial offer revision | Tax Confidential | Commercial/legal schedule; append-only |
+| Expense decision | VAT-MSA Expense Domain | Immutable independent approval or rejection evidence; terminal decision is never overwritten | Tax Confidential | Accounting/legal schedule; append-only |
 | VAT transaction | VAT-MSA VAT Domain | Authoritative linkage between invoice, taxpayer positions and period | Tax Confidential | Legal schedule; immutable corrections |
 | VAT ledger entry | VAT-MSA VAT Ledger Domain | Authoritative VAT-MSA sub-ledger evidence | Tax Confidential | Legal schedule; append-only |
 | Certificate | VAT-MSA Certification Domain | Authoritative receipt, signature and status | Tax Confidential; public subset | Invoice lifetime plus legal schedule |

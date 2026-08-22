@@ -112,6 +112,16 @@ events:
     partition_key: organisation_id
     contains_tax_confidential_data: true
     purpose: Records a tenant-scoped expense pending its evidence and approval workflow.
+  - type: na.vatmsa.expense.approved.v1
+    owner: Expense Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Records independent approval of a draft expense without creating an accounting posting.
+  - type: na.vatmsa.expense.rejected.v1
+    owner: Expense Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Records independent rejection and preserves the protected decision reason.
   - type: na.vatmsa.inventory.movement-recorded.v1
     owner: Inventory Domain
     partition_key: organisation_id

@@ -212,6 +212,12 @@ const SCHEMA_STATEMENTS = [
     created_by TEXT NOT NULL REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
     created_at TEXT NOT NULL, approved_at TEXT, UNIQUE (organisation_id, expense_number)
   )`,
+  `CREATE TABLE IF NOT EXISTS expense_decisions (
+    id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES expenses(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), decision TEXT NOT NULL,
+    reason TEXT NOT NULL, decided_by TEXT NOT NULL REFERENCES app_users(id), decided_at TEXT NOT NULL,
+    UNIQUE (expense_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS inventory_balances (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     warehouse_id TEXT NOT NULL REFERENCES warehouses(id), product_id TEXT NOT NULL REFERENCES products(id),
@@ -842,6 +848,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
   `CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id, journal_entry_id)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_expense_decisions_organisation ON expense_decisions(organisation_id, decided_at)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
   `CREATE INDEX IF NOT EXISTS idx_invoice_correction_original ON invoice_corrections(original_invoice_id, created_at)`,
@@ -890,6 +897,63 @@ const SCHEMA_STATEMENTS = [
     BEFORE DELETE ON quotation_revisions
     BEGIN
       SELECT RAISE(ABORT,'QUOTATION_REVISION_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_expense_decision_insert
+    BEFORE INSERT ON expense_decisions
+    BEGIN
+      SELECT CASE WHEN NEW.decision NOT IN ('APPROVE','REJECT') THEN RAISE(ABORT,'EXPENSE_DECISION_INVALID') END;
+      SELECT CASE WHEN length(trim(NEW.reason)) < 5 OR length(NEW.reason) > 500 THEN RAISE(ABORT,'EXPENSE_DECISION_REASON_INVALID') END;
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM expenses e WHERE e.id=NEW.expense_id AND e.organisation_id=NEW.organisation_id AND e.status='DRAFT'
+      ) THEN RAISE(ABORT,'EXPENSE_NOT_DECIDABLE') END;
+      SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM expenses e WHERE e.id=NEW.expense_id AND e.created_by=NEW.decided_by
+      ) THEN RAISE(ABORT,'EXPENSE_SELF_APPROVAL_DENIED') END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS apply_expense_decision
+    AFTER INSERT ON expense_decisions
+    BEGIN
+      UPDATE expenses SET
+        status=CASE NEW.decision WHEN 'APPROVE' THEN 'APPROVED' ELSE 'REJECTED' END,
+        approved_by=CASE NEW.decision WHEN 'APPROVE' THEN NEW.decided_by ELSE NULL END,
+        approved_at=CASE NEW.decision WHEN 'APPROVE' THEN NEW.decided_at ELSE NULL END
+      WHERE id=NEW.expense_id AND organisation_id=NEW.organisation_id AND status='DRAFT';
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_self_approval_insert
+    BEFORE INSERT ON expenses
+    WHEN NEW.status='APPROVED' AND NEW.approved_by=NEW.created_by
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_SELF_APPROVAL_DENIED');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_self_approval
+    BEFORE UPDATE OF status,approved_by,created_by ON expenses
+    WHEN NEW.status='APPROVED' AND NEW.approved_by=NEW.created_by
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_SELF_APPROVAL_DENIED');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_expense_decision_transition
+    BEFORE UPDATE OF status ON expenses
+    WHEN OLD.status='DRAFT' AND NEW.status IN ('APPROVED','REJECTED') AND NOT EXISTS (
+      SELECT 1 FROM expense_decisions d WHERE d.expense_id=NEW.id AND d.organisation_id=NEW.organisation_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_DECISION_REQUIRED');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_terminal_status_change
+    BEFORE UPDATE OF status ON expenses
+    WHEN OLD.status IN ('APPROVED','REJECTED') AND NEW.status<>OLD.status
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_TERMINAL_STATE_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_decision_update
+    BEFORE UPDATE ON expense_decisions
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_DECISION_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_decision_delete
+    BEFORE DELETE ON expense_decisions
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_DECISION_IMMUTABLE');
     END`,
   `CREATE TRIGGER IF NOT EXISTS enforce_employee_seat_limit_insert
     BEFORE INSERT ON employees WHEN NEW.status IN ('ACTIVE','INVITED')
@@ -1075,6 +1139,7 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('accounting:post','ACCOUNTING','POST','Post balanced journals','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('expenses:read','EXPENSE','READ','Read authorised expenses','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('expenses:manage','EXPENSE','MANAGE','Record and transition authorised expenses','CONFIDENTIAL','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('expenses:approve','EXPENSE','APPROVE','Independently approve or reject draft expenses','CONFIDENTIAL','2026-08-15T08:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('inventory:read','INVENTORY','READ','Read authorised inventory','RESTRICTED','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('inventory:manage','INVENTORY','MANAGE','Record authorised stock movements','RESTRICTED','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('projects:read','PROJECT','READ','Read authorised projects','RESTRICTED','2026-08-09T10:00:00Z')`,
@@ -1090,6 +1155,7 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ar','TAXPAYER_OWNER','accounting:read','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ap','TAXPAYER_OWNER','accounting:post','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-em','TAXPAYER_OWNER','expenses:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ea','TAXPAYER_OWNER','expenses:approve','ALLOW','{"scope":"own-organisation","self_approval":false}','2026-08-15T08:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-im','TAXPAYER_OWNER','inventory:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-pm','TAXPAYER_OWNER','projects:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T10:00:00Z')`,
 
@@ -1143,7 +1209,11 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO journal_lines VALUES ('journal-line-0002','journal-0001',2,'acct-4000','br-0001',NULL,'Opening balance offset',0,5000000,NULL)`,
   `INSERT OR IGNORE INTO expenses
     (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
-    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-tp1-owner','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `UPDATE expenses SET created_by='usr-tp1-owner' WHERE id='expense-0001' AND created_by=approved_by`,
+  `INSERT OR IGNORE INTO expenses
+    (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
+    VALUES ('expense-0002','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0002','2026-08-14','Synthetic courier evidence review','NAD',50000,7500,57500,'DRAFT',NULL,'usr-tp1-owner',NULL,'2026-08-15T08:00:00Z',NULL)`,
   `INSERT OR IGNORE INTO project_costs VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO inventory_balances
     (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
@@ -1478,6 +1548,7 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-post','orole-finance','accounting:post','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-returns','orole-finance','returns:read','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-workflow','orole-finance','workflows:decide','ORGANISATION','ALLOW','2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-expense-approve','orole-finance','expenses:approve','ORGANISATION','ALLOW','2026-08-15T08:00:00Z')`,
   `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-proc-exp','orole-procurement','expenses:manage','BRANCH','ALLOW','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO user_role_assignments VALUES ('ura-finance','org-0001','usr-tp1-finance','emp-finance','orole-finance','ACTIVE','2026-08-02T00:00:00Z',NULL,'usr-tp1-owner','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO user_role_assignments VALUES ('ura-procurement','org-0001','usr-tp1-procurement','emp-procurement','orole-procurement','ACTIVE','2026-08-03T00:00:00Z',NULL,'usr-tp1-owner','2026-08-10T10:00:00Z')`,
@@ -1568,6 +1639,17 @@ const PARTY_LIFECYCLE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('business-party-lifecycle-v1','2026-08-14T09:00:00Z')`,
 ];
 
+const EXPENSE_GOVERNANCE_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('expenses:approve','EXPENSE','APPROVE','Independently approve or reject draft expenses','CONFIDENTIAL','2026-08-15T08:00:00Z')`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-ea','TAXPAYER_OWNER','expenses:approve','ALLOW','{"scope":"own-organisation","self_approval":false}','2026-08-15T08:00:00Z')`,
+  `UPDATE expenses SET created_by='usr-tp1-owner' WHERE id='expense-0001' AND created_by=approved_by`,
+  `INSERT OR IGNORE INTO expenses
+    (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
+    VALUES ('expense-0002','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0002','2026-08-14','Synthetic courier evidence review','NAD',50000,7500,57500,'DRAFT',NULL,'usr-tp1-owner',NULL,'2026-08-15T08:00:00Z',NULL)`,
+  `INSERT OR IGNORE INTO organisation_role_permissions VALUES ('orp-fin-expense-approve','orole-finance','expenses:approve','ORGANISATION','ALLOW','2026-08-15T08:00:00Z')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('expense-governance-v1','2026-08-15T08:00:00Z')`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -1608,6 +1690,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!controlPlaneSeed) await db.batch(CONTROL_PLANE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const partyLifecycleSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("business-party-lifecycle-v1").first();
     if (!partyLifecycleSeed) await db.batch(PARTY_LIFECYCLE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const expenseGovernanceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("expense-governance-v1").first();
+    if (!expenseGovernanceSeed) await db.batch(EXPENSE_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.prepare("PRAGMA optimize").run();
 }

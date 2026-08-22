@@ -5,6 +5,7 @@ import {
   convertQuotationToInvoice,
   createBusinessParty,
   createExpense,
+  decideExpense,
   createProject,
   createQuotation,
   getBusinessPlatformSnapshot,
@@ -22,7 +23,7 @@ import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "DECIDE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -107,12 +108,16 @@ export async function handleBusinessPost(request: Request, permission: string, c
       }
       else if (command === "POST_JOURNAL") resource = await postJournal(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "CREATE_EXPENSE") resource = await createExpense(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "DECIDE_EXPENSE") {
+        if (!resourceId) throw new BusinessResourceError("Expense id is required.", 400);
+        resource = await decideExpense(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
       else if (command === "RECORD_STOCK_MOVEMENT") resource = await recordStockMovement(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else resource = await createProject(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
     }
     if (!resource) throw new RepositoryConflictError("The idempotent resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION"].includes(command) ? 200 : 201;
+    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "DECIDE_EXPENSE"].includes(command) ? 200 : 201;
     return Response.json({ resource }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });

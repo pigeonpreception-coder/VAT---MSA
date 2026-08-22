@@ -26,6 +26,7 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Versioned VAT return generation, governed adjustments, maker-checker approval/rejection, locked periods and explicit blocked ITAS submission until authority is configured.
 - Compliance obligations, secure communication projections, audit cases, disputes, refund requests and segregated staged review.
 - Balanced general-ledger journals, expenses, inventory movements/balances and projects/budgets.
+- Governed expense maker-checker decisions with independent-review UI actions, immutable approval/rejection evidence and database-enforced no-self-approval.
 - Hash-chained, append-only business audit events.
 - D1/SQLite schema, generated migration, indexes and synthetic pilot data.
 - Responsive, keyboard-accessible operational interface.
