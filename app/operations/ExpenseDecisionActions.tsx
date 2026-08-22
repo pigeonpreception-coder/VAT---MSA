@@ -4,13 +4,15 @@ import { useRef, useState } from "react";
 
 type ExpenseDecision = "APPROVE" | "REJECT";
 
-export function ExpenseDecisionActions({ id, organisationId, status, createdBy, actorId, canDecide }: {
+export function ExpenseDecisionActions({ id, organisationId, status, createdBy, actorId, canDecide, receiptRequired, receiptReady }: {
   id: string;
   organisationId: string;
   status: string;
   createdBy: string;
   actorId: string;
   canDecide: boolean;
+  receiptRequired: boolean;
+  receiptReady: boolean;
 }) {
   const [busy, setBusy] = useState<ExpenseDecision | null>(null);
   const [error, setError] = useState("");
@@ -50,9 +52,10 @@ export function ExpenseDecisionActions({ id, organisationId, status, createdBy, 
   if (createdBy === actorId) return <span className="muted">Independent reviewer required</span>;
   return <div>
     <div className="actions">
-      <button className="btn btn-primary" type="button" disabled={busy !== null} onClick={() => decide("APPROVE")}>{busy === "APPROVE" ? "Approving…" : "Approve"}</button>
+      <button className="btn btn-primary" type="button" disabled={busy !== null || (receiptRequired && !receiptReady)} onClick={() => decide("APPROVE")}>{busy === "APPROVE" ? "Approving…" : "Approve"}</button>
       <button className="btn btn-danger" type="button" disabled={busy !== null} onClick={() => decide("REJECT")}>{busy === "REJECT" ? "Rejecting…" : "Reject"}</button>
     </div>
+    {receiptRequired && !receiptReady ? <div className="field-help">Approval is locked until a clean, available receipt is linked.</div> : null}
     {error ? <div className="field-error" role="alert">{error}</div> : null}
   </div>;
 }

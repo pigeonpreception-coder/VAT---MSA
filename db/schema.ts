@@ -642,6 +642,23 @@ export const documentMetadata = sqliteTable(
   ],
 );
 
+export const expenseReceiptLinks = sqliteTable(
+  "expense_receipt_links",
+  {
+    id: text("id").primaryKey(),
+    expenseId: text("expense_id").notNull().references(() => expenses.id),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    documentId: text("document_id").notNull().references(() => documentMetadata.id),
+    linkedBy: text("linked_by").notNull().references(() => appUsers.id),
+    linkedAt: text("linked_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_expense_receipt_link_expense").on(table.expenseId),
+    uniqueIndex("ux_expense_receipt_link_document").on(table.documentId),
+    index("idx_expense_receipt_links_organisation").on(table.organisationId, table.linkedAt),
+  ],
+);
+
 export const commandIdempotency = sqliteTable(
   "command_idempotency",
   {

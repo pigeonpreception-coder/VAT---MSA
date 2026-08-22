@@ -7,6 +7,7 @@ import {
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateExpenseDecision,
+  normalizeAndValidateExpenseReceiptLink,
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
@@ -18,6 +19,7 @@ import {
   type BusinessPartySubmission,
   type ExpenseSubmission,
   type ExpenseDecisionSubmission,
+  type ExpenseReceiptLinkSubmission,
   type JournalSubmission,
   type NormalizedQuotation,
   type ProjectSubmission,
@@ -41,6 +43,10 @@ type ExpenseRecord = {
   status: string;
   total_cents: number;
   created_by: string;
+  requires_receipt: number;
+  receipt_document_id: string | null;
+  receipt_scan_status: string | null;
+  receipt_status: string | null;
 };
 
 type QuotationRecord = {
@@ -318,8 +324,21 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
       WHERE q.organisation_id=? ORDER BY q.issue_date DESC,q.created_at DESC LIMIT 100`).bind(org).all<Record<string, string | number | null>>(),
     db.prepare("SELECT * FROM chart_of_accounts WHERE organisation_id=? ORDER BY code LIMIT 200").bind(org).all<Record<string, string | null>>(),
     db.prepare("SELECT * FROM journal_entries WHERE organisation_id=? ORDER BY journal_date DESC,created_at DESC LIMIT 100").bind(org).all<Record<string, string | null>>(),
-    db.prepare(`SELECT e.*,c.name AS category_name,p.display_name AS supplier_name FROM expenses e
-      JOIN expense_categories c ON c.id=e.category_id LEFT JOIN business_parties p ON p.id=e.supplier_party_id
+    db.prepare(`SELECT e.*,c.name AS category_name,c.requires_receipt,p.display_name AS supplier_name,
+      d.file_name AS receipt_file_name,d.scan_status AS receipt_scan_status,d.status AS receipt_status,
+      (SELECT candidate.id FROM document_metadata candidate
+        WHERE candidate.organisation_id=e.organisation_id AND candidate.owner_domain='EXPENSE'
+          AND candidate.owner_resource_id=e.id AND candidate.scan_status='CLEAN' AND candidate.status='AVAILABLE'
+          AND NOT EXISTS (SELECT 1 FROM expense_receipt_links linked WHERE linked.document_id=candidate.id)
+        ORDER BY candidate.uploaded_at DESC LIMIT 1) AS available_receipt_document_id,
+      (SELECT candidate.file_name FROM document_metadata candidate
+        WHERE candidate.organisation_id=e.organisation_id AND candidate.owner_domain='EXPENSE'
+          AND candidate.owner_resource_id=e.id AND candidate.scan_status='CLEAN' AND candidate.status='AVAILABLE'
+          AND NOT EXISTS (SELECT 1 FROM expense_receipt_links linked WHERE linked.document_id=candidate.id)
+        ORDER BY candidate.uploaded_at DESC LIMIT 1) AS available_receipt_file_name
+      FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+      LEFT JOIN business_parties p ON p.id=e.supplier_party_id
+      LEFT JOIN document_metadata d ON d.id=e.receipt_document_id
       WHERE e.organisation_id=? ORDER BY e.expense_date DESC,e.created_at DESC LIMIT 100`).bind(org).all<Record<string, string | number | null>>(),
     db.prepare(`SELECT b.*,w.name AS warehouse_name,p.sku,p.name AS product_name FROM inventory_balances b
       JOIN warehouses w ON w.id=b.warehouse_id JOIN products p ON p.id=b.product_id
@@ -869,10 +888,23 @@ export async function decideExpense(
   const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: id, decision }));
   const prior = await priorCommand(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
-  const expense = await db.prepare("SELECT id,organisation_id,expense_number,status,total_cents,created_by FROM expenses WHERE id=? AND organisation_id=?")
+  const expense = await db.prepare(`SELECT e.id,e.organisation_id,e.expense_number,e.status,e.total_cents,e.created_by,
+      c.requires_receipt,e.receipt_document_id,d.scan_status AS receipt_scan_status,d.status AS receipt_status
+      FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+      LEFT JOIN document_metadata d ON d.id=e.receipt_document_id AND d.organisation_id=e.organisation_id
+      WHERE e.id=? AND e.organisation_id=?`)
     .bind(id, organisation.id).first<ExpenseRecord>();
   if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
-  const policy = evaluateExpenseDecision({ status: expense.status, createdBy: expense.created_by, actorId: actor.userId, decision: decision.decision });
+  const policy = evaluateExpenseDecision({
+    status: expense.status,
+    createdBy: expense.created_by,
+    actorId: actor.userId,
+    decision: decision.decision,
+    receiptRequired: expense.requires_receipt === 1,
+    receiptDocumentId: expense.receipt_document_id,
+    receiptScanStatus: expense.receipt_scan_status,
+    receiptStatus: expense.receipt_status,
+  });
   if (!policy.allowed) throw new RepositoryConflictError(policy.reason);
   const now = new Date().toISOString();
   const eventType = decision.decision === "APPROVE" ? "ExpenseApproved" : "ExpenseRejected";
@@ -901,6 +933,68 @@ export async function decideExpense(
   } catch (error) {
     if (error instanceof Error && error.message.includes("EXPENSE_")) {
       throw new RepositoryConflictError("The expense is no longer eligible for this independent decision.");
+    }
+    throw error;
+  }
+  return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
+}
+
+export async function linkExpenseReceipt(
+  id: string,
+  payload: ExpenseReceiptLinkSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const link = normalizeAndValidateExpenseReceiptLink(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: id, link }));
+  const prior = await priorCommand(db, actor.userId, "LINK_EXPENSE_RECEIPT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+
+  const expense = await db.prepare("SELECT id,status,receipt_document_id FROM expenses WHERE id=? AND organisation_id=?")
+    .bind(id, organisation.id).first<{ id: string; status: string; receipt_document_id: string | null }>();
+  if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
+  if (expense.status !== "DRAFT") throw new RepositoryConflictError("Receipt evidence can only be linked while an expense is in DRAFT status.");
+  if (expense.receipt_document_id) throw new RepositoryConflictError("The expense already has immutable linked receipt evidence.");
+
+  const document = await db.prepare(`SELECT id,file_name,checksum_sha256,scan_status,status FROM document_metadata
+      WHERE id=? AND organisation_id=? AND owner_domain='EXPENSE' AND owner_resource_id=?`)
+    .bind(link.receipt_document_id, organisation.id, id)
+    .first<{ id: string; file_name: string; checksum_sha256: string; scan_status: string; status: string }>();
+  if (!document) throw new BusinessResourceError("Receipt document was not found in the authorised expense scope.", 404);
+  if (document.scan_status !== "CLEAN" || document.status !== "AVAILABLE") {
+    throw new RepositoryConflictError("Quarantined, pending, rejected or otherwise unavailable receipt evidence cannot be linked to an expense.");
+  }
+
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_RECEIPT_LINKED", "EXPENSE", id, {
+    organisationId: organisation.id,
+    receiptDocumentId: document.id,
+    checksumSha256: document.checksum_sha256,
+    correlationId,
+  }, now);
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO expense_receipt_links
+        (id,expense_id,organisation_id,document_id,linked_by,linked_at) VALUES (?,?,?,?,?,?)`)
+        .bind(crypto.randomUUID(), id, organisation.id, document.id, actor.userId, now),
+      commandRecord(db, actor.userId, "LINK_EXPENSE_RECEIPT", idempotencyKey, requestHash, "EXPENSE", id, now),
+      outboxRecord(db, "EXPENSE", id, "ExpenseReceiptLinked", organisation.id, {
+        expense_id: id,
+        organisation_id: organisation.id,
+        receipt_document_id: document.id,
+        checksum_sha256: document.checksum_sha256,
+        correlation_id: correlationId,
+      }, now),
+      auditRecord(db, actor, audit, now),
+    ]);
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes("EXPENSE_RECEIPT") || error.message.includes("expense_receipt_links"))) {
+      throw new RepositoryConflictError("The receipt is no longer eligible to be linked to this draft expense.");
     }
     throw error;
   }

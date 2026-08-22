@@ -99,6 +99,11 @@ export type ExpenseDecisionSubmission = {
   reason: string;
 };
 
+export type ExpenseReceiptLinkSubmission = {
+  schema_version: "1.0.0";
+  receipt_document_id: string;
+};
+
 export type ExpenseDecisionEvaluation = {
   allowed: boolean;
   targetStatus: "APPROVED" | "REJECTED";
@@ -439,15 +444,34 @@ export function normalizeAndValidateExpenseDecision(payload: unknown): ExpenseDe
   return { schema_version: "1.0.0", decision, reason };
 }
 
+export function normalizeAndValidateExpenseReceiptLink(payload: unknown): ExpenseReceiptLinkSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const receiptDocumentId = idField(input.receipt_document_id, "/receipt_document_id", "Receipt document", messages) ?? "";
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", receipt_document_id: receiptDocumentId };
+}
+
 export function evaluateExpenseDecision(input: {
   status: string;
   createdBy: string;
   actorId: string;
   decision: "APPROVE" | "REJECT";
+  receiptRequired: boolean;
+  receiptDocumentId: string | null;
+  receiptScanStatus: string | null;
+  receiptStatus: string | null;
 }): ExpenseDecisionEvaluation {
   const targetStatus = input.decision === "APPROVE" ? "APPROVED" : "REJECTED";
   if (input.status !== "DRAFT") return { allowed: false, targetStatus, reason: `Only a draft expense may be decided; current status is ${input.status}.` };
   if (input.createdBy === input.actorId) return { allowed: false, targetStatus, reason: "The expense creator cannot approve or reject their own expense." };
+  if (input.decision === "APPROVE" && input.receiptRequired && !input.receiptDocumentId) {
+    return { allowed: false, targetStatus, reason: "A clean receipt is required before this expense can be approved." };
+  }
+  if (input.decision === "APPROVE" && input.receiptDocumentId && (input.receiptScanStatus !== "CLEAN" || input.receiptStatus !== "AVAILABLE")) {
+    return { allowed: false, targetStatus, reason: "The linked receipt must have CLEAN scan status and be AVAILABLE before approval." };
+  }
   return { allowed: true, targetStatus, reason: `The independent reviewer may ${input.decision.toLowerCase()} this draft expense.` };
 }
 

@@ -30,7 +30,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 | 11 | VAT transaction | Atomic invoice/certificate/VAT ledger writes, signed correction effects, adjustments, audit and outbox | VERIFIED PILOT | Enterprise ledger reconciliation and target-load recovery evidence |
 | 12 | Accounting | Chart of accounts, balanced immutable journal posting and account/balance views | VERIFIED PILOT | Reversal, period close, AR/AP and approved financial-statement rules |
 | 13 | Inventory | Product/warehouse model, signed movements, non-negative balance invariant and inventory views | VERIFIED PILOT | Valuation policy, transfers, cycle counts and alert operations |
-| 14 | Expense | Tenant-scoped draft capture, integer totals, project/branch links, independent approval/rejection, database-enforced no-self-approval, immutable decision evidence, audit and outbox | VERIFIED PILOT | Receipt-cleanliness policy, accounting posting/reversal policy and UAT |
+| 14 | Expense | Tenant-scoped draft capture, integer totals, project/branch links, immutable clean-receipt linkage, database-enforced receipt gating, independent approval/rejection, no-self-approval, immutable decision evidence, audit and outbox | VERIFIED PILOT | Approved production malware scanner, accounting posting/reversal policy and UAT |
 | 15 | Project | Projects, optional proposed budgets, costs and operational profitability projections | VERIFIED PILOT | Budget approval and governed cost/revenue posting lifecycle |
 | 16 | Payment | Bank-import and payment-instruction models with governed connector states | DISABLED PENDING AUTHORITY | Regulated connector contracts, settlement authority, allocation rules and finance segregation of duties |
 | 17 | Reconciliation | Registered-buyer matching, exceptions, risk reasons and taxpayer/NamRA work queues | CONTROLLED FOUNDATION | Assignment/resolution commands, authoritative tolerances and operational sampling evidence |
@@ -66,10 +66,11 @@ This matrix is the truthful completion record for the approved architecture. It 
 The canonical release gate passed on 2026-08-22:
 
 - ESLint and TypeScript completed without errors.
-- 63 unit/security/policy tests passed across ten test files.
+- 65 unit/security/policy/database tests passed across eleven test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
 - The production build completed and exposed all application and API routes.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.
+- SQLite migration proof applied migrations `0000` through `0011`, corrected the approved synthetic expense with clean receipt custody, rejected pending/quarantined and wrong-owner evidence, applied a clean link, gated approval and proved the link immutable.
 - Earlier runtime proofs covered versioned return workflows, blocked unconfigured ITAS submission, refund controls, invoice correction lineage, R2 quarantine, offline trust rejection, reports and separated portals.
 
 ## Production decision

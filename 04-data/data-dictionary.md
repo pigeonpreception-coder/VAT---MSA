@@ -9,6 +9,7 @@
 | Invoice and line | VAT-MSA Invoice Domain | Authoritative for the submitted/certified canonical fiscal document | Tax Confidential | Legal schedule; no in-place deletion |
 | Quotation revision | VAT-MSA Commercial Domain | Immutable hash-chained snapshot of each issued commercial offer revision | Tax Confidential | Commercial/legal schedule; append-only |
 | Expense decision | VAT-MSA Expense Domain | Immutable independent approval or rejection evidence; terminal decision is never overwritten | Tax Confidential | Accounting/legal schedule; append-only |
+| Expense receipt link | VAT-MSA Expense Domain | Immutable tenant-scoped linkage to document custody metadata; only CLEAN and AVAILABLE expense-owned evidence can be linked or used for approval | Tax Confidential | Accounting/legal schedule; append-only |
 | VAT transaction | VAT-MSA VAT Domain | Authoritative linkage between invoice, taxpayer positions and period | Tax Confidential | Legal schedule; immutable corrections |
 | VAT ledger entry | VAT-MSA VAT Ledger Domain | Authoritative VAT-MSA sub-ledger evidence | Tax Confidential | Legal schedule; append-only |
 | Certificate | VAT-MSA Certification Domain | Authoritative receipt, signature and status | Tax Confidential; public subset | Invoice lifetime plus legal schedule |

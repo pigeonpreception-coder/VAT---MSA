@@ -7,6 +7,7 @@ import {
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateExpenseDecision,
+  normalizeAndValidateExpenseReceiptLink,
   normalizeAndValidateJournal,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
@@ -141,10 +142,22 @@ describe("business command validation", () => {
     expect(() => normalizeAndValidateExpenseDecision({ schema_version: "1.0.0", decision: "REJECT", reason: "Evidence missing.", emergency_override: true })).toThrowError(BusinessValidationError);
   });
 
-  it("enforces independent draft-only expense decisions", () => {
-    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "checker", decision: "APPROVE" })).toMatchObject({ allowed: true, targetStatus: "APPROVED" });
-    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "maker", decision: "APPROVE" }).allowed).toBe(false);
-    expect(evaluateExpenseDecision({ status: "APPROVED", createdBy: "maker", actorId: "checker", decision: "REJECT" }).allowed).toBe(false);
+  it("normalizes an expense receipt link", () => {
+    expect(normalizeAndValidateExpenseReceiptLink({ schema_version: "1.0.0", receipt_document_id: "doc-expense-1001" })).toEqual({
+      schema_version: "1.0.0",
+      receipt_document_id: "doc-expense-1001",
+    });
+    expect(() => normalizeAndValidateExpenseReceiptLink({ schema_version: "1.0.0", receipt_document_id: "?" })).toThrowError(BusinessValidationError);
+  });
+
+  it("enforces independent, receipt-gated draft expense decisions", () => {
+    const cleanReceipt = { receiptRequired: true, receiptDocumentId: "doc-1", receiptScanStatus: "CLEAN", receiptStatus: "AVAILABLE" };
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "checker", decision: "APPROVE", ...cleanReceipt })).toMatchObject({ allowed: true, targetStatus: "APPROVED" });
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "maker", decision: "APPROVE", ...cleanReceipt }).allowed).toBe(false);
+    expect(evaluateExpenseDecision({ status: "APPROVED", createdBy: "maker", actorId: "checker", decision: "REJECT", ...cleanReceipt }).allowed).toBe(false);
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "checker", decision: "APPROVE", receiptRequired: true, receiptDocumentId: null, receiptScanStatus: null, receiptStatus: null }).allowed).toBe(false);
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "checker", decision: "APPROVE", receiptRequired: true, receiptDocumentId: "doc-2", receiptScanStatus: "PENDING_EXTERNAL_SCANNER", receiptStatus: "QUARANTINED" }).allowed).toBe(false);
+    expect(evaluateExpenseDecision({ status: "DRAFT", createdBy: "maker", actorId: "checker", decision: "REJECT", receiptRequired: true, receiptDocumentId: null, receiptScanStatus: null, receiptStatus: null }).allowed).toBe(true);
   });
 
   it("normalizes outbound inventory as a signed movement", () => {

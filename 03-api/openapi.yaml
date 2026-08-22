@@ -308,6 +308,29 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses/{expense_id}/receipt:
+    post:
+      tags: [Expenses]
+      operationId: linkExpenseReceipt
+      summary: Immutably link a clean, available receipt to a draft expense.
+      description: Quarantined, pending, rejected, cross-tenant, incorrectly owned or already-linked documents are refused.
+      security: [{ oauth2: [expenses.manage] }]
+      parameters:
+        - name: expense_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExpenseReceiptLinkSubmission' } } }
+      responses:
+        '200': { description: Clean receipt linked to the draft expense with immutable custody evidence. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/inventory/movements:
     get:
       tags: [Inventory]
@@ -940,6 +963,13 @@ components:
         schema_version: { type: string, const: 1.0.0 }
         decision: { type: string, enum: [APPROVE, REJECT] }
         reason: { type: string, minLength: 5, maxLength: 500 }
+    ExpenseReceiptLinkSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, receipt_document_id]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        receipt_document_id: { type: string, minLength: 2, maxLength: 100 }
     StockMovementSubmission:
       type: object
       additionalProperties: false

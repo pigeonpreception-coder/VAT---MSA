@@ -261,6 +261,13 @@ const SCHEMA_STATEMENTS = [
     status TEXT NOT NULL, uploaded_by TEXT NOT NULL REFERENCES app_users(id), uploaded_at TEXT NOT NULL,
     retained_until TEXT, legal_hold INTEGER NOT NULL DEFAULT 0
   )`,
+  `CREATE TABLE IF NOT EXISTS expense_receipt_links (
+    id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES expenses(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    document_id TEXT NOT NULL REFERENCES document_metadata(id),
+    linked_by TEXT NOT NULL REFERENCES app_users(id), linked_at TEXT NOT NULL,
+    UNIQUE (expense_id), UNIQUE (document_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS command_idempotency (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES app_users(id),
     command_type TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL,
@@ -851,6 +858,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_expense_decisions_organisation ON expense_decisions(organisation_id, decided_at)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_expense_receipt_links_organisation ON expense_receipt_links(organisation_id, linked_at)`,
   `CREATE INDEX IF NOT EXISTS idx_invoice_correction_original ON invoice_corrections(original_invoice_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_period_status_due ON vat_periods(status, due_date)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_adjustments_period_status ON vat_adjustments(vat_period_id, status)`,
@@ -1650,6 +1658,94 @@ const EXPENSE_GOVERNANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('expense-governance-v1','2026-08-15T08:00:00Z')`,
 ];
 
+const EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO document_metadata
+    (id,organisation_id,owner_domain,owner_resource_id,object_key,file_name,content_type,size_bytes,checksum_sha256,classification,scan_status,status,uploaded_by,uploaded_at,retained_until,legal_hold)
+    SELECT 'doc-expense-0001-receipt','org-0001','EXPENSE','expense-0001','synthetic/expenses/expense-0001/clean-receipt.pdf','synthetic-clean-receipt-expense-0001.pdf','application/pdf',2048,
+      '0b440d1bb4c48cf586548309d51df4a7c0bcdc349ad1505e546d8d59f4cc6946','TAX_CONFIDENTIAL','CLEAN','AVAILABLE','usr-local-admin','2026-08-09T09:55:00Z',NULL,0
+    WHERE EXISTS (SELECT 1 FROM expenses WHERE id='expense-0001' AND organisation_id='org-0001')`,
+  `INSERT OR IGNORE INTO document_metadata
+    (id,organisation_id,owner_domain,owner_resource_id,object_key,file_name,content_type,size_bytes,checksum_sha256,classification,scan_status,status,uploaded_by,uploaded_at,retained_until,legal_hold)
+    SELECT 'doc-expense-0002-receipt','org-0001','EXPENSE','expense-0002','synthetic/expenses/expense-0002/clean-receipt.pdf','synthetic-clean-receipt-expense-0002.pdf','application/pdf',1536,
+      'fe1dffea8a2f648a2301a020272eff760b71a58a63571ca5923a8f27469cd6b4','TAX_CONFIDENTIAL','CLEAN','AVAILABLE','usr-local-admin','2026-08-15T08:05:00Z',NULL,0
+    WHERE EXISTS (SELECT 1 FROM expenses WHERE id='expense-0002' AND organisation_id='org-0001')`,
+  `UPDATE expenses SET receipt_document_id='doc-expense-0001-receipt'
+    WHERE id='expense-0001' AND organisation_id='org-0001' AND status='APPROVED'`,
+  `INSERT OR IGNORE INTO expense_receipt_links
+    (id,expense_id,organisation_id,document_id,linked_by,linked_at)
+    SELECT 'expense-receipt-link-0001','expense-0001','org-0001','doc-expense-0001-receipt','usr-local-admin','2026-08-09T09:56:00Z'
+    WHERE EXISTS (SELECT 1 FROM document_metadata WHERE id='doc-expense-0001-receipt')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('expense-receipt-governance-v1','2026-08-16T08:00:00Z')`,
+];
+
+const EXPENSE_RECEIPT_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS validate_expense_receipt_link
+    BEFORE INSERT ON expense_receipt_links
+    WHEN NOT EXISTS (
+      SELECT 1 FROM expenses e JOIN document_metadata d
+        ON d.id=NEW.document_id AND d.organisation_id=e.organisation_id
+      WHERE e.id=NEW.expense_id AND e.organisation_id=NEW.organisation_id
+        AND e.status='DRAFT' AND e.receipt_document_id IS NULL
+        AND d.owner_domain='EXPENSE' AND d.owner_resource_id=e.id
+        AND d.scan_status='CLEAN' AND d.status='AVAILABLE'
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_RECEIPT_LINK_INVALID');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS apply_expense_receipt_link
+    AFTER INSERT ON expense_receipt_links
+    BEGIN
+      UPDATE expenses SET receipt_document_id=NEW.document_id
+      WHERE id=NEW.expense_id AND organisation_id=NEW.organisation_id AND status='DRAFT' AND receipt_document_id IS NULL;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_receipt_link_update
+    BEFORE UPDATE ON expense_receipt_links
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_RECEIPT_LINK_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_expense_receipt_link_delete
+    BEFORE DELETE ON expense_receipt_links
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_RECEIPT_LINK_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_expense_clean_receipt_decision
+    BEFORE INSERT ON expense_decisions
+    WHEN NEW.decision='APPROVE' AND (
+      EXISTS (
+        SELECT 1 FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+        WHERE e.id=NEW.expense_id AND e.organisation_id=NEW.organisation_id
+          AND c.requires_receipt=1 AND e.receipt_document_id IS NULL
+      ) OR EXISTS (
+        SELECT 1 FROM expenses e WHERE e.id=NEW.expense_id AND e.organisation_id=NEW.organisation_id
+          AND e.receipt_document_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM expense_receipt_links l JOIN document_metadata d ON d.id=l.document_id
+            WHERE l.expense_id=e.id AND l.organisation_id=e.organisation_id
+              AND l.document_id=e.receipt_document_id AND d.organisation_id=e.organisation_id
+              AND d.owner_domain='EXPENSE' AND d.owner_resource_id=e.id
+              AND d.scan_status='CLEAN' AND d.status='AVAILABLE'
+          )
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_CLEAN_RECEIPT_REQUIRED');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_expense_clean_receipt_status
+    BEFORE UPDATE OF status ON expenses
+    WHEN NEW.status='APPROVED' AND (
+      EXISTS (SELECT 1 FROM expense_categories c WHERE c.id=NEW.category_id AND c.requires_receipt=1 AND NEW.receipt_document_id IS NULL)
+      OR (NEW.receipt_document_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM expense_receipt_links l JOIN document_metadata d ON d.id=l.document_id
+        WHERE l.expense_id=NEW.id AND l.organisation_id=NEW.organisation_id
+          AND l.document_id=NEW.receipt_document_id AND d.organisation_id=NEW.organisation_id
+          AND d.owner_domain='EXPENSE' AND d.owner_resource_id=NEW.id
+          AND d.scan_status='CLEAN' AND d.status='AVAILABLE'
+      ))
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'EXPENSE_CLEAN_RECEIPT_REQUIRED');
+    END`,
+];
+
 let initialization: Promise<void> | null = null;
 
 export function getD1(): D1Database {
@@ -1692,6 +1788,9 @@ async function initialize(db: D1Database): Promise<void> {
     if (!partyLifecycleSeed) await db.batch(PARTY_LIFECYCLE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const expenseGovernanceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("expense-governance-v1").first();
     if (!expenseGovernanceSeed) await db.batch(EXPENSE_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const expenseReceiptGovernanceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("expense-receipt-governance-v1").first();
+    if (!expenseReceiptGovernanceSeed) await db.batch(EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
+  await db.batch(EXPENSE_RECEIPT_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.prepare("PRAGMA optimize").run();
 }

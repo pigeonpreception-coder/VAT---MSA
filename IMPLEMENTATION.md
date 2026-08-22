@@ -27,6 +27,7 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Compliance obligations, secure communication projections, audit cases, disputes, refund requests and segregated staged review.
 - Balanced general-ledger journals, expenses, inventory movements/balances and projects/budgets.
 - Governed expense maker-checker decisions with independent-review UI actions, immutable approval/rejection evidence and database-enforced no-self-approval.
+- Immutable expense-receipt linkage with tenant/owner checks and database-enforced CLEAN/AVAILABLE evidence gating before approval; synthetic clean fixtures are explicitly limited to local test data.
 - Hash-chained, append-only business audit events.
 - D1/SQLite schema, generated migration, indexes and synthetic pilot data.
 - Responsive, keyboard-accessible operational interface.

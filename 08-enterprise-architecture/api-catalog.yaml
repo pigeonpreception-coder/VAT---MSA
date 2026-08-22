@@ -59,6 +59,7 @@ domains:
   expenses:
     - { method: GET, path: /expenses, permission: expenses:read, status: implemented }
     - { method: POST, path: /expenses, permission: expenses:manage, status: implemented-draft-only }
+    - { method: POST, path: "/expenses/{id}/receipt", permission: expenses:manage, status: implemented-clean-evidence-only }
     - { method: POST, path: "/expenses/{id}/decision", permission: expenses:approve, status: implemented-no-self-approval }
   projects:
     - { method: GET, path: /projects, permission: projects:read, status: planned }
