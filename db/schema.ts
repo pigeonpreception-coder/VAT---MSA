@@ -2019,6 +2019,156 @@ export const taxAuthorities = sqliteTable("tax_authorities", {
   createdAt: text("created_at").notNull(),
 }, (table) => [uniqueIndex("ux_tax_authority_jurisdiction_code").on(table.jurisdictionId, table.code)]);
 
+export const taxAuthorityUnits = sqliteTable("tax_authority_units", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  parentUnitId: text("parent_unit_id"),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  unitType: text("unit_type").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("ux_tax_authority_unit_code").on(table.taxAuthorityId, table.code),
+  index("idx_tax_authority_unit_parent").on(table.taxAuthorityId, table.parentUnitId, table.status),
+  check("ck_tax_authority_unit_type", sql`${table.unitType} IN ('HEAD_OFFICE','DIRECTORATE','DIVISION','REGION','OFFICE','TEAM')`),
+  check("ck_tax_authority_unit_status", sql`${table.status} IN ('ACTIVE','INACTIVE')`),
+  check("ck_tax_authority_unit_no_self_parent", sql`${table.parentUnitId} IS NULL OR ${table.parentUnitId} <> ${table.id}`),
+]);
+
+export const taxAuthorityRoleDefinitions = sqliteTable("tax_authority_role_definitions", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+  dutyClass: text("duty_class").notNull(),
+  assuranceRequired: text("assurance_required").notNull(),
+  protected: integer("protected").notNull().default(1),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  check("ck_tax_authority_role_duty", sql`${table.dutyClass} IN ('ONBOARDING_MAKER','SECURITY_REVIEW','PRIVACY_REVIEW','LEGAL_REVIEW','INTEGRATION_REVIEW','ACTIVATION_APPROVAL','ACCESS_REVIEW','SYSTEM_ADMINISTRATION','AUDIT')`),
+  check("ck_tax_authority_role_assurance", sql`${table.assuranceRequired} IN ('MFA','PHISHING_RESISTANT_MFA')`),
+  check("ck_tax_authority_role_status", sql`${table.status} IN ('ACTIVE','INACTIVE')`),
+]);
+
+export const taxAuthorityRoleAssignments = sqliteTable("tax_authority_role_assignments", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  authorityUnitId: text("authority_unit_id").references(() => taxAuthorityUnits.id),
+  userId: text("user_id").notNull().references(() => appUsers.id),
+  roleCode: text("role_code").notNull().references(() => taxAuthorityRoleDefinitions.code),
+  scope: text("scope").notNull(),
+  status: text("status").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+  requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+  approvedBy: text("approved_by").notNull().references(() => appUsers.id),
+  approvalReference: text("approval_reference").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("ux_tax_authority_role_assignment").on(table.taxAuthorityId, table.userId, table.roleCode, table.authorityUnitId),
+  index("idx_tax_authority_role_assignment_status").on(table.taxAuthorityId, table.status, table.effectiveTo),
+  check("ck_tax_authority_role_assignment_status", sql`${table.status} IN ('ACTIVE','SUSPENDED','REVOKED','EXPIRED')`),
+  check("ck_tax_authority_role_assignment_no_self_approval", sql`${table.requestedBy} <> ${table.approvedBy}`),
+]);
+
+export const taxAuthorityFederationConnections = sqliteTable("tax_authority_federation_connections", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  identityProviderId: text("identity_provider_id").notNull().references(() => identityProviders.id),
+  environment: text("environment").notNull(),
+  protocol: text("protocol").notNull(),
+  issuer: text("issuer"),
+  audience: text("audience"),
+  metadataHash: text("metadata_hash"),
+  claimsContractHash: text("claims_contract_hash"),
+  assuranceProfile: text("assurance_profile"),
+  status: text("status").notNull(),
+  requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+  reviewedBy: text("reviewed_by").references(() => appUsers.id),
+  checkedAt: text("checked_at"),
+  expiresAt: text("expires_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("ux_tax_authority_federation_environment").on(table.taxAuthorityId, table.identityProviderId, table.environment),
+  index("idx_tax_authority_federation_status").on(table.taxAuthorityId, table.status, table.expiresAt),
+  check("ck_tax_authority_federation_environment", sql`${table.environment} IN ('CONTRACT_PENDING','SYNTHETIC_TEST','PRODUCTION_EQUIVALENT','PRODUCTION')`),
+  check("ck_tax_authority_federation_protocol", sql`${table.protocol} IN ('UNCONFIRMED','OIDC','SAML')`),
+  check("ck_tax_authority_federation_status", sql`${table.status} IN ('CONTRACT_PENDING','CONFIGURATION_PENDING','CONFORMANCE_PENDING','LOCAL_STAGING_READY','PRODUCTION_APPROVED','SUSPENDED','REVOKED')`),
+  check("ck_tax_authority_federation_no_self_review", sql`${table.reviewedBy} IS NULL OR ${table.reviewedBy} <> ${table.requestedBy}`),
+]);
+
+export const taxAuthorityOnboardingCases = sqliteTable("tax_authority_onboarding_cases", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  targetEnvironment: text("target_environment").notNull(),
+  status: text("status").notNull(),
+  purpose: text("purpose").notNull(),
+  evidenceBundleHash: text("evidence_bundle_hash"),
+  readinessReference: text("readiness_reference"),
+  requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+  submittedAt: text("submitted_at").notNull(),
+  approvedAt: text("approved_at"),
+  activatedAt: text("activated_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("idx_tax_authority_onboarding_status").on(table.taxAuthorityId, table.status, table.submittedAt),
+  check("ck_tax_authority_onboarding_environment", sql`${table.targetEnvironment} IN ('LOCAL_STAGING','PRODUCTION')`),
+  check("ck_tax_authority_onboarding_status", sql`${table.status} IN ('SUBMITTED','UNDER_REVIEW','LOCAL_STAGING_READY','BLOCKED_EXTERNAL','REJECTED','PRODUCTION_ACTIVATED')`),
+]);
+
+export const taxAuthorityOnboardingDecisions = sqliteTable("tax_authority_onboarding_decisions", {
+  id: text("id").primaryKey(),
+  onboardingCaseId: text("onboarding_case_id").notNull().references(() => taxAuthorityOnboardingCases.id),
+  decisionType: text("decision_type").notNull(),
+  decision: text("decision").notNull(),
+  reason: text("reason").notNull(),
+  requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+  decidedBy: text("decided_by").notNull().references(() => appUsers.id),
+  evidenceHash: text("evidence_hash").notNull(),
+  stepUpEvidenceReference: text("step_up_evidence_reference").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+}, (table) => [
+  uniqueIndex("ux_tax_authority_onboarding_decision_type").on(table.onboardingCaseId, table.decisionType),
+  index("idx_tax_authority_onboarding_decider").on(table.decidedBy, table.occurredAt),
+  check("ck_tax_authority_onboarding_decision_type", sql`${table.decisionType} IN ('LOCAL_STAGING_APPROVAL','SECURITY_APPROVAL','PRIVACY_APPROVAL','LEGAL_APPROVAL','INTEGRATION_APPROVAL','ACTIVATION_APPROVAL','REJECTION')`),
+  check("ck_tax_authority_onboarding_decision", sql`${table.decision} IN ('APPROVE','REJECT')`),
+  check("ck_tax_authority_onboarding_no_self_decision", sql`${table.requestedBy} <> ${table.decidedBy}`),
+]);
+
+export const taxAuthorityGovernanceEvents = sqliteTable("tax_authority_governance_events", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  onboardingCaseId: text("onboarding_case_id").references(() => taxAuthorityOnboardingCases.id),
+  eventType: text("event_type").notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status").notNull(),
+  reasonCode: text("reason_code").notNull(),
+  evidenceHash: text("evidence_hash"),
+  actorId: text("actor_id").notNull().references(() => appUsers.id),
+  occurredAt: text("occurred_at").notNull(),
+}, (table) => [index("idx_tax_authority_governance_event_time").on(table.taxAuthorityId, table.occurredAt)]);
+
+export const taxAuthorityAccessReviews = sqliteTable("tax_authority_access_reviews", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  reviewType: text("review_type").notNull(),
+  periodStart: text("period_start").notNull(),
+  dueAt: text("due_at").notNull(),
+  status: text("status").notNull(),
+  ownerId: text("owner_id").notNull().references(() => appUsers.id),
+  completedBy: text("completed_by").references(() => appUsers.id),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("ux_tax_authority_access_review_period").on(table.taxAuthorityId, table.reviewType, table.periodStart),
+  index("idx_tax_authority_access_review_status").on(table.taxAuthorityId, table.status, table.dueAt),
+  check("ck_tax_authority_access_review_type", sql`${table.reviewType} = 'QUARTERLY'`),
+  check("ck_tax_authority_access_review_status", sql`${table.status} IN ('OPEN','COMPLETED','OVERDUE')`),
+  check("ck_tax_authority_access_review_no_self_completion", sql`${table.completedBy} IS NULL OR ${table.completedBy} <> ${table.ownerId}`),
+]);
+
 export const taxAuthorityAdministrators = sqliteTable("tax_authority_administrators", {
   id: text("id").primaryKey(),
   taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),

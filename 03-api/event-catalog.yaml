@@ -1,4 +1,4 @@
-catalog_version: 1.0.0
+catalog_version: 1.1.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,27 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.tax-authority.onboarding-requested.v1
+    owner: Tax Authority Governance Domain
+    partition_key: tax_authority_id
+    contains_tax_confidential_data: false
+    purpose: Opens a jurisdiction-scoped authority-onboarding case without activating federation, a production authority, a tax subscription or taxpayer access.
+    minimum_payload: [onboarding_case_id, tax_authority_id, target_environment, status, reason_code, correlation_id]
+    controls: [atomic_outbox, idempotency, assigned_authority_scope, step_up, no_activation_side_effect]
+  - type: na.vatmsa.tax-authority.onboarding-decided.v1
+    owner: Tax Authority Governance Domain
+    partition_key: tax_authority_id
+    contains_tax_confidential_data: false
+    purpose: Records an independent immutable local-staging approval or rejection; local approval never represents production activation.
+    minimum_payload: [onboarding_case_id, tax_authority_id, target_environment, status, reason_code, correlation_id]
+    controls: [atomic_outbox, no_self_approval, protected_decision_role, quarterly_access_review, step_up, immutable_decision]
+  - type: na.vatmsa.tax-authority.production-onboarding-blocked.v1
+    owner: Tax Authority Governance Domain
+    partition_key: tax_authority_id
+    contains_tax_confidential_data: false
+    purpose: Preserves a production-target request in a fail-closed state until federation, legal, security, privacy, integration and activation evidence are independently accepted.
+    minimum_payload: [onboarding_case_id, tax_authority_id, target_environment, status, reason_code, correlation_id]
+    controls: [atomic_outbox, external_evidence_required, federation_contract_required, production_activation_disabled]
   - type: na.vatmsa.counterparty.verification-requested.v1
     owner: Business Party Trust Domain
     partition_key: organisation_id

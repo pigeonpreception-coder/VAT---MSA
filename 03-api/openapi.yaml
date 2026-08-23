@@ -30,6 +30,7 @@ tags:
   - name: Signup
   - name: Identity
   - name: Identity proofing
+  - name: Authority governance
   - name: Organisations
   - name: Registrations
   - name: Quotations
@@ -265,6 +266,86 @@ paths:
                     items: { $ref: '#/components/schemas/IdentityProofingCase' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/tax-authority-onboarding-cases:
+    get:
+      tags: [Authority governance]
+      operationId: getTaxAuthorityGovernance
+      summary: Read scoped authority hierarchy, roles, federation, onboarding and quarterly-review posture.
+      description: Returns governance metadata only for Tax Authorities explicitly assigned to the caller. Authentication does not create authority membership.
+      security: [{ oauth2: [authority-governance.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Scoped Tax Authority governance projection with production activation disabled. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Authority governance]
+      operationId: createTaxAuthorityOnboardingCase
+      summary: Create an idempotent, step-up protected Tax Authority onboarding case.
+      description: |
+        Local/staging requests enter independent review. Production-target requests are durably recorded as
+        `BLOCKED_EXTERNAL`; this command cannot activate federation, an authority, a tax subscription or taxpayer access.
+      security: [{ oauth2: [authority-governance.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, tax_authority_id, target_environment, purpose]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                tax_authority_id: { type: string, minLength: 3, maxLength: 100 }
+                target_environment: { type: string, enum: [LOCAL_STAGING, PRODUCTION] }
+                purpose: { type: string, minLength: 10, maxLength: 500 }
+                evidence_bundle_hash: { type: string, minLength: 32, maxLength: 200 }
+                readiness_reference: { type: string, minLength: 8, maxLength: 200 }
+      responses:
+        '201': { description: Local review case or production-blocked evidence record created with no activation effect. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/tax-authority-onboarding-cases/{onboarding_case_id}/decisions:
+    post:
+      tags: [Authority governance]
+      operationId: decideTaxAuthorityOnboardingCase
+      summary: Record an independent immutable local-staging approval or rejection.
+      description: |
+        Requires single-use step-up evidence, an active authority administrator assignment, a protected decision role,
+        a current quarterly access review and a different requester/decider. Production activation is not exposed.
+      security: [{ oauth2: [authority-governance.manage] }]
+      parameters:
+        - { name: onboarding_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, decision, reason]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                decision: { type: string, enum: [APPROVE_LOCAL_STAGING, REJECT] }
+                reason: { type: string, minLength: 10, maxLength: 500 }
+      responses:
+        '200': { description: Independent immutable local decision recorded with no production activation effect. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/quotations:
     get:
       tags: [Quotations]

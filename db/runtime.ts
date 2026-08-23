@@ -2,7 +2,8 @@ import { env } from "cloudflare:workers";
 
 const PHASE0_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
 const ISSUE2_SCHEMA_REVISION = "issue2-identity-proofing-2026-08-23";
-export const REQUIRED_SCHEMA_REVISION = "issue3-counterparty-trust-2026-08-23";
+const ISSUE3_SCHEMA_REVISION = "issue3-counterparty-trust-2026-08-23";
+export const REQUIRED_SCHEMA_REVISION = "issue4-authority-governance-2026-08-23";
 
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS taxpayers (
@@ -781,6 +782,69 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, jurisdiction_id TEXT NOT NULL REFERENCES tax_jurisdictions(id), code TEXT NOT NULL,
     name TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (jurisdiction_id,code)
   )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_units (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    parent_unit_id TEXT REFERENCES tax_authority_units(id), code TEXT NOT NULL, name TEXT NOT NULL,
+    unit_type TEXT NOT NULL CHECK (unit_type IN ('HEAD_OFFICE','DIRECTORATE','DIVISION','REGION','OFFICE','TEAM')),
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE','INACTIVE')), created_at TEXT NOT NULL,
+    UNIQUE (tax_authority_id,code), CHECK (parent_unit_id IS NULL OR parent_unit_id<>id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_role_definitions (
+    code TEXT PRIMARY KEY, name TEXT NOT NULL,
+    duty_class TEXT NOT NULL CHECK (duty_class IN ('ONBOARDING_MAKER','SECURITY_REVIEW','PRIVACY_REVIEW','LEGAL_REVIEW','INTEGRATION_REVIEW','ACTIVATION_APPROVAL','ACCESS_REVIEW','SYSTEM_ADMINISTRATION','AUDIT')),
+    assurance_required TEXT NOT NULL CHECK (assurance_required IN ('MFA','PHISHING_RESISTANT_MFA')),
+    protected INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL CHECK (status IN ('ACTIVE','INACTIVE')), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_role_assignments (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    authority_unit_id TEXT REFERENCES tax_authority_units(id), user_id TEXT NOT NULL REFERENCES app_users(id),
+    role_code TEXT NOT NULL REFERENCES tax_authority_role_definitions(code), scope TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE','SUSPENDED','REVOKED','EXPIRED')),
+    effective_from TEXT NOT NULL, effective_to TEXT, requested_by TEXT NOT NULL REFERENCES app_users(id),
+    approved_by TEXT NOT NULL REFERENCES app_users(id), approval_reference TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (tax_authority_id,user_id,role_code,authority_unit_id), CHECK (requested_by<>approved_by)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_federation_connections (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    identity_provider_id TEXT NOT NULL REFERENCES identity_providers(id),
+    environment TEXT NOT NULL CHECK (environment IN ('CONTRACT_PENDING','SYNTHETIC_TEST','PRODUCTION_EQUIVALENT','PRODUCTION')),
+    protocol TEXT NOT NULL CHECK (protocol IN ('UNCONFIRMED','OIDC','SAML')), issuer TEXT, audience TEXT,
+    metadata_hash TEXT, claims_contract_hash TEXT, assurance_profile TEXT,
+    status TEXT NOT NULL CHECK (status IN ('CONTRACT_PENDING','CONFIGURATION_PENDING','CONFORMANCE_PENDING','LOCAL_STAGING_READY','PRODUCTION_APPROVED','SUSPENDED','REVOKED')),
+    requested_by TEXT NOT NULL REFERENCES app_users(id), reviewed_by TEXT REFERENCES app_users(id),
+    checked_at TEXT, expires_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (tax_authority_id,identity_provider_id,environment), CHECK (reviewed_by IS NULL OR reviewed_by<>requested_by)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_onboarding_cases (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    target_environment TEXT NOT NULL CHECK (target_environment IN ('LOCAL_STAGING','PRODUCTION')),
+    status TEXT NOT NULL CHECK (status IN ('SUBMITTED','UNDER_REVIEW','LOCAL_STAGING_READY','BLOCKED_EXTERNAL','REJECTED','PRODUCTION_ACTIVATED')),
+    purpose TEXT NOT NULL, evidence_bundle_hash TEXT, readiness_reference TEXT,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), submitted_at TEXT NOT NULL,
+    approved_at TEXT, activated_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_onboarding_decisions (
+    id TEXT PRIMARY KEY, onboarding_case_id TEXT NOT NULL REFERENCES tax_authority_onboarding_cases(id),
+    decision_type TEXT NOT NULL CHECK (decision_type IN ('LOCAL_STAGING_APPROVAL','SECURITY_APPROVAL','PRIVACY_APPROVAL','LEGAL_APPROVAL','INTEGRATION_APPROVAL','ACTIVATION_APPROVAL','REJECTION')),
+    decision TEXT NOT NULL CHECK (decision IN ('APPROVE','REJECT')), reason TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), decided_by TEXT NOT NULL REFERENCES app_users(id),
+    evidence_hash TEXT NOT NULL, step_up_evidence_reference TEXT NOT NULL, occurred_at TEXT NOT NULL,
+    UNIQUE (onboarding_case_id,decision_type), CHECK (requested_by<>decided_by)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_governance_events (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    onboarding_case_id TEXT REFERENCES tax_authority_onboarding_cases(id), event_type TEXT NOT NULL,
+    from_status TEXT, to_status TEXT NOT NULL, reason_code TEXT NOT NULL, evidence_hash TEXT,
+    actor_id TEXT NOT NULL REFERENCES app_users(id), occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_access_reviews (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    review_type TEXT NOT NULL CHECK (review_type='QUARTERLY'), period_start TEXT NOT NULL,
+    due_at TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('OPEN','COMPLETED','OVERDUE')),
+    owner_id TEXT NOT NULL REFERENCES app_users(id), completed_by TEXT REFERENCES app_users(id),
+    completed_at TEXT, created_at TEXT NOT NULL, UNIQUE (tax_authority_id,review_type,period_start),
+    CHECK (completed_by IS NULL OR completed_by<>owner_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS tax_authority_administrators (
     id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
     user_id TEXT NOT NULL REFERENCES app_users(id), status TEXT NOT NULL, effective_from TEXT NOT NULL,
@@ -1067,6 +1131,13 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_counterparty_trust_status_expiry ON counterparty_trust_profiles(trust_status,expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_snapshot_profile_time ON counterparty_verification_snapshots(trust_profile_id,checked_at)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_events_profile_time ON counterparty_trust_events(trust_profile_id,occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_unit_parent ON tax_authority_units(tax_authority_id,parent_unit_id,status)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_role_assignment_status ON tax_authority_role_assignments(tax_authority_id,status,effective_to)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_federation_status ON tax_authority_federation_connections(tax_authority_id,status,expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_onboarding_status ON tax_authority_onboarding_cases(tax_authority_id,status,submitted_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_onboarding_decider ON tax_authority_onboarding_decisions(decided_by,occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_governance_event_time ON tax_authority_governance_events(tax_authority_id,occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tax_authority_access_review_status ON tax_authority_access_reviews(tax_authority_id,status,due_at)`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
@@ -2115,6 +2186,7 @@ const LICENSE_PERMISSION_POLICIES = [
   ['employees:read','ADMINISTRATION','READ'], ['employees:manage','USER_SEATS','ADMIN_WRITE'], ['roles:read','ADMINISTRATION','READ'],
   ['roles:manage','ADMINISTRATION','ADMIN_WRITE'], ['workflows:read','ADVANCED_WORKFLOW','READ'], ['workflows:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
   ['workflows:decide','ADVANCED_WORKFLOW','BUSINESS_WRITE'], ['access-governance:read','ADVANCED_WORKFLOW','READ'], ['access-governance:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
+  ['authority-governance:read','CORE_VAT','READ'], ['authority-governance:manage','CORE_VAT','ADMIN_WRITE'],
 ] as const;
 
 const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
@@ -2456,6 +2528,234 @@ const ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS = [
     BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_REQUIRED'); END`,
 ];
 
+const ISSUE4_AUTHORITY_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_unit_scope_insert
+    BEFORE INSERT ON tax_authority_units WHEN NEW.parent_unit_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM tax_authority_units parent WHERE parent.id=NEW.parent_unit_id AND parent.tax_authority_id=NEW.tax_authority_id)
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_UNIT_PARENT_SCOPE_MISMATCH'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_unit_scope_update
+    BEFORE UPDATE OF parent_unit_id,tax_authority_id ON tax_authority_units WHEN NEW.parent_unit_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM tax_authority_units parent WHERE parent.id=NEW.parent_unit_id AND parent.tax_authority_id=NEW.tax_authority_id)
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_UNIT_PARENT_SCOPE_MISMATCH'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_role_assignment_scope_insert
+    BEFORE INSERT ON tax_authority_role_assignments WHEN NEW.authority_unit_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM tax_authority_units unit WHERE unit.id=NEW.authority_unit_id AND unit.tax_authority_id=NEW.tax_authority_id)
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ROLE_UNIT_SCOPE_MISMATCH'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_role_assignment_no_self_approve
+    BEFORE INSERT ON tax_authority_role_assignments WHEN NEW.approved_by=NEW.user_id
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ROLE_SELF_APPROVAL_DENIED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_role_assignment_sod_insert
+    BEFORE INSERT ON tax_authority_role_assignments WHEN NEW.status='ACTIVE' AND EXISTS (
+      SELECT 1 FROM tax_authority_role_assignments existing
+      JOIN tax_authority_role_definitions existing_role ON existing_role.code=existing.role_code
+      JOIN tax_authority_role_definitions new_role ON new_role.code=NEW.role_code
+      WHERE existing.tax_authority_id=NEW.tax_authority_id AND existing.user_id=NEW.user_id AND existing.status='ACTIVE'
+        AND ((existing_role.duty_class='ONBOARDING_MAKER' AND new_role.duty_class IN ('SECURITY_REVIEW','PRIVACY_REVIEW','LEGAL_REVIEW','INTEGRATION_REVIEW','ACTIVATION_APPROVAL'))
+          OR (new_role.duty_class='ONBOARDING_MAKER' AND existing_role.duty_class IN ('SECURITY_REVIEW','PRIVACY_REVIEW','LEGAL_REVIEW','INTEGRATION_REVIEW','ACTIVATION_APPROVAL'))))
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ROLE_SOD_CONFLICT'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_role_assignment_no_delete
+    BEFORE DELETE ON tax_authority_role_assignments
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ROLE_ASSIGNMENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_federation_production_guard_insert
+    BEFORE INSERT ON tax_authority_federation_connections WHEN NEW.status='PRODUCTION_APPROVED' AND (
+      NEW.environment<>'PRODUCTION' OR NEW.protocol NOT IN ('OIDC','SAML')
+      OR NEW.issuer IS NULL OR NEW.audience IS NULL OR NEW.assurance_profile IS NULL
+      OR NEW.metadata_hash IS NULL OR length(trim(NEW.metadata_hash))<32
+      OR NEW.claims_contract_hash IS NULL OR length(trim(NEW.claims_contract_hash))<32
+      OR NEW.reviewed_by IS NULL OR NEW.reviewed_by=NEW.requested_by
+      OR NEW.checked_at IS NULL OR NEW.expires_at IS NULL OR datetime(NEW.expires_at)<=datetime(NEW.checked_at))
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_FEDERATION_PRODUCTION_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_federation_production_guard_update
+    BEFORE UPDATE OF status,environment,protocol,issuer,audience,metadata_hash,claims_contract_hash,assurance_profile,reviewed_by,checked_at,expires_at
+    ON tax_authority_federation_connections WHEN NEW.status='PRODUCTION_APPROVED' AND (
+      NEW.environment<>'PRODUCTION' OR NEW.protocol NOT IN ('OIDC','SAML')
+      OR NEW.issuer IS NULL OR NEW.audience IS NULL OR NEW.assurance_profile IS NULL
+      OR NEW.metadata_hash IS NULL OR length(trim(NEW.metadata_hash))<32
+      OR NEW.claims_contract_hash IS NULL OR length(trim(NEW.claims_contract_hash))<32
+      OR NEW.reviewed_by IS NULL OR NEW.reviewed_by=NEW.requested_by
+      OR NEW.checked_at IS NULL OR NEW.expires_at IS NULL OR datetime(NEW.expires_at)<=datetime(NEW.checked_at))
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_FEDERATION_PRODUCTION_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_federation_no_delete
+    BEFORE DELETE ON tax_authority_federation_connections
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_FEDERATION_HISTORY_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_production_insert_guard
+    BEFORE INSERT ON tax_authority_onboarding_cases
+    WHEN NEW.target_environment='PRODUCTION' AND NEW.status<>'BLOCKED_EXTERNAL'
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_PRODUCTION_ONBOARDING_DISABLED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_identity_immutable
+    BEFORE UPDATE OF tax_authority_id,target_environment,requested_by,submitted_at ON tax_authority_onboarding_cases
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ONBOARDING_IDENTITY_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_no_delete
+    BEFORE DELETE ON tax_authority_onboarding_cases
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ONBOARDING_HISTORY_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_local_transition_guard
+    BEFORE UPDATE OF status ON tax_authority_onboarding_cases
+    WHEN NEW.status='LOCAL_STAGING_READY' AND (
+      OLD.status NOT IN ('SUBMITTED','UNDER_REVIEW') OR NEW.target_environment<>'LOCAL_STAGING' OR NOT EXISTS (
+        SELECT 1 FROM tax_authority_onboarding_decisions d
+        WHERE d.onboarding_case_id=NEW.id AND d.decision_type='LOCAL_STAGING_APPROVAL' AND d.decision='APPROVE'))
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_LOCAL_STAGING_APPROVAL_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_rejection_guard
+    BEFORE UPDATE OF status ON tax_authority_onboarding_cases
+    WHEN NEW.status='REJECTED' AND NOT EXISTS (
+      SELECT 1 FROM tax_authority_onboarding_decisions d
+      WHERE d.onboarding_case_id=NEW.id AND d.decision_type='REJECTION' AND d.decision='REJECT')
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_REJECTION_DECISION_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_production_activation_guard
+    BEFORE UPDATE OF status ON tax_authority_onboarding_cases WHEN NEW.status='PRODUCTION_ACTIVATED' AND (
+      NEW.target_environment<>'PRODUCTION' OR OLD.status<>'BLOCKED_EXTERNAL'
+      OR NEW.evidence_bundle_hash IS NULL OR length(trim(NEW.evidence_bundle_hash))<32
+      OR NEW.readiness_reference IS NULL OR length(trim(NEW.readiness_reference))<8
+      OR NEW.activated_at IS NULL
+      OR NOT EXISTS (SELECT 1 FROM tax_authority_federation_connections f
+        WHERE f.tax_authority_id=NEW.tax_authority_id AND f.environment='PRODUCTION' AND f.status='PRODUCTION_APPROVED'
+          AND datetime(f.expires_at)>CURRENT_TIMESTAMP)
+      OR NOT EXISTS (SELECT 1 FROM tax_authority_access_reviews review
+        WHERE review.tax_authority_id=NEW.tax_authority_id AND review.review_type='QUARTERLY'
+          AND review.status='COMPLETED' AND review.completed_by IS NOT NULL AND review.completed_at IS NOT NULL
+          AND date(review.period_start)<=date('now') AND datetime(review.due_at)>=CURRENT_TIMESTAMP)
+      OR (SELECT COUNT(DISTINCT d.decision_type) FROM tax_authority_onboarding_decisions d
+        WHERE d.onboarding_case_id=NEW.id AND d.decision='APPROVE'
+          AND d.decision_type IN ('SECURITY_APPROVAL','PRIVACY_APPROVAL','LEGAL_APPROVAL','INTEGRATION_APPROVAL','ACTIVATION_APPROVAL'))<>5
+      OR (SELECT COUNT(DISTINCT d.decided_by) FROM tax_authority_onboarding_decisions d
+        WHERE d.onboarding_case_id=NEW.id AND d.decision='APPROVE'
+          AND d.decision_type IN ('SECURITY_APPROVAL','PRIVACY_APPROVAL','LEGAL_APPROVAL','INTEGRATION_APPROVAL','ACTIVATION_APPROVAL'))<>5)
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_PRODUCTION_ACTIVATION_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_decision_guard
+    BEFORE INSERT ON tax_authority_onboarding_decisions
+    BEGIN
+      SELECT CASE WHEN length(trim(NEW.reason))<10 OR length(NEW.reason)>500
+        OR length(trim(NEW.evidence_hash))<32 OR length(trim(NEW.step_up_evidence_reference))<16
+        THEN RAISE(ABORT,'TAX_AUTHORITY_DECISION_EVIDENCE_INVALID') END;
+      SELECT CASE WHEN (NEW.decision_type='REJECTION' AND NEW.decision<>'REJECT')
+        OR (NEW.decision_type<>'REJECTION' AND NEW.decision<>'APPROVE')
+        THEN RAISE(ABORT,'TAX_AUTHORITY_DECISION_TYPE_MISMATCH') END;
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM tax_authority_onboarding_cases c
+        JOIN tax_authority_administrators admin ON admin.tax_authority_id=c.tax_authority_id
+        WHERE c.id=NEW.onboarding_case_id AND admin.user_id=NEW.decided_by AND admin.status='ACTIVE'
+          AND datetime(admin.effective_from)<=CURRENT_TIMESTAMP
+          AND (admin.effective_to IS NULL OR datetime(admin.effective_to)>CURRENT_TIMESTAMP)
+      ) THEN RAISE(ABORT,'TAX_AUTHORITY_DECIDER_SCOPE_REQUIRED') END;
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM tax_authority_onboarding_cases c
+        JOIN tax_authority_role_assignments assignment ON assignment.tax_authority_id=c.tax_authority_id
+        JOIN tax_authority_role_definitions role ON role.code=assignment.role_code
+        WHERE c.id=NEW.onboarding_case_id AND assignment.user_id=NEW.decided_by AND assignment.status='ACTIVE'
+          AND datetime(assignment.effective_from)<=CURRENT_TIMESTAMP
+          AND (assignment.effective_to IS NULL OR datetime(assignment.effective_to)>CURRENT_TIMESTAMP)
+          AND role.duty_class=CASE NEW.decision_type
+            WHEN 'SECURITY_APPROVAL' THEN 'SECURITY_REVIEW' WHEN 'PRIVACY_APPROVAL' THEN 'PRIVACY_REVIEW'
+            WHEN 'LEGAL_APPROVAL' THEN 'LEGAL_REVIEW' WHEN 'INTEGRATION_APPROVAL' THEN 'INTEGRATION_REVIEW'
+            ELSE 'ACTIVATION_APPROVAL' END
+      ) THEN RAISE(ABORT,'TAX_AUTHORITY_DECIDER_ROLE_REQUIRED') END;
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM tax_authority_onboarding_cases c JOIN tax_authority_access_reviews review ON review.tax_authority_id=c.tax_authority_id
+        WHERE c.id=NEW.onboarding_case_id AND review.review_type='QUARTERLY' AND review.status IN ('OPEN','COMPLETED')
+          AND date(review.period_start)<=date('now') AND datetime(review.due_at)>=CURRENT_TIMESTAMP
+      ) THEN RAISE(ABORT,'TAX_AUTHORITY_ACCESS_REVIEW_REQUIRED') END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_decision_no_update
+    BEFORE UPDATE ON tax_authority_onboarding_decisions
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ONBOARDING_DECISION_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_onboarding_decision_no_delete
+    BEFORE DELETE ON tax_authority_onboarding_decisions
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ONBOARDING_DECISION_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_governance_event_no_update
+    BEFORE UPDATE ON tax_authority_governance_events
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_GOVERNANCE_EVENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_governance_event_no_delete
+    BEFORE DELETE ON tax_authority_governance_events
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_GOVERNANCE_EVENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS tax_authority_access_review_no_delete
+    BEFORE DELETE ON tax_authority_access_reviews
+    BEGIN SELECT RAISE(ABORT,'TAX_AUTHORITY_ACCESS_REVIEW_IMMUTABLE'); END`,
+];
+
+const ISSUE4_AUTHORITY_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('authority-governance:read','TAX_AUTHORITY_GOVERNANCE','READ','Read scoped Tax Authority hierarchy federation onboarding and review posture','SECURITY',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('authority-governance:manage','TAX_AUTHORITY_GOVERNANCE','MANAGE','Manage governed Tax Authority onboarding decisions without production activation','SECURITY',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-pa-agr','PILOT_ADMIN','authority-governance:read','ALLOW','{"scope":"assigned-authority","environment":"local-staging"}',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-pa-agm','PILOT_ADMIN','authority-governance:manage','ALLOW','{"scope":"assigned-authority","requires":"step-up-independent-review"}',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-agr','NAMRA_SYSTEM_ADMIN','authority-governance:read','ALLOW','{"scope":"assigned-authority"}',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-nsa-agm','NAMRA_SYSTEM_ADMIN','authority-governance:manage','ALLOW','{"scope":"assigned-authority","requires":"step-up-independent-review"}',CURRENT_TIMESTAMP)`,
+  `INSERT OR REPLACE INTO license_permission_policies VALUES ('authority-governance:read','CORE_VAT','READ','ACTIVE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+  `INSERT OR REPLACE INTO license_permission_policies VALUES ('authority-governance:manage','CORE_VAT','ADMIN_WRITE','ACTIVE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO app_users
+    (id,external_user_id,email,display_name,role,taxpayer_id,status,created_at)
+    VALUES ('usr-authority-onboarding-maker','synthetic-authority-maker','authority-maker@example.test','Synthetic Authority Onboarding Maker','NAMRA_SYSTEM_ADMIN',NULL,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO app_users
+    (id,external_user_id,email,display_name,role,taxpayer_id,status,created_at)
+    VALUES ('usr-authority-governance-approver','synthetic-authority-approver','authority-approver@example.test','Synthetic Authority Governance Approver','NAMRA_SYSTEM_ADMIN',NULL,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_administrators
+    (id,tax_authority_id,user_id,status,effective_from,effective_to,appointed_by,approval_reference)
+    SELECT 'tax-admin-na-maker',id,'usr-authority-onboarding-maker','ACTIVE',CURRENT_TIMESTAMP,NULL,
+      'SYNTHETIC_LOCAL_STAGING_GOVERNANCE','ISSUE4-LOCAL-STAGING-MAKER' FROM tax_authorities WHERE id='tax-authority-na-namra'`,
+  `INSERT OR IGNORE INTO tax_authority_administrators
+    (id,tax_authority_id,user_id,status,effective_from,effective_to,appointed_by,approval_reference)
+    SELECT 'tax-admin-na-governance-approver',id,'usr-authority-governance-approver','ACTIVE',CURRENT_TIMESTAMP,NULL,
+      'SYNTHETIC_LOCAL_STAGING_GOVERNANCE','ISSUE4-LOCAL-STAGING-APPROVER' FROM tax_authorities WHERE id='tax-authority-na-namra'`,
+  `INSERT OR IGNORE INTO tax_authority_users
+    (id,tax_authority_id,user_id,authority_role,status,effective_from,effective_to)
+    SELECT 'tax-user-na-maker',id,'usr-authority-onboarding-maker','AUTHORITY_ONBOARDING_MAKER','ACTIVE',CURRENT_TIMESTAMP,NULL
+    FROM tax_authorities WHERE id='tax-authority-na-namra'`,
+  `INSERT OR IGNORE INTO tax_authority_users
+    (id,tax_authority_id,user_id,authority_role,status,effective_from,effective_to)
+    SELECT 'tax-user-na-governance-approver',id,'usr-authority-governance-approver','AUTHORITY_ACCESS_REVIEWER','ACTIVE',CURRENT_TIMESTAMP,NULL
+    FROM tax_authorities WHERE id='tax-authority-na-namra'`,
+  `INSERT OR IGNORE INTO tax_authority_units VALUES ('tax-unit-na-hq','tax-authority-na-namra',NULL,'HQ','Head Office','HEAD_OFFICE','ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_units VALUES ('tax-unit-na-domestic','tax-authority-na-namra','tax-unit-na-hq','DOMESTIC_TAX','Domestic Taxes Directorate','DIRECTORATE','ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_units VALUES ('tax-unit-na-identity','tax-authority-na-namra','tax-unit-na-hq','IDENTITY_SECURITY','Identity and Access Governance','DIVISION','ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_ONBOARDING_MAKER','Authority Onboarding Maker','ONBOARDING_MAKER','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_SECURITY_REVIEWER','Authority Security Reviewer','SECURITY_REVIEW','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_PRIVACY_REVIEWER','Authority Privacy Reviewer','PRIVACY_REVIEW','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_LEGAL_REVIEWER','Authority Legal Reviewer','LEGAL_REVIEW','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_INTEGRATION_REVIEWER','Authority Integration Reviewer','INTEGRATION_REVIEW','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_ACTIVATION_APPROVER','Authority Activation Approver','ACTIVATION_APPROVAL','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_ACCESS_REVIEWER','Authority Access Reviewer','ACCESS_REVIEW','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_SYSTEM_ADMIN','Authority System Administrator','SYSTEM_ADMINISTRATION','PHISHING_RESISTANT_MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_definitions VALUES ('AUTHORITY_GOVERNANCE_AUDITOR','Authority Governance Auditor','AUDIT','MFA',1,'ACTIVE',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_assignments
+    (id,tax_authority_id,authority_unit_id,user_id,role_code,scope,status,effective_from,effective_to,requested_by,approved_by,approval_reference,created_at)
+    VALUES ('tax-role-na-maker','tax-authority-na-namra','tax-unit-na-hq','usr-authority-onboarding-maker','AUTHORITY_ONBOARDING_MAKER','{"jurisdiction":"NA","environment":"LOCAL_STAGING"}','ACTIVE',CURRENT_TIMESTAMP,NULL,'usr-authority-onboarding-maker','usr-authority-governance-approver','ISSUE4-SYNTHETIC-MAKER-ASSIGNMENT',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_assignments
+    (id,tax_authority_id,authority_unit_id,user_id,role_code,scope,status,effective_from,effective_to,requested_by,approved_by,approval_reference,created_at)
+    VALUES ('tax-role-na-activator','tax-authority-na-namra','tax-unit-na-identity','usr-local-admin','AUTHORITY_ACTIVATION_APPROVER','{"jurisdiction":"NA","environment":"LOCAL_STAGING"}','ACTIVE',CURRENT_TIMESTAMP,NULL,'usr-authority-onboarding-maker','usr-authority-governance-approver','ISSUE4-SYNTHETIC-ACTIVATOR-ASSIGNMENT',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_assignments
+    (id,tax_authority_id,authority_unit_id,user_id,role_code,scope,status,effective_from,effective_to,requested_by,approved_by,approval_reference,created_at)
+    VALUES ('tax-role-na-system-admin','tax-authority-na-namra','tax-unit-na-identity','usr-local-admin','AUTHORITY_SYSTEM_ADMIN','{"jurisdiction":"NA","environment":"LOCAL_STAGING"}','ACTIVE',CURRENT_TIMESTAMP,NULL,'usr-authority-onboarding-maker','usr-authority-governance-approver','ISSUE4-SYNTHETIC-SYSTEM-ASSIGNMENT',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_role_assignments
+    (id,tax_authority_id,authority_unit_id,user_id,role_code,scope,status,effective_from,effective_to,requested_by,approved_by,approval_reference,created_at)
+    VALUES ('tax-role-na-access-reviewer','tax-authority-na-namra','tax-unit-na-identity','usr-authority-governance-approver','AUTHORITY_ACCESS_REVIEWER','{"jurisdiction":"NA","environment":"LOCAL_STAGING"}','ACTIVE',CURRENT_TIMESTAMP,NULL,'usr-authority-onboarding-maker','usr-local-admin','ISSUE4-SYNTHETIC-REVIEW-ASSIGNMENT',CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_federation_connections
+    (id,tax_authority_id,identity_provider_id,environment,protocol,issuer,audience,metadata_hash,claims_contract_hash,
+     assurance_profile,status,requested_by,reviewed_by,checked_at,expires_at,created_at,updated_at)
+    SELECT 'tax-fed-na-itas-contract-pending','tax-authority-na-namra',id,'CONTRACT_PENDING','UNCONFIRMED',NULL,NULL,NULL,NULL,
+      NULL,'CONTRACT_PENDING','usr-authority-onboarding-maker',NULL,NULL,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    FROM identity_providers WHERE provider_key='ITAS'`,
+  `INSERT OR IGNORE INTO tax_authority_onboarding_cases
+    (id,tax_authority_id,target_environment,status,purpose,evidence_bundle_hash,readiness_reference,requested_by,
+     submitted_at,approved_at,activated_at,created_at,updated_at)
+    VALUES ('tax-onboarding-na-local-issue4','tax-authority-na-namra','LOCAL_STAGING','SUBMITTED',
+      'Validate the Issue 4 authority hierarchy, governance and independent approval workflow using synthetic local data only.',
+      NULL,'ISSUE4-LOCAL-STAGING','usr-authority-onboarding-maker',CURRENT_TIMESTAMP,NULL,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+  `INSERT OR IGNORE INTO tax_authority_governance_events
+    (id,tax_authority_id,onboarding_case_id,event_type,from_status,to_status,reason_code,evidence_hash,actor_id,occurred_at)
+    VALUES ('tax-gov-event-na-local-requested','tax-authority-na-namra','tax-onboarding-na-local-issue4','TaxAuthorityOnboardingRequested',
+      NULL,'SUBMITTED','LOCAL_STAGING_REVIEW_REQUIRED',NULL,'usr-authority-onboarding-maker',CURRENT_TIMESTAMP)`,
+  `WITH quarter(period_start) AS (
+      SELECT CASE
+        WHEN cast(strftime('%m','now') AS integer)<=3 THEN strftime('%Y-01-01','now')
+        WHEN cast(strftime('%m','now') AS integer)<=6 THEN strftime('%Y-04-01','now')
+        WHEN cast(strftime('%m','now') AS integer)<=9 THEN strftime('%Y-07-01','now')
+        ELSE strftime('%Y-10-01','now') END)
+    INSERT OR IGNORE INTO tax_authority_access_reviews
+      (id,tax_authority_id,review_type,period_start,due_at,status,owner_id,completed_by,completed_at,created_at)
+    SELECT 'tax-review-na-'||period_start,'tax-authority-na-namra','QUARTERLY',period_start,
+      datetime(period_start,'+3 months','+14 days'),'OPEN','usr-authority-governance-approver',NULL,NULL,CURRENT_TIMESTAMP FROM quarter`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('issue4-authority-governance-v1',CURRENT_TIMESTAMP)`,
+];
+
 async function tableHasColumn(db: D1Database, table: string, column: string): Promise<boolean> {
   const result = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
   return result.results.some((item) => item.name === column);
@@ -2516,6 +2816,13 @@ async function applyIssue3LocalUpgrade(db: D1Database): Promise<void> {
       SELECT 1 FROM counterparty_trust_events e WHERE e.trust_profile_id=t.id)`).run();
   await db.batch(ISSUE3_COUNTERPARTY_INDEX_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
+    VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(ISSUE3_SCHEMA_REVISION).run();
+}
+
+async function applyIssue4LocalUpgrade(db: D1Database): Promise<void> {
+  await db.batch(ISSUE4_AUTHORITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(ISSUE4_AUTHORITY_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
     VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(REQUIRED_SCHEMA_REVISION).run();
 }
@@ -2583,12 +2890,14 @@ async function initialize(db: D1Database): Promise<void> {
     await applyPhase0LocalUpgrade(db);
     await applyIssue2LocalUpgrade(db);
     await applyIssue3LocalUpgrade(db);
+    await applyIssue4LocalUpgrade(db);
     const licenseEnforcementSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("license-central-enforcement-v1").first();
     if (!licenseEnforcementSeed) await db.batch(LICENSE_ENFORCEMENT_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.batch(EXPENSE_RECEIPT_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE2_IDENTITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(ISSUE4_AUTHORITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   const foreignKeyViolations = await db.prepare("PRAGMA foreign_key_check").all<Record<string, unknown>>();
   if (foreignKeyViolations.results.length > 0) throw new Error("VAT-MSA local compatibility upgrade left foreign-key violations.");
   await db.prepare("PRAGMA optimize").run();

@@ -40,7 +40,8 @@ function trustCustomer(db: DatabaseSync, taxStatus = "ACTIVE") {
 describe("Issue 3 counterparty-trust database enforcement", () => {
   it("registers the generated schema, pending backfill and required revision", () => {
     const journal = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8"));
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 18, tag: "0018_counterparty_trust" });
+    expect(journal.entries.find((entry: { idx: number }) => entry.idx === 18))
+      .toMatchObject({ idx: 18, tag: "0018_counterparty_trust" });
     const snapshot = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "0018_snapshot.json"), "utf8"));
     expect(snapshot.tables.counterparty_trust_profiles).toBeDefined();
     expect(snapshot.tables.counterparty_verification_snapshots).toBeDefined();

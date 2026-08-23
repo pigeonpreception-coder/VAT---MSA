@@ -13,6 +13,10 @@ domains:
   tax_authority_subscription:
     - { method: POST, path: "/tax-authorities/{authorityId}/subscriptions", permission: tax-authority-admin-step-up, authority_domain: GOVERNMENT_TAX, status: architecture-gated-disabled-local-staging }
     - { method: POST, path: "/tax-authorities/{authorityId}/taxpayer-authorizations", permission: tax-authority-admin-step-up, authority_domain: GOVERNMENT_TAX, status: synthetic-foundation }
+  tax_authority_governance:
+    - { method: GET, path: /tax-authority-onboarding-cases, permission: authority-governance:read-and-assigned-authority, authority_domain: GOVERNMENT_TAX, status: implemented-scoped-governance-projection }
+    - { method: POST, path: /tax-authority-onboarding-cases, permission: authority-governance:manage-step-up-and-idempotency, authority_domain: GOVERNMENT_TAX, status: implemented-local-review-or-production-blocked-no-activation }
+    - { method: POST, path: "/tax-authority-onboarding-cases/{id}/decisions", permission: authority-governance:manage-step-up-independent-role-and-current-review, authority_domain: GOVERNMENT_TAX, status: implemented-local-staging-decision-production-activation-not-exposed }
   dual_authorization:
     - { method: POST, path: /tax-access/decision, permission: authenticated-tax-scope, authority_domain: GOVERNMENT_TAX, status: implemented-central-decision-foundation }
     - { method: GET, path: /licensing/license, permission: licensing:read, authority_domain: COMMERCIAL_SAAS, status: implemented-central-decision-foundation }

@@ -10,7 +10,7 @@ const PORTAL_PERMISSIONS: Record<PortalKey, string> = {
   buyer: "dashboard:read",
   seller: "dashboard:read",
   namra: "dashboard:read",
-  "namra-admin": "identity:read",
+  "namra-admin": "authority-governance:read",
   "super-admin": "platform:read",
   developer: "developer:read",
 };

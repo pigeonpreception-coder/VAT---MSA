@@ -4,9 +4,9 @@
 
 **Repository:** `C:\Users\Jean-Pierre\Desktop\2026 FOLDERS\SAFINA BUSINESS ADVISORY\SAFINA\VAT Management System`
 
-**Assessed baseline before this increment:** `103d0cb`
+**Assessed baseline before this increment:** `db2355d`
 
-**Execution model:** controlled sequential remediation with programme-authorised Issue 2 and Issue 3 sequence exceptions
+**Execution model:** controlled sequential remediation with programme-authorised Issue 2, Issue 3 and Issue 4 sequence exceptions
 
 **Environment:** local, synthetic data, no live external integrations
 
@@ -16,7 +16,7 @@
 
 VAT-MSA remains a functional controlled-pilot application. Issue 1's application controls are locally verified, but Issue 1 remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED` because production identity-provider, MFA/recovery, origin-isolation, revocation and independent attack evidence are unavailable.
 
-On 23 August 2026 the programme authority explicitly instructed the remediation programme to move first to Issue 2 despite the Issue 1 blocker and then to Issue 3 despite the outstanding Issue 2 external evidence. These are recorded sequence exceptions, not waivers or production acceptance. Issue 4 and later issues remain locked unless Issue 3 passes or another explicit exception is recorded.
+On 23 August 2026 the programme authority explicitly instructed the remediation programme to move first to Issue 2 despite the Issue 1 blocker, then to Issue 3 despite the outstanding Issue 2 external evidence, and now to Issue 4 despite the outstanding Issue 3 authority evidence. These are recorded sequence exceptions, not waivers or production acceptance. Issue 5 and later issues remain locked unless Issue 4 passes or another explicit exception is recorded.
 
 Issue 2 now has a durable local identity-proofing foundation: each registration receives one fail-closed proofing case; canonical VAT numbers and TINs are independently unique; deterministic reconciliation records explainable matched/conflicting fields and confidence; mismatch resolution requires an independent actor; synthetic evidence is database-separated from authority verification; and proofing decisions/events are append-only. The scoped API and registration UI expose the posture without returning raw provider evidence.
 
@@ -26,12 +26,17 @@ Issue 3 now has a fail-closed local counterparty-trust foundation. Customers and
 
 This increment does **not** claim that NamRA, ITAS or BIPA validated a counterparty. Issue 3 remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED` pending PR-012 and applicable PR-003 evidence.
 
+Issue 4 now has a fail-closed local Tax Authority governance foundation. The system records an authority hierarchy, protected administrative duty catalogue, independently approved role assignments, environment-labelled federation registrations, durable onboarding cases, append-only decisions/events and authority-specific quarterly access reviews. Onboarding commands require assigned-authority scope, central licensing, step-up authentication and idempotency. A requester cannot decide their own case, and protected decision roles are database-enforced.
+
+The API exposes only local-staging approval/rejection and records every production-target request as `BLOCKED_EXTERNAL`; it exposes no production-activation command. Database activation requires a current production-approved federation, a current completed access review, evidence/readiness references, and security, privacy, legal, integration and activation approvals from five distinct authorised reviewers. The synthetic ITAS federation remains `CONTRACT_PENDING` / `UNCONFIRMED`. Issue 4 therefore remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED` pending PR-013 plus PR-004 and applicable PR-003 evidence.
+
 ## Authorised sequence exception records
 
 | Issue unlocked | Authority direction | Recorded scope | Predecessor/production effect | Downstream effect |
 | --- | --- | --- | --- | --- |
 | Issue 2 | “move to issue number 2, since issue 1 can't be resolved and completed now” | Bounded local/staging identity-proofing implementation with synthetic data | Issue 1 remains blocked; live identity proofing/ITAS stay disabled | Issue 3 remained locked until separately directed |
 | Issue 3 | “move to issue number 3, since issue 2 is now resolved and completed” | Bounded local/staging counterparty-trust implementation with synthetic data | Direction does not create PR-011/PR-003 evidence; Issue 2 remains blocked/not closed; live NamRA/ITAS/BIPA validation stays disabled | Issue 4–27 remain locked absent Issue 3 PASS or another explicit exception |
+| Issue 4 | “move to issue number 4, since issue 3 is now resolved and completed” | Bounded local/staging authority-provisioning, governance and federation foundation with synthetic data | Direction does not create PR-012/PR-003 evidence; Issue 3 remains blocked/not closed; live federation and production activation stay disabled | Issue 5–27 remain locked absent Issue 4 PASS or another explicit exception |
 
 ## Current system position
 
@@ -42,12 +47,13 @@ This increment does **not** claim that NamRA, ITAS or BIPA validated a counterpa
 | Identity proofing | Durable scoped cases, deterministic candidates, mismatch evidence, immutable events and synthetic/authority separation | ITAS/NamRA proofing contract, accepted attributes/provenance/freshness, merge rules and production-equivalent conformance (PR-011) |
 | Taxpayer uniqueness | VAT and TIN are database-unique; one registration has at most one proofing case | NamRA-approved identifier precedence, deregistration and legitimate merge procedure |
 | Counterparty trust | VAT/TIN/company-registration uniqueness, durable trust/tax status, expiring evidence, immutable snapshots/events and database transaction gates; synthetic evidence is test-only | NamRA/ITAS/BIPA contracts, authoritative status/provenance/freshness/reconciliation and conformance evidence (PR-012/PR-003) |
+| Tax Authority governance | Assigned-authority hierarchy, protected roles/SoD, contract-labelled federation, step-up onboarding, immutable independent decisions, quarterly reviews and database production-activation gates | Participating-authority appointment, federation/conformance, five-party activation, rollback and incident evidence (PR-013), plus PR-004/PR-003 as applicable |
 | Authorization and governance | Central permissions/licence policy, no self-approval, immutable decisions, quarterly access reviews and non-destructive expiry foundations | Production IAM/PAM, tenant-isolation assessment and controlled database administration |
 | Self-service signup | Company intake works with synthetic pending records; no licence is activated | Authoritative identity/taxpayer proof, verified notifications, sandbox payment and provisioning acceptance |
 | Licensing | Central page/API/search/command enforcement and expired read/export/compliance continuity are implemented | Provider-backed commercial lifecycle, reconciliation and race/load acceptance |
 | Statutory VAT | Runtime requires one effective `AUTHORITY_APPROVED` Namibia rule and fails closed otherwise | Tax/Finance approval, signed golden vectors and authoritative rule activation |
 | Expenses/documents | Receipt, approved CLEAN scan, quarantine and maker-checker controls are implemented | Production malware/CDR provider, retention/legal hold and posting/reversal policy |
-| API contract | 54 runtime v1 paths and 67 method/path operations are represented and contract-tested | External consumer and production gateway conformance |
+| API contract | 56 runtime v1 paths and 70 method/path operations are represented and contract-tested | External consumer and production gateway conformance |
 | External integrations | ITAS, real payments, email, SMS and event delivery remain disabled/unconfigured | Signed contracts, approved environments, credentials, owners and operational acceptance |
 | Production operations | Architecture, SLO and runbook foundations exist | Deployed observability, capacity, incident, backup/restore and DR exercises |
 
@@ -255,37 +261,142 @@ Until those packages exist, local matching can prove the repository's fail-close
 
 The local increment is **PARTIALLY COMPLETE / LOCALLY VERIFIED**. It supplies the safe counterparty-trust foundation and negative controls, but Issue 3 does not PASS or CLOSE without production-equivalent and operational authority evidence.
 
+## Issue 4 — Tax Authority Provisioning, Federation and Governance
+
+### A. Problem
+
+The prior architecture held synthetic Tax Authority, administrator, user, subscription and identity-provider records, but those records did not form a production-governance lifecycle. There was no durable authority-onboarding case, authority-unit hierarchy, protected duty catalogue, governed federation-registration state, independent onboarding decision evidence, authority-specific quarterly review or database gate preventing an unsupported production activation.
+
+### B. Root cause
+
+A real authority appointment, hierarchy, administrator mandate, OIDC/SAML issuer and audience, claims/assurance contract, conformance result and production activation approval are external governance facts. The repository correctly did not invent them, but it also needed an internal fail-closed control plane capable of preserving and enforcing those facts when they become available.
+
+### C. Existing implementation before this increment
+
+- Synthetic `tax_authorities`, administrators/users, tax subscriptions/features and taxpayer-authorization records.
+- Identity-provider and immutable provider-subject-link models.
+- NamRA Administration portal with basic provider and administrator counts.
+- Maker/checker, no-self-approval, step-up and quarterly access-review architecture requirements.
+- Disabled live ITAS adapter and explicit local/staging boundary.
+
+### D. Changes made in this increment
+
+- Added an authority-unit hierarchy with same-authority parent enforcement.
+- Added protected authority role definitions and independently approved, effective-dated, scoped assignments.
+- Added environment-labelled OIDC/SAML federation registrations with contract, configuration, conformance, local-ready, production-approved, suspension and revocation states.
+- Added durable local-staging/production-target onboarding cases, immutable decisions and append-only governance events.
+- Added assigned-authority-scoped reads and step-up/idempotent commands for case creation and independent local approval/rejection.
+- Added authority-specific quarterly access reviews and protected decision-role checks.
+- Added database production-activation gates requiring current federation, access review, evidence/readiness and five distinct protected approvals.
+- Expanded the NamRA Administration portal with hierarchy, federation, role, review and onboarding-control projections/actions while retaining the no-finance/no-implicit-taxpayer-access boundary.
+- Added OpenAPI, event/API catalogues, migration, security boundary, delivery evidence and automated tests.
+
+### E. Files/components changed
+
+- `db/schema.ts`, `db/runtime.ts`
+- `drizzle/0019_authority_governance.sql`, generated snapshot and journal
+- `lib/domain/authority-governance.ts`, `lib/data/authority-governance-repository.ts`
+- `lib/auth.ts`, `lib/portals.ts`, `lib/api/control-plane.ts`
+- `app/api/v1/tax-authority-onboarding-cases/route.ts`
+- `app/api/v1/tax-authority-onboarding-cases/[id]/decisions/route.ts`
+- `app/portal/namra-admin/page.tsx`, `app/portal/namra-admin/AuthorityGovernanceActions.tsx`
+- `tests/authority-governance-domain.test.ts`, `tests/authority-governance-migration.test.ts` and migration/licence regressions
+- OpenAPI, event/API catalogues, environment template, security boundary and delivery/architecture evidence
+
+### F. Database changes
+
+Migration `0019_authority_governance.sql` adds units, role definitions/assignments, federation connections, onboarding cases/decisions/events and quarterly reviews. It registers the new access permissions and central licence policies, backfills each existing authority with a head office, a contract-pending/unconfirmed ITAS federation, a production-target `BLOCKED_EXTERNAL` case and an open current-quarter review, and records revision `issue4-authority-governance-2026-08-23`.
+
+Triggers reject cross-authority hierarchy/assignment links, self-approved assignments, maker/protected-approver duty conflicts, self decisions, missing/expired reviews, decision-role mismatch, mutable decisions/events, deletion of governance evidence, synthetic production federation claims and unsupported lifecycle transitions. Production activation requires all accepted external evidence and five distinct protected decision makers.
+
+### G. API and event contract changes
+
+- Added `GET /api/v1/tax-authority-onboarding-cases` (`authority-governance:read`) with assigned-authority-scoped governance projection.
+- Added `POST /api/v1/tax-authority-onboarding-cases` (`authority-governance:manage`, step-up, idempotency) for local review or fail-closed production requests.
+- Added `POST /api/v1/tax-authority-onboarding-cases/{onboarding_case_id}/decisions` for independent local-staging approval/rejection only.
+- Added requested, decided and production-blocked atomic-outbox event contracts.
+- OpenAPI now covers 56 v1 paths and 70 method/path operations.
+
+No route can approve production federation or activate a production authority.
+
+### H. Security changes
+
+Governance reads and writes require central permission/licence enforcement and explicit active authority-administrator assignment. Privileged mutations require step-up authentication and idempotency. Requester/decider separation, protected-duty membership, current quarterly review and immutable evidence are database-enforced. Production federation requires a supported protocol, issuer/audience/assurance values, current evidence and claims/metadata digests, and an independent reviewer. Local/staging synthetic writes are explicitly environment-gated and always disabled in production.
+
+Authority administration is not authentication and does not itself grant taxpayer, financial or statutory access. Technical authority governance remains isolated from Finance data and business commands.
+
+### I. Automated verification
+
+Focused Issue 4 verification passed 5 files and 18 tests. The complete suite passed 25 files and 129 tests, including:
+
+- strict payload normalization and mass-assignment rejection;
+- production request preservation in a blocked state;
+- same-authority hierarchy and assignment enforcement;
+- onboarding-maker/protected-approver SoD;
+- self-decision rejection and independent scoped local approval;
+- current quarterly-review and protected duty requirements;
+- unsupported federation/activation rejection;
+- immutable decisions/events/assignments and schema revision verification;
+- licence-policy and prior migration regressions;
+- exact runtime/OpenAPI path and operation reconciliation.
+
+The complete canonical release gate passed: ESLint and TypeScript completed without errors; 25 test files and 129 tests passed; the heuristic local secret scan passed; the high-threshold dependency audit reported zero critical/high and one moderate development-only advisory; the CycloneDX SBOM was regenerated with four production components; and the Vinext/Vite production build completed with all 56 v1 API paths and 70 method/path operations.
+
+### J. End-to-end and operational verification
+
+**NOT VERIFIED — EXTERNAL ENVIRONMENT REQUIRED.** No approved participating-authority appointment, production IdP/federation contract, issuer/audience/metadata/claims package, assurance profile, disposable authority credentials, conformance endpoint, access-certification sign-off, five-party activation decision or rollback/incident exercise was supplied. Browser testing was not used as a substitute for those facts.
+
+### K. Evidence
+
+- `05-security/issue4-authority-governance-boundary.md`
+- migration `0019`, generated snapshot and schema revision
+- `tests/authority-governance-domain.test.ts` and `tests/authority-governance-migration.test.ts`
+- OpenAPI/event/API catalogues
+- `06-delivery/phase0-production-readiness-evidence-backlog.md`, PR-013, PR-004 and applicable PR-003
+
+### L. Residual risk and exact external dependency
+
+PR-013 requires Tax Authority Governance/IAM/Platform ownership and participating-authority, CISO, Privacy/Legal, Integration and Country Readiness approval of the real appointment/hierarchy, administrator role catalogue, federation metadata/claims/assurance/revocation/key rollover, independent protected approvals, quarterly review, activation/rollback, conformance, outage and incident evidence. PR-004 must accept the production authentication/origin boundary, and PR-003 must accept any applicable live ITAS integration.
+
+Until those packages exist, the repository can prove that unsupported production provisioning fails closed but cannot establish a legal authority mandate, authenticate through a real federation or activate a production authority.
+
+### M. Acceptance decision
+
+**BLOCKED — EXTERNAL DEPENDENCY REQUIRED**
+
+The local increment is **PARTIALLY COMPLETE / LOCALLY VERIFIED**. It supplies the safe authority-governance and activation-control foundation, but Issue 4 does not PASS or CLOSE without production-equivalent and operational authority evidence.
+
 ## Sequential remediation control board
 
 | # | Issue | Status | Gate/evidence position |
 | ---: | --- | --- | --- |
 | 1 | Production identity foundation | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | PR-004 open; Issue 2 sequence exception recorded |
 | 2 | Production identity proofing | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | Local foundation verified; PR-011/PR-003 open; Issue 3 sequence exception recorded |
-| 3 | Taxpayer/counterparty trust | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | Local foundation verified; PR-012 and applicable PR-003 evidence open |
-| 4 | Authority provisioning/federation | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 5 | Commercial subscription/licence operations | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 6 | Security bypass/runtime viability | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 7 | Account-creation lifecycle | **LOCKED** | Issue 3 has not passed; stale-fact reproduction still required |
-| 8 | Live ITAS/authority adapter | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 9 | Email/SMS/invitations | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 10 | Statutory VAT rule engine | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 11 | Production-scale taxpayer reconciliation | **LOCKED** | Issue 3 has not passed; must reuse Issue 2/3 evidence models |
-| 12 | Full reconciliation lifecycle | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 13 | VAT return formulas/authority submission | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 14 | Tax authority case management | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 15 | Financial accounting core | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 16 | Accounting posting/malware protection | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 17 | Inventory management | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 18 | Order-to-cash/fulfilment | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 19 | Process catalogue/serialization | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 20 | File security/retention | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 21 | Reporting/high-volume reads | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 22 | Device trust/offline operation | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 23 | External system contracts | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 24 | Payment-provider productionization | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 25 | Event platform | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 26 | Communication platform | **LOCKED** | Issue 3 has not passed; no further exception recorded |
-| 27 | AI platform | **LOCKED** | Issue 3 has not passed; no further exception recorded |
+| 3 | Taxpayer/counterparty trust | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | Local foundation verified; PR-012 and applicable PR-003 evidence open; Issue 4 sequence exception recorded |
+| 4 | Authority provisioning/federation | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | Local governance/activation-control foundation verified; PR-013, PR-004 and applicable PR-003 open |
+| 5 | Commercial subscription/licence operations | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 6 | Security bypass/runtime viability | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 7 | Account-creation lifecycle | **LOCKED** | Issue 4 has not passed; stale-fact reproduction still required |
+| 8 | Live ITAS/authority adapter | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 9 | Email/SMS/invitations | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 10 | Statutory VAT rule engine | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 11 | Production-scale taxpayer reconciliation | **LOCKED** | Issue 4 has not passed; must reuse Issue 2/3 evidence models |
+| 12 | Full reconciliation lifecycle | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 13 | VAT return formulas/authority submission | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 14 | Tax authority case management | **LOCKED** | Issue 4 has not passed; must reuse Issue 4 authority scope/governance |
+| 15 | Financial accounting core | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 16 | Accounting posting/malware protection | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 17 | Inventory management | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 18 | Order-to-cash/fulfilment | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 19 | Process catalogue/serialization | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 20 | File security/retention | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 21 | Reporting/high-volume reads | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 22 | Device trust/offline operation | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 23 | External system contracts | **LOCKED** | Issue 4 has not passed; must consume the governed federation boundary |
+| 24 | Payment-provider productionization | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 25 | Event platform | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 26 | Communication platform | **LOCKED** | Issue 4 has not passed; no further exception recorded |
+| 27 | AI platform | **LOCKED** | Issue 4 has not passed; no further exception recorded |
 
 ## Readiness determination
 
@@ -298,9 +409,11 @@ The local increment is **PARTIALLY COMPLETE / LOCALLY VERIFIED**. It supplies th
 | Issue 2 production acceptance | **BLOCKED** |
 | Issue 3 local controls | **PARTIALLY COMPLETE / LOCALLY VERIFIED** |
 | Issue 3 production acceptance | **BLOCKED** |
+| Issue 4 local controls | **PARTIALLY COMPLETE / LOCALLY VERIFIED** |
+| Issue 4 production acceptance | **BLOCKED** |
 | Production readiness | **NO** |
 | Enterprise readiness | **NO** |
 | Government integration readiness | **NO** |
 | Global deployment readiness | **NO** |
 
-The next normal action is to obtain and test PR-012 and applicable PR-003 authoritative counterparty evidence while PR-011 remains open for Issue 2. Because Issue 3 is blocked, Issue 4 remains locked unless the programme authority explicitly records another sequence exception.
+The next normal action is to obtain and test PR-013 authority appointment, federation, conformance and activation evidence together with PR-004 and applicable PR-003 packages. PR-012 remains open for Issue 3 and PR-011 remains open for Issue 2. Because Issue 4 is blocked, Issue 5 remains locked unless the programme authority explicitly records another sequence exception.

@@ -134,6 +134,13 @@
       "when": 1787511703665,
       "tag": "0018_counterparty_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1787514014475,
+      "tag": "0019_authority_governance",
+      "breakpoints": true
     }
   ]
 }

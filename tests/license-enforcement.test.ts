@@ -56,6 +56,7 @@ describe("central licence enforcement migration", () => {
     expect(() => db.prepare("UPDATE license_permission_policies SET operation_class='UNCONTROLLED' WHERE permission_code='dashboard:read'").run())
       .toThrow(/CHECK constraint/i);
 
+    for (const migration of migrations.slice(centralIndex + 1)) applyMigration(db, migration);
     const registered = new Set((db.prepare("SELECT permission_code FROM license_permission_policies").all() as Array<{ permission_code: string }>).map((row) => row.permission_code));
     expect([...grantedPermissions].filter((permission) => !registered.has(permission))).toEqual([]);
     db.close();

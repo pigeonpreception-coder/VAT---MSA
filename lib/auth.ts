@@ -116,6 +116,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
 };
 
 const WORKSPACE_READ = ["workspace:read", "search:read", "licensing:read"];
+const AUTHORITY_GOVERNANCE = ["authority-governance:read", "authority-governance:manage"];
 const ORGANISATION_CONTROL = [
   ...WORKSPACE_READ,
   "licensing:request",
@@ -132,13 +133,13 @@ const ORGANISATION_CONTROL = [
   "access-governance:manage",
 ];
 const CONTROL_PLANE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
-  PILOT_ADMIN: new Set(ORGANISATION_CONTROL),
+  PILOT_ADMIN: new Set([...ORGANISATION_CONTROL, ...AUTHORITY_GOVERNANCE]),
   TAXPAYER_OWNER: new Set(ORGANISATION_CONTROL),
   TAXPAYER_ADMIN: new Set(ORGANISATION_CONTROL),
   TAXPAYER_ACCOUNTANT: new Set([...WORKSPACE_READ, "employees:read", "roles:read", "workflows:read", "workflows:decide", "access-governance:read"]),
   TAXPAYER_STAFF: new Set(["workspace:read", "search:read"]),
   TAXPAYER_VIEWER: new Set(["workspace:read", "search:read"]),
-  NAMRA_SYSTEM_ADMIN: new Set(ORGANISATION_CONTROL),
+  NAMRA_SYSTEM_ADMIN: new Set([...ORGANISATION_CONTROL, ...AUTHORITY_GOVERNANCE]),
 };
 
 export function hasPermission(user: UserContext, permission: string): boolean {

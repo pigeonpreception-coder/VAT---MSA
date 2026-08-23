@@ -1,6 +1,7 @@
 import { AccessDeniedError } from "@/lib/auth";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { ControlPlaneValidationError } from "@/lib/domain/control-plane";
+import { AuthorityGovernanceValidationError } from "@/lib/domain/authority-governance";
 import { RequestGuardError, type RequestContext } from "@/lib/security/request";
 
 export function organisationIdFrom(request: Request): string | null {
@@ -16,6 +17,10 @@ export function controlPlaneProblem(error: unknown, context: RequestContext): Re
     code = status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED";
     detail = error.message;
   } else if (error instanceof ControlPlaneValidationError) {
+    status = 422;
+    code = error.code;
+    detail = error.message;
+  } else if (error instanceof AuthorityGovernanceValidationError) {
     status = 422;
     code = error.code;
     detail = error.message;
