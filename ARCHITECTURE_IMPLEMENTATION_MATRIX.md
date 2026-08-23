@@ -17,8 +17,8 @@ This matrix is the truthful completion record for the approved architecture. It 
 
 | # | Domain | Current implementation | Status | Required closure before national production |
 |---:|---|---|---|---|
-| 1 | Identity | Provider registry, immutable provider-subject links, provisioned-user checks, controlled self-serve identity assertion/verification posture, role/capability policy and development-only identity fallback | CONTROLLED FOUNDATION | Approved ITAS/enterprise IdP claims, MFA, recovery, lifecycle and assurance tests |
-| 2 | Taxpayer | Canonical taxpayers, identifiers, VAT status, scoped queries, idempotent registration intake and duplicate-safe self-serve applications that cannot auto-activate | CONTROLLED FOUNDATION | Authoritative ITAS verification, merge/deregistration rules and signed identifier precedence |
+| 1 | Identity | Provider registry, immutable provider-subject links, provisioned-user checks, controlled self-serve posture, durable proofing cases/events, explainable candidate confidence, mismatch evidence and development-only identity fallback | CONTROLLED FOUNDATION | Approved ITAS/enterprise IdP claims, MFA, recovery, proofing lifecycle and assurance tests |
+| 2 | Taxpayer | Canonical VAT/TIN uniqueness, scoped queries, idempotent registration intake, one proofing case per application and duplicate-safe self-serve applications that cannot auto-activate | CONTROLLED FOUNDATION | Authoritative ITAS verification, identifier precedence, provider freshness, merge/deregistration rules and accepted independent review |
 | 3 | Organisation | One taxpayer/one organisation constraint, branches, memberships and effective-dated buyer/seller capabilities | VERIFIED PILOT | NamRA lifecycle authority and enterprise policy enforcement evidence |
 | 4 | User management | Users, memberships, roles, permissions, grants and separated privileged portal projections | CONTROLLED FOUNDATION | Enterprise provisioning, invitation/suspension workflows, PAM and periodic access certification |
 | 5 | Buyer/Seller | Dynamic organisation capabilities and transaction-context roles without duplicate taxpayer identities | VERIFIED PILOT | Legal terminology and operating-policy approval |
@@ -56,6 +56,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 | Tenant isolation | Organisation/taxpayer predicates in repositories, permission checks in page/API handlers, national-scope separation | Independent penetration and policy-bypass testing remains mandatory |
 | Licence enforcement | Fail-closed permission/feature/operation registry; central page, portal, API, search and command guard; state-filtered navigation; read/export/compliance/correction continuity after restriction | Production plan authority, commercial provider, independent bypass test and legally approved continuity runbook remain mandatory |
 | Self-serve onboarding | Public bounded/idempotent/rate-limited intake; immutable consent and legal-identity snapshot; active-plan and cross-registry duplicate database gates; pending verification only; no account, organisation, subscription, payment or licence activation | Approved identity verification, ITAS/NamRA taxpayer contract, controlled promotion review and approved subscription provider remain mandatory |
+| Identity proofing | Permission-scoped queue; deterministic field-level confidence; append-only candidates/events; database-separated synthetic and authority states; mismatch no-self-resolution; no activation side effect | ITAS/NamRA proofing contract, authoritative attributes/provenance/freshness, merge policy and production-equivalent conformance remain mandatory |
 | Data integrity | Integer cents/quantity micros, uniqueness constraints, idempotency records, immutable correction lineage and hash-chained audit | Production database selection, migration rehearsal and independent reconciliation |
 | Reliable integration | Transactional outbox, event catalogue, retry-safe commands, webhook/sync delivery state | Managed broker/relay, consumer replay tests and contracted providers |
 | Offline safety | Device/range/batch/conflict models; untrusted submissions are rejected with explicit trust failure | Legal offline authority, enrolled device client, signed ranges and field pilot |
@@ -68,13 +69,14 @@ This matrix is the truthful completion record for the approved architecture. It 
 The canonical release gate passed on 2026-08-23:
 
 - ESLint and TypeScript completed without errors.
-- 78 unit/security/policy/database tests passed across fifteen test files.
-- Heuristic secret scan passed and a CycloneDX SBOM was generated.
-- The production build completed and exposed all application and API routes.
+- 114 unit/security/policy/database tests passed across 22 test files.
+- The heuristic secret scan passed; the high-threshold audit reported zero critical/high and one moderate development-only advisory; a CycloneDX SBOM with four production components was generated.
+- The production build completed and exposed 53 v1 API paths, including the licensed/scoped identity-proofing queue.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.
 - SQLite migration proof applied migrations `0000` through `0011`, corrected the approved synthetic expense with clean receipt custody, rejected pending/quarantined and wrong-owner evidence, applied a clean link, gated approval and proved the link immutable.
 - Central licence migration proof applied `0012` with foreign keys enabled, covered every granted permission, rejected invalid operation classes and classified read versus write-only navigation; static coverage proved every protected page and API route reaches the central guard.
 - Self-serve signup migration proof applied `0013`, enforced active-plan and cross-registry identity gates, immutable submitted identity/consent, controlled transitions, no premature promotion or deletion, and the permanent `NOT_ACTIVATED` intake boundary. Browser proof completed two synthetic submissions, caught and verified the asynchronous form-reset fix, and confirmed clean pending-verification status with no client errors.
+- Identity-proofing migration proof applied `0016` and `0017`, enforced canonical TIN uniqueness, one proofing case per registration, synthetic/authority evidence separation, append-only candidates/events/authority decisions and independent mismatch resolution without creating activation records.
 - Earlier runtime proofs covered versioned return workflows, blocked unconfigured ITAS submission, refund controls, invoice correction lineage, R2 quarantine, offline trust rejection, reports and separated portals.
 
 ## Production decision

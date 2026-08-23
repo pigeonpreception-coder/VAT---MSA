@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 
-export const REQUIRED_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
+const PHASE0_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
+export const REQUIRED_SCHEMA_REVISION = "issue2-identity-proofing-2026-08-23";
 
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS taxpayers (
@@ -108,6 +109,64 @@ const SCHEMA_STATEMENTS = [
     response_hash TEXT, verified_taxpayer_id TEXT REFERENCES taxpayers(id),
     checked_at TEXT NOT NULL, expires_at TEXT,
     UNIQUE (provider, request_reference)
+  )`,
+  `CREATE TABLE IF NOT EXISTS identity_proofing_cases (
+    id TEXT PRIMARY KEY,
+    subject_type TEXT NOT NULL CHECK (subject_type IN ('TAXPAYER_REGISTRATION','USER_IDENTITY')),
+    subject_reference TEXT NOT NULL,
+    registration_application_id TEXT UNIQUE REFERENCES registration_applications(id),
+    provider TEXT NOT NULL,
+    provider_environment TEXT NOT NULL CHECK (provider_environment IN ('CONTRACT_PENDING','SYNTHETIC_TEST','PRODUCTION_EQUIVALENT','PRODUCTION')),
+    provider_reference TEXT,
+    status TEXT NOT NULL CHECK (status IN ('PENDING_PROVIDER','CANDIDATE_FOUND','DUPLICATE_CONFIRMED','MISMATCH','MANUAL_REVIEW','SYNTHETIC_MATCHED','AUTHORITY_VERIFIED','REJECTED')),
+    confidence_bps INTEGER NOT NULL DEFAULT 0 CHECK (confidence_bps BETWEEN 0 AND 10000),
+    matched_taxpayer_id TEXT REFERENCES taxpayers(id),
+    evidence_hash TEXT,
+    reason_code TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id),
+    reviewed_by TEXT REFERENCES app_users(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    UNIQUE (provider, provider_reference),
+    CHECK (reviewed_by IS NULL OR reviewed_by <> requested_by)
+  )`,
+  `CREATE TABLE IF NOT EXISTS identity_reconciliation_candidates (
+    id TEXT PRIMARY KEY,
+    proofing_case_id TEXT NOT NULL REFERENCES identity_proofing_cases(id),
+    candidate_taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    outcome TEXT NOT NULL CHECK (outcome IN ('NO_CANDIDATE','CANDIDATE_FOUND','DUPLICATE_CONFIRMED','MISMATCH','MANUAL_REVIEW')),
+    confidence_bps INTEGER NOT NULL CHECK (confidence_bps BETWEEN 0 AND 10000),
+    matched_fields TEXT NOT NULL,
+    conflicting_fields TEXT NOT NULL,
+    evidence_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (proofing_case_id, candidate_taxpayer_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS identity_mismatch_cases (
+    id TEXT PRIMARY KEY,
+    proofing_case_id TEXT NOT NULL UNIQUE REFERENCES identity_proofing_cases(id),
+    mismatch_type TEXT NOT NULL,
+    conflicting_fields TEXT NOT NULL,
+    details_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('OPEN','RESOLVED','REJECTED')),
+    resolution_code TEXT,
+    assigned_to TEXT REFERENCES app_users(id),
+    resolved_by TEXT REFERENCES app_users(id),
+    opened_at TEXT NOT NULL,
+    resolved_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS identity_proofing_events (
+    id TEXT PRIMARY KEY,
+    proofing_case_id TEXT NOT NULL REFERENCES identity_proofing_cases(id),
+    event_type TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    confidence_bps INTEGER NOT NULL CHECK (confidence_bps BETWEEN 0 AND 10000),
+    reason_code TEXT NOT NULL,
+    evidence_hash TEXT,
+    actor_id TEXT NOT NULL REFERENCES app_users(id),
+    occurred_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS business_parties (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
@@ -948,6 +1007,7 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_status_issue_date ON invoices(status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_taxpayer_identifiers_taxpayer ON taxpayer_identifiers(taxpayer_id, status)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_taxpayers_tin ON taxpayers(tin)`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_supplier_issue_date ON invoices(supplier_taxpayer_id, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_customer_issue_date ON invoices(customer_taxpayer_id, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_ledger_taxpayer_period ON ledger_entries(taxpayer_id, period)`,
@@ -970,6 +1030,11 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_status_submitted ON registration_applications(status, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_identifiers ON registration_applications(vat_number, tin)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_identity_proofing_status_created ON identity_proofing_cases(status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_identity_proofing_subject ON identity_proofing_cases(subject_type, subject_reference)`,
+  `CREATE INDEX IF NOT EXISTS idx_identity_reconciliation_taxpayer ON identity_reconciliation_candidates(candidate_taxpayer_id, outcome)`,
+  `CREATE INDEX IF NOT EXISTS idx_identity_mismatch_status_opened ON identity_mismatch_cases(status, opened_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_identity_proofing_events_case_time ON identity_proofing_events(proofing_case_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
@@ -2201,6 +2266,76 @@ const PHASE0_RUNTIME_TRIGGER_STATEMENTS = [
     ) BEGIN SELECT RAISE(ABORT,'CERTIFICATE_RULE_BINDING_REQUIRED'); END`,
 ];
 
+const ISSUE2_IDENTITY_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_authority_guard_insert
+    BEFORE INSERT ON identity_proofing_cases
+    WHEN NEW.status='AUTHORITY_VERIFIED' AND (
+      NEW.provider<>'ITAS'
+      OR NEW.provider_environment NOT IN ('PRODUCTION_EQUIVALENT','PRODUCTION')
+      OR NEW.matched_taxpayer_id IS NULL
+      OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+      OR NEW.reviewed_by IS NULL OR NEW.reviewed_at IS NULL
+    )
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_AUTHORITY_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_authority_guard_update
+    BEFORE UPDATE OF status,provider,provider_environment,matched_taxpayer_id,evidence_hash,reviewed_by,reviewed_at ON identity_proofing_cases
+    WHEN NEW.status='AUTHORITY_VERIFIED' AND (
+      NEW.provider<>'ITAS'
+      OR NEW.provider_environment NOT IN ('PRODUCTION_EQUIVALENT','PRODUCTION')
+      OR NEW.matched_taxpayer_id IS NULL
+      OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+      OR NEW.reviewed_by IS NULL OR NEW.reviewed_at IS NULL
+    )
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_AUTHORITY_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_synthetic_guard_insert
+    BEFORE INSERT ON identity_proofing_cases
+    WHEN NEW.status='SYNTHETIC_MATCHED' AND (
+      NEW.provider_environment<>'SYNTHETIC_TEST'
+      OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+    )
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_SYNTHETIC_EVIDENCE_INVALID'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_synthetic_guard_update
+    BEFORE UPDATE OF status,provider_environment,evidence_hash ON identity_proofing_cases
+    WHEN NEW.status='SYNTHETIC_MATCHED' AND (
+      NEW.provider_environment<>'SYNTHETIC_TEST'
+      OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+    )
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_SYNTHETIC_EVIDENCE_INVALID'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_verified_immutable
+    BEFORE UPDATE ON identity_proofing_cases
+    WHEN OLD.status='AUTHORITY_VERIFIED' AND (
+      NEW.status<>OLD.status OR NEW.provider<>OLD.provider
+      OR NEW.provider_environment<>OLD.provider_environment
+      OR COALESCE(NEW.provider_reference,'')<>COALESCE(OLD.provider_reference,'')
+      OR COALESCE(NEW.matched_taxpayer_id,'')<>COALESCE(OLD.matched_taxpayer_id,'')
+      OR COALESCE(NEW.evidence_hash,'')<>COALESCE(OLD.evidence_hash,'')
+      OR NEW.confidence_bps<>OLD.confidence_bps
+    )
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_AUTHORITY_DECISION_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_no_delete
+    BEFORE DELETE ON identity_proofing_cases
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_PROOFING_HISTORY_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_reconciliation_no_update
+    BEFORE UPDATE ON identity_reconciliation_candidates
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_RECONCILIATION_EVIDENCE_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_reconciliation_no_delete
+    BEFORE DELETE ON identity_reconciliation_candidates
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_RECONCILIATION_EVIDENCE_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_event_no_update
+    BEFORE UPDATE ON identity_proofing_events
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_PROOFING_EVENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_proofing_event_no_delete
+    BEFORE DELETE ON identity_proofing_events
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_PROOFING_EVENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS identity_mismatch_no_self_resolution
+    BEFORE UPDATE OF status,resolved_by,resolved_at ON identity_mismatch_cases
+    WHEN NEW.status IN ('RESOLVED','REJECTED') AND EXISTS (
+      SELECT 1 FROM identity_proofing_cases p
+      WHERE p.id=NEW.proofing_case_id AND (NEW.resolved_by IS NULL OR NEW.resolved_by=p.requested_by)
+    )
+    BEGIN SELECT RAISE(ABORT,'IDENTITY_MISMATCH_INDEPENDENT_REVIEW_REQUIRED'); END`,
+];
+
 async function tableHasColumn(db: D1Database, table: string, column: string): Promise<boolean> {
   const result = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
   return result.results.some((item) => item.name === column);
@@ -2219,6 +2354,24 @@ async function applyPhase0LocalUpgrade(db: D1Database): Promise<void> {
   await db.prepare(`UPDATE certificates SET rule_set_version='NA-VAT-PILOT-2026.1'
     WHERE rule_set_version IS NULL AND EXISTS (SELECT 1 FROM invoices i WHERE i.id=certificates.invoice_id AND i.tax_rule_set_id='taxrule-na-pilot-2026-1')`).run();
   await db.batch(PHASE0_RUNTIME_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
+    VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(PHASE0_SCHEMA_REVISION).run();
+}
+
+async function applyIssue2LocalUpgrade(db: D1Database): Promise<void> {
+  await db.batch(ISSUE2_IDENTITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.prepare(`INSERT OR IGNORE INTO identity_proofing_cases
+    (id,subject_type,subject_reference,registration_application_id,provider,provider_environment,provider_reference,status,
+     confidence_bps,matched_taxpayer_id,evidence_hash,reason_code,requested_by,reviewed_by,created_at,updated_at,reviewed_at)
+    SELECT 'proof-reg-0001','TAXPAYER_REGISTRATION','reg-0001','reg-0001','ITAS','CONTRACT_PENDING',
+      'itas-contract-pending:reg-0001','PENDING_PROVIDER',0,NULL,NULL,'AUTHORITATIVE_PROVIDER_CONTRACT_REQUIRED',submitted_by,NULL,
+      '2026-08-23T20:00:00Z','2026-08-23T20:00:00Z',NULL
+    FROM registration_applications WHERE id='reg-0001'`).run();
+  await db.prepare(`INSERT OR IGNORE INTO identity_proofing_events
+    (id,proofing_case_id,event_type,from_status,to_status,confidence_bps,reason_code,evidence_hash,actor_id,occurred_at)
+    SELECT 'proof-event-reg-0001','proof-reg-0001','IdentityProofingRequested',NULL,'PENDING_PROVIDER',0,
+      'AUTHORITATIVE_PROVIDER_CONTRACT_REQUIRED',NULL,requested_by,'2026-08-23T20:00:00Z'
+    FROM identity_proofing_cases WHERE id='proof-reg-0001'`).run();
   await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
     VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(REQUIRED_SCHEMA_REVISION).run();
 }
@@ -2284,10 +2437,12 @@ async function initialize(db: D1Database): Promise<void> {
     const expenseReceiptGovernanceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("expense-receipt-governance-v1").first();
     if (!expenseReceiptGovernanceSeed) await db.batch(EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     await applyPhase0LocalUpgrade(db);
+    await applyIssue2LocalUpgrade(db);
     const licenseEnforcementSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("license-central-enforcement-v1").first();
     if (!licenseEnforcementSeed) await db.batch(LICENSE_ENFORCEMENT_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.batch(EXPENSE_RECEIPT_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(ISSUE2_IDENTITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   const foreignKeyViolations = await db.prepare("PRAGMA foreign_key_check").all<Record<string, unknown>>();
   if (foreignKeyViolations.results.length > 0) throw new Error("VAT-MSA local compatibility upgrade left foreign-key violations.");
   await db.prepare("PRAGMA optimize").run();

@@ -16,7 +16,10 @@ export const taxpayers = sqliteTable(
     email: text("email").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [uniqueIndex("ux_taxpayers_vat_number").on(table.vatNumber)],
+  (table) => [
+    uniqueIndex("ux_taxpayers_vat_number").on(table.vatNumber),
+    uniqueIndex("ux_taxpayers_tin").on(table.tin),
+  ],
 );
 
 export const taxpayerIdentifiers = sqliteTable(
@@ -239,6 +242,103 @@ export const registrationVerifications = sqliteTable(
   (table) => [
     uniqueIndex("ux_registration_verification_reference").on(table.provider, table.requestReference),
     index("idx_registration_verification_application").on(table.registrationApplicationId, table.status),
+  ],
+);
+
+export const identityProofingCases = sqliteTable(
+  "identity_proofing_cases",
+  {
+    id: text("id").primaryKey(),
+    subjectType: text("subject_type").notNull(),
+    subjectReference: text("subject_reference").notNull(),
+    registrationApplicationId: text("registration_application_id").references(() => registrationApplications.id),
+    provider: text("provider").notNull(),
+    providerEnvironment: text("provider_environment").notNull(),
+    providerReference: text("provider_reference"),
+    status: text("status").notNull(),
+    confidenceBps: integer("confidence_bps").notNull().default(0),
+    matchedTaxpayerId: text("matched_taxpayer_id").references(() => taxpayers.id),
+    evidenceHash: text("evidence_hash"),
+    reasonCode: text("reason_code").notNull(),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    reviewedBy: text("reviewed_by").references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    reviewedAt: text("reviewed_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_identity_proofing_registration").on(table.registrationApplicationId),
+    uniqueIndex("ux_identity_proofing_provider_reference").on(table.provider, table.providerReference),
+    index("idx_identity_proofing_status_created").on(table.status, table.createdAt),
+    index("idx_identity_proofing_subject").on(table.subjectType, table.subjectReference),
+    check("ck_identity_proofing_subject_type", sql`${table.subjectType} IN ('TAXPAYER_REGISTRATION','USER_IDENTITY')`),
+    check("ck_identity_proofing_environment", sql`${table.providerEnvironment} IN ('CONTRACT_PENDING','SYNTHETIC_TEST','PRODUCTION_EQUIVALENT','PRODUCTION')`),
+    check("ck_identity_proofing_status", sql`${table.status} IN ('PENDING_PROVIDER','CANDIDATE_FOUND','DUPLICATE_CONFIRMED','MISMATCH','MANUAL_REVIEW','SYNTHETIC_MATCHED','AUTHORITY_VERIFIED','REJECTED')`),
+    check("ck_identity_proofing_confidence", sql`${table.confidenceBps} BETWEEN 0 AND 10000`),
+    check("ck_identity_proofing_review_separation", sql`${table.reviewedBy} IS NULL OR ${table.reviewedBy} <> ${table.requestedBy}`),
+  ],
+);
+
+export const identityReconciliationCandidates = sqliteTable(
+  "identity_reconciliation_candidates",
+  {
+    id: text("id").primaryKey(),
+    proofingCaseId: text("proofing_case_id").notNull().references(() => identityProofingCases.id),
+    candidateTaxpayerId: text("candidate_taxpayer_id").notNull().references(() => taxpayers.id),
+    outcome: text("outcome").notNull(),
+    confidenceBps: integer("confidence_bps").notNull(),
+    matchedFields: text("matched_fields").notNull(),
+    conflictingFields: text("conflicting_fields").notNull(),
+    evidenceHash: text("evidence_hash").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_identity_reconciliation_candidate").on(table.proofingCaseId, table.candidateTaxpayerId),
+    index("idx_identity_reconciliation_taxpayer").on(table.candidateTaxpayerId, table.outcome),
+    check("ck_identity_reconciliation_outcome", sql`${table.outcome} IN ('NO_CANDIDATE','CANDIDATE_FOUND','DUPLICATE_CONFIRMED','MISMATCH','MANUAL_REVIEW')`),
+    check("ck_identity_reconciliation_confidence", sql`${table.confidenceBps} BETWEEN 0 AND 10000`),
+  ],
+);
+
+export const identityMismatchCases = sqliteTable(
+  "identity_mismatch_cases",
+  {
+    id: text("id").primaryKey(),
+    proofingCaseId: text("proofing_case_id").notNull().references(() => identityProofingCases.id),
+    mismatchType: text("mismatch_type").notNull(),
+    conflictingFields: text("conflicting_fields").notNull(),
+    detailsHash: text("details_hash").notNull(),
+    status: text("status").notNull(),
+    resolutionCode: text("resolution_code"),
+    assignedTo: text("assigned_to").references(() => appUsers.id),
+    resolvedBy: text("resolved_by").references(() => appUsers.id),
+    openedAt: text("opened_at").notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (table) => [
+    uniqueIndex("ux_identity_mismatch_proofing_case").on(table.proofingCaseId),
+    index("idx_identity_mismatch_status_opened").on(table.status, table.openedAt),
+    check("ck_identity_mismatch_status", sql`${table.status} IN ('OPEN','RESOLVED','REJECTED')`),
+  ],
+);
+
+export const identityProofingEvents = sqliteTable(
+  "identity_proofing_events",
+  {
+    id: text("id").primaryKey(),
+    proofingCaseId: text("proofing_case_id").notNull().references(() => identityProofingCases.id),
+    eventType: text("event_type").notNull(),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status").notNull(),
+    confidenceBps: integer("confidence_bps").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    evidenceHash: text("evidence_hash"),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (table) => [
+    index("idx_identity_proofing_events_case_time").on(table.proofingCaseId, table.occurredAt),
+    check("ck_identity_proofing_event_confidence", sql`${table.confidenceBps} BETWEEN 0 AND 10000`),
   ],
 );
 

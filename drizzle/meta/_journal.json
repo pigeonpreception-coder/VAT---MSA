@@ -113,6 +113,20 @@
       "when": 1787503294421,
       "tag": "0015_phase0_stabilization",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1787508913706,
+      "tag": "0016_identity_proofing_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1787508968889,
+      "tag": "0017_identity_proofing_enforcement",
+      "breakpoints": true
     }
   ]
 }

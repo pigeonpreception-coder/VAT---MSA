@@ -35,7 +35,7 @@ function baseFixture(db: DatabaseSync) {
 describe("Phase 0 database enforcement", () => {
   it("registers the production schema revision and generated snapshot", () => {
     const journal = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8"));
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 15, tag: "0015_phase0_stabilization" });
+    expect(journal.entries.find((entry: { idx: number }) => entry.idx === 15)).toMatchObject({ idx: 15, tag: "0015_phase0_stabilization" });
     const snapshot = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "0015_snapshot.json"), "utf8"));
     expect(snapshot.tables.app_schema_revisions).toBeDefined();
     expect(snapshot.tables.step_up_evidence_uses).toBeDefined();

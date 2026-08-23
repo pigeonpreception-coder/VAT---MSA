@@ -29,6 +29,7 @@ security:
 tags:
   - name: Signup
   - name: Identity
+  - name: Identity proofing
   - name: Organisations
   - name: Registrations
   - name: Quotations
@@ -235,6 +236,35 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/identity-proofing-cases:
+    get:
+      tags: [Identity proofing]
+      operationId: listIdentityProofingCases
+      summary: List explainable identity-proofing cases within the caller's authorised scope.
+      description: |
+        Returns the durable proofing posture and confidence evidence created for registration
+        applications. Synthetic results are explicitly labelled and never constitute NamRA/ITAS
+        authority verification or create taxpayer, organisation, membership or licence records.
+      security:
+        - oauth2: [registrations.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Scoped identity-proofing queue.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [identity_proofing_cases]
+                properties:
+                  identity_proofing_cases:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: '#/components/schemas/IdentityProofingCase' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/quotations:
     get:
       tags: [Quotations]
@@ -1233,14 +1263,40 @@ components:
     RegistrationAccepted:
       type: object
       additionalProperties: false
-      required: [registration_id, status, verification_source, verification_status, submitted_at, next_action]
+      required: [registration_id, status, verification_source, verification_status, proofing_case_id, identity_proofing_status, submitted_at, next_action]
       properties:
         registration_id: { type: string, format: uuid }
         status: { type: string, const: PENDING_VERIFICATION }
         verification_source: { type: string, const: ITAS }
         verification_status: { type: string, const: AWAITING_PROVIDER_CONTRACT }
+        proofing_case_id: { type: string, format: uuid }
+        identity_proofing_status: { type: string, const: PENDING_PROVIDER }
         submitted_at: { type: string, format: date-time }
         next_action: { type: string }
+    IdentityProofingCase:
+      type: object
+      additionalProperties: false
+      required: [id, subject_type, subject_reference, provider, provider_environment, status, confidence_bps, reason_code, requested_by, created_at, updated_at]
+      properties:
+        id: { type: string, maxLength: 100 }
+        subject_type: { type: string, enum: [TAXPAYER_REGISTRATION, USER_IDENTITY] }
+        subject_reference: { type: string, maxLength: 100 }
+        registration_application_id: { type: [string, 'null'], maxLength: 100 }
+        provider: { type: string, enum: [ITAS] }
+        provider_environment: { type: string, enum: [CONTRACT_PENDING, SYNTHETIC_TEST, PRODUCTION_EQUIVALENT, PRODUCTION] }
+        status: { type: string, enum: [PENDING_PROVIDER, CANDIDATE_FOUND, DUPLICATE_CONFIRMED, MISMATCH, MANUAL_REVIEW, SYNTHETIC_MATCHED, AUTHORITY_VERIFIED, REJECTED] }
+        confidence_bps: { type: integer, minimum: 0, maximum: 10000 }
+        matched_taxpayer_id: { type: [string, 'null'], maxLength: 100 }
+        reason_code: { type: string, maxLength: 100 }
+        requested_by: { type: string, maxLength: 100 }
+        reviewed_by: { type: [string, 'null'], maxLength: 100 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        reviewed_at: { type: [string, 'null'], format: date-time }
+        mismatch_status: { type: [string, 'null'], enum: [OPEN, RESOLVED, REJECTED, null] }
+        conflicting_fields:
+          type: [string, 'null']
+          description: Minimized JSON field-name list; raw provider evidence is not returned.
     QuotationSubmission:
       type: object
       additionalProperties: false

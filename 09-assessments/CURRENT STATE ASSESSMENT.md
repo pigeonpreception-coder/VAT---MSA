@@ -4,9 +4,9 @@
 
 **Repository:** `C:\Users\Jean-Pierre\Desktop\2026 FOLDERS\SAFINA BUSINESS ADVISORY\SAFINA\VAT Management System`
 
-**Assessed baseline before this increment:** `a7fccf200fdd7cf087f4b691084db3061e3ebb8c`
+**Assessed baseline before this increment:** `22559d3`
 
-**Execution model:** controlled sequential remediation; Issue 1 only
+**Execution model:** controlled sequential remediation with the programme-authorised Issue 2 sequence exception
 
 **Environment:** local, synthetic data, no live external integrations
 
@@ -14,171 +14,192 @@
 
 ## Executive update
 
-VAT-MSA is a functional controlled-pilot application. The Phase 0 increment corrected the previous local database upgrade/startup failure, bound invoice certification to an authority-approved effective statutory rule, prohibited development certificate signing in production, reconciled all 52 runtime v1 paths with OpenAPI, introduced signed single-use privileged evidence, and restored a passing local release gate.
+VAT-MSA remains a functional controlled-pilot application. Issue 1's application controls are locally verified, but Issue 1 remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED` because production identity-provider, MFA/recovery, origin-isolation, revocation and independent attack evidence are unavailable.
 
-The earlier forensic assessment dated 23 August 2026 remains useful for its broad inventory, but its baseline and several current-state findings are superseded. In particular, the canonical local runtime is no longer blocked by the licence seed failure; OpenAPI is no longer missing runtime paths; the high-threshold dependency gate no longer reports critical/high advisories; and the assessed critical local journeys now render or respond successfully.
+On 23 August 2026 the programme authority explicitly instructed the remediation programme to move to Issue 2 despite that blocker. This is a recorded sequence exception, not a waiver or production acceptance. Issue 2 is therefore the only newly unlocked issue; Issue 3 and later issues remain locked unless Issue 2 passes or another explicit exception is recorded.
 
-The supplied 27-issue prompt has been made executable through the [controlled sequential remediation execution addendum](../06-delivery/controlled-sequential-remediation-execution-addendum.md). The addendum corrects its incomplete state machine, defines authority and safety gates, resolves overlapping issue ownership, prevents stale failure assumptions and preserves strict PASS-only unlocking.
+Issue 2 now has a durable local identity-proofing foundation: each registration receives one fail-closed proofing case; canonical VAT numbers and TINs are independently unique; deterministic reconciliation records explainable matched/conflicting fields and confidence; mismatch resolution requires an independent actor; synthetic evidence is database-separated from authority verification; and proofing decisions/events are append-only. The scoped API and registration UI expose the posture without returning raw provider evidence.
 
-Under that strict sequence, **Issue 1 is the only unlocked issue**. It has locally verifiable controls, but it cannot receive PASS because the production identity provider, actual MFA and recovery operations, managed-edge origin isolation, revocation behaviour and independent security evidence are not present in this local environment. **Issue 1 is BLOCKED — EXTERNAL DEPENDENCY REQUIRED. Issues 2–27 remain LOCKED.**
+This increment does **not** claim that ITAS/NamRA verified any identity. Live ITAS remains disabled. Registration still stops at `PENDING_VERIFICATION`; no proofing result creates a taxpayer, organisation, user, membership, authorization, subscription or licence. Issue 2 consequently remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED` pending PR-011 and the applicable PR-003 authority integration evidence.
+
+## Authorised sequence exception record
+
+| Field | Record |
+| --- | --- |
+| Authority direction | “move to issue number 2, since issue 1 can't be resolved and completed now” |
+| Recorded | 23 August 2026 |
+| Scope | Bounded local/staging Issue 2 implementation with synthetic data |
+| Issue 1 effect | None; remains blocked and not closed |
+| Production effect | None; live identity proofing and ITAS remain disabled |
+| Downstream effect | Issue 3–27 remain locked absent Issue 2 PASS or another explicit exception |
 
 ## Current system position
 
 | Area | Current evidence-backed state | Important remaining boundary |
 | --- | --- | --- |
-| Local runtime and database upgrade | Functional; legacy local D1 upgrades non-destructively and readiness/core routes respond | Managed production migration, backup/restore and rollback evidence |
-| Identity | Provisioned Sites identity headers map by stable provider subject; production fails closed unless the Sites dispatch trust mode is declared | Signed production IdP contract, direct-origin denial, header strip/re-injection proof, identity lifecycle and revocation evidence |
-| Privileged step-up | HMAC-SHA256 v2 evidence is actor-, MFA-method-, issuer-, session-, origin- and action-bound, time-limited and persisted once by digest | Trusted IdP/broker issuance, real MFA enrollment/recovery and independent spoof/replay testing |
-| Authorization and governance | Central permissions/licence policy, no self-approval, immutable decisions, quarterly access reviews and non-destructive expiry are implemented foundations | Production IAM/PAM operation, tenant-isolation penetration evidence and controlled database administration |
-| Self-service signup | Company intake works with synthetic pending records; no licence is activated | Identity proofing, verified notifications, sandbox payment lifecycle and provisioning acceptance |
+| Local runtime and database upgrade | Functional; forward-only revisions and non-destructive local upgrades are enforced | Managed production migration, backup/restore and rollback evidence |
+| Identity authentication | Sites identity maps by stable provider subject and production fails closed without declared dispatch trust | Production IdP, MFA/recovery, origin and revocation acceptance (PR-004) |
+| Identity proofing | Durable scoped cases, deterministic candidates, mismatch evidence, immutable events and synthetic/authority separation | ITAS/NamRA proofing contract, accepted attributes/provenance/freshness, merge rules and production-equivalent conformance (PR-011) |
+| Taxpayer uniqueness | VAT and TIN are database-unique; one registration has at most one proofing case | NamRA-approved identifier precedence, deregistration and legitimate merge procedure |
+| Authorization and governance | Central permissions/licence policy, no self-approval, immutable decisions, quarterly access reviews and non-destructive expiry foundations | Production IAM/PAM, tenant-isolation assessment and controlled database administration |
+| Self-service signup | Company intake works with synthetic pending records; no licence is activated | Authoritative identity/taxpayer proof, verified notifications, sandbox payment and provisioning acceptance |
 | Licensing | Central page/API/search/command enforcement and expired read/export/compliance continuity are implemented | Provider-backed commercial lifecycle, reconciliation and race/load acceptance |
-| Statutory VAT | Runtime now requires one effective `AUTHORITY_APPROVED` Namibia rule and fails closed otherwise | Tax/Finance approval, signed golden vectors and authoritative country rule activation |
-| Invoice/certificate | Invoice pipeline, ledgers, audit and outbox exist; rule-bound certification checks are implemented | Production HSM/KMS signing, trusted counterparties, authority delivery and reconciliation |
-| Expenses/documents | Receipt requirement, approved CLEAN scan gate, quarantine rules and maker-checker controls are implemented | Production malware/CDR provider, retention/legal hold and accounting posting/reversal policy |
-| API contract | 52 runtime v1 paths and 65 method/path operations are represented in OpenAPI and contract-tested | External consumer conformance and production gateway policy |
-| Dependencies/build | Phase 0 gate reported 0 critical, 0 high and 1 moderate development-only transitive advisory | Remove or formally time-bound the Drizzle/esbuild tooling risk |
-| External integrations | ITAS, real payments, email, SMS and event delivery remain disabled or unconfigured | Signed contracts, approved environments, credentials, owners and operational acceptance |
-| Production operations | Architecture, SLO and runbook foundations exist | Deployed observability, incident response, capacity, backup/restore and DR exercises |
+| Statutory VAT | Runtime requires one effective `AUTHORITY_APPROVED` Namibia rule and fails closed otherwise | Tax/Finance approval, signed golden vectors and authoritative rule activation |
+| Expenses/documents | Receipt, approved CLEAN scan, quarantine and maker-checker controls are implemented | Production malware/CDR provider, retention/legal hold and posting/reversal policy |
+| API contract | 53 runtime v1 paths and 66 method/path operations are represented and contract-tested | External consumer and production gateway conformance |
+| External integrations | ITAS, real payments, email, SMS and event delivery remain disabled/unconfigured | Signed contracts, approved environments, credentials, owners and operational acceptance |
+| Production operations | Architecture, SLO and runbook foundations exist | Deployed observability, capacity, incident, backup/restore and DR exercises |
 
-## Issue 1 — Production Identity Foundation
+## Issue 1 — Production Identity Foundation (carried forward)
+
+Issue 1 implemented signed v2 step-up evidence bound to actor, issuer, MFA method, session, origin and exact action; bounded assertion/authentication age; single-use database digests; fail-closed production trust configuration; and negative replay/spoofing coverage. Its last complete local gate passed 21 test files and 106 tests.
+
+**Decision:** `BLOCKED — EXTERNAL DEPENDENCY REQUIRED`. PR-004 still requires an approved production-equivalent IdP/edge environment, accountable IAM/Cloud owners and CISO acceptance for phishing-resistant MFA, recovery, revocation, session controls, direct-origin denial, trusted-header replacement, key custody and authorized attack tests. The Issue 2 sequence exception does not change this decision.
+
+## Issue 2 — Production Identity Proofing
 
 ### A. Problem
 
-The current application consumes hosting-injected identity headers and relies on a declared Sites dispatch boundary. The repository does not prove that a production origin is unreachable directly or that caller-supplied identity headers are stripped and replaced. Actual MFA enrollment, recovery, revocation and production-equivalent IdP operation are also unevidenced.
-
-The Phase 0 step-up token was signed, actor-bound, time-limited and single-use, but its v1 payload did not cryptographically bind the asserted MFA method, trusted issuer, application session, request action or origin. The Phase 0 evidence description therefore exceeded what the token itself proved.
+The prior registration path rejected obvious VAT/TIN duplicates and recorded a placeholder ITAS verification state, but it did not own a durable proofing case, field-level candidate confidence, mismatch lifecycle or database distinction between synthetic evidence and authoritative verification. TIN uniqueness was not enforced directly on the canonical taxpayer table. A future integration or privileged database actor could therefore have lacked a complete, immutable proofing boundary.
 
 ### B. Root cause
 
-The identity assurance boundary spans services and owners outside this repository: the IdP, Sites/edge dispatch, DNS/origin controls, secret management, MFA/recovery administration and independent security assessment. The initial local step-up format intentionally covered a smaller Phase 0 slice and did not carry the complete assurance context.
+The live ITAS/NamRA proofing protocol, authoritative attributes, signature/provenance model, freshness, identifier precedence, duplicate/merge policy and operational acceptance are external decisions. The repository had correctly avoided inventing them, but it also lacked the internal case/evidence model needed to integrate them safely later.
 
 ### C. Existing implementation before this increment
 
-- `app/chatgpt-auth.ts` rejected production identity unless `VAT_MSA_IDENTITY_TRUST_MODE=SITES_DISPATCH` and mapped platform subject identifiers to active provisioned identity links.
-- `lib/security/step-up-evidence.ts` signed `v1.<issued-at>.<nonce>.<HMAC>` and rejected tampering, actor mismatch, expiry, future timestamps and weak secrets.
-- `lib/security/step-up.ts` rejected unsigned privileged evidence in production and persisted an evidence digest once in `step_up_evidence_uses`.
-- Migration `0015_phase0_stabilization.sql` created the single-use evidence table and unique digest control.
-- PR-004 in the production-readiness backlog correctly remained open for identity and origin assurance.
+- Idempotent registration intake with VAT/TIN checks against canonical and active applications.
+- Unique VAT number plus unique typed identifier records.
+- Registration verification record held at `AWAITING_PROVIDER_CONTRACT`.
+- ITAS adapter that fails closed when unavailable.
+- Registration list and submission UI/API.
+- One-taxpayer/one-organisation architecture with NamRA confirmation explicitly outstanding.
 
 ### D. Changes made in this increment
 
-- Replaced the minimal v1 step-up format with a signed v2 claims envelope.
-- Bound evidence to the internal actor, exact issuer, exact HTTP method/path audience, application origin and application session.
-- Required a signed `mfa` authentication-method claim and bounded both assertion age and underlying authentication age.
-- Retained five-minute validity, future-clock-skew rejection, HMAC-SHA256 verification and database-enforced single use.
-- Added exact issuer configuration and made a missing/weak verifier fail closed.
-- Added negative coverage for cross-user, cross-session, cross-origin, cross-action and wrong-issuer reuse, tampering, expiry, future time, stale authentication and weak configuration.
-- Added the remediation execution addendum so prompt status and acceptance decisions are unambiguous.
+- Added one durable proofing case per registration with provider/environment, confidence, evidence digest, reason, requester/reviewer and timestamps.
+- Added append-only reconciliation candidates and proofing events plus independent mismatch cases.
+- Added deterministic explainable reconciliation for VAT, TIN, company registration number and normalized legal name.
+- Added canonical TIN uniqueness alongside existing VAT uniqueness.
+- Automatically creates a `PENDING_PROVIDER` / `CONTRACT_PENDING` proofing case and atomic outbox event with every accepted registration.
+- Added fail-closed database guards for authority and synthetic states, immutable authority decisions/history/evidence, and mismatch no-self-resolution.
+- Added a permission/licence-scoped proofing queue API and identity-proofing status, confidence and mismatch columns to the registration UI.
+- Added forward-only migrations, runtime revision enforcement, OpenAPI, event catalogue, API catalogue and security-boundary evidence.
 
 ### E. Files/components changed
 
-- `lib/security/step-up-evidence.ts`
-- `lib/security/step-up.ts`
-- `tests/step-up-evidence.test.ts`
-- `.env.example`
-- `03-api/openapi.yaml`
-- `05-security/phase0-identity-origin-trust.md`
-- `06-delivery/controlled-sequential-remediation-execution-addendum.md`
-- `09-assessments/CURRENT STATE ASSESSMENT.md`
-- `09-assessments/VAT-MSA-CURRENT-STATE-ASSESSMENT-2026-08-23.md` (supersession notice only)
+- `db/schema.ts`, `db/runtime.ts`
+- `drizzle/0016_identity_proofing_core.sql`, `drizzle/0017_identity_proofing_enforcement.sql` and generated snapshots/journal
+- `lib/domain/identity-proofing.ts`, `lib/data/identity-repository.ts`
+- `app/api/v1/identity-proofing-cases/route.ts`, `app/api/v1/registration-applications/route.ts`
+- `app/registrations/page.tsx`
+- `tests/identity-domain.test.ts`, `tests/identity-proofing-migration.test.ts`, Phase 0/signup migration regressions
+- `03-api/openapi.yaml`, `03-api/event-catalog.yaml`, `08-enterprise-architecture/api-catalog.yaml`
+- `05-security/issue2-identity-proofing-boundary.md`
+- delivery control, evidence backlog, architecture matrix and this assessment
 
 ### F. Database changes
 
-None. The existing unique `step_up_evidence_uses.evidence_digest` persistence remains suitable for single-use v2 evidence.
+Migration `0016_identity_proofing_core.sql` creates `identity_proofing_cases`, `identity_reconciliation_candidates`, `identity_mismatch_cases` and `identity_proofing_events`. Migration `0017_identity_proofing_enforcement.sql` adds canonical TIN uniqueness, evidence/state triggers, immutable-history triggers, independent mismatch resolution, legacy pending-case/event backfill and schema revision `issue2-identity-proofing-2026-08-23`.
 
-### G. API/contract changes
+Production startup does not mutate schema at request time; it requires the registered revision. The local upgrade is forward-only and backfills existing synthetic registration `reg-0001` as pending provider evidence, not verified.
 
-No route was added or removed. Privileged command requests carrying signed evidence now require:
+### G. API and event contract changes
 
-- `x-vat-msa-step-up-evidence`: v2 signed claims envelope;
-- `x-vat-msa-session-id`: the session identifier included in the signed claims;
-- configured `VAT_MSA_STEP_UP_ISSUER`: exact trusted issuer match.
+- Added `GET /api/v1/identity-proofing-cases` (`registrations:read`, central licensed `READ`) returning at most 100 scope-filtered minimized case summaries.
+- Registration `POST` acceptance now returns `proofing_case_id` and `identity_proofing_status`.
+- Added `na.vatmsa.identity.proofing-requested.v1` with a minimized atomic-outbox payload.
+- OpenAPI now covers 53 v1 paths and 66 method/path operations.
 
-The signed audience is the uppercase HTTP method plus exact route pathname, and the signed origin must match the request origin. Existing local synthetic confirmation remains non-production only.
+No mutation endpoint claims authority verification. No raw provider response or evidence digest is returned.
 
 ### H. Security changes
 
-The v2 format prevents a valid captured token from being repurposed for another actor, session, origin or privileged action and prevents a recently issued assertion from masking stale authentication. Database digest uniqueness continues to reject exact replay. These are local application controls; their trustworthiness in production still depends on exclusive signing-key custody and an accepted identity broker.
+Authority verification requires ITAS, `PRODUCTION_EQUIVALENT` or `PRODUCTION`, a matched taxpayer, evidence digest and independent reviewer/time. Synthetic matches require `SYNTHETIC_TEST`; they cannot be relabelled as authority evidence. Reviewed-by/requested-by separation, mismatch resolver separation, unique identifiers/cases/candidates and append-only proofing history are database-enforced. Non-national callers see only their requested cases.
 
-### I. Tests
+### I. Automated verification
 
-The targeted tests passed (2 files, 10 tests). The complete local release gate also passed:
+Focused verification passed 4 files and 17 tests. The complete local suite passed 22 files and 114 tests, including:
 
-- fresh valid MFA evidence;
-- tamper and cross-user rejection;
-- cross-session, cross-origin, cross-action and wrong-issuer rejection;
-- expired, future-dated and stale-authentication rejection;
-- weak verifier rejection;
-- database duplicate-digest rejection;
-- lint, typecheck, complete unit/migration suite, secret scan, dependency audit, SBOM and production build.
+- exact, partial, name-only, conflict and no-candidate reconciliation outcomes;
+- authority-state rejection for synthetic/unproven evidence;
+- synthetic-state environment/evidence enforcement and no activation side effect;
+- VAT/TIN and one-case-per-registration uniqueness;
+- immutable candidate/event/authority history;
+- mismatch requester self-resolution rejection and independent resolution acceptance;
+- schema revision/snapshot verification and existing Phase 0/signup migration regressions;
+- exact runtime/OpenAPI path and operation reconciliation.
 
-Recorded result: ESLint passed; TypeScript passed; 21 test files and 106 tests passed; the heuristic local secret scan passed; the high-threshold dependency audit passed with zero critical/high and one moderate development-only advisory; the CycloneDX SBOM was regenerated with four production components; and the Vinext/Vite production build completed with all 52 v1 API paths emitted.
+The complete canonical release gate passed: ESLint and TypeScript completed without errors; 22 test files and 114 tests passed; the heuristic local secret scan passed; the high-threshold dependency audit reported zero critical/high and one moderate development-only advisory; the CycloneDX SBOM was regenerated with four production components; and the Vinext/Vite production build completed with all 53 v1 API paths, including `/api/v1/identity-proofing-cases`.
 
-### J. End-to-end verification
+### J. End-to-end and operational verification
 
-**NOT VERIFIED — EXTERNAL ENVIRONMENT REQUIRED.** A local signed fixture is not a production-equivalent IdP login. No approved IdP tenant, disposable identity set, phishing-resistant MFA factor, recovery operator, managed origin or independent attack-test environment was supplied for this assessment.
+**NOT VERIFIED — EXTERNAL ENVIRONMENT REQUIRED.** No approved ITAS/NamRA sandbox or production-equivalent endpoint, protocol, credentials, disposable authority identities, lawful test record set, signature chain, response freshness contract or independent reviewer was supplied. Browser testing was not used as a substitute for those facts.
 
 ### K. Evidence
 
-- Phase 0 evidence: `09-assessments/PHASE0-STABILIZATION-EVIDENCE-2026-08-23.md`
-- Identity/origin boundary: `05-security/phase0-identity-origin-trust.md`
-- External acceptance backlog: `06-delivery/phase0-production-readiness-evidence-backlog.md`, item PR-004
-- Automated tests: `tests/step-up-evidence.test.ts` and `tests/phase0-migration.test.ts`
+- `05-security/issue2-identity-proofing-boundary.md`
+- migrations `0016` and `0017` plus snapshots and schema revision
+- `tests/identity-domain.test.ts` and `tests/identity-proofing-migration.test.ts`
+- OpenAPI/event/API catalogues
+- `06-delivery/phase0-production-readiness-evidence-backlog.md`, PR-011 and PR-003
 
 ### L. Residual risk and exact external dependency
 
-PR-004 requires an approved production-equivalent IdP and edge environment plus accountable IAM/Cloud owners and CISO acceptance. Evidence must cover OIDC/SAML configuration as applicable, issuer/audience/signature/time validation, phishing-resistant MFA enrollment and enforcement, controlled recovery, revocation, session controls, direct-origin denial, trusted-header replacement, key custody/rotation, clock synchronization, and authorized rejection tests for forgery, replay, invalid issuer/audience/signature/origin and unauthorized recovery.
+PR-011 requires Identity/Master Data ownership and NamRA/ITAS plus CISO/Privacy acceptance of identifier precedence, lawful/minimal provider attributes, signed provenance, freshness/expiry, confidence and mismatch policy, independent review, merge/deregistration, sandbox/production separation, conformance/rejection cases and monitoring. PR-003 must supply the accepted live integration contract and operational controls.
 
-Until that evidence exists, a compromised or misconfigured dispatch/origin/broker could undermine the local application controls.
+Until those packages exist, local confidence can detect candidate similarity but cannot prove legal identity, ownership, current VAT status or authority. Direct database administration remains an operational-control risk requiring production privileged-access and audit evidence.
 
 ### M. Acceptance decision
 
 **BLOCKED — EXTERNAL DEPENDENCY REQUIRED**
 
-Local remediation is materially stronger and is **PARTIALLY COMPLETE / LOCALLY VERIFIED**. It does not satisfy the mandatory production-equivalent end-to-end or operational gates. Issue 1 does not PASS and is not CLOSED.
+The local increment is **PARTIALLY COMPLETE / LOCALLY VERIFIED**. It supplies the safe integration foundation and negative controls, but Issue 2 does not PASS or CLOSE without production-equivalent and operational authority evidence.
 
 ## Sequential remediation control board
 
 | # | Issue | Status | Gate/evidence position |
 | ---: | --- | --- | --- |
-| 1 | Production identity foundation | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | Local controls improved; PR-004 and production-equivalent E2E/operational evidence open |
-| 2 | Production identity proofing | **LOCKED** | Issue 1 has not passed |
-| 3 | Taxpayer/counterparty trust | **LOCKED** | Issue 1 has not passed |
-| 4 | Authority provisioning/federation | **LOCKED** | Issue 1 has not passed |
-| 5 | Commercial subscription/licence operations | **LOCKED** | Issue 1 has not passed |
-| 6 | Security bypass/runtime viability | **LOCKED** | Issue 1 has not passed |
-| 7 | Account-creation lifecycle | **LOCKED** | Issue 1 has not passed; “failing page” must be freshly reproduced |
-| 8 | Live ITAS/authority adapter | **LOCKED** | Issue 1 has not passed |
-| 9 | Email/SMS/invitations | **LOCKED** | Issue 1 has not passed |
-| 10 | Statutory VAT rule engine | **LOCKED** | Issue 1 has not passed |
-| 11 | Production-scale taxpayer reconciliation | **LOCKED** | Issue 1 has not passed |
-| 12 | Full reconciliation lifecycle | **LOCKED** | Issue 1 has not passed |
-| 13 | VAT return formulas/authority submission | **LOCKED** | Issue 1 has not passed |
-| 14 | Tax authority case management | **LOCKED** | Issue 1 has not passed |
-| 15 | Financial accounting core | **LOCKED** | Issue 1 has not passed |
-| 16 | Accounting posting/malware protection | **LOCKED** | Issue 1 has not passed |
-| 17 | Inventory management | **LOCKED** | Issue 1 has not passed |
-| 18 | Order-to-cash/fulfilment | **LOCKED** | Issue 1 has not passed |
-| 19 | Process catalogue/serialization | **LOCKED** | Issue 1 has not passed |
-| 20 | File security/retention | **LOCKED** | Issue 1 has not passed |
-| 21 | Reporting/high-volume reads | **LOCKED** | Issue 1 has not passed |
-| 22 | Device trust/offline operation | **LOCKED** | Issue 1 has not passed |
-| 23 | External system contracts | **LOCKED** | Issue 1 has not passed |
-| 24 | Payment-provider productionization | **LOCKED** | Issue 1 has not passed |
-| 25 | Event platform | **LOCKED** | Issue 1 has not passed |
-| 26 | Communication platform | **LOCKED** | Issue 1 has not passed |
-| 27 | AI platform | **LOCKED** | Issue 1 has not passed |
+| 1 | Production identity foundation | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | PR-004 open; explicit Issue 2 sequence exception recorded |
+| 2 | Production identity proofing | **BLOCKED — EXTERNAL DEPENDENCY REQUIRED** | Local foundation verified; PR-011 and applicable PR-003 evidence open |
+| 3 | Taxpayer/counterparty trust | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 4 | Authority provisioning/federation | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 5 | Commercial subscription/licence operations | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 6 | Security bypass/runtime viability | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 7 | Account-creation lifecycle | **LOCKED** | Issue 2 has not passed; stale-fact reproduction still required |
+| 8 | Live ITAS/authority adapter | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 9 | Email/SMS/invitations | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 10 | Statutory VAT rule engine | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 11 | Production-scale taxpayer reconciliation | **LOCKED** | Issue 2 has not passed; must reuse Issue 2 evidence model |
+| 12 | Full reconciliation lifecycle | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 13 | VAT return formulas/authority submission | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 14 | Tax authority case management | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 15 | Financial accounting core | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 16 | Accounting posting/malware protection | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 17 | Inventory management | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 18 | Order-to-cash/fulfilment | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 19 | Process catalogue/serialization | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 20 | File security/retention | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 21 | Reporting/high-volume reads | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 22 | Device trust/offline operation | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 23 | External system contracts | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 24 | Payment-provider productionization | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 25 | Event platform | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 26 | Communication platform | **LOCKED** | Issue 2 has not passed; no further exception recorded |
+| 27 | AI platform | **LOCKED** | Issue 2 has not passed; no further exception recorded |
 
 ## Readiness determination
 
 | Readiness dimension | Determination |
 | --- | --- |
-| Functional local pilot | **YES — with disabled external/statutory production paths** |
-| Issue 1 local application controls | **PARTIALLY COMPLETE / LOCALLY VERIFIED; full local gate passed** |
+| Functional local pilot | **YES — external/statutory production paths disabled** |
+| Issue 1 local controls | **PARTIALLY COMPLETE / LOCALLY VERIFIED** |
 | Issue 1 production acceptance | **BLOCKED** |
+| Issue 2 local controls | **PARTIALLY COMPLETE / LOCALLY VERIFIED** |
+| Issue 2 production acceptance | **BLOCKED** |
 | Production readiness | **NO** |
 | Enterprise readiness | **NO** |
 | Government integration readiness | **NO** |
 | Global deployment readiness | **NO** |
 
-The next permitted action under the supplied strict sequence is to obtain and test the PR-004 production-equivalent identity/origin evidence package. No subsequent issue is unlocked by this assessment.
+The next normal action is to obtain and test PR-011 and applicable PR-003 proofing evidence. Because Issue 2 is blocked, Issue 3 remains locked unless the programme authority explicitly records another sequence exception.

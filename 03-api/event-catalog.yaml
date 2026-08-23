@@ -1,4 +1,4 @@
-catalog_version: 0.8.0
+catalog_version: 0.9.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,13 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.identity.proofing-requested.v1
+    owner: Identity Domain
+    partition_key: proofing_case_id
+    contains_tax_confidential_data: true
+    purpose: Starts a durable proofing case in a non-authoritative pending posture; the event never provisions a taxpayer, organisation, membership, authorization or licence.
+    minimum_payload: [proofing_case_id, registration_id, status, provider_environment, correlation_id]
+    controls: [atomic_outbox, minimized_payload, provider_environment_label, no_raw_provider_evidence]
   - type: na.vatmsa.self-serve-signup.submitted.v1
     owner: Onboarding Domain
     partition_key: identity_subject_hash_or_contact_hash

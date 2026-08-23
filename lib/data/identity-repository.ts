@@ -33,8 +33,33 @@ export type RegistrationApplicationSummary = {
   status: string;
   verification_source: string;
   verification_status: string | null;
+  proofing_case_id: string | null;
+  proofing_status: string | null;
+  proofing_confidence_bps: number | null;
+  proofing_reason_code: string | null;
+  mismatch_status: string | null;
   submitted_by: string;
   submitted_at: string;
+};
+
+export type IdentityProofingCaseSummary = {
+  id: string;
+  subject_type: string;
+  subject_reference: string;
+  registration_application_id: string | null;
+  provider: string;
+  provider_environment: string;
+  status: string;
+  confidence_bps: number;
+  matched_taxpayer_id: string | null;
+  reason_code: string;
+  requested_by: string;
+  reviewed_by: string | null;
+  created_at: string;
+  updated_at: string;
+  reviewed_at: string | null;
+  mismatch_status: string | null;
+  conflicting_fields: string | null;
 };
 
 type IdempotentRegistrationRow = RegistrationApplicationSummary & { request_hash: string };
@@ -80,11 +105,27 @@ export async function listRegistrationApplications(user: UserContext): Promise<R
   const db = await ensureDatabase();
   const base = `SELECT r.id,r.vat_number,r.tin,r.company_registration_number,r.legal_name,r.trading_name,
     r.taxpayer_type,r.return_frequency,r.email,r.status,r.verification_source,r.submitted_by,r.submitted_at,
-    (SELECT v.status FROM registration_verifications v WHERE v.registration_application_id=r.id ORDER BY v.checked_at DESC LIMIT 1) AS verification_status
-    FROM registration_applications r`;
+    (SELECT v.status FROM registration_verifications v WHERE v.registration_application_id=r.id ORDER BY v.checked_at DESC LIMIT 1) AS verification_status,
+    p.id AS proofing_case_id,p.status AS proofing_status,p.confidence_bps AS proofing_confidence_bps,
+    p.reason_code AS proofing_reason_code,m.status AS mismatch_status
+    FROM registration_applications r
+    LEFT JOIN identity_proofing_cases p ON p.registration_application_id=r.id
+    LEFT JOIN identity_mismatch_cases m ON m.proofing_case_id=p.id`;
   const result = isNationalScope(user)
     ? await db.prepare(`${base} ORDER BY r.submitted_at DESC LIMIT 100`).all<RegistrationApplicationSummary>()
     : await db.prepare(`${base} WHERE r.submitted_by = ? ORDER BY r.submitted_at DESC LIMIT 100`).bind(user.userId).all<RegistrationApplicationSummary>();
+  return result.results;
+}
+
+export async function listIdentityProofingCases(user: UserContext): Promise<IdentityProofingCaseSummary[]> {
+  const db = await ensureDatabase();
+  const base = `SELECT p.id,p.subject_type,p.subject_reference,p.registration_application_id,p.provider,p.provider_environment,
+    p.status,p.confidence_bps,p.matched_taxpayer_id,p.reason_code,p.requested_by,p.reviewed_by,p.created_at,p.updated_at,
+    p.reviewed_at,m.status AS mismatch_status,m.conflicting_fields
+    FROM identity_proofing_cases p LEFT JOIN identity_mismatch_cases m ON m.proofing_case_id=p.id`;
+  const result = isNationalScope(user)
+    ? await db.prepare(`${base} ORDER BY p.created_at DESC LIMIT 100`).all<IdentityProofingCaseSummary>()
+    : await db.prepare(`${base} WHERE p.requested_by=? ORDER BY p.created_at DESC LIMIT 100`).bind(user.userId).all<IdentityProofingCaseSummary>();
   return result.results;
 }
 
@@ -125,8 +166,12 @@ export async function submitRegistrationApplication(
   const db = await ensureDatabase();
   const requestHash = await sha256Hex(stableStringify(registration));
   const prior = await db.prepare(`SELECT r.*,
-    (SELECT v.status FROM registration_verifications v WHERE v.registration_application_id=r.id ORDER BY v.checked_at DESC LIMIT 1) AS verification_status
-    FROM registration_applications r WHERE r.submitted_by=? AND r.idempotency_key=?`)
+    (SELECT v.status FROM registration_verifications v WHERE v.registration_application_id=r.id ORDER BY v.checked_at DESC LIMIT 1) AS verification_status,
+    p.id AS proofing_case_id,p.status AS proofing_status,p.confidence_bps AS proofing_confidence_bps,
+    p.reason_code AS proofing_reason_code,
+    (SELECT m.status FROM identity_mismatch_cases m WHERE m.proofing_case_id=p.id LIMIT 1) AS mismatch_status
+    FROM registration_applications r LEFT JOIN identity_proofing_cases p ON p.registration_application_id=r.id
+    WHERE r.submitted_by=? AND r.idempotency_key=?`)
     .bind(actor.userId, idempotencyKey).first<IdempotentRegistrationRow>();
   if (prior) {
     if (prior.request_hash !== requestHash) throw new RepositoryConflictError("The idempotency key was already used for a different registration application.");
@@ -147,7 +192,10 @@ export async function submitRegistrationApplication(
   const id = crypto.randomUUID();
   const verificationId = crypto.randomUUID();
   const verificationReference = `itas-contract-pending:${id}`;
+  const proofingCaseId = crypto.randomUUID();
+  const proofingEventId = crypto.randomUUID();
   const outboxId = crypto.randomUUID();
+  const proofingOutboxId = crypto.randomUUID();
   const auditId = crypto.randomUUID();
   const priorAudit = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
   const auditDetails = JSON.stringify({ registrationId: id, vatNumber: registration.vat_number, correlationId, verificationState: "AWAITING_PROVIDER_CONTRACT" });
@@ -165,11 +213,29 @@ export async function submitRegistrationApplication(
     db.prepare(`INSERT INTO registration_verifications
       (id,registration_application_id,provider,request_reference,status,response_hash,verified_taxpayer_id,checked_at,expires_at)
       VALUES (?,?,?,?,?,NULL,NULL,?,NULL)`).bind(verificationId, id, "ITAS", verificationReference, "AWAITING_PROVIDER_CONTRACT", now),
+    db.prepare(`INSERT INTO identity_proofing_cases
+      (id,subject_type,subject_reference,registration_application_id,provider,provider_environment,provider_reference,status,
+       confidence_bps,matched_taxpayer_id,evidence_hash,reason_code,requested_by,reviewed_by,created_at,updated_at,reviewed_at)
+      VALUES (?,'TAXPAYER_REGISTRATION',?,?,'ITAS','CONTRACT_PENDING',?,'PENDING_PROVIDER',0,NULL,NULL,
+       'AUTHORITATIVE_PROVIDER_CONTRACT_REQUIRED',?,NULL,?,?,NULL)`).bind(
+        proofingCaseId, id, id, verificationReference, actor.userId, now, now,
+      ),
+    db.prepare(`INSERT INTO identity_proofing_events
+      (id,proofing_case_id,event_type,from_status,to_status,confidence_bps,reason_code,evidence_hash,actor_id,occurred_at)
+      VALUES (?,?,'IdentityProofingRequested',NULL,'PENDING_PROVIDER',0,'AUTHORITATIVE_PROVIDER_CONTRACT_REQUIRED',NULL,?,?)`)
+      .bind(proofingEventId, proofingCaseId, actor.userId, now),
     db.prepare(`INSERT INTO outbox_events
       (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
         outboxId, "REGISTRATION", id, "TaxpayerRegistrationSubmitted", 1, registration.vat_number,
         JSON.stringify({ registration_id: id, status: "PENDING_VERIFICATION", correlation_id: correlationId }),
+        "PENDING", 0, now, now, null, null,
+      ),
+    db.prepare(`INSERT INTO outbox_events
+      (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+        proofingOutboxId, "IDENTITY_PROOFING", proofingCaseId, "IdentityProofingRequested", 1, registration.vat_number,
+        JSON.stringify({ proofing_case_id: proofingCaseId, registration_id: id, status: "PENDING_PROVIDER", provider_environment: "CONTRACT_PENDING", correlation_id: correlationId }),
         "PENDING", 0, now, now, null, null,
       ),
     db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(
@@ -191,6 +257,11 @@ export async function submitRegistrationApplication(
     status: "PENDING_VERIFICATION",
     verification_source: "ITAS",
     verification_status: "AWAITING_PROVIDER_CONTRACT",
+    proofing_case_id: proofingCaseId,
+    proofing_status: "PENDING_PROVIDER",
+    proofing_confidence_bps: 0,
+    proofing_reason_code: "AUTHORITATIVE_PROVIDER_CONTRACT_REQUIRED",
+    mismatch_status: null,
     submitted_by: actor.userId,
     submitted_at: now,
   };

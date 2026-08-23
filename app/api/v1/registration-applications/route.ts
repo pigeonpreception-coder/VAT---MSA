@@ -49,6 +49,8 @@ export async function POST(request: Request) {
       status: registration.status,
       verification_source: registration.verification_source,
       verification_status: registration.verification_status,
+      proofing_case_id: registration.proofing_case_id,
+      identity_proofing_status: registration.proofing_status,
       submitted_at: registration.submitted_at,
       next_action: "Await authoritative ITAS/NamRA verification. No taxpayer or organisation is created until verification and approval complete.",
     }, { status: 202, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store", location: `/api/v1/registration-applications` } });

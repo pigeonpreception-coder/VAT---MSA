@@ -22,6 +22,7 @@ domains:
   taxpayers:
     - { method: GET, path: /taxpayers, permission: taxpayers:read, status: planned }
     - { method: POST, path: /registration-applications, permission: registrations:submit, status: implemented-pending-ITAS-verification }
+    - { method: GET, path: /identity-proofing-cases, permission: registrations:read, status: implemented-local-proofing-foundation-authority-verification-disabled }
     - { method: GET, path: "/registration-applications/{id}", permission: registrations:review-or-owner, status: planned }
   organisations:
     - { method: GET, path: /organisations, permission: identity:read, status: implemented }

@@ -40,7 +40,9 @@ LOCKED
   -> CLOSED (PASS only)
 ```
 
-`FAIL` returns the same issue to implementation. `BLOCKED` stops execution and identifies the dependency, owner and exact evidence needed. Neither state unlocks the next issue. `CLOSED` is a terminal administrative state reached only after `PASS`; it is not a substitute for acceptance.
+`FAIL` returns the same issue to implementation. `BLOCKED` stops automatic execution and identifies the dependency, owner and exact evidence needed. Neither state automatically unlocks the next issue. `CLOSED` is a terminal administrative state reached only after `PASS`; it is not a substitute for acceptance.
+
+A named programme authority may explicitly direct work to proceed to a later issue despite a blocked predecessor. That direction is a **sequence exception**, not acceptance: it must be recorded with its date, scope and residual risk; it does not convert the blocked issue to PASS/CLOSED, authorize production, or waive the later issue's own gates. Without an explicit direction, subsequent issues remain locked.
 
 ## 3. Evidence and claim rules
 
@@ -102,4 +104,10 @@ Architecture documents, code, mocks and locally signed fixtures cannot close an 
 
 Issue 1 can locally implement input validation, fail-closed trust modes, signed assertion validation, issuer/audience/time/session/action/origin binding, single-use privileged evidence and negative tests. It cannot locally prove a production IdP contract, actual phishing-resistant MFA enrollment, recovery governance, managed-edge direct-origin denial, revocation propagation or independent attack resistance.
 
-Therefore Issue 1 remains blocked until the external PR-004 identity-and-origin evidence package is accepted. Issue 2 remains locked.
+Therefore Issue 1 remains blocked until the external PR-004 identity-and-origin evidence package is accepted.
+
+## 9. Authorised Issue 2 sequence exception
+
+On 23 August 2026, the programme authority explicitly instructed implementation to move to Issue 2 because Issue 1 cannot presently be completed. This unlocks only Issue 2 for bounded local/staging implementation with synthetic data. Issue 1 remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED`; its risk and PR-004 evidence requirement are unchanged.
+
+Issue 2 may implement proofing cases, deterministic reconciliation, uniqueness and mismatch controls, fail-closed provider boundaries, contracts, migrations, UI projections and automated tests. It may not claim a national-registry result, activate a taxpayer/organisation/account/licence, or enable live ITAS. Issue 3 and later issues remain locked unless Issue 2 passes or the programme authority records another explicit sequence exception.

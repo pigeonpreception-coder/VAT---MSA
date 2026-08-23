@@ -20,6 +20,7 @@ Scope: VAT-MSA production acceptance dependencies that cannot be truthfully comp
 | PR-008 | Production infrastructure and supply chain | Cloud Platform / DevSecOps | Platform owner and CISO | Reproducible environment; WAF and origin rules; signed image/provenance; protected promotion; SAST/SCA/DAST/IaC/container evidence; rollback test | OPEN |
 | PR-009 | Production document protection | Security / Records | Privacy, security and records owners | Malware/CDR provider; quarantine-to-clean/reject evidence; retention; legal hold; deletion governance; provider failure tests | OPEN |
 | PR-010 | Residual dependency risk | DevSecOps | Product Security | Removal or formal time-bounded acceptance of the development-only esbuild advisory; confirmation that development service is not exposed | OPEN |
+| PR-011 | Authoritative identity proofing and taxpayer uniqueness | Identity / Master Data | NamRA/ITAS authority and CISO/Privacy | Identifier precedence; lawful/minimal provider attributes; response signatures and provenance; freshness/expiry; match/mismatch and independent-review policy; merge/deregistration rules; sandbox/production conformance; rejection, outage and monitoring evidence | OPEN |
 
 ## Signature record
 
@@ -37,6 +38,7 @@ Signatures must identify the evidence version or immutable digest. Empty fields 
 | PR-008 |  |  |  |  |  |
 | PR-009 |  |  |  |  |  |
 | PR-010 |  |  |  |  |  |
+| PR-011 |  |  |  |  |  |
 
 ## Release rule
 
