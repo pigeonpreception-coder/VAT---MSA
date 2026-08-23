@@ -86,6 +86,22 @@ textarea:focus-visible { outline: 3px solid rgba(24, 163, 154, .32); outline-off
 .signup-unavailable { max-width: 800px; margin: 0 auto; padding: 22px; border: 1px solid #f0d8a3; border-radius: 14px; background: var(--amber-pale); color: #6b562e; line-height: 1.6; }
 .signup-unavailable strong { display: block; color: #7b540e; }
 .signup-footer { padding: 22px 24px; border-top: 1px solid var(--line); color: var(--ink-soft); text-align: center; font-size: 10px; }
+.signup-choice-main { min-height: calc(100vh - 140px); }
+.signup-choice-intro { max-width: 820px; margin-bottom: 34px; }
+.signup-choice-intro h1 { max-width: 760px; font-size: clamp(34px, 5vw, 56px); }
+.signup-choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-bottom: 26px; }
+.signup-choice-card { display: flex; min-height: 390px; flex-direction: column; align-items: flex-start; padding: 28px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.94); box-shadow: var(--shadow); }
+.signup-choice-card.tax-path { border-top: 4px solid #1769aa; }
+.signup-choice-card.commercial-path { border-top: 4px solid var(--teal); }
+.signup-choice-card.employee-path { border-top: 4px solid #687681; }
+.signup-choice-kicker { color: var(--teal); font-size: 10px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
+.signup-choice-card h2 { margin: 13px 0 10px; color: var(--navy); font-size: 24px; }
+.signup-choice-card p { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.65; }
+.signup-choice-card ul { display: grid; flex: 1; gap: 9px; width: 100%; margin: 22px 0; padding-left: 19px; color: var(--ink); font-size: 12px; }
+.signup-choice-card .btn { margin-top: auto; }
+.signup-choice-card small { display: block; margin-top: 12px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
+.tax-option-grid .signup-choice-card, .employee-option-grid .signup-choice-card { min-height: 310px; }
+.employee-option-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 @media (max-width: 800px) {
   .signup-topbar { align-items: flex-start; }
@@ -93,6 +109,7 @@ textarea:focus-visible { outline: 3px solid rgba(24, 163, 154, .32); outline-off
   .signup-top-actions .env-pill { display: none; }
   .signup-main { padding-top: 36px; }
   .signup-hero { grid-template-columns: 1fr; gap: 28px; }
+  .signup-choice-grid, .employee-option-grid { grid-template-columns: 1fr; }
   .signup-form-head, .signup-form { padding-left: 20px; padding-right: 20px; }
 }
 

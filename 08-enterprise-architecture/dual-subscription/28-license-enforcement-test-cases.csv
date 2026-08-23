@@ -1,0 +1,25 @@
+test_id,priority,layer,scenario,expected_result
+LIC-001,P0,architecture,Central feature policy is classified by authority domain,Every feature routes to exactly one appropriate evaluator
+LIC-002,P0,schema,COMMERCIAL_SAAS plan is assigned GOVERNMENT_TAX feature,Transaction is rejected
+LIC-003,P0,schema,GOVERNMENT_TAX plan is assigned COMMERCIAL_SAAS feature,Transaction is rejected
+LIC-004,P0,API,Employee bypasses UI and calls commercial subscription command,403 COMPANY_ADMIN_AUTHORITY_REQUIRED and no persisted subscription
+LIC-005,P0,database,Capacity 50 with 50 counting users receives user 51,Atomic rejection USER_LICENSE_LIMIT_REACHED
+LIC-006,P0,concurrency,Capacity 100 with 99 users receives two simultaneous invitations,Exactly one commits and usage never exceeds 100
+LIC-007,P0,schema,Unlimited entitlement is created without explicit UNLIMITED mode,Rejected; NULL/large numeric limit does not imply unlimited
+LIC-008,P0,service,Downgrade from 100 to 50 while 87 users count,Capacity exception opens and no user/history is deleted
+LIC-009,P0,service,Commercial licence expires while user has active session,Mutation/search-command denied; approved read/export/compliance continuity remains; tax access unchanged
+LIC-010,P0,service,Finite plan upgrade is requested but payment/activation is pending,Old capacity remains authoritative
+LIC-011,P0,service,Approved upgrade activates,New capacity and entitlement version apply immediately
+LIC-012,P0,service,User is deactivated,Seat is released; history and audit references remain
+LIC-013,P1,service,Invitation expires or is revoked,Reserved seat is released idempotently
+LIC-014,P0,database,UNLIMITED plan creates many valid users,No numeric ceiling applies but identity/role/tenant/audit validation still runs
+LIC-015,P0,service,NOT_APPLICABLE capacity is used for USER_SEATS,Decision denies invalid entitlement configuration
+LIC-016,P0,API,Unlicensed direct API call creates employee,Deny identically to UI path
+LIC-017,P1,API,Commercial licence is active but module is absent,Deny COMMERCIAL_FEATURE_NOT_ENTITLED
+LIC-018,P0,service,Tax authority subscription is active but commercial licence is absent,Tax functions may pass tax checks; commercial functions deny
+LIC-019,P0,service,Commercial licence is active but taxpayer authorization is absent,Commercial functions may pass commercial checks; tax functions deny
+LIC-020,P1,API,Expired licence exports authorized organisation records,Allow under continuity policy and audit EXPIRED_LICENSE_EXPORT_ACCESSED
+LIC-021,P0,API,Expired licence tries business mutation,Deny COMMERCIAL_LICENSE_INACTIVE and leave data unchanged
+LIC-022,P0,database,Two idempotent retries use the same invitation key,One invitation/seat reservation exists
+LIC-023,P1,service,Last active company administrator is deactivated without successor,Deny continuity violation and preserve membership
+LIC-024,P1,service,Buyer and seller capabilities are enabled for one organisation,One organisation/subscription/capacity identity is used

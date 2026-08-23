@@ -1,0 +1,31 @@
+flowchart TB
+  Platform[VAT-MSA Platform] --> GlobalAdmin[Platform Super Administration\nno implicit domain membership]
+  Platform --> Country[Country]
+  Country --> Jurisdiction[Tax Jurisdiction]
+  Jurisdiction --> Authority[Tax Governing Authority]
+  Authority --> AuthorityAdmins[Tax Authority Administrators]
+  Authority --> TaxSubscription[Government Tax Subscription]
+  TaxSubscription --> TaxpayerAuthorization[Taxpayer Authorizations]
+  TaxpayerAuthorization --> CanonicalOrg[Canonical Legal Organisation / Taxpayer]
+
+  Platform --> Tenant[Commercial Tenant Boundary]
+  Tenant --> CanonicalOrg
+  CanonicalOrg --> CompanyAdmin[Verified Company System Administrator]
+  CanonicalOrg --> Branches[Branches / Divisions / Departments / Teams]
+  CanonicalOrg --> Capabilities[Buyer + Seller + Supplier + Importer + Exporter]
+  CompanyAdmin --> CommercialSubscription[Commercial SaaS Subscription]
+  CommercialSubscription --> CommercialPlan[Commercial Plan / Modules / Capacity]
+  CompanyAdmin --> Invitations[Employee Invitations]
+  Invitations --> Memberships[Organisation Memberships]
+  Memberships --> Roles[Commercial Roles]
+  Roles --> Permissions[Permissions]
+
+  TaxpayerAuthorization -. tax functions only .-> TaxUsers[Taxpayer Users]
+  CommercialPlan -. business functions only .-> Memberships
+
+  classDef tax fill:#e7f3ff,stroke:#1769aa,color:#10253d;
+  classDef commercial fill:#eaf8ee,stroke:#217a3c,color:#102d1c;
+  classDef neutral fill:#f5f5f5,stroke:#555,color:#222;
+  class Authority,AuthorityAdmins,TaxSubscription,TaxpayerAuthorization,TaxUsers tax;
+  class CompanyAdmin,CommercialSubscription,CommercialPlan,Invitations,Memberships,Roles,Permissions commercial;
+  class Platform,GlobalAdmin,Country,Jurisdiction,CanonicalOrg,Tenant,Branches,Capabilities neutral;

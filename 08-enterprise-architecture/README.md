@@ -24,7 +24,9 @@ Review the extension with `configuration-system-control-matrix.csv`, `workspace-
 
 Status: architecture-board draft for formal review. This package governs the evolution of the operational pilot into Namibia's national digital VAT infrastructure. It distinguishes the approved target, existing pilot evidence and production capabilities that still require NamRA/ITAS confirmation, legal approval, selected platforms and acceptance evidence. No production implementation is authorized by this package until the Architecture Approval Gate permits it.
 
-Start with the authoritative [baseline and extension deliverable register](00-deliverable-register.md), then review the consolidated [enterprise blueprint](VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md), the [workspace/licensing/workflow extension](30-workspace-organisation-licensing-workflow-architecture.md) and the [formal approval gate](29-architecture-approval-gate.md).
+Start with the authoritative [baseline and extension deliverable register](00-deliverable-register.md), then review the consolidated [enterprise blueprint](VAT-MSA-ENTERPRISE-ARCHITECTURE-BLUEPRINT.md), the [workspace/licensing/workflow extension](30-workspace-organisation-licensing-workflow-architecture.md), the ordered [dual-subscription and self-service onboarding package](dual-subscription/README.md), and the [formal approval gate](29-architecture-approval-gate.md).
+
+The dual-subscription package and [ADR-030](adr/ADR-030-dual-subscription-authority-separation.md) supersede any earlier interpretation that one organisation licence may grant both commercial modules and government tax functions. They are approved only for synthetic local/staging implementation; live payment, ITAS, government activation and statutory rules remain gated.
 
 ## Architecture principles
 

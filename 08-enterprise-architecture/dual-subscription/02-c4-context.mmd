@@ -1,0 +1,21 @@
+flowchart TB
+  PersonTA["Tax Authority Administrator"]
+  PersonTP["VAT Taxpayer / Tax User"]
+  PersonCA["Company System Administrator"]
+  PersonE["Company Employee"]
+  PersonSA["Global Platform Super Administrator"]
+  VATMSA["VAT-MSA Global Multi-country Platform"]
+  Authority["Country Tax Governing Authority"]
+  IdP["Authority IdP / Tax Portal / ITAS"]
+  Pay["Approved Payment Provider (disabled locally)"]
+  SIEM["Security, Audit and Evidence Services"]
+
+  PersonTA -->|"governs country tax subscription and taxpayer authorization"| VATMSA
+  PersonTP -->|"uses authorized tax services"| VATMSA
+  PersonCA -->|"subscribes to commercial SaaS and manages company users"| VATMSA
+  PersonE -->|"uses invited licensed business modules"| VATMSA
+  PersonSA -->|"operates platform; no implicit tenant or tax authority"| VATMSA
+  VATMSA <-->|"signed authority contract and status evidence"| Authority
+  VATMSA <-->|"federated identity; no duplicate taxpayer"| IdP
+  VATMSA -.->|"commercial payment confirmation only"| Pay
+  VATMSA -->|"immutable minimized events"| SIEM

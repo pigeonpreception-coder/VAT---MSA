@@ -31,7 +31,7 @@ export type SelfServeSignupSubmission = {
   taxpayer_type: TaxpayerType;
   return_frequency: ReturnFrequency;
   address: string;
-  authority_attested: boolean;
+  company_system_administrator_attested: boolean;
   terms_accepted: boolean;
   privacy_notice_accepted: boolean;
 };
@@ -82,7 +82,7 @@ const ALLOWED_FIELDS = new Set([
   "taxpayer_type",
   "return_frequency",
   "address",
-  "authority_attested",
+  "company_system_administrator_attested",
   "terms_accepted",
   "privacy_notice_accepted",
 ]);
@@ -121,8 +121,8 @@ export function normalizeAndValidateSelfServeSignup(payload: unknown): Normalize
   if (text(input.country_code).toUpperCase() !== "NA") {
     messages.push({ code: "COUNTRY_UNSUPPORTED", path: "/country_code", message: "This controlled signup channel currently accepts Namibia applications only." });
   }
-  if (input.authority_attested !== true) {
-    messages.push({ code: "AUTHORITY_ATTESTATION_REQUIRED", path: "/authority_attested", message: "Confirm that you are authorised to submit for the organisation." });
+  if (input.company_system_administrator_attested !== true) {
+    messages.push({ code: "COMPANY_ADMIN_AUTHORITY_REQUIRED", path: "/company_system_administrator_attested", message: "Only the verified Company System Administrator may start a commercial subscription application." });
   }
   if (input.terms_accepted !== true) {
     messages.push({ code: "TERMS_ACCEPTANCE_REQUIRED", path: "/terms_accepted", message: "Accept the current terms to continue." });
@@ -159,7 +159,7 @@ export function normalizeAndValidateSelfServeSignup(payload: unknown): Normalize
     contact_email: registration.email,
     country_code: "NA",
     plan_code: planCode,
-    authority_attested: true,
+    company_system_administrator_attested: true,
     terms_accepted: true,
     privacy_notice_accepted: true,
   };

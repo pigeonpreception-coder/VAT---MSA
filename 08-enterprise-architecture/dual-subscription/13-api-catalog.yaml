@@ -1,0 +1,116 @@
+openapi: 3.1.0
+info:
+  title: VAT-MSA Dual Subscription and Onboarding API Catalogue
+  version: 0.1.0-architecture
+  description: >-
+    Architecture contract only. Local/staging implementation keeps payment, live ITAS,
+    production tax activation and unapproved statutory rules disabled.
+servers:
+  - url: /api/v1
+tags:
+  - name: Public onboarding
+  - name: Commercial subscription
+  - name: Government tax authority
+  - name: Taxpayer access
+paths:
+  /public/commercial-plans:
+    get:
+      tags: [Public onboarding]
+      summary: List active COMMERCIAL_SAAS plans without prices in the local baseline
+      x-authority-domain: COMMERCIAL_SAAS
+      x-license-required: false
+      responses:
+        '200': {description: Commercial plans only}
+  /public/tax-access-options:
+    get:
+      tags: [Public onboarding]
+      summary: List configured tax-authority access options without activating an integration
+      x-authority-domain: GOVERNMENT_TAX
+      x-license-required: false
+      responses:
+        '200': {description: Country access options and disabled-state explanations}
+  /self-service/commercial-applications:
+    post:
+      tags: [Public onboarding]
+      summary: Start a pending commercial application as an attested company system administrator
+      x-authority-domain: COMMERCIAL_SAAS
+      x-idempotency-required: true
+      x-local-terminal-state: PENDING_VERIFICATION
+      responses:
+        '202': {description: Pending application created; no licence activated}
+        '403': {description: Ordinary employees cannot create a subscription}
+        '409': {description: Duplicate or conflicting application}
+  /commercial/subscriptions/{subscriptionId}/activate:
+    post:
+      tags: [Commercial subscription]
+      summary: Activate an approved commercial subscription
+      x-authority-domain: COMMERCIAL_SAAS
+      x-local-enabled: false
+      x-required-role: COMPANY_SYSTEM_ADMIN
+      responses:
+        '403': {description: Authority or activation gate denied}
+  /organisations/{organisationId}/invitations:
+    post:
+      tags: [Commercial subscription]
+      summary: Invite an internal user subject to atomic capacity enforcement
+      x-authority-domain: COMMERCIAL_SAAS
+      x-required-role: COMPANY_SYSTEM_ADMIN
+      x-step-up-for-privileged-role: true
+      responses:
+        '201': {description: Invitation consumes a finite seat reservation}
+        '409': {description: USER_LICENSE_LIMIT_REACHED or duplicate invitation}
+  /organisations/{organisationId}/users/{userId}/deactivate:
+    post:
+      tags: [Commercial subscription]
+      summary: Deactivate membership, release its seat and preserve history
+      x-authority-domain: COMMERCIAL_SAAS
+      x-required-role: COMPANY_SYSTEM_ADMIN
+      responses:
+        '200': {description: Deactivated non-destructively}
+  /tax-authorities/{authorityId}/subscriptions:
+    post:
+      tags: [Government tax authority]
+      summary: Create a government tax subscription for one jurisdiction
+      x-authority-domain: GOVERNMENT_TAX
+      x-required-role: TAX_AUTHORITY_ADMIN
+      x-local-enabled: false
+      responses:
+        '403': {description: Authority or production gate denied}
+  /tax-authorities/{authorityId}/taxpayer-authorizations:
+    post:
+      tags: [Government tax authority]
+      summary: Authorize a verified taxpayer under an active authority subscription
+      x-authority-domain: GOVERNMENT_TAX
+      x-required-role: TAX_AUTHORITY_ADMIN
+      x-step-up-required: true
+      responses:
+        '201': {description: Taxpayer authorization created}
+        '403': {description: Commercial authority can never satisfy this operation}
+  /tax-authorities/{authorityId}/taxpayer-authorizations/{authorizationId}/suspend:
+    post:
+      tags: [Government tax authority]
+      summary: Suspend tax access without altering commercial access
+      x-authority-domain: GOVERNMENT_TAX
+      x-required-role: TAX_AUTHORITY_ADMIN
+      responses:
+        '200': {description: Suspended and audited}
+  /tax-access/decision:
+    post:
+      tags: [Taxpayer access]
+      summary: Evaluate government tax access independently from commercial licensing
+      x-authority-domain: GOVERNMENT_TAX
+      responses:
+        '200': {description: Allow or deny with authority-safe reason codes}
+  /identity/federation/itas/start:
+    post:
+      tags: [Taxpayer access]
+      summary: Start approved ITAS federation without creating a duplicate identity
+      x-authority-domain: GOVERNMENT_TAX
+      x-country: NA
+      x-local-enabled: false
+      responses:
+        '503': {description: ITAS_INTEGRATION_DISABLED until approved contract and keys exist}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: vatmsa_session}
+    oidc: {type: openIdConnect, openIdConnectUrl: https://configured-authority.invalid/.well-known/openid-configuration}

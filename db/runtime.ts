@@ -607,6 +607,7 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS license_plans (
     id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, version INTEGER NOT NULL,
+    plan_domain TEXT NOT NULL CHECK (plan_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX')),
     status TEXT NOT NULL, effective_from TEXT NOT NULL, effective_to TEXT, created_at TEXT NOT NULL,
     UNIQUE (code, version)
   )`,
@@ -616,6 +617,7 @@ const SCHEMA_STATEMENTS = [
     applicant_name TEXT NOT NULL, applicant_role TEXT NOT NULL
       CHECK (applicant_role IN ('OWNER','DIRECTOR','PARTNER','TRUSTEE','AUTHORISED_REPRESENTATIVE')),
     contact_email TEXT NOT NULL, identity_provider TEXT, identity_subject_hash TEXT,
+    onboarding_path TEXT NOT NULL CHECK (onboarding_path='COMPANY_ADMIN'),
     country_code TEXT NOT NULL CHECK (country_code='NA'),
     requested_plan_id TEXT NOT NULL REFERENCES license_plans(id),
     vat_number TEXT NOT NULL, tin TEXT NOT NULL, company_registration_number TEXT,
@@ -636,20 +638,28 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS license_features (
     feature_key TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
+    authority_domain TEXT NOT NULL CHECK (authority_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX','PLATFORM_CONTROL')),
     metric_key TEXT, protected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS license_plan_entitlements (
     id TEXT PRIMARY KEY, license_plan_id TEXT NOT NULL REFERENCES license_plans(id),
     feature_key TEXT NOT NULL REFERENCES license_features(feature_key), enabled INTEGER NOT NULL DEFAULT 1,
+    capacity_mode TEXT NOT NULL CHECK (capacity_mode IN ('FINITE','UNLIMITED','NOT_APPLICABLE')),
     limit_value INTEGER, configuration TEXT NOT NULL DEFAULT '{}',
+    CHECK ((capacity_mode='FINITE' AND limit_value IS NOT NULL AND limit_value>0)
+      OR (capacity_mode IN ('UNLIMITED','NOT_APPLICABLE') AND limit_value IS NULL)),
     UNIQUE (license_plan_id, feature_key)
   )`,
   `CREATE TABLE IF NOT EXISTS subscriptions (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     provider TEXT NOT NULL, provider_reference TEXT NOT NULL, status TEXT NOT NULL,
+    subscription_domain TEXT NOT NULL CHECK (subscription_domain='COMMERCIAL_SAAS'),
+    payment_mode TEXT NOT NULL CHECK (payment_mode IN ('DISABLED','SANDBOX','APPROVED_PROVIDER')),
     activated_at TEXT, current_period_start TEXT NOT NULL, current_period_end TEXT NOT NULL,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (provider, provider_reference)
   )`,
+  `CREATE VIEW IF NOT EXISTS commercial_subscriptions AS
+    SELECT * FROM subscriptions WHERE subscription_domain='COMMERCIAL_SAAS'`,
   `CREATE TABLE IF NOT EXISTS organisation_licenses (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     subscription_id TEXT NOT NULL REFERENCES subscriptions(id), license_plan_id TEXT NOT NULL REFERENCES license_plans(id),
@@ -667,6 +677,62 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, organisation_license_id TEXT NOT NULL REFERENCES organisation_licenses(id),
     organisation_id TEXT NOT NULL REFERENCES organisations(id), event_type TEXT NOT NULL,
     from_state TEXT, to_state TEXT NOT NULL, authority TEXT NOT NULL, reason TEXT NOT NULL, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS countries (
+    code TEXT PRIMARY KEY, iso3_code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    currency_code TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_jurisdictions (
+    id TEXT PRIMARY KEY, country_code TEXT NOT NULL REFERENCES countries(code), code TEXT NOT NULL,
+    name TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (country_code,code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authorities (
+    id TEXT PRIMARY KEY, jurisdiction_id TEXT NOT NULL REFERENCES tax_jurisdictions(id), code TEXT NOT NULL,
+    name TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (jurisdiction_id,code)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_administrators (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    user_id TEXT NOT NULL REFERENCES app_users(id), status TEXT NOT NULL, effective_from TEXT NOT NULL,
+    effective_to TEXT, appointed_by TEXT NOT NULL, approval_reference TEXT NOT NULL,
+    UNIQUE (tax_authority_id,user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_authority_users (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    user_id TEXT NOT NULL REFERENCES app_users(id), authority_role TEXT NOT NULL, status TEXT NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT, UNIQUE (tax_authority_id,user_id,authority_role)
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_subscriptions (
+    id TEXT PRIMARY KEY, tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    license_plan_id TEXT NOT NULL REFERENCES license_plans(id), status TEXT NOT NULL,
+    environment TEXT NOT NULL, effective_from TEXT NOT NULL, effective_to TEXT,
+    activation_authority TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS tax_subscription_features (
+    id TEXT PRIMARY KEY, tax_subscription_id TEXT NOT NULL REFERENCES tax_subscriptions(id),
+    feature_key TEXT NOT NULL REFERENCES license_features(feature_key), status TEXT NOT NULL,
+    created_at TEXT NOT NULL, UNIQUE (tax_subscription_id,feature_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS taxpayer_authorizations (
+    id TEXT PRIMARY KEY, tax_subscription_id TEXT NOT NULL REFERENCES tax_subscriptions(id),
+    tax_authority_id TEXT NOT NULL REFERENCES tax_authorities(id),
+    jurisdiction_id TEXT NOT NULL REFERENCES tax_jurisdictions(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    status TEXT NOT NULL CHECK (status IN ('PENDING','ACTIVE','SUSPENDED','REVOKED')),
+    vat_registration_status TEXT NOT NULL, effective_from TEXT NOT NULL, effective_to TEXT,
+    authorization_reference TEXT NOT NULL UNIQUE, authorized_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS taxpayer_authorization_decisions (
+    id TEXT PRIMARY KEY, taxpayer_authorization_id TEXT NOT NULL REFERENCES taxpayer_authorizations(id),
+    decision TEXT NOT NULL CHECK (decision IN ('AUTHORIZE','SUSPEND','REINSTATE','REVOKE')),
+    reason TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES app_users(id),
+    decided_by TEXT NOT NULL REFERENCES app_users(id), step_up_evidence_reference TEXT NOT NULL,
+    occurred_at TEXT NOT NULL, CHECK (requested_by<>decided_by)
+  )`,
+  `CREATE TABLE IF NOT EXISTS license_capacity_exceptions (
+    id TEXT PRIMARY KEY, organisation_license_id TEXT NOT NULL REFERENCES organisation_licenses(id),
+    organisation_id TEXT NOT NULL REFERENCES organisations(id), active_users INTEGER NOT NULL,
+    licensed_capacity INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('OPEN','RESOLVED','SUPERSEDED')),
+    reason TEXT NOT NULL, opened_at TEXT NOT NULL, resolved_at TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS departments (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), code TEXT NOT NULL,
@@ -699,6 +765,12 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (organisation_id, employee_number), UNIQUE (organisation_id, email)
   )`,
+  `CREATE TABLE IF NOT EXISTS user_invitations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    employee_id TEXT NOT NULL REFERENCES employees(id) UNIQUE, invited_by TEXT NOT NULL REFERENCES app_users(id),
+    recipient_email_hash TEXT NOT NULL, token_hash TEXT, status TEXT NOT NULL,
+    expires_at TEXT NOT NULL, created_at TEXT NOT NULL, accepted_at TEXT, revoked_at TEXT
+  )`,
   `CREATE TABLE IF NOT EXISTS organisation_administrator_roles (
     code TEXT PRIMARY KEY, name TEXT NOT NULL, maximum_scope TEXT NOT NULL,
     protected INTEGER NOT NULL DEFAULT 1
@@ -711,6 +783,8 @@ const SCHEMA_STATEMENTS = [
     effective_from TEXT NOT NULL, effective_to TEXT, appointed_by TEXT NOT NULL, approval_reference TEXT NOT NULL,
     UNIQUE (organisation_id, user_id, administrator_role_code)
   )`,
+  `CREATE VIEW IF NOT EXISTS system_administrators AS
+    SELECT * FROM organisation_administrators WHERE status='ACTIVE'`,
   `CREATE TABLE IF NOT EXISTS organisation_roles (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     name TEXT NOT NULL, description TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
@@ -944,6 +1018,7 @@ const SCHEMA_STATEMENTS = [
     BEGIN
       SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM license_plans p WHERE p.id=NEW.requested_plan_id AND p.status='ACTIVE'
+          AND p.plan_domain='COMMERCIAL_SAAS'
           AND datetime(p.effective_from) <= CURRENT_TIMESTAMP
           AND (p.effective_to IS NULL OR datetime(p.effective_to) > CURRENT_TIMESTAMP)
       ) THEN RAISE(ABORT,'SELF_SERVE_SIGNUP_PLAN_UNAVAILABLE') END;
@@ -958,7 +1033,7 @@ const SCHEMA_STATEMENTS = [
     END`,
   `CREATE TRIGGER IF NOT EXISTS prevent_self_serve_signup_input_update
     BEFORE UPDATE OF id,public_reference,idempotency_key,request_hash,applicant_name,applicant_role,
-      contact_email,identity_provider,identity_subject_hash,country_code,requested_plan_id,
+      contact_email,identity_provider,identity_subject_hash,onboarding_path,country_code,requested_plan_id,
       vat_number,tin,company_registration_number,legal_name,trading_name,taxpayer_type,
       return_frequency,address,terms_version,privacy_notice_version,authority_attested_at,
       terms_accepted_at,privacy_notice_accepted_at,licence_status,submitted_at
@@ -986,6 +1061,118 @@ const SCHEMA_STATEMENTS = [
     BEFORE DELETE ON self_serve_signup_applications
     BEGIN
       SELECT RAISE(ABORT,'SELF_SERVE_SIGNUP_IMMUTABLE_HISTORY');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_plan_feature_authority_insert
+    BEFORE INSERT ON license_plan_entitlements
+    BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM license_plans p JOIN license_features f
+          ON p.plan_domain=f.authority_domain
+        WHERE p.id=NEW.license_plan_id AND f.feature_key=NEW.feature_key
+          AND f.authority_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX')
+      ) THEN RAISE(ABORT,'PLAN_FEATURE_AUTHORITY_DOMAIN_MISMATCH') END;
+      SELECT CASE WHEN NEW.feature_key='USER_SEATS' AND NEW.capacity_mode NOT IN ('FINITE','UNLIMITED')
+        THEN RAISE(ABORT,'USER_SEATS_CAPACITY_MODE_INVALID') END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_plan_feature_authority_update
+    BEFORE UPDATE OF license_plan_id,feature_key ON license_plan_entitlements
+    BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM license_plans p JOIN license_features f
+          ON p.plan_domain=f.authority_domain
+        WHERE p.id=NEW.license_plan_id AND f.feature_key=NEW.feature_key
+          AND f.authority_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX')
+      ) THEN RAISE(ABORT,'PLAN_FEATURE_AUTHORITY_DOMAIN_MISMATCH') END;
+      SELECT CASE WHEN NEW.feature_key='USER_SEATS' AND NEW.capacity_mode NOT IN ('FINITE','UNLIMITED')
+        THEN RAISE(ABORT,'USER_SEATS_CAPACITY_MODE_INVALID') END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_commercial_license_domain
+    BEFORE INSERT ON organisation_licenses
+    WHEN NOT EXISTS (
+      SELECT 1 FROM license_plans p JOIN subscriptions s ON s.id=NEW.subscription_id
+      WHERE p.id=NEW.license_plan_id AND p.plan_domain='COMMERCIAL_SAAS'
+        AND s.subscription_domain='COMMERCIAL_SAAS' AND s.organisation_id=NEW.organisation_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'COMMERCIAL_LICENSE_AUTHORITY_DOMAIN_MISMATCH');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_commercial_license_domain_update
+    BEFORE UPDATE OF organisation_id,subscription_id,license_plan_id ON organisation_licenses
+    WHEN NOT EXISTS (
+      SELECT 1 FROM license_plans p JOIN subscriptions s ON s.id=NEW.subscription_id
+      WHERE p.id=NEW.license_plan_id AND p.plan_domain='COMMERCIAL_SAAS'
+        AND s.subscription_domain='COMMERCIAL_SAAS' AND s.organisation_id=NEW.organisation_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'COMMERCIAL_LICENSE_AUTHORITY_DOMAIN_MISMATCH');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS open_capacity_exception_on_entitlement_reduction
+    AFTER UPDATE OF capacity_mode,limit_value ON license_plan_entitlements
+    WHEN NEW.feature_key='USER_SEATS' AND NEW.capacity_mode='FINITE' AND EXISTS (
+      SELECT 1 FROM organisation_licenses ol
+      WHERE ol.license_plan_id=NEW.license_plan_id AND
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=ol.organisation_id AND e.status IN ('ACTIVE','INVITED'))>NEW.limit_value
+    )
+    BEGIN
+      INSERT INTO license_capacity_exceptions
+        (id,organisation_license_id,organisation_id,active_users,licensed_capacity,status,reason,opened_at,resolved_at)
+      SELECT 'capex-'||ol.id||'-'||ol.state_version,ol.id,ol.organisation_id,
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=ol.organisation_id AND e.status IN ('ACTIVE','INVITED')),
+        NEW.limit_value,'OPEN','Activated finite capacity is below current non-destructive user usage',CURRENT_TIMESTAMP,NULL
+      FROM organisation_licenses ol WHERE ol.license_plan_id=NEW.license_plan_id
+        AND (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=ol.organisation_id AND e.status IN ('ACTIVE','INVITED'))>NEW.limit_value
+        AND NOT EXISTS (SELECT 1 FROM license_capacity_exceptions x WHERE x.organisation_license_id=ol.id AND x.status='OPEN');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS open_capacity_exception_on_plan_downgrade
+    AFTER UPDATE OF license_plan_id ON organisation_licenses
+    WHEN EXISTS (
+      SELECT 1 FROM license_plan_entitlements pe WHERE pe.license_plan_id=NEW.license_plan_id
+        AND pe.feature_key='USER_SEATS' AND pe.enabled=1 AND pe.capacity_mode='FINITE'
+        AND (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED'))>pe.limit_value
+    )
+    BEGIN
+      INSERT INTO license_capacity_exceptions
+        (id,organisation_license_id,organisation_id,active_users,licensed_capacity,status,reason,opened_at,resolved_at)
+      SELECT 'capex-'||NEW.id||'-'||NEW.state_version,NEW.id,NEW.organisation_id,
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')),
+        pe.limit_value,'OPEN','Activated downgrade is below current non-destructive user usage',CURRENT_TIMESTAMP,NULL
+      FROM license_plan_entitlements pe WHERE pe.license_plan_id=NEW.license_plan_id AND pe.feature_key='USER_SEATS'
+        AND pe.enabled=1 AND pe.capacity_mode='FINITE'
+        AND NOT EXISTS (SELECT 1 FROM license_capacity_exceptions x WHERE x.organisation_license_id=NEW.id AND x.status='OPEN');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_tax_subscription_plan_domain
+    BEFORE INSERT ON tax_subscriptions
+    WHEN NOT EXISTS (SELECT 1 FROM license_plans p WHERE p.id=NEW.license_plan_id AND p.plan_domain='GOVERNMENT_TAX')
+    BEGIN
+      SELECT RAISE(ABORT,'TAX_SUBSCRIPTION_PLAN_DOMAIN_MISMATCH');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_tax_subscription_feature_domain
+    BEFORE INSERT ON tax_subscription_features
+    WHEN NOT EXISTS (SELECT 1 FROM license_features f WHERE f.feature_key=NEW.feature_key AND f.authority_domain='GOVERNMENT_TAX')
+    BEGIN
+      SELECT RAISE(ABORT,'TAX_SUBSCRIPTION_FEATURE_DOMAIN_MISMATCH');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_taxpayer_authorization_scope
+    BEFORE INSERT ON taxpayer_authorizations
+    WHEN NOT EXISTS (
+      SELECT 1 FROM tax_subscriptions ts JOIN tax_authorities ta ON ta.id=ts.tax_authority_id
+      JOIN tax_jurisdictions tj ON tj.id=ta.jurisdiction_id
+      JOIN organisations o ON o.id=NEW.organisation_id
+      WHERE ts.id=NEW.tax_subscription_id AND ts.tax_authority_id=NEW.tax_authority_id
+        AND ta.jurisdiction_id=NEW.jurisdiction_id AND o.taxpayer_id=NEW.taxpayer_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'TAXPAYER_AUTHORIZATION_SCOPE_MISMATCH');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_taxpayer_authorization_decision_update
+    BEFORE UPDATE ON taxpayer_authorization_decisions
+    BEGIN
+      SELECT RAISE(ABORT,'TAXPAYER_AUTHORIZATION_DECISION_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_taxpayer_authorization_decision_delete
+    BEFORE DELETE ON taxpayer_authorization_decisions
+    BEGIN
+      SELECT RAISE(ABORT,'TAXPAYER_AUTHORIZATION_DECISION_IMMUTABLE');
     END`,
   `CREATE TRIGGER IF NOT EXISTS prevent_quotation_revision_update
     BEFORE UPDATE ON quotation_revisions
@@ -1057,23 +1244,37 @@ const SCHEMA_STATEMENTS = [
   `CREATE TRIGGER IF NOT EXISTS enforce_employee_seat_limit_insert
     BEFORE INSERT ON employees WHEN NEW.status IN ('ACTIVE','INVITED')
     BEGIN
-      SELECT CASE WHEN
-        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')) >=
-        COALESCE((SELECT pe.limit_value FROM organisation_licenses ol
+      SELECT CASE WHEN COALESCE((SELECT pe.capacity_mode FROM organisation_licenses ol
+          JOIN license_plans lp ON lp.id=ol.license_plan_id AND lp.plan_domain='COMMERCIAL_SAAS'
           JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
-          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),0)
-        THEN RAISE(ABORT,'USER_SEAT_LIMIT_EXCEEDED') END;
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),'MISSING')='MISSING'
+        THEN RAISE(ABORT,'COMMERCIAL_USER_SEAT_ENTITLEMENT_REQUIRED') END;
+      SELECT CASE WHEN COALESCE((SELECT pe.capacity_mode FROM organisation_licenses ol
+          JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),'MISSING')='FINITE' AND
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')) >=
+        (SELECT pe.limit_value FROM organisation_licenses ol
+          JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1)
+        THEN RAISE(ABORT,'USER_LICENSE_LIMIT_REACHED') END;
     END`,
   `CREATE TRIGGER IF NOT EXISTS enforce_employee_seat_limit_update
     BEFORE UPDATE OF status,organisation_id ON employees
     WHEN NEW.status IN ('ACTIVE','INVITED') AND OLD.status NOT IN ('ACTIVE','INVITED')
     BEGIN
-      SELECT CASE WHEN
-        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')) >=
-        COALESCE((SELECT pe.limit_value FROM organisation_licenses ol
+      SELECT CASE WHEN COALESCE((SELECT pe.capacity_mode FROM organisation_licenses ol
+          JOIN license_plans lp ON lp.id=ol.license_plan_id AND lp.plan_domain='COMMERCIAL_SAAS'
           JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
-          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),0)
-        THEN RAISE(ABORT,'USER_SEAT_LIMIT_EXCEEDED') END;
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),'MISSING')='MISSING'
+        THEN RAISE(ABORT,'COMMERCIAL_USER_SEAT_ENTITLEMENT_REQUIRED') END;
+      SELECT CASE WHEN COALESCE((SELECT pe.capacity_mode FROM organisation_licenses ol
+          JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1),'MISSING')='FINITE' AND
+        (SELECT COUNT(*) FROM employees e WHERE e.organisation_id=NEW.organisation_id AND e.status IN ('ACTIVE','INVITED')) >=
+        (SELECT pe.limit_value FROM organisation_licenses ol
+          JOIN license_plan_entitlements pe ON pe.license_plan_id=ol.license_plan_id AND pe.feature_key='USER_SEATS' AND pe.enabled=1
+          WHERE ol.organisation_id=NEW.organisation_id ORDER BY ol.effective_from DESC LIMIT 1)
+        THEN RAISE(ABORT,'USER_LICENSE_LIMIT_REACHED') END;
     END`,
 ];
 
@@ -1566,31 +1767,36 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('access-governance:read','ACCESS_GOVERNANCE','READ','Read access requests reviews and certifications','RESTRICTED','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('access-governance:manage','ACCESS_GOVERNANCE','MANAGE','Decide access requests and certify or revoke access','SECURITY','2026-08-10T10:00:00Z')`,
 
-  `INSERT OR IGNORE INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at)
-    VALUES ('plan-pilot-professional-v1','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('CORE_VAT','Core VAT management','Controlled invoice VAT reconciliation and return workspaces',NULL,1,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','USER_SEATS',1,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','USER_SEATS',0,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('BRANCHES','Branches','Active operating branches','BRANCHES',0,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','WORKFLOWS',1,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('ACCOUNTING','Accounting','General ledger and financial controls',NULL,0,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('INVENTORY','Inventory','Inventory and warehouse controls',NULL,0,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('PROJECTS','Projects','Project costing budgets and reports',NULL,0,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('ANALYTICS','Analytics','Advanced governed reports and analytics','REPORT_RUNS',0,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_features VALUES ('API_ACCESS','API access','Scoped API clients webhooks and usage','API_REQUESTS',1,'2026-08-10T10:00:00Z')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-core','plan-pilot-professional-v1','CORE_VAT',1,NULL,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-admin','plan-pilot-professional-v1','ADMINISTRATION',1,NULL,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-seats','plan-pilot-professional-v1','USER_SEATS',1,25,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-branches','plan-pilot-professional-v1','BRANCHES',1,5,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-workflow','plan-pilot-professional-v1','ADVANCED_WORKFLOW',1,20,'{"max_nodes":30}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-accounting','plan-pilot-professional-v1','ACCOUNTING',1,NULL,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-inventory','plan-pilot-professional-v1','INVENTORY',1,NULL,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-projects','plan-pilot-professional-v1','PROJECTS',1,NULL,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-analytics','plan-pilot-professional-v1','ANALYTICS',1,1000,'{}')`,
-  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-api','plan-pilot-professional-v1','API_ACCESS',1,100000,'{}')`,
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,plan_domain,status,effective_from,effective_to,created_at)
+    VALUES ('plan-pilot-professional-v1','PILOT_PROFESSIONAL','Professional Pilot',1,'COMMERCIAL_SAAS','ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,plan_domain,status,effective_from,effective_to,created_at)
+    VALUES ('plan-tax-na-synthetic-v1','NA_GOVERNMENT_TAX','Namibia Government Tax Services',1,'GOVERNMENT_TAX','ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('CORE_VAT','Core VAT management','Controlled invoice VAT reconciliation and return workspaces','GOVERNMENT_TAX',NULL,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','COMMERCIAL_SAAS','USER_SEATS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','COMMERCIAL_SAAS','USER_SEATS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BRANCHES','Branches','Active operating branches','COMMERCIAL_SAAS','BRANCHES',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','COMMERCIAL_SAAS','WORKFLOWS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ACCOUNTING','Accounting','General ledger and financial controls','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BUSINESS_OPERATIONS','Business operations','Expenses quotations parties imports and business documents','COMMERCIAL_SAAS',NULL,1,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('INVENTORY','Inventory','Inventory and warehouse controls','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PROJECTS','Projects','Project costing budgets and reports','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ANALYTICS','Analytics','Advanced governed reports and analytics','COMMERCIAL_SAAS','REPORT_RUNS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('API_ACCESS','API access','Scoped API clients webhooks and usage','COMMERCIAL_SAAS','API_REQUESTS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PLATFORM_SECURITY','Platform control','Global platform security and operational control','PLATFORM_CONTROL',NULL,1,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-tax-core','plan-tax-na-synthetic-v1','CORE_VAT',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-admin','plan-pilot-professional-v1','ADMINISTRATION',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-seats','plan-pilot-professional-v1','USER_SEATS',1,'FINITE',25,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-branches','plan-pilot-professional-v1','BRANCHES',1,'FINITE',5,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-workflow','plan-pilot-professional-v1','ADVANCED_WORKFLOW',1,'FINITE',20,'{"max_nodes":30}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-accounting','plan-pilot-professional-v1','ACCOUNTING',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-business','plan-pilot-professional-v1','BUSINESS_OPERATIONS',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-inventory','plan-pilot-professional-v1','INVENTORY',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-projects','plan-pilot-professional-v1','PROJECTS',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-analytics','plan-pilot-professional-v1','ANALYTICS',1,'FINITE',1000,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-api','plan-pilot-professional-v1','API_ACCESS',1,'FINITE',100000,'{}')`,
   `INSERT OR IGNORE INTO subscriptions
-    (id,organisation_id,provider,provider_reference,status,activated_at,current_period_start,current_period_end,created_at,updated_at)
-    VALUES ('sub-org1-pilot','org-0001','LOCAL_SYNTHETIC','synthetic-subscription-org1','ACTIVE','2026-08-01T00:00:00Z','2026-08-01','2026-10-31','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
+    (id,organisation_id,provider,provider_reference,status,subscription_domain,payment_mode,activated_at,current_period_start,current_period_end,created_at,updated_at)
+    VALUES ('sub-org1-pilot','org-0001','LOCAL_SYNTHETIC','synthetic-subscription-org1','ACTIVE','COMMERCIAL_SAAS','DISABLED','2026-08-01T00:00:00Z','2026-08-01','2026-10-31','2026-08-10T10:00:00Z','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO organisation_licenses
     (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
     VALUES ('olic-org1','org-0001','sub-org1-pilot','plan-pilot-professional-v1','ACTIVE',1,'2026-08-01T00:00:00Z',NULL,NULL,'NON_DESTRUCTIVE_TAX_RETENTION','2026-08-10T10:00:00Z')`,
@@ -1599,6 +1805,14 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO license_usage VALUES ('usage-workflows-org1','olic-org1','org-0001','WORKFLOWS','2026-Q3',1,0,1,'2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO license_usage VALUES ('usage-api-org1','olic-org1','org-0001','API_REQUESTS','2026-08',142,0,1,'2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO license_events VALUES ('levent-org1-active','olic-org1','org-0001','LicenseActivated',NULL,'ACTIVE','LOCAL_SYNTHETIC_APPROVAL','Architecture-approved local staging activation','2026-08-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO countries VALUES ('NA','NAM','Namibia','NAD','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_jurisdictions VALUES ('tax-jurisdiction-na-national','NA','NA-NATIONAL','Namibia national tax jurisdiction','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_authorities VALUES ('tax-authority-na-namra','tax-jurisdiction-na-national','NAMRA','Namibia Revenue Agency','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_authority_administrators VALUES ('tax-admin-na-local','tax-authority-na-namra','usr-local-admin','ACTIVE','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','LOCAL-STAGING-ADR-030')`,
+  `INSERT OR IGNORE INTO tax_authority_users VALUES ('tax-user-na-local','tax-authority-na-namra','usr-local-admin','SYNTHETIC_PILOT_OPERATOR','ACTIVE','2026-08-23T12:00:00Z',NULL)`,
+  `INSERT OR IGNORE INTO tax_subscriptions VALUES ('tax-sub-na-synthetic','tax-authority-na-namra','plan-tax-na-synthetic-v1','ACTIVE','LOCAL_STAGING','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_subscription_features VALUES ('tax-sub-feature-na-core','tax-sub-na-synthetic','CORE_VAT','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO taxpayer_authorizations VALUES ('tax-authz-org1','tax-sub-na-synthetic','tax-authority-na-namra','tax-jurisdiction-na-national','org-0001','tp-0001','ACTIVE','ACTIVE','2026-08-23T12:00:00Z',NULL,'SYNTHETIC-NA-TP-0001','usr-local-admin','2026-08-23T12:00:00Z')`,
 
   `INSERT OR IGNORE INTO departments VALUES ('dept-finance','org-0001','FIN','Finance','', 'ACTIVE','2026-08-10T10:00:00Z')`,
   `INSERT OR IGNORE INTO departments VALUES ('dept-procurement','org-0001','PROC','Procurement','', 'ACTIVE','2026-08-10T10:00:00Z')`,
@@ -1770,24 +1984,24 @@ const EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS = [
 ];
 
 const LICENSE_PERMISSION_POLICIES = [
-  ['dashboard:read','CORE_VAT','READ'], ['identity:read','ADMINISTRATION','READ'], ['taxpayers:read','ADMINISTRATION','READ'],
-  ['registrations:read','ADMINISTRATION','READ'], ['registrations:submit','ADMINISTRATION','COMPLIANCE_WRITE'], ['organisations:manage','ADMINISTRATION','ADMIN_WRITE'],
+  ['dashboard:read','CORE_VAT','READ'], ['identity:read','CORE_VAT','READ'], ['taxpayers:read','CORE_VAT','READ'],
+  ['registrations:read','CORE_VAT','READ'], ['registrations:submit','CORE_VAT','COMPLIANCE_WRITE'], ['organisations:manage','CORE_VAT','ADMIN_WRITE'],
   ['invoices:read','CORE_VAT','READ'], ['invoices:submit','CORE_VAT','BUSINESS_WRITE'], ['exceptions:read','CORE_VAT','READ'],
   ['returns:read','CORE_VAT','READ'], ['returns:generate','CORE_VAT','COMPLIANCE_WRITE'], ['returns:approve','CORE_VAT','COMPLIANCE_WRITE'],
   ['returns:submit','CORE_VAT','COMPLIANCE_WRITE'], ['vat-adjustments:manage','CORE_VAT','CORRECTION_WRITE'], ['reconciliation:manage','CORE_VAT','COMPLIANCE_WRITE'],
-  ['audit:read','CORE_VAT','READ'], ['security:read','ADMINISTRATION','READ'], ['commercial:read','CORE_VAT','READ'],
-  ['parties:manage','CORE_VAT','BUSINESS_WRITE'], ['quotations:manage','CORE_VAT','BUSINESS_WRITE'], ['accounting:read','ACCOUNTING','READ'],
-  ['accounting:post','ACCOUNTING','BUSINESS_WRITE'], ['expenses:read','CORE_VAT','READ'], ['expenses:manage','CORE_VAT','BUSINESS_WRITE'],
-  ['expenses:approve','CORE_VAT','BUSINESS_WRITE'], ['inventory:read','INVENTORY','READ'], ['inventory:manage','INVENTORY','BUSINESS_WRITE'],
-  ['projects:read','PROJECTS','READ'], ['projects:manage','PROJECTS','BUSINESS_WRITE'], ['imports:read','CORE_VAT','READ'],
-  ['imports:manage','CORE_VAT','BUSINESS_WRITE'], ['documents:read','CORE_VAT','READ'], ['documents:upload','CORE_VAT','BUSINESS_WRITE'],
+  ['audit:read','CORE_VAT','READ'], ['security:read','PLATFORM_SECURITY','READ'], ['commercial:read','BUSINESS_OPERATIONS','READ'],
+  ['parties:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['quotations:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['accounting:read','ACCOUNTING','READ'],
+  ['accounting:post','ACCOUNTING','BUSINESS_WRITE'], ['expenses:read','BUSINESS_OPERATIONS','READ'], ['expenses:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'],
+  ['expenses:approve','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['inventory:read','INVENTORY','READ'], ['inventory:manage','INVENTORY','BUSINESS_WRITE'],
+  ['projects:read','PROJECTS','READ'], ['projects:manage','PROJECTS','BUSINESS_WRITE'], ['imports:read','BUSINESS_OPERATIONS','READ'],
+  ['imports:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['documents:read','BUSINESS_OPERATIONS','READ'], ['documents:upload','BUSINESS_OPERATIONS','BUSINESS_WRITE'],
   ['compliance:read','CORE_VAT','READ'], ['cases:manage','CORE_VAT','COMPLIANCE_WRITE'], ['disputes:manage','CORE_VAT','COMPLIANCE_WRITE'],
   ['refunds:read','CORE_VAT','READ'], ['refunds:request','CORE_VAT','COMPLIANCE_WRITE'], ['refunds:review','CORE_VAT','COMPLIANCE_WRITE'],
   ['risk:read','CORE_VAT','READ'], ['risk:review','CORE_VAT','COMPLIANCE_WRITE'], ['communications:manage','CORE_VAT','COMPLIANCE_WRITE'],
-  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','API_ACCESS','READ'], ['integrations:manage','API_ACCESS','BUSINESS_WRITE'],
+  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','CORE_VAT','READ'], ['integrations:manage','CORE_VAT','COMPLIANCE_WRITE'],
   ['developer:read','API_ACCESS','READ'], ['developer:manage','API_ACCESS','BUSINESS_WRITE'], ['offline:read','CORE_VAT','READ'],
-  ['offline:sync','CORE_VAT','BUSINESS_WRITE'], ['reports:read','ANALYTICS','READ'], ['reports:run','ANALYTICS','EXPORT'],
-  ['platform:read','API_ACCESS','READ'], ['platform:manage','API_ACCESS','ADMIN_WRITE'], ['payments:read','CORE_VAT','READ'],
+  ['offline:sync','CORE_VAT','BUSINESS_WRITE'], ['reports:read','CORE_VAT','READ'], ['reports:run','CORE_VAT','EXPORT'],
+  ['platform:read','PLATFORM_SECURITY','READ'], ['platform:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['payments:read','CORE_VAT','READ'],
   ['administration:read','ADMINISTRATION','READ'], ['administration:manage','ADMINISTRATION','ADMIN_WRITE'], ['workspace:read','ADMINISTRATION','READ'],
   ['search:read','ADMINISTRATION','READ'], ['licensing:read','ADMINISTRATION','READ'], ['licensing:request','ADMINISTRATION','ADMIN_WRITE'],
   ['employees:read','ADMINISTRATION','READ'], ['employees:manage','USER_SEATS','ADMIN_WRITE'], ['roles:read','ADMINISTRATION','READ'],

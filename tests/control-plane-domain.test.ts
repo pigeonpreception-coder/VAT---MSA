@@ -12,22 +12,27 @@ import {
 describe("licence continuity policy", () => {
   it("preserves authorised read and compliance continuity after expiry", () => {
     for (const operationClass of ["READ", "EXPORT", "COMPLIANCE_WRITE", "CORRECTION_WRITE"] as const) {
-      const result = evaluateEntitlement({ licenseState: "EXPIRED", featureKey: "CORE_VAT", featureEnabled: true, operationClass, limit: null, used: 0 });
+      const result = evaluateEntitlement({ licenseState: "EXPIRED", featureKey: "CORE_VAT", featureEnabled: true, operationClass, capacityMode: "NOT_APPLICABLE", limit: null, used: 0 });
       expect(result.allowed).toBe(true);
       expect(result.obligations).toContain("ENHANCED_AUDIT");
     }
   });
 
   it("blocks expansion without deleting records after expiry", () => {
-    const result = evaluateEntitlement({ licenseState: "EXPIRED", featureKey: "USER_SEATS", featureEnabled: true, operationClass: "ADMIN_WRITE", limit: 25, used: 3 });
+    const result = evaluateEntitlement({ licenseState: "EXPIRED", featureKey: "USER_SEATS", featureEnabled: true, operationClass: "ADMIN_WRITE", capacityMode: "FINITE", limit: 25, used: 3 });
     expect(result.allowed).toBe(false);
     expect(result.code).toBe("LICENSE_EXPIRED");
     expect(result.obligations).toContain("PRESERVE_RECORDS");
   });
 
   it("enforces numeric limits including reserved capacity", () => {
-    const result = evaluateEntitlement({ licenseState: "ACTIVE", featureKey: "USER_SEATS", featureEnabled: true, operationClass: "ADMIN_WRITE", limit: 5, used: 3, reserved: 1, requested: 2 });
+    const result = evaluateEntitlement({ licenseState: "ACTIVE", featureKey: "USER_SEATS", featureEnabled: true, operationClass: "ADMIN_WRITE", capacityMode: "FINITE", limit: 5, used: 3, reserved: 1, requested: 2 });
     expect(result).toMatchObject({ allowed: false, code: "ENTITLEMENT_LIMIT_EXCEEDED", remaining: 1 });
+  });
+
+  it("requires unlimited capacity to be represented explicitly", () => {
+    expect(evaluateEntitlement({ licenseState: "ACTIVE", featureKey: "USER_SEATS", featureEnabled: true, operationClass: "ADMIN_WRITE", capacityMode: "UNLIMITED", limit: null, used: 100_000, requested: 1 })).toMatchObject({ allowed: true, remaining: null });
+    expect(evaluateEntitlement({ licenseState: "ACTIVE", featureKey: "USER_SEATS", featureEnabled: true, operationClass: "ADMIN_WRITE", capacityMode: "NOT_APPLICABLE", limit: 999_999, used: 1 })).toMatchObject({ allowed: false, code: "ENTITLEMENT_CONFIGURATION_INVALID" });
   });
 });
 

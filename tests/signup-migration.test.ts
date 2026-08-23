@@ -22,11 +22,11 @@ function insertSignup(db: DatabaseSync, fixture: SignupFixture = {}) {
   const timestamp = "2026-08-23T12:00:00Z";
   db.prepare(`INSERT INTO self_serve_signup_applications
     (id,public_reference,idempotency_key,request_hash,applicant_name,applicant_role,contact_email,
-     identity_provider,identity_subject_hash,country_code,requested_plan_id,vat_number,tin,
+     identity_provider,identity_subject_hash,onboarding_path,country_code,requested_plan_id,vat_number,tin,
      company_registration_number,legal_name,trading_name,taxpayer_type,return_frequency,address,
      terms_version,privacy_notice_version,authority_attested_at,terms_accepted_at,privacy_notice_accepted_at,
      status,identity_status,taxpayer_verification_status,licence_status,promoted_registration_application_id,submitted_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     fixture.id ?? "signup-1",
     fixture.reference ?? "VMS-2026-0000000001",
     fixture.idempotency ?? "00000000-0000-4000-8000-000000000001",
@@ -36,6 +36,7 @@ function insertSignup(db: DatabaseSync, fixture: SignupFixture = {}) {
     fixture.email ?? "ndeshi@example.test",
     null,
     null,
+    "COMPANY_ADMIN",
     "NA",
     fixture.planId ?? "plan-signup",
     fixture.vat ?? "VAT-SIGNUP-001",
@@ -64,11 +65,11 @@ describe("self-serve signup database boundary", () => {
   it("enforces immutable pending intake without creating activation records", () => {
     const db = new DatabaseSync(":memory:");
     const migrations = readdirSync(join(process.cwd(), "drizzle")).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
-    expect(migrations.at(-1)).toBe("0013_self_serve_signup.sql");
+    expect(migrations.at(-1)).toBe("0014_dual_subscription_authority.sql");
     for (const migration of migrations) applyMigration(db, migration);
     db.exec("PRAGMA foreign_keys=ON");
-    db.prepare(`INSERT INTO license_plans VALUES
-      ('plan-signup','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z')`).run();
+    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain) VALUES
+      ('plan-signup','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z','COMMERCIAL_SAAS')`).run();
 
     const before = {
       users: db.prepare("SELECT COUNT(*) AS count FROM app_users").get(),
@@ -111,9 +112,9 @@ describe("self-serve signup database boundary", () => {
     const db = new DatabaseSync(":memory:");
     const migrations = readdirSync(join(process.cwd(), "drizzle")).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
     for (const migration of migrations) applyMigration(db, migration);
-    db.prepare(`INSERT INTO license_plans VALUES
-      ('plan-signup','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z'),
-      ('plan-inactive','INACTIVE','Inactive',1,'RETIRED','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z')`).run();
+    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain) VALUES
+      ('plan-signup','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z','COMMERCIAL_SAAS'),
+      ('plan-inactive','INACTIVE','Inactive',1,'RETIRED','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z','COMMERCIAL_SAAS')`).run();
     expect(() => insertSignup(db, { planId: "plan-inactive" })).toThrow(/SELF_SERVE_SIGNUP_PLAN_UNAVAILABLE/);
     insertSignup(db);
     expect(() => insertSignup(db, {
@@ -130,8 +131,8 @@ describe("self-serve signup database boundary", () => {
     const db = new DatabaseSync(":memory:");
     const migrations = readdirSync(join(process.cwd(), "drizzle")).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
     for (const migration of migrations) applyMigration(db, migration);
-    db.prepare(`INSERT INTO license_plans VALUES
-      ('plan-signup','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z')`).run();
+    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain) VALUES
+      ('plan-signup','PILOT_PROFESSIONAL','Professional Pilot',1,'ACTIVE','2026-01-01T00:00:00Z',NULL,'2026-01-01T00:00:00Z','COMMERCIAL_SAAS')`).run();
     db.prepare(`INSERT INTO taxpayers
       (id,vat_number,tin,legal_name,trading_name,taxpayer_type,vat_status,return_frequency,address,email,created_at)
       VALUES ('tp-existing','VAT-EXISTING','TIN-EXISTING','Existing Taxpayer',NULL,'PRIVATE_COMPANY','ACTIVE','BIMONTHLY','Windhoek','existing@example.test','2026-01-01T00:00:00Z')`).run();

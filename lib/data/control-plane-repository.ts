@@ -34,6 +34,7 @@ type EntitlementRow = {
   description: string;
   metric_key: string | null;
   enabled: number;
+  capacity_mode: "FINITE" | "UNLIMITED" | "NOT_APPLICABLE";
   limit_value: number | null;
   used_value: number | null;
   reserved_value: number | null;
@@ -65,13 +66,14 @@ async function getLicense(db: D1Database, organisationId: string): Promise<Licen
   const row = await db.prepare(`SELECT l.id,l.organisation_id,p.id AS plan_id,p.code AS plan_code,p.name AS plan_name,p.version AS plan_version,
     l.state,l.retention_policy,s.current_period_start,s.current_period_end
     FROM organisation_licenses l JOIN license_plans p ON p.id=l.license_plan_id JOIN subscriptions s ON s.id=l.subscription_id
-    WHERE l.organisation_id=? ORDER BY l.effective_from DESC LIMIT 1`).bind(organisationId).first<LicenseRow>();
+    WHERE l.organisation_id=? AND p.plan_domain='COMMERCIAL_SAAS' AND s.subscription_domain='COMMERCIAL_SAAS'
+    ORDER BY l.effective_from DESC LIMIT 1`).bind(organisationId).first<LicenseRow>();
   if (!row) throw new AccessDeniedError("The organisation has no configured licence.");
   return row;
 }
 
 async function getEntitlements(db: D1Database, license: LicenseRow): Promise<EntitlementRow[]> {
-  const result = await db.prepare(`SELECT e.feature_key,f.name,f.description,f.metric_key,e.enabled,e.limit_value,
+  const result = await db.prepare(`SELECT e.feature_key,f.name,f.description,f.metric_key,e.enabled,e.capacity_mode,e.limit_value,
     COALESCE(u.used_value,0) AS used_value,COALESCE(u.reserved_value,0) AS reserved_value
     FROM license_plan_entitlements e JOIN license_features f ON f.feature_key=e.feature_key
     LEFT JOIN license_usage u ON u.organisation_license_id=? AND u.metric_key=f.metric_key
@@ -96,6 +98,7 @@ export async function assertEntitledOperation(
     featureKey,
     featureEnabled: entitlement?.enabled === 1,
     operationClass,
+    capacityMode: entitlement?.capacity_mode ?? "NOT_APPLICABLE",
     limit: entitlement?.limit_value ?? null,
     used: entitlement?.used_value ?? 0,
     reserved: entitlement?.reserved_value ?? 0,
@@ -145,6 +148,7 @@ export async function getEffectiveNavigation(actor: UserContext, requestedOrgani
         featureKey: row.feature_key,
         featureEnabled: entitlement?.enabled === 1,
         operationClass: String(row.operation_class) as OperationClass,
+        capacityMode: entitlement?.capacity_mode ?? "NOT_APPLICABLE",
         limit: entitlement?.limit_value ?? null,
         used: entitlement?.used_value ?? 0,
         reserved: entitlement?.reserved_value ?? 0,
@@ -174,7 +178,7 @@ export async function getEffectiveNavigation(actor: UserContext, requestedOrgani
 export async function getAdministrationSnapshot(actor: UserContext, requestedOrganisationId?: string | null) {
   const db = await ensureDatabase();
   const { organisation, license } = await assertEntitledOperation(actor, "ADMINISTRATION", "READ", 0, requestedOrganisationId);
-  const [entitlements, employees, roles, workflows, tasks, accessRequests, accessReviews, structures, administrators, security] = await Promise.all([
+  const [entitlements, employees, roles, workflows, tasks, accessRequests, accessReviews, structures, administrators, capacityExceptions, security] = await Promise.all([
     getEntitlements(db, license),
     db.prepare(`SELECT e.id,e.employee_number,e.full_name,e.email,e.status,e.last_activity_at,d.name AS department,j.name AS job_title,b.name AS branch
       FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN branches b ON b.id=e.branch_id
@@ -200,6 +204,9 @@ export async function getAdministrationSnapshot(actor: UserContext, requestedOrg
       (SELECT COUNT(*) FROM job_titles WHERE organisation_id=? AND status='ACTIVE') AS job_titles`).bind(organisation.id, organisation.id, organisation.id, organisation.id).first<Record<string, number>>(),
     db.prepare(`SELECT a.id,a.administrator_role_code,a.scope,a.is_primary,a.status,u.display_name,u.email
       FROM organisation_administrators a JOIN app_users u ON u.id=a.user_id WHERE a.organisation_id=? ORDER BY a.is_primary DESC,u.display_name`).bind(organisation.id).all<Record<string, string | number | null>>(),
+    db.prepare(`SELECT id,active_users,licensed_capacity,status,reason,opened_at,resolved_at
+      FROM license_capacity_exceptions WHERE organisation_id=? ORDER BY opened_at DESC LIMIT 20`)
+      .bind(organisation.id).all<Record<string, string | number | null>>(),
     db.prepare(`SELECT
       (SELECT COUNT(*) FROM security_events WHERE occurred_at >= datetime('now','-30 days')) AS security_events_30d,
       (SELECT COUNT(*) FROM security_events WHERE event_type='AUTHENTICATION_FAILED' AND occurred_at >= datetime('now','-30 days')) AS failed_logins_30d,
@@ -217,6 +224,7 @@ export async function getAdministrationSnapshot(actor: UserContext, requestedOrg
     accessReviews: accessReviews.results,
     structures: structures ?? {},
     administrators: administrators.results,
+    capacityExceptions: capacityExceptions.results,
     security: security ?? {},
     integrations: { payments: "DISABLED", itas: "DISABLED_PENDING_AUTHORITY_CONTRACT", statutoryRules: "APPROVED_RULES_ONLY" },
   };
@@ -244,12 +252,19 @@ export async function inviteEmployee(actor: UserContext, input: unknown, request
     if (!valid) throw new ControlPlaneValidationError("REFERENCE_OUT_OF_SCOPE", `The selected ${table.replaceAll("_", " ")} record is outside this organisation.`);
   }
   const id = crypto.randomUUID();
+  const invitationId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const invitationExpiresAt = new Date(Date.parse(now) + 72 * 60 * 60 * 1000).toISOString();
+  const recipientEmailHash = `sha256:${await sha256Hex(employee.email.toLowerCase())}`;
   await db.batch([
     db.prepare(`INSERT INTO employees
       (id,organisation_id,user_id,employee_number,full_name,email,position_id,job_title_id,department_id,business_unit_id,branch_id,manager_employee_id,status,invited_at,activated_at,terminated_at,last_activity_at,created_at,updated_at)
       VALUES (?,?,NULL,?,?,?,NULL,?, ?,NULL,?,?,'INVITED',?,NULL,NULL,NULL,?,?)`)
       .bind(id, organisation.id, employee.employeeNumber, employee.fullName, employee.email, employee.jobTitleId, employee.departmentId, employee.branchId, employee.managerEmployeeId, now, now, now),
+    db.prepare(`INSERT INTO user_invitations
+      (id,organisation_id,employee_id,invited_by,recipient_email_hash,token_hash,status,expires_at,created_at,accepted_at,revoked_at)
+      VALUES (?,?,?,?,?,NULL,'PENDING',?,?,NULL,NULL)`)
+      .bind(invitationId, organisation.id, id, actor.userId, recipientEmailHash, invitationExpiresAt, now),
     db.prepare(`UPDATE license_usage SET reserved_value=reserved_value+1,version=version+1,updated_at=?
       WHERE organisation_license_id=? AND metric_key='USER_SEATS'`).bind(now, license.id),
     db.prepare(`INSERT INTO outbox_events
@@ -257,7 +272,7 @@ export async function inviteEmployee(actor: UserContext, input: unknown, request
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), "EMPLOYEE", id, "EmployeeInvitationRecorded", 1, organisation.id, JSON.stringify({ employee_id: id, delivery: "DISABLED_LOCAL_STAGING" }), "PENDING", 0, now, now, null, null),
     await appendAudit(db, actor, "EMPLOYEE_INVITED", "EMPLOYEE", id, { organisationId: organisation.id, email: employee.email, delivery: "DISABLED_LOCAL_STAGING" }),
   ]);
-  return { id, ...employee, status: "INVITED", invitationDelivery: "DISABLED_LOCAL_STAGING" };
+  return { id, ...employee, status: "INVITED", invitationId, invitationExpiresAt, invitationDelivery: "DISABLED_LOCAL_STAGING" };
 }
 
 export async function createOrganisationRole(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
@@ -299,7 +314,10 @@ export async function terminateEmployee(actor: UserContext, employeeId: string, 
     WHERE organisation_id=? AND is_primary=1 AND status='ACTIVE' AND user_id<>? LIMIT 1`).bind(organisation.id, employee.user_id ?? "__none__").first<{ user_id: string }>();
   const statements: D1PreparedStatement[] = [
     db.prepare("UPDATE employees SET status='TERMINATED',terminated_at=?,updated_at=? WHERE id=? AND organisation_id=?").bind(now, now, employee.id, organisation.id),
-    db.prepare("UPDATE license_usage SET used_value=MAX(0,used_value-1),version=version+1,updated_at=? WHERE organisation_license_id=? AND metric_key='USER_SEATS'").bind(now, license.id),
+    employee.status === "INVITED"
+      ? db.prepare("UPDATE license_usage SET reserved_value=MAX(0,reserved_value-1),version=version+1,updated_at=? WHERE organisation_license_id=? AND metric_key='USER_SEATS'").bind(now, license.id)
+      : db.prepare("UPDATE license_usage SET used_value=MAX(0,used_value-1),version=version+1,updated_at=? WHERE organisation_license_id=? AND metric_key='USER_SEATS'").bind(now, license.id),
+    db.prepare("UPDATE user_invitations SET status='REVOKED',revoked_at=? WHERE employee_id=? AND status='PENDING'").bind(now, employee.id),
     await appendAudit(db, actor, "EMPLOYEE_TERMINATED", "EMPLOYEE", employee.id, { organisationId: organisation.id, reason: cleanReason, historicalRecordsPreserved: true }),
   ];
   if (employee.user_id) {

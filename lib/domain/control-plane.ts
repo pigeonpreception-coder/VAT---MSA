@@ -8,6 +8,7 @@ export type LicenseState =
   | "CANCELLED";
 
 export type OperationClass = "READ" | "EXPORT" | "BUSINESS_WRITE" | "COMPLIANCE_WRITE" | "CORRECTION_WRITE" | "ADMIN_WRITE";
+export type CapacityMode = "FINITE" | "UNLIMITED" | "NOT_APPLICABLE";
 
 export type EntitlementEvaluation = {
   allowed: boolean;
@@ -22,6 +23,7 @@ export type EntitlementInput = {
   featureKey: string;
   featureEnabled: boolean;
   operationClass: OperationClass;
+  capacityMode: CapacityMode;
   limit: number | null;
   used: number;
   reserved?: number;
@@ -34,7 +36,21 @@ export function evaluateEntitlement(input: EntitlementInput): EntitlementEvaluat
   const requested = Math.max(0, input.requested ?? 1);
   const reserved = Math.max(0, input.reserved ?? 0);
   const used = Math.max(0, input.used);
-  const remaining = input.limit === null ? null : Math.max(0, input.limit - used - reserved);
+  const configurationValid = (input.capacityMode === "FINITE" && input.limit !== null && input.limit > 0)
+    || (input.capacityMode !== "FINITE" && input.limit === null);
+  const featureCapacityValid = input.featureKey !== "USER_SEATS" || input.capacityMode !== "NOT_APPLICABLE";
+  if (!configurationValid || !featureCapacityValid) {
+    return {
+      allowed: false,
+      code: "ENTITLEMENT_CONFIGURATION_INVALID",
+      reason: `${input.featureKey} has an invalid explicit capacity configuration.`,
+      remaining: null,
+      obligations: ["FAIL_CLOSED", "ALERT_CONFIGURATION_OWNER"],
+    };
+  }
+  const remaining = input.capacityMode === "FINITE" && input.limit !== null
+    ? Math.max(0, input.limit - used - reserved)
+    : null;
 
   if (!input.featureEnabled) {
     return { allowed: false, code: "FEATURE_NOT_ENTITLED", reason: `${input.featureKey} is not included in the organisation licence.`, remaining, obligations: [] };

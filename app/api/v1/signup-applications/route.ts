@@ -77,7 +77,8 @@ export async function POST(request: Request) {
     });
   } catch (cause) {
     if (cause instanceof SignupValidationError) {
-      outcome = "VALIDATION_REJECTED";
+      const companyAdminRequired = cause.messages.some((message) => message.code === "COMPANY_ADMIN_AUTHORITY_REQUIRED");
+      outcome = companyAdminRequired ? "COMPANY_ADMIN_AUTHORITY_REQUIRED" : "VALIDATION_REJECTED";
       await recordSecurityEvent({
         eventType: "SELF_SERVE_SIGNUP_REJECTED",
         severity: "LOW",
@@ -86,7 +87,9 @@ export async function POST(request: Request) {
         outcome,
         details: { reason_code: cause.messages[0]?.code ?? "VALIDATION_FAILED" },
       });
-      return problem(422, "VALIDATION_FAILED", "Validation failed", "The signup application contains invalid or missing values.", context.correlationId, cause.messages);
+      return companyAdminRequired
+        ? problem(403, "COMPANY_ADMIN_AUTHORITY_REQUIRED", "Company administrator required", "Only the verified Company System Administrator may start a commercial subscription application.", context.correlationId, cause.messages)
+        : problem(422, "VALIDATION_FAILED", "Validation failed", "The signup application contains invalid or missing values.", context.correlationId, cause.messages);
     }
     if (cause instanceof RepositoryConflictError) {
       outcome = "DUPLICATE_REJECTED";

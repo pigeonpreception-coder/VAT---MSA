@@ -1,0 +1,25 @@
+decision_id,actor,operation,resource,authority_domain,rbac_requirement,abac_requirement,commercial_subscription,tax_authorization,result,deep_enforcement,audit_event
+AUTH-001,TAX_AUTHORITY_ADMIN,activate,tax_subscription,GOVERNMENT_TAX,TAX_AUTHORITY_ADMIN,"authority_admin.authority_id = tax_subscription.authority_id and step_up = true",IGNORED,NOT_APPLICABLE,ALLOW,service+database,TAX_SUBSCRIPTION_ACTIVATED
+AUTH-002,COMPANY_SYSTEM_ADMIN,activate,tax_subscription,GOVERNMENT_TAX,NONE,NONE,IGNORED,NOT_APPLICABLE,DENY,database,TAX_AUTHORITY_BOUNDARY_DENIED
+AUTH-003,TAX_AUTHORITY_ADMIN,authorize,taxpayer,GOVERNMENT_TAX,TAX_AUTHORITY_ADMIN,"same jurisdiction and active authority subscription and verified VAT registration and step_up = true",IGNORED,REQUIRED,ALLOW,service+database,TAXPAYER_AUTHORIZED
+AUTH-004,COMPANY_SYSTEM_ADMIN,authorize,taxpayer,GOVERNMENT_TAX,NONE,NONE,IGNORED,REQUIRED,DENY,database,TAX_AUTHORITY_BOUNDARY_DENIED
+AUTH-005,TAXPAYER_USER,access,tax_feature,GOVERNMENT_TAX,TAXPAYER_USER,"active taxpayer authorization and active VAT status and enabled jurisdiction feature and tenant/taxpayer scope",IGNORED,REQUIRED,CONDITIONAL,central tax authorization service,TAX_ACCESS_DECIDED
+AUTH-006,TAXPAYER_USER,access,commercial_feature,COMMERCIAL_SAAS,ASSIGNED_COMMERCIAL_ROLE,"active organisation membership and licensed feature",REQUIRED,IGNORED,CONDITIONAL,central licence service,COMMERCIAL_ACCESS_DECIDED
+AUTH-007,COMPANY_SYSTEM_ADMIN,initiate,commercial_subscription,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"verified organisation relationship and step_up = true",NOT_YET_ACTIVE,IGNORED,ALLOW,service+database,COMMERCIAL_SUBSCRIPTION_INITIATED
+AUTH-008,EMPLOYEE,initiate,commercial_subscription,COMMERCIAL_SAAS,NONE,NONE,ANY,IGNORED,DENY,service+database,COMMERCIAL_SUBSCRIPTION_DENIED
+AUTH-009,TAX_AUTHORITY_ADMIN,manage,commercial_subscription,COMMERCIAL_SAAS,NONE,NONE,REQUIRED,IGNORED,DENY,database,COMMERCIAL_AUTHORITY_BOUNDARY_DENIED
+AUTH-010,COMPANY_SYSTEM_ADMIN,invite,organisation_user,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"same organisation and active subscription and capacity available and step_up when privileged role",REQUIRED,IGNORED,CONDITIONAL,service+transactional database trigger,USER_INVITED
+AUTH-011,COMPANY_SYSTEM_ADMIN,activate,organisation_user,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"same organisation and capacity available and no self-approval when workflow requires review",REQUIRED,IGNORED,CONDITIONAL,transactional database trigger,USER_ACTIVATED
+AUTH-012,COMPANY_SYSTEM_ADMIN,deactivate,organisation_user,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"same organisation and target is not last active administrator",REQUIRED,IGNORED,CONDITIONAL,service+database,USER_DEACTIVATED
+AUTH-013,EMPLOYEE,create,organisation_user,COMMERCIAL_SAAS,NONE,NONE,REQUIRED,IGNORED,DENY,service+database,USER_PROVISIONING_DENIED
+AUTH-014,COMPANY_SYSTEM_ADMIN,change,commercial_plan,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"same organisation and step_up = true and activated commercial change",REQUIRED,IGNORED,CONDITIONAL,licence service+database,COMMERCIAL_PLAN_CHANGED
+AUTH-015,COMPANY_SYSTEM_ADMIN,grant,tax_feature,GOVERNMENT_TAX,NONE,NONE,ANY,REQUIRED,DENY,database,TAX_AUTHORITY_BOUNDARY_DENIED
+AUTH-016,TAX_AUTHORITY_ADMIN,grant,commercial_feature,COMMERCIAL_SAAS,NONE,NONE,REQUIRED,ANY,DENY,database,COMMERCIAL_AUTHORITY_BOUNDARY_DENIED
+AUTH-017,SUPER_ADMIN,assume,tax_authority_admin,GOVERNMENT_TAX,NONE,NONE,IGNORED,REQUIRED,DENY,identity policy+database,PRIVILEGE_ASSUMPTION_DENIED
+AUTH-018,SUPER_ADMIN,assume,company_system_admin,COMMERCIAL_SAAS,NONE,NONE,REQUIRED,IGNORED,DENY,identity policy+database,PRIVILEGE_ASSUMPTION_DENIED
+AUTH-019,SYSTEM,add,commercial_plan_feature,COMMERCIAL_SAAS,PLATFORM_CATALOG_ADMIN,"feature.authority_domain = COMMERCIAL_SAAS and four-eyes catalogue approval",NOT_APPLICABLE,IGNORED,CONDITIONAL,database constraint,PLAN_FEATURE_CHANGED
+AUTH-020,SYSTEM,add,tax_plan_feature,GOVERNMENT_TAX,PLATFORM_CATALOG_ADMIN,"feature.authority_domain = GOVERNMENT_TAX and authority contract approved",IGNORED,NOT_APPLICABLE,CONDITIONAL,database constraint,PLAN_FEATURE_CHANGED
+AUTH-021,COMPANY_SYSTEM_ADMIN,operate,buyer_seller_capabilities,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"same canonical organisation; capabilities are additive and effective-dated",REQUIRED,IGNORED,CONDITIONAL,organisation service,ORGANISATION_CAPABILITY_CHANGED
+AUTH-022,TAX_AUTHORITY_ADMIN,suspend,taxpayer_authorization,GOVERNMENT_TAX,TAX_AUTHORITY_ADMIN,"same jurisdiction and step_up = true and reason present",IGNORED,REQUIRED,ALLOW,service+database,TAXPAYER_AUTHORIZATION_SUSPENDED
+AUTH-023,COMPANY_SYSTEM_ADMIN,export,expired_commercial_data,COMMERCIAL_SAAS,COMPANY_SYSTEM_ADMIN,"same organisation and continuity policy permits read/export",EXPIRED,IGNORED,ALLOW,central licence continuity policy,EXPIRED_LICENSE_EXPORT_ACCESSED
+AUTH-024,EMPLOYEE,mutate,expired_commercial_data,COMMERCIAL_SAAS,ASSIGNED_COMMERCIAL_ROLE,"same organisation",EXPIRED,IGNORED,DENY,central licence service,EXPIRED_LICENSE_MUTATION_DENIED

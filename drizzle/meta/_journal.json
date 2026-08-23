@@ -99,6 +99,13 @@
       "when": 1787466568379,
       "tag": "0013_self_serve_signup",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1787494276361,
+      "tag": "0014_dual_subscription_authority",
+      "breakpoints": true
     }
   ]
 }

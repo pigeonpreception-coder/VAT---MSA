@@ -1,0 +1,43 @@
+flowchart LR
+  subgraph Edge["Edge and Experience"]
+    Landing["Dual Signup Landing"]
+    TaxPortal["Tax Services Portal"]
+    CompanyPortal["Company Onboarding / Workspace"]
+    Gateway["API Gateway + Session Enforcement"]
+  end
+  subgraph Core["VAT-MSA Application Plane"]
+    PDP["Unified Policy Decision Point"]
+    TaxAuth["Government Tax Authorization Service"]
+    Commercial["Commercial Licence & Entitlement Service"]
+    Identity["Global Identity Resolver"]
+    Org["Organisation Administration Service"]
+    Tax["Tax Domain Services"]
+    Business["Commercial Business Services"]
+    Audit["Audit / Outbox"]
+  end
+  subgraph Data["Authoritative Stores"]
+    IdentityDB[("Identity / Organisation")]
+    TaxDB[("Tax Authority / Authorization")]
+    LicenceDB[("Commercial Subscription / Licence")]
+    DomainDB[("Tax and Business Records")]
+    Evidence[("Immutable Evidence")]
+  end
+  Adapters["Country Tax Authority Adapter Plane"]
+  Payment["Commercial Payment Adapter (disabled)"]
+
+  Landing --> Gateway
+  TaxPortal --> Gateway
+  CompanyPortal --> Gateway
+  Gateway --> Identity --> IdentityDB
+  Gateway --> PDP
+  PDP --> TaxAuth --> TaxDB
+  PDP --> Commercial --> LicenceDB
+  PDP --> Org --> IdentityDB
+  PDP --> Tax --> DomainDB
+  PDP --> Business --> DomainDB
+  TaxAuth <--> Adapters
+  Commercial -.-> Payment
+  TaxAuth --> Audit
+  Commercial --> Audit
+  Org --> Audit
+  Audit --> Evidence

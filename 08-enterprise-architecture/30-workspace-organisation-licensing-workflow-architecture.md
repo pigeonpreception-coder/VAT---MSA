@@ -2,6 +2,8 @@
 
 **Status:** Architecture-board draft. This extension integrates with the approved VAT-MSA baseline. It does not authorize production implementation.
 
+**ADR-030 clarification:** the ordered `dual-subscription/` package supersedes any reading of this document that couples a commercial organisation licence to government taxpayer authorization. Commercial SaaS and Government Tax Authority access are independently owned and evaluated. The approved implementation scope is synthetic local/staging only.
+
 ## 1. Scope and mandatory separation
 
 This architecture adds five bounded capabilities to the existing platform: Workspace and Navigation Configuration, Organisation Administration, Licensing and Entitlements, Organisation Workflow, and Access Governance. They reuse the canonical Taxpayer, Organisation, Identity, Policy, Audit, Integration and Fiscal domains. They do not create a parallel taxpayer, buyer, seller or NamRA-administration model.
@@ -20,7 +22,8 @@ The following components extend the current modular core and are independently e
 |---|---|---|---|
 | Workspace and Navigation Service | workspace/folder/item definitions, ordering, favourites, recent functions, visibility projections | IAM policy decisions, entitlements, organisation capabilities | authorization truth or protected search records |
 | Organisation Administration Service | employees, positions, job titles, departments, business units, branches and delegated administrator appointments | canonical Organisation, Identity, Workflow and Audit | taxpayer identity verification or NamRA roles |
-| License and Entitlement Service | plans, subscriptions, organisation licences, feature grants, limits, usage reservations and licence events | verified taxpayer/organisation, approved subscription provider | payment-card data or self-service licence authority |
+| License and Entitlement Service | commercial plans, subscriptions, organisation licences, feature grants, limits, usage reservations and licence events | verified organisation/Company System Administrator, approved subscription provider | payment-card data, government tax features or taxpayer authorization |
+| Government Tax Authorization Service | tax authorities, tax subscriptions, taxpayer authorizations, VAT-status evidence and government-tax feature grants | canonical taxpayer/organisation, jurisdiction and approved authority adapter | commercial plans, employee seats or company administrator authority |
 | Organisation Authorization Service | organisation roles, permission sets, assignments, capabilities, scopes and financial authorities | Identity, Organisation, Entitlement and central Policy | statutory/NamRA or platform security policy overrides |
 | Workflow Service | definitions, immutable published versions, nodes, conditions, transitions, assignments, approvals, delegations and escalations | Authorization, SoD Policy, Audit, domain commands | source transaction mutation or tax-rule authority |
 | Access Governance Service | access requests, approvals, reviews, certifications, dormant/excessive privilege findings and offboarding orchestration | Identity, HR/organisation data, Workflow and Security | deletion of historical actor attribution |
@@ -47,15 +50,15 @@ An Employee is an organisation-owned employment profile. A User is a human ident
 
 ### 3.2 Licensed administrator provisioning
 
-The first Organisation Portal Administrator is provisioned only after all gating facts are satisfied: taxpayer identity verified, active VAT registration verified, organisation resolved or created without duplicate, eligible subscription activated, required identity assurance met, and administrator invitation/identity proof completed. Provisioning is idempotent and emits evidence.
+The first Organisation Portal Administrator is provisioned only after all commercial gating facts are satisfied: organisation and administrator relationship verified without creating a duplicate, eligible commercial subscription activated, required identity assurance met, and administrator identity proof completed. Taxpayer authorization and government VAT status do not grant or block unrelated commercial authority. Provisioning is idempotent and emits evidence.
 
 The existing `Taxpayer Administrator` role is retained as a compatibility role key but its canonical display and architecture name becomes `Organisation Portal Administrator`. It is not a NamRA role. NamRA Administration and Super Administration remain separate control planes.
 
 #### 3.2.1 Controlled self-serve application channel
 
-Self-serve signup is an intake channel, not an identity provider, taxpayer authority, subscription provider or licence authority. An applicant may submit their name and declared authority, contact email, Namibia legal taxpayer identity, current consent attestations and a requested configurable placeholder plan. A trusted workspace subject may be recorded as externally asserted; an unauthenticated submission remains `VERIFICATION_REQUIRED`. Neither state provisions access.
+Self-serve signup is a commercial intake channel, not an identity provider, taxpayer authority, payment provider or licence activation authority. Only an applicant attesting as the Company System Administrator may submit their name, contact email, organisation identifiers, current consent and a requested configurable commercial placeholder plan. Ordinary employees use invitation/sign-in. A trusted workspace subject may be recorded as externally asserted; an unauthenticated submission remains `VERIFICATION_REQUIRED`. Neither state provisions access.
 
-The initial lifecycle is `PENDING_VERIFICATION -> UNDER_REVIEW -> APPROVED_FOR_PROVISIONING | REJECTED | WITHDRAWN`. Promotion to the controlled registration/provisioning workflow requires verified taxpayer evidence and an approved review. Submitted identity, plan request, consent version/timestamps and licence status are immutable. The signup aggregate accepts only `licence_status=NOT_ACTIVATED`; subscriptions and organisation licences are not created by this boundary.
+The initial lifecycle is `PENDING_VERIFICATION -> UNDER_REVIEW -> APPROVED_FOR_PROVISIONING | REJECTED | WITHDRAWN`. Promotion requires verified administrator/organisation evidence and an approved review; it does not create government tax authorization. Submitted identity, plan request, consent version/timestamps and licence status are immutable. The signup aggregate accepts only `licence_status=NOT_ACTIVATED`; subscriptions and organisation licences are not created by this boundary.
 
 The public endpoint is bounded to JSON, strict schema fields, idempotency and source/email/global rate budgets. It performs duplicate checks against canonical taxpayers, controlled registration applications and active self-serve applications. Its outbox and hash-chained audit evidence exclude raw contact and taxpayer identifiers. No email, SMS, real payment or live ITAS call occurs in the approved local/staging baseline.
 
@@ -76,7 +79,9 @@ Changing the primary administrator, granting a privileged administrator appointm
 
 ### 4.1 Activation flow
 
-`Select plan -> create pending subscription -> complete sandbox/approved payment activation -> verify taxpayer -> verify VAT registration -> resolve organisation -> create/link administrator identity -> assign organisation licence -> materialize entitlements -> administrator command centre.`
+`Verify company administrator and organisation -> select COMMERCIAL_SAAS plan and explicit capacity -> create pending subscription -> complete approved payment activation -> create/link administrator identity -> assign commercial organisation licence -> materialize only commercial entitlements -> administrator command centre.`
+
+Government tax access follows a different flow: `active authority tax subscription -> canonical taxpayer -> active VAT status -> taxpayer authorization -> government-tax feature and user-scope decision`. Neither flow substitutes for the other.
 
 No stage trusts a client-provided success flag. Payment/subscription activation is accepted only from an approved provider adapter or authorised back-office activation command. VAT-MSA stores provider references and signed receipts, not payment-card data.
 

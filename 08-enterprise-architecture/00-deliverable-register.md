@@ -1,5 +1,22 @@
 # VAT-MSA baseline and extension deliverable register
 
+## Dual-subscription and self-service onboarding extension
+
+| # | Required extension output | Primary evidence | Document status |
+|---:|---|---|---|
+| 96 | Strict two-authority enterprise architecture | `dual-subscription/01-updated-enterprise-architecture.md`, ADR-030 | Approved for local/staging implementation baseline |
+| 97 | C4 context/container/component views | dual-subscription artefacts `02`-`04` | Complete and architecture-gated |
+| 98 | Dual signup, identity and subscription architectures | dual-subscription artefacts `05`-`09` | Complete; payment/live ITAS remain disabled |
+| 99 | RBAC/ABAC, hierarchy and ERD | dual-subscription artefacts `10`-`12` | Complete logical/deep-control baseline |
+| 100 | API and authority adapter architecture | dual-subscription artefacts `13`-`15` | Complete reference; external contracts gated |
+| 101 | Security and sequence architecture | dual-subscription artefacts `16`-`17` | Complete for local/staging implementation |
+| 102 | Eighteen end-to-end and enforcement workflows | dual-subscription artefacts `18`-`20` | Complete and traceable |
+| 103 | Failure, audit, scale and offline architecture | dual-subscription artefacts `21`-`24` | Complete reference; scale not asserted |
+| 104 | Threat model, strategy and executable test catalogues | dual-subscription artefacts `25`-`28` | Complete; automated gate required |
+| 105 | Acceptance criteria | `dual-subscription/29-acceptance-criteria.md` | Local/staging scope only |
+
+These artefacts establish two independent authority decisions. A commercial subscription never grants government tax functionality, and government taxpayer authorization never grants commercial SaaS functionality.
+
 ## Global security, privacy and compliance architecture extension
 
 | # | Required security output | Primary evidence | Document status |

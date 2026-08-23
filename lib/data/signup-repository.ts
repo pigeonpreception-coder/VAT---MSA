@@ -72,7 +72,7 @@ export async function listPublicSignupPlans(now = new Date().toISOString()): Pro
     FROM license_plans p
     LEFT JOIN license_plan_entitlements e ON e.license_plan_id=p.id
     LEFT JOIN license_features f ON f.feature_key=e.feature_key
-    WHERE p.status='ACTIVE' AND datetime(p.effective_from) <= datetime(?)
+    WHERE p.status='ACTIVE' AND p.plan_domain='COMMERCIAL_SAAS' AND datetime(p.effective_from) <= datetime(?)
       AND (p.effective_to IS NULL OR datetime(p.effective_to) > datetime(?))
     GROUP BY p.id,p.code,p.name,p.version
     ORDER BY p.name,p.version DESC`).bind(now, now).all<SignupPlanRow>();
@@ -122,7 +122,7 @@ export async function submitSelfServeSignup(
 
   const prior = await db.prepare(`SELECT public_reference AS application_reference,status,identity_status,
     taxpayer_verification_status,licence_status,submitted_at,request_hash,
-    'The application is held for identity and taxpayer verification. No account, organisation, subscription or licence has been activated.' AS next_action
+    'The commercial application is held for administrator and organisation verification. No account, payment, subscription or licence has been activated.' AS next_action
     FROM self_serve_signup_applications WHERE contact_email=? AND idempotency_key=?`)
     .bind(signup.contact_email, idempotencyKey).first<IdempotentSignupRow>();
   if (prior) {
@@ -133,7 +133,7 @@ export async function submitSelfServeSignup(
   }
 
   const plan = await db.prepare(`SELECT id,code,name,version,NULL AS feature_names FROM license_plans
-    WHERE code=? AND status='ACTIVE' AND datetime(effective_from) <= datetime(?)
+    WHERE code=? AND plan_domain='COMMERCIAL_SAAS' AND status='ACTIVE' AND datetime(effective_from) <= datetime(?)
       AND (effective_to IS NULL OR datetime(effective_to) > datetime(?))
     ORDER BY version DESC LIMIT 1`).bind(signup.plan_code, now, now).first<SignupPlanRow>();
   if (!plan) {
@@ -175,13 +175,13 @@ export async function submitSelfServeSignup(
     await db.batch([
       db.prepare(`INSERT INTO self_serve_signup_applications
         (id,public_reference,idempotency_key,request_hash,applicant_name,applicant_role,contact_email,
-         identity_provider,identity_subject_hash,country_code,requested_plan_id,vat_number,tin,
+         identity_provider,identity_subject_hash,onboarding_path,country_code,requested_plan_id,vat_number,tin,
          company_registration_number,legal_name,trading_name,taxpayer_type,return_frequency,address,
          terms_version,privacy_notice_version,authority_attested_at,terms_accepted_at,privacy_notice_accepted_at,
          status,identity_status,taxpayer_verification_status,licence_status,promoted_registration_application_id,submitted_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)`).bind(
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)`).bind(
         id, publicReference, idempotencyKey, requestHash, signup.applicant_name, signup.applicant_role,
-        signup.contact_email, identity?.provider ?? null, identitySubjectHash, signup.country_code, plan.id,
+        signup.contact_email, identity?.provider ?? null, identitySubjectHash, "COMPANY_ADMIN", signup.country_code, plan.id,
         signup.vat_number, signup.tin, signup.company_registration_number ?? null, signup.legal_name,
         signup.trading_name ?? null, signup.taxpayer_type, signup.return_frequency, signup.address,
         SELF_SERVE_TERMS_VERSION, SELF_SERVE_PRIVACY_NOTICE_VERSION, now, now, now,
@@ -221,6 +221,6 @@ export async function submitSelfServeSignup(
     taxpayer_verification_status: "AWAITING_PROVIDER_CONTRACT",
     licence_status: "NOT_ACTIVATED",
     submitted_at: now,
-    next_action: "The application is held for identity and taxpayer verification. No account, organisation, subscription or licence has been activated.",
+    next_action: "The commercial application is held for administrator and organisation verification. No account, payment, subscription or licence has been activated.",
   };
 }

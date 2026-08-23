@@ -44,6 +44,17 @@
 
 ## Workspace, licensing and workflow extension decision register
 
+### ADR-030 dual-subscription implementation baseline
+
+| Component / decision | Status | Scope/condition | Authority |
+|---|---|---|---|
+| Separate Government Tax Authorization Service and commercial License & Entitlement Service | APPROVED WITH CONDITIONS | synthetic local/staging only; authority-domain database constraints mandatory | Architecture owner-approved requirement |
+| Company administrator commercial self-service intake | APPROVED WITH CONDITIONS | pending verification only; no payment, activation, email or SMS | Architecture owner-approved requirement |
+| Explicit finite/unlimited capacity and non-destructive exception | APPROVED WITH CONDITIONS | API/service/database enforcement and automated negative tests | Architecture owner-approved requirement |
+| Live ITAS/payment/government activation/statutory rules | NOT READY | named external contracts, evidence and production approval absent | NamRA/ITAS/Finance/Legal/CISO |
+
+The complete ordered evidence is `dual-subscription/01` through `29` and ADR-030. This approval does not change any production `NOT READY` decision below.
+
 | Component / decision | Proposed status | Conditions / decision required | Required approver |
 |---|---|---|---|
 | canonical organisation with dynamic Buyer/Seller capabilities | APPROVED WITH CONDITIONS | retain one taxpayer identity and validate capability terminology | Architecture + NamRA Tax |

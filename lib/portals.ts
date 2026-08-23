@@ -46,5 +46,5 @@ export async function requirePortalAccess(user: UserContext, key: PortalKey) {
   const portal = (await getAvailablePortals(user)).find((item) => item.key === key);
   if (!portal) throw new AccessDeniedError(`Role ${user.role} is not authorised for the ${key} portal in the active organisation context.`);
   const decision = await requireLicensedPermission(user, PORTAL_PERMISSIONS[key], { operationClass: "READ" });
-  return { ...portal, licenseState: decision.license.state };
+  return { ...portal, licenseState: decision.license?.state ?? (decision.authorityDomain === "GOVERNMENT_TAX" ? "TAX_AUTHORIZED" : "NOT_APPLICABLE") };
 }

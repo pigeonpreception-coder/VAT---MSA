@@ -17,7 +17,7 @@ function signup(overrides: Record<string, unknown> = {}) {
     taxpayer_type: "private_company",
     return_frequency: "bimonthly",
     address: "17 Mandume Ndemufayo Avenue, Windhoek",
-    authority_attested: true,
+    company_system_administrator_attested: true,
     terms_accepted: true,
     privacy_notice_accepted: true,
     ...overrides,
@@ -40,7 +40,7 @@ describe("self-serve signup validation", () => {
   });
 
   it.each([
-    ["authority_attested", false],
+    ["company_system_administrator_attested", false],
     ["terms_accepted", false],
     ["privacy_notice_accepted", false],
   ])("requires explicit %s consent", (field, value) => {

@@ -9,7 +9,13 @@ common_controls:
   limits: schema byte page query and multi-level rate budgets
 domains:
   signup:
-    - { method: POST, path: /signup-applications, permission: public-rate-limited-controlled-intake, status: implemented-pending-verification-no-activation }
+    - { method: POST, path: /signup-applications, permission: public-company-admin-attestation-rate-limited, authority_domain: COMMERCIAL_SAAS, status: implemented-pending-verification-no-activation }
+  tax_authority_subscription:
+    - { method: POST, path: "/tax-authorities/{authorityId}/subscriptions", permission: tax-authority-admin-step-up, authority_domain: GOVERNMENT_TAX, status: architecture-gated-disabled-local-staging }
+    - { method: POST, path: "/tax-authorities/{authorityId}/taxpayer-authorizations", permission: tax-authority-admin-step-up, authority_domain: GOVERNMENT_TAX, status: synthetic-foundation }
+  dual_authorization:
+    - { method: POST, path: /tax-access/decision, permission: authenticated-tax-scope, authority_domain: GOVERNMENT_TAX, status: implemented-central-decision-foundation }
+    - { method: GET, path: /licensing/license, permission: licensing:read, authority_domain: COMMERCIAL_SAAS, status: implemented-central-decision-foundation }
   identity:
     - { method: GET, path: /identity/federation-status, permission: identity:read, status: foundation }
     - { method: POST, path: /auth/token-exchange, permission: external-provider-contract, status: gated-by-ITAS }

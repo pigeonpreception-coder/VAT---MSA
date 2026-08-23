@@ -45,7 +45,7 @@ export function SelfServeSignupForm({
       taxpayer_type: String(form.get("taxpayer_type") ?? ""),
       return_frequency: String(form.get("return_frequency") ?? ""),
       address: String(form.get("address") ?? ""),
-      authority_attested: form.get("authority_attested") === "on",
+      company_system_administrator_attested: form.get("company_system_administrator_attested") === "on",
       terms_accepted: form.get("terms_accepted") === "on",
       privacy_notice_accepted: form.get("privacy_notice_accepted") === "on",
     };
@@ -187,8 +187,8 @@ export function SelfServeSignupForm({
 
       <h3 className="section-title">Authority and consent</h3>
       <label className="signup-check full">
-        <input type="checkbox" name="authority_attested" required />
-        <span>I confirm that I am authorised to submit this application for the organisation.</span>
+        <input type="checkbox" name="company_system_administrator_attested" required />
+        <span>I confirm that I am the Company System Administrator authorised to start this commercial subscription application. Ordinary employees must use an invitation.</span>
       </label>
       <label className="signup-check full">
         <input type="checkbox" name="terms_accepted" required />

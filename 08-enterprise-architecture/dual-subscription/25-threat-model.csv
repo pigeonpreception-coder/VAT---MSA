@@ -1,0 +1,25 @@
+threat_id,domain,asset,threat,category,pre_control_risk,required_controls,residual_target,verification
+DS-T01,CROSS_DOMAIN,authority router,Commercial licence grants tax feature,Elevation,Critical,"feature authority classification; separate services; plan-feature DB constraint; negative cross-domain tests",Low,SEC-003; LIC-002
+DS-T02,CROSS_DOMAIN,authority router,Tax authorization grants commercial module,Elevation,Critical,"separate evaluators; domain-bound policy; DB constraints",Low,SEC-004; LIC-003
+DS-T03,COMMERCIAL,signup,Ordinary employee creates company subscription,Elevation,High,"administrator attestation and verification; service/DB actor rule; audit; rate limit",Low,SEC-005; LIC-004
+DS-T04,GOVERNMENT_TAX,taxpayer authorization,Company administrator provisions tax access,Elevation,Critical,"authority appointment; jurisdiction ABAC; step-up; DB trigger",Low,SEC-006
+DS-T05,COMMERCIAL,user capacity,Concurrent invitations exceed finite capacity,Tampering,High,"serialized transaction; counting-state reservation; DB trigger; idempotency",Low,LIC-005; LIC-006
+DS-T06,COMMERCIAL,capacity mode,NULL/large number misread as unlimited,Tampering,High,"explicit enum; CHECK constraints; no numeric sentinel",Low,LIC-007
+DS-T07,COMMERCIAL,downgrade,Users deleted to fit capacity,Tampering,High,"capacity exception; non-destructive membership state; FK history",Low,LIC-008
+DS-T08,IDENTITY,canonical taxpayer,Federation creates duplicate taxpayer,Tampering,High,"opaque identity links; deterministic approved match; conflict review; unique constraints",Low,SEC-007
+DS-T09,IDENTITY,federation callback,State/nonce/code replay,Spoofing,Critical,"PKCE; state; nonce; issuer/audience/signature/time; one-time transaction",Low,SEC-008
+DS-T10,GOVERNMENT_TAX,adapter,Malicious or compromised authority endpoint,Spoofing,Critical,"allow-list; mTLS/signature; isolated credentials; key rotation; lifecycle approval",Medium,SEC-009
+DS-T11,MULTITENANT,organisation data,Cross-tenant query/search/export,InformationDisclosure,Critical,"mandatory tenant filters; deny-by-default ABAC; worker re-evaluation; isolation tests",Low,SEC-010
+DS-T12,MULTICOUNTRY,tax data,Cross-jurisdiction authority access,InformationDisclosure,Critical,"authority/jurisdiction binding; partition/scopes; negative tests",Low,SEC-011
+DS-T13,COMMERCIAL,payment callback,Forged/replayed payment activates licence,Spoofing,Critical,"provider allow-list; signature; amount/currency/order/environment validation; unique event",Low,SEC-012
+DS-T14,AUDIT,privileged decisions,Actor repudiates change,Repudiation,High,"immutable append-only events; integrity chain; step-up evidence; SIEM reconciliation",Low,SEC-013
+DS-T15,SESSION,privileged access,Stolen session performs admin action,Spoofing,High,"secure cookies; short TTL; rotation; recent step-up; revocation; device/risk signals",Medium,SEC-014
+DS-T16,API,public onboarding,Enumeration and mass application abuse,DenialOfService,High,"generic responses; layered rate limits; idempotency; bot/fraud signals; quotas",Medium,SEC-015
+DS-T17,ENTITLEMENT,decision cache,Stale allow survives suspension/expiry,Elevation,High,"evidence/versioned cache keys; invalidation; bounded TTL; fail closed for privileged action",Low,SEC-016; LIC-009
+DS-T18,OFFLINE,offline snapshot,Expired evidence grants access,Elevation,High,"signed device-bound TTL evidence; online revalidation; quarantine",Low,SEC-017
+DS-T19,PRIVILEGE,super administrator,Platform operator assumes domain admin,Elevation,Critical,"no implicit membership; PAM/JIT approval; explicit denial; quarterly review",Low,SEC-018
+DS-T20,PRIVILEGE,approval workflow,Self-approval or emergency SoD override,Elevation,Critical,"database actor/decider separation; immutable decision; no override path",Low,SEC-019
+DS-T21,DATA,taxpayer/employee identifiers,Sensitive data leaks in audit/error,InformationDisclosure,High,"tokenization; evidence references; response minimization; log scanning",Low,SEC-020
+DS-T22,AVAILABILITY,authority adapter,External outage cascades across platform,DenialOfService,High,"bulkheads; timeouts; circuit breakers; bounded retry; commercial isolation",Medium,SEC-021
+DS-T23,CATALOG,plan feature assignment,Insider adds CORE_VAT to commercial plan,Tampering,Critical,"domain CHECK/trigger; four-eyes approval; immutable audit; catalogue diff alert",Low,SEC-022; LIC-002
+DS-T24,IDENTITY,invitation token,Stolen/replayed invite joins organisation,Spoofing,High,"hashed single-use token; short expiry; intended identity binding; MFA; revocation",Low,SEC-023

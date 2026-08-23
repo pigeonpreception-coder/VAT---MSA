@@ -6,13 +6,14 @@ info:
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
     error codes, signature formats, retention and service levels require NamRA approval.
-    Every authenticated operation is denied by default unless its server-side permission policy
-    maps to an enabled licence feature and an allowed operation class. Suspended, expired and
-    cancelled licences preserve records and permit only authorised READ, EXPORT,
-    COMPLIANCE_WRITE and CORRECTION_WRITE continuity operations.
+    Every protected operation is classified by authority domain. Government-tax features use
+    the independent Government Tax Authorization Service; commercial features use the License
+    & Entitlement Service; platform-control permissions do not imply either domain membership.
+    Suspended, expired and cancelled commercial licences preserve records and approved continuity.
 x-vat-msa-license-enforcement:
   policy_authority: license_permission_policies
-  evaluation_order: [identity, tenant, permission, feature, license_state, usage_limit, security_policy, workflow, segregation_of_duties]
+  authority_domains: [GOVERNMENT_TAX, COMMERCIAL_SAAS, PLATFORM_CONTROL]
+  evaluation_order: [identity, tenant_or_jurisdiction, permission, feature_authority_domain, domain_specific_authorization, usage_limit, security_policy, workflow, segregation_of_duties]
   restricted_states: [SUSPENDED, EXPIRED, CANCELLED]
   continuity_operations: [READ, EXPORT, COMPLIANCE_WRITE, CORRECTION_WRITE]
   denied_operations_after_restriction: [BUSINESS_WRITE, ADMIN_WRITE]
@@ -54,10 +55,11 @@ paths:
     post:
       tags: [Signup]
       operationId: submitSelfServeSignup
-      summary: Submit a controlled self-serve organisation signup application.
+      summary: Submit a controlled company-commercial application as the attested Company System Administrator.
+      x-authority-domain: COMMERCIAL_SAAS
       description: |
-        This public, rate-limited intake records applicant authority, legal taxpayer identity,
-        consent and a configurable placeholder licence-plan request. Acceptance creates only
+        This public, rate-limited intake records explicit Company System Administrator attestation,
+        organisation identity, consent and a configurable commercial placeholder-plan request. Acceptance creates only
         an immutable pending-verification application. It never creates a user, taxpayer,
         organisation, subscription or licence and never triggers payment, email, SMS or live
         ITAS/NamRA activity. A trusted Sites/ChatGPT identity assertion may be recorded when
@@ -73,10 +75,12 @@ paths:
             schema: { $ref: '#/components/schemas/SelfServeSignupSubmission' }
       responses:
         '202':
-          description: Application accepted and held pending identity and taxpayer verification.
+          description: Application accepted and held pending administrator and organisation verification.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SelfServeSignupAccepted' }
+        '403':
+          description: COMPANY_ADMIN_AUTHORITY_REQUIRED; ordinary employees must use invitation or sign-in.
         '409': { $ref: '#/components/responses/Conflict' }
         '413':
           description: Request exceeds the 32 KiB signup limit.
@@ -943,7 +947,7 @@ components:
     SelfServeSignupSubmission:
       type: object
       additionalProperties: false
-      required: [schema_version, applicant_name, applicant_role, contact_email, country_code, plan_code, vat_number, tin, legal_name, taxpayer_type, return_frequency, address, authority_attested, terms_accepted, privacy_notice_accepted]
+      required: [schema_version, applicant_name, applicant_role, contact_email, country_code, plan_code, vat_number, tin, legal_name, taxpayer_type, return_frequency, address, company_system_administrator_attested, terms_accepted, privacy_notice_accepted]
       properties:
         schema_version: { type: string, const: 1.0.0 }
         applicant_name: { type: string, minLength: 2, maxLength: 120 }
@@ -962,7 +966,10 @@ components:
         taxpayer_type: { type: string, enum: [PRIVATE_COMPANY, CLOSE_CORPORATION, SOLE_PROPRIETOR, PARTNERSHIP, TRUST, NON_PROFIT, PUBLIC_ENTITY, OTHER] }
         return_frequency: { type: string, enum: [MONTHLY, BIMONTHLY, QUARTERLY, ANNUAL] }
         address: { type: string, minLength: 5, maxLength: 500 }
-        authority_attested: { type: boolean, const: true }
+        company_system_administrator_attested:
+          type: boolean
+          const: true
+          description: Ordinary employees must use invitation/sign-in and cannot initiate a company subscription.
         terms_accepted: { type: boolean, const: true }
         privacy_notice_accepted: { type: boolean, const: true }
     SelfServeSignupAccepted:
@@ -977,6 +984,13 @@ components:
         licence_status: { type: string, const: NOT_ACTIVATED }
         submitted_at: { type: string, format: date-time }
         next_action: { type: string, maxLength: 500 }
+    AuthorityDomain:
+      type: string
+      enum: [GOVERNMENT_TAX, COMMERCIAL_SAAS, PLATFORM_CONTROL]
+    CapacityMode:
+      type: string
+      enum: [FINITE, UNLIMITED, NOT_APPLICABLE]
+      description: UNLIMITED is explicit and is never inferred from NULL or a large numeric value.
     OrganisationSummary:
       type: object
       additionalProperties: false

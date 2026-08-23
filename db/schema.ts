@@ -1640,12 +1640,16 @@ export const licensePlans = sqliteTable(
     code: text("code").notNull(),
     name: text("name").notNull(),
     version: integer("version").notNull(),
+    planDomain: text("plan_domain").notNull().default("COMMERCIAL_SAAS"),
     status: text("status").notNull(),
     effectiveFrom: text("effective_from").notNull(),
     effectiveTo: text("effective_to"),
     createdAt: text("created_at").notNull(),
   },
-  (table) => [uniqueIndex("ux_license_plan_code_version").on(table.code, table.version)],
+  (table) => [
+    uniqueIndex("ux_license_plan_code_version").on(table.code, table.version),
+    check("ck_license_plan_domain", sql`${table.planDomain} IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX')`),
+  ],
 );
 
 export const selfServeSignupApplications = sqliteTable(
@@ -1660,6 +1664,7 @@ export const selfServeSignupApplications = sqliteTable(
     contactEmail: text("contact_email").notNull(),
     identityProvider: text("identity_provider"),
     identitySubjectHash: text("identity_subject_hash"),
+    onboardingPath: text("onboarding_path").notNull().default("COMPANY_ADMIN"),
     countryCode: text("country_code").notNull(),
     requestedPlanId: text("requested_plan_id").notNull().references(() => licensePlans.id),
     vatNumber: text("vat_number").notNull(),
@@ -1689,6 +1694,7 @@ export const selfServeSignupApplications = sqliteTable(
     index("idx_self_serve_signup_identifiers").on(table.vatNumber, table.tin),
     check("ck_self_serve_signup_applicant_role", sql`${table.applicantRole} IN ('OWNER','DIRECTOR','PARTNER','TRUSTEE','AUTHORISED_REPRESENTATIVE')`),
     check("ck_self_serve_signup_country", sql`${table.countryCode} = 'NA'`),
+    check("ck_self_serve_signup_path", sql`${table.onboardingPath} = 'COMPANY_ADMIN'`),
     check("ck_self_serve_signup_identity_pair", sql`(${table.identityProvider} IS NULL AND ${table.identitySubjectHash} IS NULL) OR (${table.identityProvider} IS NOT NULL AND ${table.identitySubjectHash} IS NOT NULL)`),
     check("ck_self_serve_signup_status", sql`${table.status} IN ('PENDING_VERIFICATION','UNDER_REVIEW','REJECTED','APPROVED_FOR_PROVISIONING','WITHDRAWN')`),
     check("ck_self_serve_signup_identity_status", sql`${table.identityStatus} IN ('VERIFICATION_REQUIRED','EXTERNALLY_ASSERTED')`),
@@ -1701,10 +1707,11 @@ export const licenseFeatures = sqliteTable("license_features", {
   key: text("feature_key").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
+  authorityDomain: text("authority_domain").notNull().default("COMMERCIAL_SAAS"),
   metricKey: text("metric_key"),
   protected: integer("protected").notNull().default(0),
   createdAt: text("created_at").notNull(),
-});
+}, (table) => [check("ck_license_feature_authority_domain", sql`${table.authorityDomain} IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX','PLATFORM_CONTROL')`)]);
 
 export const licensePlanEntitlements = sqliteTable(
   "license_plan_entitlements",
@@ -1713,10 +1720,15 @@ export const licensePlanEntitlements = sqliteTable(
     licensePlanId: text("license_plan_id").notNull().references(() => licensePlans.id),
     featureKey: text("feature_key").notNull().references(() => licenseFeatures.key),
     enabled: integer("enabled").notNull().default(1),
+    capacityMode: text("capacity_mode").notNull().default("NOT_APPLICABLE"),
     limitValue: integer("limit_value"),
     configuration: text("configuration").notNull().default("{}"),
   },
-  (table) => [uniqueIndex("ux_plan_entitlement_feature").on(table.licensePlanId, table.featureKey)],
+  (table) => [
+    uniqueIndex("ux_plan_entitlement_feature").on(table.licensePlanId, table.featureKey),
+    check("ck_plan_entitlement_capacity", sql`(${table.capacityMode}='FINITE' AND ${table.limitValue} IS NOT NULL AND ${table.limitValue}>0) OR (${table.capacityMode} IN ('UNLIMITED','NOT_APPLICABLE') AND ${table.limitValue} IS NULL)`),
+    check("ck_user_seat_capacity_mode", sql`${table.featureKey}<>'USER_SEATS' OR ${table.capacityMode} IN ('FINITE','UNLIMITED')`),
+  ],
 );
 
 export const subscriptions = sqliteTable(
@@ -1726,6 +1738,8 @@ export const subscriptions = sqliteTable(
     organisationId: text("organisation_id").notNull().references(() => organisations.id),
     provider: text("provider").notNull(),
     providerReference: text("provider_reference").notNull(),
+    subscriptionDomain: text("subscription_domain").notNull().default("COMMERCIAL_SAAS"),
+    paymentMode: text("payment_mode").notNull().default("DISABLED"),
     status: text("status").notNull(),
     activatedAt: text("activated_at"),
     currentPeriodStart: text("current_period_start").notNull(),
@@ -1733,7 +1747,12 @@ export const subscriptions = sqliteTable(
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
-  (table) => [uniqueIndex("ux_subscription_provider_ref").on(table.provider, table.providerReference), index("idx_subscription_org_status").on(table.organisationId, table.status)],
+  (table) => [
+    uniqueIndex("ux_subscription_provider_ref").on(table.provider, table.providerReference),
+    index("idx_subscription_org_status").on(table.organisationId, table.status),
+    check("ck_subscription_domain", sql`${table.subscriptionDomain} = 'COMMERCIAL_SAAS'`),
+    check("ck_subscription_payment_mode", sql`${table.paymentMode} IN ('DISABLED','SANDBOX','APPROVED_PROVIDER')`),
+  ],
 );
 
 export const organisationLicenses = sqliteTable(
@@ -1785,6 +1804,116 @@ export const licenseEvents = sqliteTable(
   },
   (table) => [index("idx_license_events_org_time").on(table.organisationId, table.occurredAt)],
 );
+
+export const countries = sqliteTable("countries", {
+  code: text("code").primaryKey(),
+  iso3Code: text("iso3_code").notNull(),
+  name: text("name").notNull(),
+  currencyCode: text("currency_code").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("ux_countries_iso3").on(table.iso3Code)]);
+
+export const taxJurisdictions = sqliteTable("tax_jurisdictions", {
+  id: text("id").primaryKey(),
+  countryCode: text("country_code").notNull().references(() => countries.code),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("ux_tax_jurisdiction_country_code").on(table.countryCode, table.code)]);
+
+export const taxAuthorities = sqliteTable("tax_authorities", {
+  id: text("id").primaryKey(),
+  jurisdictionId: text("jurisdiction_id").notNull().references(() => taxJurisdictions.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("ux_tax_authority_jurisdiction_code").on(table.jurisdictionId, table.code)]);
+
+export const taxAuthorityAdministrators = sqliteTable("tax_authority_administrators", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  userId: text("user_id").notNull().references(() => appUsers.id),
+  status: text("status").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+  appointedBy: text("appointed_by").notNull(),
+  approvalReference: text("approval_reference").notNull(),
+}, (table) => [uniqueIndex("ux_tax_authority_admin_user").on(table.taxAuthorityId, table.userId)]);
+
+export const taxAuthorityUsers = sqliteTable("tax_authority_users", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  userId: text("user_id").notNull().references(() => appUsers.id),
+  authorityRole: text("authority_role").notNull(),
+  status: text("status").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+}, (table) => [uniqueIndex("ux_tax_authority_user_role").on(table.taxAuthorityId, table.userId, table.authorityRole)]);
+
+export const taxSubscriptions = sqliteTable("tax_subscriptions", {
+  id: text("id").primaryKey(),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  licensePlanId: text("license_plan_id").notNull().references(() => licensePlans.id),
+  status: text("status").notNull(),
+  environment: text("environment").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+  activationAuthority: text("activation_authority").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [index("idx_tax_subscription_authority_status").on(table.taxAuthorityId, table.status)]);
+
+export const taxSubscriptionFeatures = sqliteTable("tax_subscription_features", {
+  id: text("id").primaryKey(),
+  taxSubscriptionId: text("tax_subscription_id").notNull().references(() => taxSubscriptions.id),
+  featureKey: text("feature_key").notNull().references(() => licenseFeatures.key),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [uniqueIndex("ux_tax_subscription_feature").on(table.taxSubscriptionId, table.featureKey)]);
+
+export const taxpayerAuthorizations = sqliteTable("taxpayer_authorizations", {
+  id: text("id").primaryKey(),
+  taxSubscriptionId: text("tax_subscription_id").notNull().references(() => taxSubscriptions.id),
+  taxAuthorityId: text("tax_authority_id").notNull().references(() => taxAuthorities.id),
+  jurisdictionId: text("jurisdiction_id").notNull().references(() => taxJurisdictions.id),
+  organisationId: text("organisation_id").notNull().references(() => organisations.id),
+  taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+  status: text("status").notNull(),
+  vatRegistrationStatus: text("vat_registration_status").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+  authorizationReference: text("authorization_reference").notNull(),
+  authorizedBy: text("authorized_by").notNull().references(() => appUsers.id),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("ux_taxpayer_authorization_reference").on(table.authorizationReference),
+  index("idx_taxpayer_authorization_scope_status").on(table.taxAuthorityId, table.organisationId, table.status),
+]);
+
+export const taxpayerAuthorizationDecisions = sqliteTable("taxpayer_authorization_decisions", {
+  id: text("id").primaryKey(),
+  taxpayerAuthorizationId: text("taxpayer_authorization_id").notNull().references(() => taxpayerAuthorizations.id),
+  decision: text("decision").notNull(),
+  reason: text("reason").notNull(),
+  requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+  decidedBy: text("decided_by").notNull().references(() => appUsers.id),
+  stepUpEvidenceReference: text("step_up_evidence_reference").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+}, (table) => [check("ck_taxpayer_authorization_no_self_decision", sql`${table.requestedBy} <> ${table.decidedBy}`)]);
+
+export const licenseCapacityExceptions = sqliteTable("license_capacity_exceptions", {
+  id: text("id").primaryKey(),
+  organisationLicenseId: text("organisation_license_id").notNull().references(() => organisationLicenses.id),
+  organisationId: text("organisation_id").notNull().references(() => organisations.id),
+  activeUsers: integer("active_users").notNull(),
+  licensedCapacity: integer("licensed_capacity").notNull(),
+  status: text("status").notNull(),
+  reason: text("reason").notNull(),
+  openedAt: text("opened_at").notNull(),
+  resolvedAt: text("resolved_at"),
+}, (table) => [index("idx_license_capacity_exception_status").on(table.organisationId, table.status)]);
 
 export const departments = sqliteTable(
   "departments",
@@ -1868,6 +1997,20 @@ export const employees = sqliteTable(
   },
   (table) => [uniqueIndex("ux_employees_org_number").on(table.organisationId, table.employeeNumber), uniqueIndex("ux_employees_org_email").on(table.organisationId, table.email), index("idx_employees_org_status_name").on(table.organisationId, table.status, table.fullName)],
 );
+
+export const userInvitations = sqliteTable("user_invitations", {
+  id: text("id").primaryKey(),
+  organisationId: text("organisation_id").notNull().references(() => organisations.id),
+  employeeId: text("employee_id").notNull().references(() => employees.id),
+  invitedBy: text("invited_by").notNull().references(() => appUsers.id),
+  recipientEmailHash: text("recipient_email_hash").notNull(),
+  tokenHash: text("token_hash"),
+  status: text("status").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  acceptedAt: text("accepted_at"),
+  revokedAt: text("revoked_at"),
+}, (table) => [uniqueIndex("ux_user_invitation_employee").on(table.employeeId), index("idx_user_invitation_status_expiry").on(table.organisationId, table.status, table.expiresAt)]);
 
 export const organisationAdministratorRoles = sqliteTable("organisation_administrator_roles", {
   code: text("code").primaryKey(),

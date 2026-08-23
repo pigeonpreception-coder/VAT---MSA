@@ -1,0 +1,28 @@
+flowchart TB
+  Request["Authenticated or public onboarding request"]
+  Resolver["Identity + Tenant + Jurisdiction Resolver"]
+  Classifier["Permission-to-Feature Authority Classifier"]
+  TaxPDP["Tax Authorization Evaluator"]
+  SaaSPDP["Commercial Entitlement Evaluator"]
+  Capacity["Atomic User Capacity Evaluator"]
+  Workflow["Workflow / SoD / Step-up Evaluator"]
+  Decision["Unified Deny-by-default Decision"]
+  TaxRepo["Tax Authority Subscription Repository"]
+  AuthRepo["Taxpayer Authorization Repository"]
+  LicenceRepo["Commercial Licence Repository"]
+  UsageRepo["Seat Reservation / Usage Repository"]
+  Adapter["Country Adapter Registry"]
+  Audit["Decision Audit + Security Event"]
+
+  Request --> Resolver --> Classifier
+  Classifier -->|"GOVERNMENT_TAX"| TaxPDP
+  Classifier -->|"COMMERCIAL_SAAS"| SaaSPDP
+  Classifier -->|"unknown / mismatched"| Decision
+  TaxPDP --> TaxRepo
+  TaxPDP --> AuthRepo
+  TaxPDP --> Adapter
+  SaaSPDP --> LicenceRepo
+  SaaSPDP --> Capacity --> UsageRepo
+  TaxPDP --> Workflow
+  SaaSPDP --> Workflow
+  Workflow --> Decision --> Audit

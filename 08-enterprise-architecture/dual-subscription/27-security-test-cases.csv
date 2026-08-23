@@ -1,0 +1,26 @@
+test_id,priority,layer,scenario,expected_result,evidence
+SEC-001,P0,architecture,All 29 ordered artefacts exist and contain authority separation terms,Gate passes only with complete traceable package,architecture test
+SEC-002,P0,schema,Feature has invalid authority domain,Database rejects row,migration test
+SEC-003,P0,API,Active commercial plan requests government tax feature,Deny AUTHORITY_DOMAIN_MISMATCH without consulting commercial status,integration test+audit
+SEC-004,P0,API,Active taxpayer authorization requests commercial feature,Deny AUTHORITY_DOMAIN_MISMATCH without treating tax status as licence,integration test+audit
+SEC-005,P0,API,Ordinary employee posts commercial application,Deny COMPANY_ADMIN_AUTHORITY_REQUIRED and persist no application,integration test
+SEC-006,P0,schema,Company administrator inserts taxpayer authorization directly,Database trigger rejects unauthorized domain/actor,deep constraint test
+SEC-007,P0,identity,ITAS subject conflicts with existing taxpayer identifiers,Enter IDENTITY_LINK_REVIEW and create no duplicate taxpayer,identity test
+SEC-008,P0,identity,Replay federation state/nonce/callback,Deny replay and create no session,protocol test
+SEC-009,P0,integration,Adapter issuer/host/key is not allow-listed,Deny connection and alert,adapter security test
+SEC-010,P0,API,User searches or exports another organisation,Deny without existence/count disclosure,tenant isolation test
+SEC-011,P0,API,Authority administrator accesses another jurisdiction,Deny and emit cross-jurisdiction event,jurisdiction isolation test
+SEC-012,P0,payment,Forged/replayed/mismatched callback attempts activation,Deny; subscription remains pending; quarantine callback,payment contract test
+SEC-013,P1,audit,Privileged lifecycle change succeeds,Immutable event contains actor/domain/scope/prior/new/policy/evidence IDs,audit schema test
+SEC-014,P0,session,Privileged action uses old or non-step-up session,Deny STEP_UP_REQUIRED,session integration test
+SEC-015,P1,API,Public signup is flooded or enumerated,Rate limits and generic responses apply with no sensitive disclosure,abuse test
+SEC-016,P0,cache,Tax authorization suspended after an allow was cached,Subsequent decision denies within approved propagation bound,cache revocation test
+SEC-017,P0,offline,Expired or wrong-domain offline evidence is synchronized,Quarantine and require online revalidation,offline test
+SEC-018,P0,IAM,Super administrator lacks explicit domain appointment,Deny tax/company administration actions,privilege separation test
+SEC-019,P0,schema,Requester attempts to approve own privileged request,Database rejects; no emergency override path exists,SoD constraint test
+SEC-020,P1,logging,Errors/audit generated from sensitive identifiers,Logs contain tokenized/reference values and safe denial detail,log inspection
+SEC-021,P1,resilience,ITAS adapter times out repeatedly,Circuit breaker/bulkhead protects commercial APIs,resilience test
+SEC-022,P0,schema,Catalogue admin attaches CORE_VAT to commercial plan,Database rejects and records attempted change,catalogue constraint test
+SEC-023,P0,identity,Expired/replayed invitation token is accepted,Deny and create no membership,invitation test
+SEC-024,P1,UI,Employee onboarding page is viewed,Only sign-in/invitation actions appear; no organisation/subscription action,UI test
+SEC-025,P1,configuration,Local/staging startup inspects integrations,Payment and live ITAS remain disabled with synthetic-data banner,configuration test

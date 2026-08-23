@@ -1,0 +1,88 @@
+erDiagram
+  COUNTRIES ||--o{ TAX_JURISDICTIONS : contains
+  COUNTRIES ||--o{ TAX_AUTHORITIES : recognizes
+  TAX_JURISDICTIONS ||--o{ TAX_AUTHORITIES : governed_by
+  TAX_AUTHORITIES ||--o{ TAX_AUTHORITY_ADMINS : appoints
+  TAX_AUTHORITIES ||--o{ TAX_SUBSCRIPTIONS : owns
+  TAX_SUBSCRIPTIONS ||--o{ TAX_SUBSCRIPTION_FEATURES : enables
+  LICENSE_FEATURES ||--o{ TAX_SUBSCRIPTION_FEATURES : classifies
+
+  ORGANISATIONS ||--o{ ORGANISATION_USERS : contains
+  USERS ||--o{ ORGANISATION_USERS : joins
+  ORGANISATIONS ||--o{ SYSTEM_ADMINISTRATORS : verifies
+  USERS ||--o{ SYSTEM_ADMINISTRATORS : serves_as
+  ORGANISATIONS ||--o{ ORGANISATION_CAPABILITIES : performs
+  ORGANISATIONS ||--o{ TAXPAYER_AUTHORIZATIONS : receives
+  TAX_AUTHORITIES ||--o{ TAXPAYER_AUTHORIZATIONS : issues
+  TAX_SUBSCRIPTIONS ||--o{ TAXPAYER_AUTHORIZATIONS : underwrites
+
+  ORGANISATIONS ||--o{ COMMERCIAL_SUBSCRIPTIONS : purchases
+  COMMERCIAL_SUBSCRIPTIONS ||--o{ LICENSES : activates
+  LICENSE_PLANS ||--o{ COMMERCIAL_SUBSCRIPTIONS : selected_as
+  LICENSE_PLANS ||--o{ LICENSE_ENTITLEMENTS : defines
+  LICENSE_FEATURES ||--o{ LICENSE_ENTITLEMENTS : grants
+  LICENSES ||--|| LICENSE_USER_CAPACITY : constrains
+  LICENSES ||--o{ LICENSE_CAPACITY_EXCEPTIONS : records
+
+  ORGANISATIONS ||--o{ USER_INVITATIONS : issues
+  USERS ||--o{ USER_INVITATIONS : accepts
+  ORGANISATION_USERS ||--o{ USER_ROLES : assigned
+  ROLES ||--o{ USER_ROLES : grants
+  ROLES ||--o{ ROLE_PERMISSIONS : contains
+  PERMISSIONS ||--o{ ROLE_PERMISSIONS : included
+  MODULES ||--o{ LICENSE_FEATURES : groups
+
+  IDENTITY_PROVIDERS ||--o{ SSO_CONNECTIONS : backs
+  TAX_AUTHORITIES ||--o{ SSO_CONNECTIONS : configures
+  SSO_CONNECTIONS ||--o| ITAS_CONNECTIONS : specializes
+  USERS ||--o{ IDENTITY_LINKS : links
+  IDENTITY_PROVIDERS ||--o{ IDENTITY_LINKS : asserts
+
+  ORGANISATIONS ||--o{ AUDIT_EVENTS : scoped_by
+  USERS ||--o{ AUDIT_EVENTS : performs
+  TAX_AUTHORITIES ||--o{ AUDIT_EVENTS : government_scope
+
+  LICENSE_PLANS {
+    text id PK
+    text plan_domain "COMMERCIAL_SAAS or GOVERNMENT_TAX"
+    text status
+  }
+  LICENSE_FEATURES {
+    text id PK
+    text authority_domain "COMMERCIAL_SAAS or GOVERNMENT_TAX or PLATFORM_CONTROL"
+    text module_id FK
+  }
+  LICENSE_ENTITLEMENTS {
+    text plan_id FK
+    text feature_id FK
+    text capacity_mode "FINITE or UNLIMITED or NOT_APPLICABLE"
+    integer limit_value
+  }
+  TAXPAYER_AUTHORIZATIONS {
+    text id PK
+    text tax_subscription_id FK
+    text organisation_id FK
+    text taxpayer_id UK
+    text vat_status
+    text status
+  }
+  COMMERCIAL_SUBSCRIPTIONS {
+    text id PK
+    text organisation_id FK
+    text plan_id FK
+    text status
+    text payment_mode "DISABLED or SANDBOX or APPROVED_PROVIDER"
+  }
+  LICENSE_USER_CAPACITY {
+    text license_id PK
+    text capacity_mode
+    integer maximum_active_users
+    integer version
+  }
+  USER_INVITATIONS {
+    text id PK
+    text organisation_id FK
+    text email_hash
+    text status
+    datetime expires_at
+  }

@@ -67,6 +67,9 @@ describe("licence enforcement coverage", () => {
     const pages = filesBelow(join(process.cwd(), "app"), "page.tsx");
     const publicPages = new Set([
       join("app", "signup", "page.tsx"),
+      join("app", "signup", "company", "page.tsx"),
+      join("app", "signup", "employee", "page.tsx"),
+      join("app", "signup", "tax-services", "page.tsx"),
       join("app", "verify", "[token]", "page.tsx"),
     ]);
     const uncoveredPages = pages.filter((path) => {
