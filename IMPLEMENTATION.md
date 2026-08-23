@@ -12,6 +12,7 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 - Identity-provider registry and immutable provider-subject links; workspace identity is configured while ITAS and standalone access remain explicitly gated.
 - Branch-scoped organisation model, governed memberships, role/permission metadata and taxpayer-scoped identity queries.
 - Idempotent taxpayer-registration intake with duplicate controls, append-only audit evidence, outbox event and an ITAS verification record that remains pending until the authoritative contract is confirmed.
+- Self-serve signup page and public API with strict schema/size controls, source/email/global rate budgets, idempotency, cross-registry duplicate detection, applicant authority and versioned consent evidence, optional workspace identity assertion, configurable non-priced plan selection and an immutable pending-verification state that cannot activate an account, taxpayer, organisation, subscription or licence.
 - Identity foundation, organisation detail and registration-intake portal experiences plus protected organisation/registration APIs.
 - Electronic invoice submission through the web portal and `POST /api/v1/invoices`.
 - Commercial parties, products and server-calculated quotations with guarded acceptance and recoverable idempotent conversion to certified invoices.
@@ -65,13 +66,13 @@ pnpm security:ci
 
 Production access expects the authenticated identity headers supplied by the Sites/ChatGPT sign-in dispatcher. The identity must also exist as an active row in `app_users` and resolve through an approved provider link; an authenticated but unprovisioned user is denied. Server-side permission checks protect both pages and API handlers.
 
-The system includes an ITAS identity/verification port and an intentionally unconfigured adapter. It does not invent ITAS protocols, claims or responses. Live ITAS SSO, taxpayer verification and return exchange remain disabled until NamRA/ITAS provides and approves the authoritative contract. Standalone public authentication must use an approved identity platform and is not implemented as an application-owned password stack.
+The system includes an ITAS identity/verification port and an intentionally unconfigured adapter. It does not invent ITAS protocols, claims or responses. Live ITAS SSO, taxpayer verification and return exchange remain disabled until NamRA/ITAS provides and approves the authoritative contract. Standalone public authentication must use an approved identity platform and is not implemented as an application-owned password stack. The public self-serve form is an application intake channel only: workspace identity assertions are recorded when present, while all other applicants remain explicitly pending identity verification.
 
 The pilot role exists only for local development. Production roles must be provisioned from the approved RBAC matrix and constrained to their taxpayer, portfolio or case scope before operational use.
 
 ## Database and integrity model
 
-The platform uses D1-compatible SQLite for the operational pilot. Reviewed migrations under `drizzle/` cover the canonical identity/organisation foundation, business operations, VAT lifecycle, compliance/refunds, platform-edge controls, invoice correction lineage and central licence policy registry. Monetary values are stored as integer cents and quantities as integer micros. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
+The platform uses D1-compatible SQLite for the operational pilot. Reviewed migrations under `drizzle/` cover the canonical identity/organisation foundation, immutable self-serve signup intake, business operations, VAT lifecycle, compliance/refunds, platform-edge controls, invoice correction lineage and central licence policy registry. Monetary values are stored as integer cents and quantities as integer micros. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
 
 The generated migration is stored in `drizzle/`. The runtime initializer is an onboarding convenience for the local pilot; controlled hosted environments should apply reviewed migrations through the deployment pipeline.
 

@@ -1,4 +1,5 @@
 Event,Owner,Partition_key,Trigger,Minimum_payload,Consumers,Delivery_and_controls
+SelfServeSignupSubmitted,Onboarding,identity_subject_hash_or_contact_hash,Validated signup application accepted,"application_reference,requested_plan_code,status,identity_status,activation_effect,occurred_at",Registration;Identity;Licensing;Audit,"outbox,at-least-once,restricted,no raw contact or taxpayer identifiers,no activation effect"
 TaxpayerRegistered,Taxpayer,taxpayer_id,Registration record accepted,"taxpayer_id,registration_id,status,occurred_at",Organisation;Identity;Audit,"outbox,at-least-once,restricted"
 TaxpayerVerified,Taxpayer,taxpayer_id,Authoritative verification completed,"taxpayer_id,source,source_version,verified_at",Organisation;Compliance;Integration,"minimal attributes,provenance"
 UserCreated,Identity,user_id,Internal user created or linked,"user_id,issuer,subject,assurance",Membership;Audit;Security,"no tokens or credential material"

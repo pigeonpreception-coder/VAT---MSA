@@ -17,8 +17,8 @@ This matrix is the truthful completion record for the approved architecture. It 
 
 | # | Domain | Current implementation | Status | Required closure before national production |
 |---:|---|---|---|---|
-| 1 | Identity | Provider registry, immutable provider-subject links, provisioned-user checks, role/capability policy and development-only identity fallback | CONTROLLED FOUNDATION | Approved ITAS/enterprise IdP claims, MFA, recovery, lifecycle and assurance tests |
-| 2 | Taxpayer | Canonical taxpayers, identifiers, VAT status, scoped queries and idempotent registration intake | CONTROLLED FOUNDATION | Authoritative ITAS verification, merge/deregistration rules and signed identifier precedence |
+| 1 | Identity | Provider registry, immutable provider-subject links, provisioned-user checks, controlled self-serve identity assertion/verification posture, role/capability policy and development-only identity fallback | CONTROLLED FOUNDATION | Approved ITAS/enterprise IdP claims, MFA, recovery, lifecycle and assurance tests |
+| 2 | Taxpayer | Canonical taxpayers, identifiers, VAT status, scoped queries, idempotent registration intake and duplicate-safe self-serve applications that cannot auto-activate | CONTROLLED FOUNDATION | Authoritative ITAS verification, merge/deregistration rules and signed identifier precedence |
 | 3 | Organisation | One taxpayer/one organisation constraint, branches, memberships and effective-dated buyer/seller capabilities | VERIFIED PILOT | NamRA lifecycle authority and enterprise policy enforcement evidence |
 | 4 | User management | Users, memberships, roles, permissions, grants and separated privileged portal projections | CONTROLLED FOUNDATION | Enterprise provisioning, invitation/suspension workflows, PAM and periodic access certification |
 | 5 | Buyer/Seller | Dynamic organisation capabilities and transaction-context roles without duplicate taxpayer identities | VERIFIED PILOT | Legal terminology and operating-policy approval |
@@ -42,7 +42,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 | 23 | Communication | Secure-message/notice records and scoped compliance inbox projection | CONTROLLED FOUNDATION | Send/respond/close commands, templates, service policy and records-retention approval |
 | 24 | Notification | Notification, preference and delivery-attempt models with operational projection | CONTROLLED FOUNDATION | Approved email/SMS/push providers, consent rules, retries and delivery receipts |
 | 25 | Integration | Provider/connection registry, webhook metadata/deliveries, sync jobs and health projection | VERIFIED FOUNDATION | Per-provider contracts, credentials, conformance sandbox, mTLS/signatures and DLP review |
-| 26 | SaaS | Provider/application/environment ownership and conformance metadata | CONTROLLED FOUNDATION | Provider onboarding/approval commands and commercial/security operating model |
+| 26 | SaaS | Provider/application/environment ownership, public controlled signup intake, non-priced configurable plan selection and conformance metadata | CONTROLLED FOUNDATION | Provider onboarding/approval commands, verified provisioning workflow and commercial/security operating model |
 | 27 | Developer platform | API-client metadata, scopes, credential-reference posture, webhooks, quotas and developer portal | VERIFIED FOUNDATION | External secret manager, credential issuance/rotation/revocation and gateway enforcement |
 | 28 | Reporting | Governed report definitions, scoped run requests, result references and report portal | VERIFIED PILOT | Export generation/custody, approval thresholds, watermark/DLP and large-data performance evidence |
 | 29 | Analytics | Operational metrics and approved report projections; no autonomous adverse decisions | ARCHITECTURE / PRODUCTION EVIDENCE | Governed warehouse/lakehouse, lineage, certified metrics, privacy and model controls |
@@ -55,6 +55,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 |---|---|---|
 | Tenant isolation | Organisation/taxpayer predicates in repositories, permission checks in page/API handlers, national-scope separation | Independent penetration and policy-bypass testing remains mandatory |
 | Licence enforcement | Fail-closed permission/feature/operation registry; central page, portal, API, search and command guard; state-filtered navigation; read/export/compliance/correction continuity after restriction | Production plan authority, commercial provider, independent bypass test and legally approved continuity runbook remain mandatory |
+| Self-serve onboarding | Public bounded/idempotent/rate-limited intake; immutable consent and legal-identity snapshot; active-plan and cross-registry duplicate database gates; pending verification only; no account, organisation, subscription, payment or licence activation | Approved identity verification, ITAS/NamRA taxpayer contract, controlled promotion review and approved subscription provider remain mandatory |
 | Data integrity | Integer cents/quantity micros, uniqueness constraints, idempotency records, immutable correction lineage and hash-chained audit | Production database selection, migration rehearsal and independent reconciliation |
 | Reliable integration | Transactional outbox, event catalogue, retry-safe commands, webhook/sync delivery state | Managed broker/relay, consumer replay tests and contracted providers |
 | Offline safety | Device/range/batch/conflict models; untrusted submissions are rejected with explicit trust failure | Legal offline authority, enrolled device client, signed ranges and field pilot |
@@ -67,12 +68,13 @@ This matrix is the truthful completion record for the approved architecture. It 
 The canonical release gate passed on 2026-08-23:
 
 - ESLint and TypeScript completed without errors.
-- 67 unit/security/policy/database tests passed across twelve test files.
+- 78 unit/security/policy/database tests passed across fifteen test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
 - The production build completed and exposed all application and API routes.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.
 - SQLite migration proof applied migrations `0000` through `0011`, corrected the approved synthetic expense with clean receipt custody, rejected pending/quarantined and wrong-owner evidence, applied a clean link, gated approval and proved the link immutable.
 - Central licence migration proof applied `0012` with foreign keys enabled, covered every granted permission, rejected invalid operation classes and classified read versus write-only navigation; static coverage proved every protected page and API route reaches the central guard.
+- Self-serve signup migration proof applied `0013`, enforced active-plan and cross-registry identity gates, immutable submitted identity/consent, controlled transitions, no premature promotion or deletion, and the permanent `NOT_ACTIVATED` intake boundary. Browser proof completed two synthetic submissions, caught and verified the asynchronous form-reset fix, and confirmed clean pending-verification status with no client errors.
 - Earlier runtime proofs covered versioned return workflows, blocked unconfigured ITAS submission, refund controls, invoice correction lineage, R2 quarantine, offline trust rejection, reports and separated portals.
 
 ## Production decision

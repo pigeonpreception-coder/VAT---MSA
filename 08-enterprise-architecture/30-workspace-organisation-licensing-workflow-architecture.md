@@ -51,6 +51,14 @@ The first Organisation Portal Administrator is provisioned only after all gating
 
 The existing `Taxpayer Administrator` role is retained as a compatibility role key but its canonical display and architecture name becomes `Organisation Portal Administrator`. It is not a NamRA role. NamRA Administration and Super Administration remain separate control planes.
 
+#### 3.2.1 Controlled self-serve application channel
+
+Self-serve signup is an intake channel, not an identity provider, taxpayer authority, subscription provider or licence authority. An applicant may submit their name and declared authority, contact email, Namibia legal taxpayer identity, current consent attestations and a requested configurable placeholder plan. A trusted workspace subject may be recorded as externally asserted; an unauthenticated submission remains `VERIFICATION_REQUIRED`. Neither state provisions access.
+
+The initial lifecycle is `PENDING_VERIFICATION -> UNDER_REVIEW -> APPROVED_FOR_PROVISIONING | REJECTED | WITHDRAWN`. Promotion to the controlled registration/provisioning workflow requires verified taxpayer evidence and an approved review. Submitted identity, plan request, consent version/timestamps and licence status are immutable. The signup aggregate accepts only `licence_status=NOT_ACTIVATED`; subscriptions and organisation licences are not created by this boundary.
+
+The public endpoint is bounded to JSON, strict schema fields, idempotency and source/email/global rate budgets. It performs duplicate checks against canonical taxpayers, controlled registration applications and active self-serve applications. Its outbox and hash-chained audit evidence exclude raw contact and taxpayer identifiers. No email, SMS, real payment or live ITAS call occurs in the approved local/staging baseline.
+
 ### 3.3 Administrator hierarchy
 
 | Appointment | Maximum administrative scope | Prohibited inheritance |
@@ -71,6 +79,8 @@ Changing the primary administrator, granting a privileged administrator appointm
 `Select plan -> create pending subscription -> complete sandbox/approved payment activation -> verify taxpayer -> verify VAT registration -> resolve organisation -> create/link administrator identity -> assign organisation licence -> materialize entitlements -> administrator command centre.`
 
 No stage trusts a client-provided success flag. Payment/subscription activation is accepted only from an approved provider adapter or authorised back-office activation command. VAT-MSA stores provider references and signed receipts, not payment-card data.
+
+The self-serve channel stops before this activation flow: it records only the requested plan and verification posture. A public submission cannot create the pending subscription shown above. The controlled promotion command and approved provider contract remain separate future authorities.
 
 The payment provider, billing rules, plan catalogue, grace duration, renewal timing, refund policy and commercial prices are **PROPOSED - REQUIRES APPROVAL**.
 
@@ -118,7 +128,7 @@ For the approved local/staging baseline, `SUSPENDED`, `EXPIRED` and `CANCELLED` 
 
 `license_permission_policies` is the authoritative fail-closed registry mapping each grantable permission to one licensed feature and default operation class. A route may narrow a multi-use permission to a more exact operation class (for example a read page using a manage permission, quarterly certification as compliance continuity, or an invoice credit/debit note as a correction), but it cannot select a more permissive feature or licence state. An absent or retired policy is denied as `LICENSE_POLICY_MISSING`.
 
-Every protected page, portal, API, search request and business command resolves the tenant on the server and calls the central guard. Shared handlers cover business, VAT, compliance, platform, document, report and offline commands; direct organisation, workflow, access-governance, invoice, licensing, navigation and search routes call it explicitly. Navigation has a separate operation classification so write-only destinations disappear in continuity mode while licensed read destinations remain. Health/readiness and privacy-minimised public verification are explicit exemptions because they do not expose an organisation workspace or execute a business command.
+Every protected page, portal, API, search request and business command resolves the tenant on the server and calls the central guard. Shared handlers cover business, VAT, compliance, platform, document, report and offline commands; direct organisation, workflow, access-governance, invoice, licensing, navigation and search routes call it explicitly. Navigation has a separate operation classification so write-only destinations disappear in continuity mode while licensed read destinations remain. Health/readiness, privacy-minimised public verification and controlled self-serve signup intake are explicit exemptions because they do not expose an organisation workspace or execute a business or activation command. Signup has its own strict input, idempotency, rate, duplicate and immutable-state controls.
 
 ## 5. Dynamic workspace and navigation engine
 

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.8.0
-  summary: Centrally licensed identity, business, VAT, evidence, search and platform-edge contract.
+  version: 0.9.0
+  summary: Controlled self-serve onboarding plus centrally licensed identity, business, VAT, evidence, search and platform-edge contracts.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
     error codes, signature formats, retention and service levels require NamRA approval.
@@ -16,7 +16,7 @@ x-vat-msa-license-enforcement:
   restricted_states: [SUSPENDED, EXPIRED, CANCELLED]
   continuity_operations: [READ, EXPORT, COMPLIANCE_WRITE, CORRECTION_WRITE]
   denied_operations_after_restriction: [BUSINESS_WRITE, ADMIN_WRITE]
-  public_exemptions: [/health/live, /health/ready, '/v1/verify/{token}']
+  public_exemptions: [/health/live, /health/ready, /v1/signup-applications, '/v1/verify/{token}']
   failure_mode: deny
 servers:
   - url: https://sandbox.api.vat-msa.na
@@ -26,6 +26,7 @@ servers:
 security:
   - oauth2: [invoices.write]
 tags:
+  - name: Signup
   - name: Identity
   - name: Organisations
   - name: Registrations
@@ -49,6 +50,41 @@ tags:
   - name: Offline
   - name: Verification
 paths:
+  /v1/signup-applications:
+    post:
+      tags: [Signup]
+      operationId: submitSelfServeSignup
+      summary: Submit a controlled self-serve organisation signup application.
+      description: |
+        This public, rate-limited intake records applicant authority, legal taxpayer identity,
+        consent and a configurable placeholder licence-plan request. Acceptance creates only
+        an immutable pending-verification application. It never creates a user, taxpayer,
+        organisation, subscription or licence and never triggers payment, email, SMS or live
+        ITAS/NamRA activity. A trusted Sites/ChatGPT identity assertion may be recorded when
+        present, but it does not provision access.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelfServeSignupSubmission' }
+      responses:
+        '202':
+          description: Application accepted and held pending identity and taxpayer verification.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelfServeSignupAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413':
+          description: Request exceeds the 32 KiB signup limit.
+        '415':
+          description: Content-Type is not application/json.
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429':
+          description: Public signup rate budget exceeded.
   /v1/licensing/license:
     get:
       tags: [Organisations]
@@ -904,6 +940,43 @@ components:
       description: End-to-end trace identifier.
       schema: { type: string, format: uuid }
   schemas:
+    SelfServeSignupSubmission:
+      type: object
+      additionalProperties: false
+      required: [schema_version, applicant_name, applicant_role, contact_email, country_code, plan_code, vat_number, tin, legal_name, taxpayer_type, return_frequency, address, authority_attested, terms_accepted, privacy_notice_accepted]
+      properties:
+        schema_version: { type: string, const: 1.0.0 }
+        applicant_name: { type: string, minLength: 2, maxLength: 120 }
+        applicant_role: { type: string, enum: [OWNER, DIRECTOR, PARTNER, TRUSTEE, AUTHORISED_REPRESENTATIVE] }
+        contact_email: { type: string, format: email, maxLength: 254 }
+        country_code: { type: string, const: NA }
+        plan_code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]{2,39}$'
+          description: Configurable active placeholder plan; no price or payment data is accepted.
+        vat_number: { type: string, minLength: 3, maxLength: 40 }
+        tin: { type: string, minLength: 3, maxLength: 40 }
+        company_registration_number: { type: string, minLength: 3, maxLength: 40 }
+        legal_name: { type: string, minLength: 2, maxLength: 200 }
+        trading_name: { type: string, minLength: 2, maxLength: 200 }
+        taxpayer_type: { type: string, enum: [PRIVATE_COMPANY, CLOSE_CORPORATION, SOLE_PROPRIETOR, PARTNERSHIP, TRUST, NON_PROFIT, PUBLIC_ENTITY, OTHER] }
+        return_frequency: { type: string, enum: [MONTHLY, BIMONTHLY, QUARTERLY, ANNUAL] }
+        address: { type: string, minLength: 5, maxLength: 500 }
+        authority_attested: { type: boolean, const: true }
+        terms_accepted: { type: boolean, const: true }
+        privacy_notice_accepted: { type: boolean, const: true }
+    SelfServeSignupAccepted:
+      type: object
+      additionalProperties: false
+      required: [application_reference, status, identity_status, taxpayer_verification_status, licence_status, submitted_at, next_action]
+      properties:
+        application_reference: { type: string, pattern: '^VMS-[0-9]{4}-[A-F0-9]{10}$' }
+        status: { type: string, const: PENDING_VERIFICATION }
+        identity_status: { type: string, enum: [VERIFICATION_REQUIRED, EXTERNALLY_ASSERTED] }
+        taxpayer_verification_status: { type: string, const: AWAITING_PROVIDER_CONTRACT }
+        licence_status: { type: string, const: NOT_ACTIVATED }
+        submitted_at: { type: string, format: date-time }
+        next_action: { type: string, maxLength: 500 }
     OrganisationSummary:
       type: object
       additionalProperties: false

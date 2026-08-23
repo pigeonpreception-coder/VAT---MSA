@@ -8,6 +8,8 @@ common_controls:
   idempotency: required for financial and tax commands
   limits: schema byte page query and multi-level rate budgets
 domains:
+  signup:
+    - { method: POST, path: /signup-applications, permission: public-rate-limited-controlled-intake, status: implemented-pending-verification-no-activation }
   identity:
     - { method: GET, path: /identity/federation-status, permission: identity:read, status: foundation }
     - { method: POST, path: /auth/token-exchange, permission: external-provider-contract, status: gated-by-ITAS }

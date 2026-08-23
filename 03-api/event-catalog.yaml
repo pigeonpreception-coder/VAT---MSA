@@ -1,4 +1,4 @@
-catalog_version: 0.7.0
+catalog_version: 0.8.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,11 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.self-serve-signup.submitted.v1
+    owner: Onboarding Domain
+    partition_key: identity_subject_hash_or_contact_hash
+    contains_tax_confidential_data: false
+    purpose: Records a validated pending signup reference, requested placeholder plan and verification posture with no user, taxpayer, organisation, subscription, licence or payment activation effect.
   - type: na.vatmsa.license.state-changed.v1
     owner: Licensing and Entitlements Domain
     partition_key: organisation_id

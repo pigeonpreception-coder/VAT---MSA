@@ -19,8 +19,10 @@ describe("central licence enforcement migration", () => {
   it("registers every granted permission and classifies continuity-sensitive navigation", () => {
     const db = new DatabaseSync(":memory:");
     const migrations = readdirSync(join(process.cwd(), "drizzle")).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
-    expect(migrations.at(-1)).toBe("0012_central_license_enforcement.sql");
-    for (const migration of migrations.slice(0, -1)) applyMigration(db, migration);
+    const centralMigration = "0012_central_license_enforcement.sql";
+    const centralIndex = migrations.indexOf(centralMigration);
+    expect(centralIndex).toBeGreaterThan(0);
+    for (const migration of migrations.slice(0, centralIndex)) applyMigration(db, migration);
     db.exec("PRAGMA foreign_keys=ON");
     const authSource = readFileSync(join(process.cwd(), "lib", "auth.ts"), "utf8");
     const grantedPermissions = new Set([...authSource.matchAll(/"([a-z][a-z0-9-]*:[a-z][a-z0-9-]*)"/g)].map((match) => match[1]));
@@ -38,7 +40,7 @@ describe("central licence enforcement migration", () => {
       (id,workspace_id,folder_id,item_key,label,href,feature_key,capability,required_permission,sort_order,status,classification)
       VALUES ('nitem-dashboard','workspace','folder','dashboard','Dashboard','/','CORE_VAT',NULL,'dashboard:read',1,'ACTIVE','INTERNAL'),
              ('nitem-new-invoice','workspace','folder','new-invoice','New invoice','/invoices/new','CORE_VAT',NULL,'invoices:submit',2,'ACTIVE','RESTRICTED')`).run();
-    applyMigration(db, migrations.at(-1)!);
+    applyMigration(db, centralMigration);
 
     expect(db.prepare("SELECT feature_key,operation_class FROM license_permission_policies WHERE permission_code='reports:run'").get())
       .toEqual({ feature_key: "ANALYTICS", operation_class: "EXPORT" });
@@ -63,7 +65,10 @@ describe("central licence enforcement migration", () => {
 describe("licence enforcement coverage", () => {
   it("routes every protected page and API through the central guard", () => {
     const pages = filesBelow(join(process.cwd(), "app"), "page.tsx");
-    const publicPages = new Set([join("app", "verify", "[token]", "page.tsx")]);
+    const publicPages = new Set([
+      join("app", "signup", "page.tsx"),
+      join("app", "verify", "[token]", "page.tsx"),
+    ]);
     const uncoveredPages = pages.filter((path) => {
       const local = relative(process.cwd(), path);
       if (publicPages.has(local)) return false;
@@ -76,6 +81,7 @@ describe("licence enforcement coverage", () => {
     const publicRoutes = new Set([
       join("app", "api", "health", "live", "route.ts"),
       join("app", "api", "health", "ready", "route.ts"),
+      join("app", "api", "v1", "signup-applications", "route.ts"),
       join("app", "api", "v1", "verify", "[token]", "route.ts"),
     ]);
     const sharedGuards = /requireLicensedPermission|handleBusiness(Get|Post)|handleCompliance(List|Command)|handleVat(LifecycleList|ReturnDetail|Command)|handle(PlatformList|OfflineBatch|ReportRun|DocumentUpload)/;

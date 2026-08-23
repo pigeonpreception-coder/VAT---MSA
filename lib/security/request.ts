@@ -103,6 +103,20 @@ export async function enforceRegistrationRateLimits(user: UserContext, context: 
   ]);
 }
 
+export async function enforceSelfServeSignupSourceRateLimits(context: RequestContext): Promise<void> {
+  await enforceRateLimits([
+    { key: `signup:source:${context.sourceToken}`, limit: 5, windowSeconds: 3_600 },
+    { key: "signup:global", limit: 500, windowSeconds: 3_600 },
+  ]);
+}
+
+export async function enforceSelfServeSignupEmailRateLimit(email: string): Promise<void> {
+  const emailToken = (await sha256Hex(email.trim().toLowerCase())).slice(0, 32);
+  await enforceRateLimits([
+    { key: `signup:email:${emailToken}`, limit: 3, windowSeconds: 86_400 },
+  ]);
+}
+
 export async function enforceRateLimits(buckets: RateBucket[], nowMs = Date.now()): Promise<void> {
   const { ensureDatabase } = await import("@/db/runtime");
   const db = await ensureDatabase();

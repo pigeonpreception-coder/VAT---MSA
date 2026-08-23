@@ -610,6 +610,30 @@ const SCHEMA_STATEMENTS = [
     status TEXT NOT NULL, effective_from TEXT NOT NULL, effective_to TEXT, created_at TEXT NOT NULL,
     UNIQUE (code, version)
   )`,
+  `CREATE TABLE IF NOT EXISTS self_serve_signup_applications (
+    id TEXT PRIMARY KEY, public_reference TEXT NOT NULL UNIQUE,
+    idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL,
+    applicant_name TEXT NOT NULL, applicant_role TEXT NOT NULL
+      CHECK (applicant_role IN ('OWNER','DIRECTOR','PARTNER','TRUSTEE','AUTHORISED_REPRESENTATIVE')),
+    contact_email TEXT NOT NULL, identity_provider TEXT, identity_subject_hash TEXT,
+    country_code TEXT NOT NULL CHECK (country_code='NA'),
+    requested_plan_id TEXT NOT NULL REFERENCES license_plans(id),
+    vat_number TEXT NOT NULL, tin TEXT NOT NULL, company_registration_number TEXT,
+    legal_name TEXT NOT NULL, trading_name TEXT, taxpayer_type TEXT NOT NULL,
+    return_frequency TEXT NOT NULL, address TEXT NOT NULL,
+    terms_version TEXT NOT NULL, privacy_notice_version TEXT NOT NULL,
+    authority_attested_at TEXT NOT NULL, terms_accepted_at TEXT NOT NULL,
+    privacy_notice_accepted_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('PENDING_VERIFICATION','UNDER_REVIEW','REJECTED','APPROVED_FOR_PROVISIONING','WITHDRAWN')),
+    identity_status TEXT NOT NULL CHECK (identity_status IN ('VERIFICATION_REQUIRED','EXTERNALLY_ASSERTED')),
+    taxpayer_verification_status TEXT NOT NULL CHECK (taxpayer_verification_status IN ('AWAITING_PROVIDER_CONTRACT','PENDING','VERIFIED','FAILED')),
+    licence_status TEXT NOT NULL CHECK (licence_status='NOT_ACTIVATED'),
+    promoted_registration_application_id TEXT REFERENCES registration_applications(id),
+    submitted_at TEXT NOT NULL,
+    CHECK ((identity_provider IS NULL AND identity_subject_hash IS NULL)
+      OR (identity_provider IS NOT NULL AND identity_subject_hash IS NOT NULL)),
+    UNIQUE (contact_email, idempotency_key)
+  )`,
   `CREATE TABLE IF NOT EXISTS license_features (
     feature_key TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
     metric_key TEXT, protected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
@@ -890,6 +914,14 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_report_runs_status_requested ON report_runs(status, requested_at)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_self_serve_signup_status_submitted ON self_serve_signup_applications(status, submitted_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_self_serve_signup_identifiers ON self_serve_signup_applications(vat_number, tin)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_self_serve_signup_active_vat
+    ON self_serve_signup_applications(vat_number)
+    WHERE status IN ('PENDING_VERIFICATION','UNDER_REVIEW','APPROVED_FOR_PROVISIONING')`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_self_serve_signup_active_tin
+    ON self_serve_signup_applications(tin)
+    WHERE status IN ('PENDING_VERIFICATION','UNDER_REVIEW','APPROVED_FOR_PROVISIONING')`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_departments_org_status ON departments(organisation_id, status)`,
@@ -907,6 +939,54 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_sod_violations_org_status ON sod_violations(organisation_id, status, detected_at)`,
   `CREATE INDEX IF NOT EXISTS idx_navigation_folders_parent ON navigation_folders(workspace_id, parent_folder_id, sort_order)`,
   `CREATE INDEX IF NOT EXISTS idx_navigation_items_folder ON navigation_items(folder_id, sort_order)`,
+  `CREATE TRIGGER IF NOT EXISTS validate_self_serve_signup_insert
+    BEFORE INSERT ON self_serve_signup_applications
+    BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM license_plans p WHERE p.id=NEW.requested_plan_id AND p.status='ACTIVE'
+          AND datetime(p.effective_from) <= CURRENT_TIMESTAMP
+          AND (p.effective_to IS NULL OR datetime(p.effective_to) > CURRENT_TIMESTAMP)
+      ) THEN RAISE(ABORT,'SELF_SERVE_SIGNUP_PLAN_UNAVAILABLE') END;
+      SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM taxpayers t WHERE t.vat_number=NEW.vat_number OR t.tin=NEW.tin
+      ) THEN RAISE(ABORT,'SELF_SERVE_SIGNUP_CANONICAL_TAXPAYER_EXISTS') END;
+      SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM registration_applications r
+        WHERE (r.vat_number=NEW.vat_number OR r.tin=NEW.tin)
+          AND r.status IN ('PENDING_VERIFICATION','UNDER_REVIEW','VERIFIED')
+      ) THEN RAISE(ABORT,'SELF_SERVE_SIGNUP_CONTROLLED_REGISTRATION_EXISTS') END;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_self_serve_signup_input_update
+    BEFORE UPDATE OF id,public_reference,idempotency_key,request_hash,applicant_name,applicant_role,
+      contact_email,identity_provider,identity_subject_hash,country_code,requested_plan_id,
+      vat_number,tin,company_registration_number,legal_name,trading_name,taxpayer_type,
+      return_frequency,address,terms_version,privacy_notice_version,authority_attested_at,
+      terms_accepted_at,privacy_notice_accepted_at,licence_status,submitted_at
+    ON self_serve_signup_applications
+    BEGIN
+      SELECT RAISE(ABORT,'SELF_SERVE_SIGNUP_INPUT_IMMUTABLE');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_self_serve_signup_transition
+    BEFORE UPDATE OF status ON self_serve_signup_applications
+    WHEN NEW.status<>OLD.status AND NOT (
+      (OLD.status='PENDING_VERIFICATION' AND NEW.status IN ('UNDER_REVIEW','REJECTED','WITHDRAWN'))
+      OR (OLD.status='UNDER_REVIEW' AND NEW.status IN ('REJECTED','APPROVED_FOR_PROVISIONING','WITHDRAWN'))
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'SELF_SERVE_SIGNUP_TRANSITION_INVALID');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS enforce_self_serve_signup_promotion
+    BEFORE UPDATE OF promoted_registration_application_id ON self_serve_signup_applications
+    WHEN NEW.promoted_registration_application_id IS NOT NULL
+      AND (OLD.status<>'APPROVED_FOR_PROVISIONING' OR NEW.taxpayer_verification_status<>'VERIFIED')
+    BEGIN
+      SELECT RAISE(ABORT,'SELF_SERVE_SIGNUP_PROMOTION_NOT_APPROVED');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS prevent_self_serve_signup_delete
+    BEFORE DELETE ON self_serve_signup_applications
+    BEGIN
+      SELECT RAISE(ABORT,'SELF_SERVE_SIGNUP_IMMUTABLE_HISTORY');
+    END`,
   `CREATE TRIGGER IF NOT EXISTS prevent_quotation_revision_update
     BEFORE UPDATE ON quotation_revisions
     BEGIN
