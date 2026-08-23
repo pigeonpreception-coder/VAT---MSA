@@ -1,5 +1,7 @@
 # VAT-MSA Current-State Assessment & Global Enterprise Transformation Report
 
+> **Superseded current-state facts:** This report assesses commit `496daf0` before the accepted Phase 0 remediation. Its forensic inventory remains useful, but current runtime, dependency, OpenAPI, statutory-binding and identity-step-up findings must be read with [CURRENT STATE ASSESSMENT.md](CURRENT%20STATE%20ASSESSMENT.md), which assesses the post-Phase 0 baseline and the controlled Issue 1 increment.
+
 **Assessment date:** 23 August 2026
 
 **Assessed repository:** `C:\Users\Jean-Pierre\Desktop\2026 FOLDERS\SAFINA BUSINESS ADVISORY\SAFINA\VAT Management System`

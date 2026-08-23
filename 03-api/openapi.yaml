@@ -874,6 +874,8 @@ paths:
       summary: Record an independent, immutable access decision with single-use step-up evidence.
       parameters:
         - { name: access_request_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '200': { description: Independent decision recorded. }
@@ -891,6 +893,9 @@ paths:
       tags: [Approvals]
       operationId: createAccessReview
       summary: Open a quarterly access review with step-up authentication.
+      parameters:
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '201': { description: Quarterly review opened. }
@@ -902,6 +907,8 @@ paths:
       summary: Record an immutable access-review certification.
       parameters:
         - { name: access_review_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '200': { description: Certification recorded. }
@@ -964,6 +971,9 @@ paths:
       tags: [Organisations]
       operationId: createOrganisationEmployee
       summary: Create an employee within licensed seat capacity using step-up authentication.
+      parameters:
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '201': { description: Employee created. }
@@ -975,6 +985,8 @@ paths:
       summary: Non-destructively terminate an employee using step-up authentication.
       parameters:
         - { name: employee_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       responses:
         '200': { description: Employee terminated. }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -990,6 +1002,9 @@ paths:
       tags: [Organisations]
       operationId: createOrganisationRole
       summary: Create a role using step-up authentication and SoD validation.
+      parameters:
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '201': { description: Role created. }
@@ -1001,6 +1016,8 @@ paths:
       summary: Record an independent workflow decision with no self-approval.
       parameters:
         - { name: workflow_task_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '200': { description: Workflow decision recorded. }
@@ -1017,6 +1034,9 @@ paths:
       tags: [Approvals]
       operationId: createWorkflowDraft
       summary: Create a workflow draft using step-up authentication.
+      parameters:
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
       responses:
         '201': { description: Workflow draft created. }
@@ -1028,6 +1048,8 @@ paths:
       summary: Publish a validated workflow version using step-up authentication.
       parameters:
         - { name: workflow_version_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { $ref: '#/components/parameters/StepUpEvidence' }
+        - { $ref: '#/components/parameters/StepUpSessionId' }
       responses:
         '200': { description: Workflow version published. }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1070,6 +1092,18 @@ components:
             reports.run: Execute allow-listed, tenant-scoped inline reports.
             offline.sync: Synchronise enrolled offline devices.
   parameters:
+    StepUpEvidence:
+      name: X-VAT-MSA-Step-Up-Evidence
+      in: header
+      required: true
+      description: HMAC-SHA256 v2 claims envelope issued by the configured trusted identity broker and bound to actor, MFA method, issuer, session, request method/path and origin. It expires within five minutes and is single-use.
+      schema: { type: string, pattern: '^v2\.[A-Za-z0-9_-]{32,2048}\.[A-Za-z0-9_-]{32,128}$' }
+    StepUpSessionId:
+      name: X-VAT-MSA-Session-ID
+      in: header
+      required: true
+      description: Application session identifier that must exactly match the signed sid claim in the step-up evidence.
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{16,128}$' }
     IdempotencyKey:
       name: Idempotency-Key
       in: header

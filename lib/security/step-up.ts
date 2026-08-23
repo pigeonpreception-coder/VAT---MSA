@@ -11,9 +11,19 @@ export async function requireStepUp(request: Request, actor: UserContext): Promi
   const signedEvidence = request.headers.get(EVIDENCE_HEADER);
   if (signedEvidence) {
     const secret = process.env.VAT_MSA_STEP_UP_HMAC_SECRET ?? "";
+    const issuer = process.env.VAT_MSA_STEP_UP_ISSUER ?? "";
+    const sessionId = request.headers.get("x-vat-msa-session-id") ?? "";
+    const requestUrl = new URL(request.url);
     let verified: Awaited<ReturnType<typeof verifySignedStepUpEvidence>>;
     try {
-      verified = await verifySignedStepUpEvidence(signedEvidence, actor.userId, secret);
+      verified = await verifySignedStepUpEvidence(signedEvidence, {
+        actorId: actor.userId,
+        audience: `${request.method.toUpperCase()} ${requestUrl.pathname}`,
+        issuer,
+        origin: requestUrl.origin,
+        sessionId,
+        secret,
+      });
     } catch (error) {
       throw new AccessDeniedError(error instanceof Error ? error.message : "The step-up authentication evidence is invalid.");
     }
