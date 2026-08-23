@@ -34,9 +34,9 @@ function baseFixture(db: DatabaseSync) {
 }
 
 describe("dual-subscription database boundary", () => {
-  it("registers migration 0014 and its generated schema snapshot", () => {
+  it("retains migration 0014 and its generated schema snapshot", () => {
     const journal = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8"));
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 14, tag: "0014_dual_subscription_authority" });
+    expect(journal.entries).toContainEqual(expect.objectContaining({ idx: 14, tag: "0014_dual_subscription_authority" }));
     const snapshot = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "0014_snapshot.json"), "utf8"));
     expect(snapshot.tables["tax_subscriptions"]).toBeDefined();
     expect(snapshot.tables["license_capacity_exceptions"]).toBeDefined();

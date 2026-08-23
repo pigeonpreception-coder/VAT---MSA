@@ -19,6 +19,11 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  if (process.env.NODE_ENV === "production" && process.env.VAT_MSA_IDENTITY_TRUST_MODE !== "SITES_DISPATCH") {
+    // Platform identity headers are trustworthy only when the deployment
+    // guarantees requests arrive through the Sites dispatch boundary.
+    return null;
+  }
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);

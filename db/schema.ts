@@ -1385,6 +1385,7 @@ export const invoices = sqliteTable(
     transactionId: text("transaction_id").notNull(),
     certificateId: text("certificate_id").notNull(),
     verificationToken: text("verification_token").notNull(),
+    taxRuleSetId: text("tax_rule_set_id").references(() => taxRuleSets.id),
     createdAt: text("created_at").notNull(),
     certifiedAt: text("certified_at").notNull(),
   },
@@ -1444,6 +1445,7 @@ export const certificates = sqliteTable(
     invoiceHash: text("invoice_hash").notNull(),
     signature: text("signature").notNull(),
     signatureProfile: text("signature_profile").notNull(),
+    ruleSetVersion: text("rule_set_version"),
     status: text("status").notNull(),
     issuedAt: text("issued_at").notNull(),
   },
@@ -2425,6 +2427,24 @@ export const navigationPreferences = sqliteTable(
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [uniqueIndex("ux_navigation_preference").on(table.userId, table.organisationId, table.preferenceType)],
+);
+
+export const appSchemaRevisions = sqliteTable("app_schema_revisions", {
+  revision: text("revision").primaryKey(),
+  appliedAt: text("applied_at").notNull(),
+  source: text("source").notNull(),
+});
+
+export const stepUpEvidenceUses = sqliteTable(
+  "step_up_evidence_uses",
+  {
+    evidenceDigest: text("evidence_digest").primaryKey(),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    issuedAt: text("issued_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at").notNull(),
+  },
+  (table) => [index("idx_step_up_evidence_expiry").on(table.expiresAt)],
 );
 
 export const seedState = sqliteTable("seed_state", {

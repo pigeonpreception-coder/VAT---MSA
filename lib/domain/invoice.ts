@@ -10,6 +10,16 @@ export type ValidationMessage = {
   message: string;
 };
 
+export type AppliedTaxRule = {
+  id: string;
+  jurisdiction: "NA";
+  version: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  standardRateBps: number;
+  legalAuthorityReference: string;
+};
+
 export class InvoiceValidationError extends Error {
   readonly messages: ValidationMessage[];
 
@@ -54,8 +64,12 @@ function vatIdentifier(party: InvoiceSubmission["supplier"]): string | null {
   return party.identifiers?.find((identifier) => identifier.type === "VAT_NUMBER")?.value.trim() || null;
 }
 
-export function calculateAndValidateInvoice(payload: InvoiceSubmission): CalculatedInvoice {
+export function calculateAndValidateInvoice(payload: InvoiceSubmission, taxRule: AppliedTaxRule): CalculatedInvoice {
   const errors: ValidationMessage[] = [];
+
+  if (taxRule.jurisdiction !== "NA" || !taxRule.version.trim() || !taxRule.legalAuthorityReference.trim()) {
+    errors.push({ code: "TAX_RULE_INVALID", path: "/issue_date", message: "The approved Namibia tax rule is incomplete." });
+  }
 
   if (payload.schema_version !== "1.0.0") {
     errors.push({ code: "SCHEMA_VERSION", path: "/schema_version", message: "Schema version 1.0.0 is required." });
@@ -93,6 +107,8 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
   }
   if (!/^[A-Z]{3}$/.test(payload.currency ?? "")) {
     errors.push({ code: "CURRENCY_INVALID", path: "/currency", message: "Currency must be a three-letter ISO code." });
+  } else if (payload.currency !== "NAD") {
+    errors.push({ code: "CURRENCY_JURISDICTION_MISMATCH", path: "/currency", message: "Namibia VAT certification requires NAD currency." });
   }
   if (!Array.isArray(payload.lines) || payload.lines.length === 0) {
     errors.push({ code: "LINES_REQUIRED", path: "/lines", message: "At least one invoice line is required." });
@@ -158,6 +174,12 @@ export function calculateAndValidateInvoice(payload: InvoiceSubmission): Calcula
     }
     if (taxRateBps < 0 || taxRateBps > 10_000) {
       errors.push({ code: "TAX_RATE_OUT_OF_RANGE", path: `${path}/tax/rate`, message: "Tax rate must be between 0 and 100 percent." });
+    }
+    if (tax.category === "STANDARD" && taxRateBps !== taxRule.standardRateBps) {
+      errors.push({ code: "STANDARD_RATE_NOT_APPROVED", path: `${path}/tax/rate`, message: `The approved ${taxRule.version} standard rate is ${(taxRule.standardRateBps / 100).toFixed(2)} percent.` });
+    }
+    if (["REVERSE_CHARGE", "OTHER"].includes(tax.category)) {
+      errors.push({ code: "TAX_CATEGORY_NOT_APPROVED", path: `${path}/tax/category`, message: `${tax.category} is not mapped by the approved rule set.` });
     }
     if (!["CREDIT_NOTE"].includes(payload.document_type) && [unitPriceCents, suppliedNetCents, suppliedTaxableCents, suppliedTaxCents].some((value) => value < 0)) {
       errors.push({ code: "NEGATIVE_AMOUNT_NOT_ALLOWED", path, message: "Negative amounts require the approved credit-note workflow." });

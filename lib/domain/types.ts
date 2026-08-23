@@ -132,8 +132,12 @@ export type InvoiceDetail = InvoiceSummary & {
   sourceSystem: string;
   sourceDocumentId: string;
   payloadHash: string;
+  certificationHash: string;
   signature: string;
   signatureProfile: string;
+  taxRuleSetId: string;
+  taxRuleSetVersion: string;
+  taxLegalAuthorityReference: string;
   correction: {
     originalInvoiceId: string;
     originalInvoiceNumber: string;

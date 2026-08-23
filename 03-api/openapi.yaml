@@ -664,6 +664,18 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
   /v1/invoices:
+    get:
+      tags: [Invoices]
+      operationId: listInvoices
+      summary: List authorised invoices under tenant or national scope.
+      security:
+        - oauth2: [invoices.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Authorised invoice summaries. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Invoices]
       operationId: submitInvoice
@@ -719,26 +731,6 @@ paths:
                 $ref: '#/components/schemas/InvoiceStatus'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-  /v1/certificates/{certificate_id}:
-    get:
-      tags: [Certificates]
-      operationId: getCertificate
-      summary: Retrieve the signed certification receipt for an authorised party.
-      security:
-        - oauth2: [certificates.read]
-      parameters:
-        - name: certificate_id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        '200':
-          description: Signed receipt.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CertificationReceipt'
         '404': { $ref: '#/components/responses/NotFound' }
   /v1/platform:
     get:
@@ -858,6 +850,187 @@ paths:
               schema:
                 $ref: '#/components/schemas/PublicVerification'
         '404': { $ref: '#/components/responses/NotFound' }
+  /v1/access-requests:
+    get:
+      tags: [Approvals]
+      operationId: listAccessRequests
+      summary: List tenant-scoped access requests and review context.
+      responses:
+        '200': { description: Authorised access requests. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Approvals]
+      operationId: createAccessRequest
+      summary: Request a role assignment without granting it.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '201': { description: Access request created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/access-requests/{access_request_id}/decision:
+    post:
+      tags: [Approvals]
+      operationId: decideAccessRequest
+      summary: Record an independent, immutable access decision with single-use step-up evidence.
+      parameters:
+        - { name: access_request_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '200': { description: Independent decision recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/access-reviews:
+    get:
+      tags: [Approvals]
+      operationId: listAccessReviews
+      summary: List quarterly access reviews in authorised scope.
+      responses:
+        '200': { description: Access reviews and certifications. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Approvals]
+      operationId: createAccessReview
+      summary: Open a quarterly access review with step-up authentication.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '201': { description: Quarterly review opened. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/access-reviews/{access_review_id}/certifications:
+    post:
+      tags: [Approvals]
+      operationId: certifyAccessReview
+      summary: Record an immutable access-review certification.
+      parameters:
+        - { name: access_review_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '200': { description: Certification recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/administration:
+    get:
+      tags: [Organisations]
+      operationId: getAdministrationWorkspace
+      summary: Read the licensed administration and governance workspace.
+      responses:
+        '200': { description: Authorised administration snapshot. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/business-parties:
+    get:
+      tags: [Organisations]
+      operationId: listBusinessParties
+      summary: List tenant-scoped business parties.
+      responses:
+        '200': { description: Business party register. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Organisations]
+      operationId: createBusinessParty
+      summary: Create a tenant-scoped business party.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '201': { description: Business party created. }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/business-parties/{business_party_id}:
+    patch:
+      tags: [Organisations]
+      operationId: updateBusinessParty
+      summary: Update an active business party under tenant scope.
+      parameters:
+        - { name: business_party_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '200': { description: Business party updated. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/business-parties/{business_party_id}/deactivation:
+    post:
+      tags: [Organisations]
+      operationId: deactivateBusinessParty
+      summary: Non-destructively deactivate a business party.
+      parameters:
+        - { name: business_party_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      responses:
+        '200': { description: Business party deactivated. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/organisations/employees:
+    get:
+      tags: [Organisations]
+      operationId: listOrganisationEmployees
+      summary: List licensed organisation employees.
+      responses:
+        '200': { description: Employee register. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Organisations]
+      operationId: createOrganisationEmployee
+      summary: Create an employee within licensed seat capacity using step-up authentication.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '201': { description: Employee created. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/organisations/employees/{employee_id}/termination:
+    post:
+      tags: [Organisations]
+      operationId: terminateOrganisationEmployee
+      summary: Non-destructively terminate an employee using step-up authentication.
+      parameters:
+        - { name: employee_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      responses:
+        '200': { description: Employee terminated. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/organisations/roles:
+    get:
+      tags: [Organisations]
+      operationId: listOrganisationRoles
+      summary: List organisation-defined roles and grants.
+      responses:
+        '200': { description: Organisation roles. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Organisations]
+      operationId: createOrganisationRole
+      summary: Create a role using step-up authentication and SoD validation.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '201': { description: Role created. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/workflow-tasks/{workflow_task_id}/decision:
+    post:
+      tags: [Approvals]
+      operationId: decideWorkflowTask
+      summary: Record an independent workflow decision with no self-approval.
+      parameters:
+        - { name: workflow_task_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '200': { description: Workflow decision recorded. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/workflows:
+    get:
+      tags: [Approvals]
+      operationId: listWorkflows
+      summary: List workflows, versions and outstanding tasks.
+      responses:
+        '200': { description: Workflow register. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Approvals]
+      operationId: createWorkflowDraft
+      summary: Create a workflow draft using step-up authentication.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '201': { description: Workflow draft created. }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/workflows/versions/{workflow_version_id}/publication:
+    post:
+      tags: [Approvals]
+      operationId: publishWorkflowVersion
+      summary: Publish a validated workflow version using step-up authentication.
+      parameters:
+        - { name: workflow_version_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+      responses:
+        '200': { description: Workflow version published. }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     oauth2:
@@ -1239,7 +1412,7 @@ components:
     CertificationReceipt:
       type: object
       additionalProperties: false
-      required: [invoice_id, transaction_id, certificate_id, status, certified_at, invoice_hash, signature, verification_url]
+      required: [invoice_id, transaction_id, certificate_id, status, certified_at, rule_set_id, rule_set_version, legal_authority_reference, invoice_hash, signature, verification_url]
       properties:
         invoice_id: { type: string, format: uuid }
         document_type: { type: string, enum: [TAX_INVOICE, SIMPLIFIED_TAX_INVOICE, CREDIT_NOTE, DEBIT_NOTE, SELF_BILLED_INVOICE] }
@@ -1248,8 +1421,10 @@ components:
         status: { type: string, const: CERTIFIED }
         processing_status: { type: string, enum: [CERTIFIED, MATCHED, EXCEPTION] }
         certified_at: { type: string, format: date-time }
-        rule_set_version: { type: string }
-        invoice_hash: { type: string, pattern: '^[A-Fa-f0-9]{64}$' }
+        rule_set_id: { type: string, minLength: 1, description: Immutable identifier of the authority-approved rule resolved for the issue date. }
+        rule_set_version: { type: string, minLength: 1 }
+        legal_authority_reference: { type: string, minLength: 1 }
+        invoice_hash: { type: string, pattern: '^[A-Fa-f0-9]{64}$', description: Certification hash binding the payload hash and approved statutory rule evidence. }
         signature: { type: string, description: JWS or equivalent approved signature container. }
         verification_url: { type: string, format: uri }
         qr_payload: { type: string }

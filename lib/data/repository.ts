@@ -1,5 +1,6 @@
 import { ensureDatabase } from "@/db/runtime";
 import {
+  type AppliedTaxRule,
   calculateAndValidateInvoice,
   getVatNumber,
   InvoiceValidationError,
@@ -7,6 +8,7 @@ import {
   sha256Hex,
   stableStringify,
 } from "@/lib/domain/invoice";
+import { signCertificationHash } from "@/lib/integrations/signing";
 import type { InvoiceDetail, InvoiceSubmission, InvoiceSummary, RiskLevel, UserContext } from "@/lib/domain/types";
 import { hasPermission, isNationalScope, requireTaxpayerScope } from "@/lib/auth";
 import type { RequestContext } from "@/lib/security/request";
@@ -17,6 +19,18 @@ type InvoiceRow = {
   issue_date: string; currency: string; line_net_cents: number; tax_cents: number; total_cents: number;
   status: string; risk_level: RiskLevel; payload_hash: string; transaction_id: string; certificate_id: string;
   verification_token: string; certified_at: string; signature?: string; signature_profile?: string;
+  tax_rule_set_id?: string; tax_rule_set_version?: string; tax_legal_authority_reference?: string;
+  certification_hash?: string;
+};
+
+type TaxRuleRow = {
+  id: string;
+  jurisdiction: string;
+  version: string;
+  effective_from: string;
+  effective_to: string | null;
+  standard_rate_bps: number;
+  legal_authority_reference: string | null;
 };
 
 type CorrectionOriginal = {
@@ -72,8 +86,12 @@ export async function listInvoices(user: UserContext, limit = 100): Promise<Invo
 export async function getInvoiceById(id: string, user: UserContext): Promise<InvoiceDetail | null> {
   const db = await ensureDatabase();
   const row = isNationalScope(user)
-    ? await db.prepare(`SELECT i.*, c.signature, c.signature_profile FROM invoices i JOIN certificates c ON c.invoice_id = i.id WHERE i.id = ?`).bind(id).first<InvoiceRow>()
-    : await db.prepare(`SELECT i.*, c.signature, c.signature_profile FROM invoices i JOIN certificates c ON c.invoice_id = i.id
+    ? await db.prepare(`SELECT i.*, c.signature, c.signature_profile, c.invoice_hash AS certification_hash,
+        r.version AS tax_rule_set_version, r.legal_authority_reference AS tax_legal_authority_reference
+        FROM invoices i JOIN certificates c ON c.invoice_id = i.id JOIN tax_rule_sets r ON r.id = i.tax_rule_set_id WHERE i.id = ?`).bind(id).first<InvoiceRow>()
+    : await db.prepare(`SELECT i.*, c.signature, c.signature_profile, c.invoice_hash AS certification_hash,
+        r.version AS tax_rule_set_version, r.legal_authority_reference AS tax_legal_authority_reference
+        FROM invoices i JOIN certificates c ON c.invoice_id = i.id JOIN tax_rule_sets r ON r.id = i.tax_rule_set_id
       WHERE i.id = ? AND (i.supplier_taxpayer_id = ? OR i.customer_taxpayer_id = ?)`).bind(id, user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").first<InvoiceRow>();
   if (!row) return null;
 
@@ -100,8 +118,12 @@ export async function getInvoiceById(id: string, user: UserContext): Promise<Inv
     sourceSystem: row.source_system,
     sourceDocumentId: row.source_document_id,
     payloadHash: row.payload_hash,
+    certificationHash: row.certification_hash ?? "",
     signature: row.signature ?? "",
     signatureProfile: row.signature_profile ?? "",
+    taxRuleSetId: row.tax_rule_set_id ?? "",
+    taxRuleSetVersion: row.tax_rule_set_version ?? "",
+    taxLegalAuthorityReference: row.tax_legal_authority_reference ?? "",
     correction: correctionResult ? {
       originalInvoiceId: correctionResult.original_invoice_id,
       originalInvoiceNumber: correctionResult.original_invoice_number,
@@ -234,12 +256,44 @@ export async function getPublicVerification(token: string) {
     }>();
 }
 
+async function resolveApprovedNamibiaTaxRule(db: D1Database, issueDate: string): Promise<AppliedTaxRule> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate)) {
+    throw new InvoiceValidationError([{ code: "ISSUE_DATE_INVALID", path: "/issue_date", message: "Issue date must use YYYY-MM-DD." }]);
+  }
+
+  const result = await db.prepare(`SELECT id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference
+    FROM tax_rule_sets
+    WHERE jurisdiction='NA' AND status='AUTHORITY_APPROVED'
+      AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?)
+    ORDER BY effective_from DESC LIMIT 2`).bind(issueDate, issueDate).all<TaxRuleRow>();
+  if (result.results.length === 0) {
+    throw new InvoiceValidationError([{ code: "APPROVED_TAX_RULE_NOT_AVAILABLE", path: "/issue_date", message: "No authority-approved Namibia VAT rule is effective for the invoice date." }]);
+  }
+  if (result.results.length > 1) {
+    throw new InvoiceValidationError([{ code: "AMBIGUOUS_APPROVED_TAX_RULE", path: "/issue_date", message: "More than one authority-approved Namibia VAT rule is effective for the invoice date." }]);
+  }
+  const row = result.results[0];
+  if (row.jurisdiction !== "NA" || !row.legal_authority_reference?.trim()) {
+    throw new InvoiceValidationError([{ code: "APPROVED_TAX_RULE_INCOMPLETE", path: "/issue_date", message: "The effective Namibia VAT rule lacks an approved legal-authority reference." }]);
+  }
+  return {
+    id: row.id,
+    jurisdiction: "NA",
+    version: row.version,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+    standardRateBps: row.standard_rate_bps,
+    legalAuthorityReference: row.legal_authority_reference,
+  };
+}
+
 export async function submitInvoice(payload: InvoiceSubmission, actor: UserContext, idempotencyKey: string, context: RequestContext): Promise<InvoiceDetail> {
   if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
     throw new InvoiceValidationError([{ code: "IDEMPOTENCY_KEY_INVALID", path: "/headers/idempotency-key", message: "Idempotency key must contain 16 to 128 characters." }]);
   }
-  const calculated = calculateAndValidateInvoice(payload);
   const db = await ensureDatabase();
+  const taxRule = await resolveApprovedNamibiaTaxRule(db, payload.issue_date);
+  const calculated = calculateAndValidateInvoice(payload, taxRule);
   const requestHash = await sha256Hex(stableStringify(payload));
   const prior = await db.prepare("SELECT request_hash, response_invoice_id FROM idempotency_records WHERE actor_id = ? AND idempotency_key = ?")
     .bind(actor.userId, idempotencyKey).first<{ request_hash: string; response_invoice_id: string }>();
@@ -318,15 +372,28 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   const verificationToken = `vfy_${crypto.randomUUID().replaceAll("-", "")}`;
   const risk = scoreInvoice(payload, calculated, Boolean(customer));
   const status = risk.level === "HIGH" || risk.level === "CRITICAL" ? "EXCEPTION" : customer ? "MATCHED" : "CERTIFIED";
-  const signature = `DEV.${await sha256Hex(`${requestHash}:${certificateId}:${now}`)}`;
+  const certificationHash = await sha256Hex(stableStringify({
+    invoicePayloadHash: requestHash,
+    taxRule: {
+      id: taxRule.id,
+      version: taxRule.version,
+      standardRateBps: taxRule.standardRateBps,
+      legalAuthorityReference: taxRule.legalAuthorityReference,
+    },
+  }));
+  const certificateSignature = await signCertificationHash(certificationHash);
   const period = payload.issue_date.slice(0, 7);
   const statements: D1PreparedStatement[] = [];
 
-  statements.push(db.prepare(`INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+  statements.push(db.prepare(`INSERT INTO invoices
+    (id,invoice_number,document_type,source_system,source_document_id,supplier_taxpayer_id,supplier_name,supplier_vat_number,
+     customer_taxpayer_id,customer_name,customer_vat_number,issue_date,currency,line_net_cents,tax_cents,total_cents,status,risk_level,
+     payload_hash,transaction_id,certificate_id,verification_token,tax_rule_set_id,created_at,certified_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
     invoiceId, payload.invoice_number.trim(), payload.document_type, payload.source.system_id.trim(), payload.source.document_id.trim(),
     supplier.id, payload.supplier.name.trim(), supplierVat, customer?.id ?? null, payload.customer.name.trim(), customerVat,
     payload.issue_date, payload.currency, calculated.lineNetCents, calculated.taxCents, calculated.totalCents, status, risk.level,
-    requestHash, transactionId, certificateId, verificationToken, now, now,
+    requestHash, transactionId, certificateId, verificationToken, taxRule.id, now, now,
   ));
 
   if (originalInvoice) {
@@ -342,8 +409,10 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
       line.unitPriceCents, line.netAmountCents, line.taxRateBps, line.tax.category, line.taxAmountCents,
     ));
   }
-  statements.push(db.prepare("INSERT INTO certificates VALUES (?,?,?,?,?,?,?,?)").bind(
-    certificateId, invoiceId, verificationToken, requestHash, signature, "DEV-SHA256", "VALID", now,
+  statements.push(db.prepare(`INSERT INTO certificates
+    (id,invoice_id,verification_token,invoice_hash,signature,signature_profile,rule_set_version,status,issued_at)
+    VALUES (?,?,?,?,?,?,?,?,?)`).bind(
+    certificateId, invoiceId, verificationToken, certificationHash, certificateSignature.signature, certificateSignature.profile, taxRule.version, "VALID", now,
   ));
   const reversesVat = payload.document_type === "CREDIT_NOTE";
   const ledgerVatCents = Math.abs(calculated.taxCents);
@@ -381,6 +450,9 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
     invoiceNumber: payload.invoice_number,
     transactionId,
     certificateId,
+    taxRuleSetId: taxRule.id,
+    taxRuleSetVersion: taxRule.version,
+    certificationHash,
     riskLevel: risk.level,
     exceptionId,
     correlationId: context.correlationId,
@@ -397,7 +469,7 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   ));
   statements.push(db.prepare("INSERT INTO outbox_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(
     crypto.randomUUID(), "INVOICE", invoiceId, originalInvoice ? "InvoiceCorrected" : "InvoiceCertified", 1, supplier.id,
-    JSON.stringify({ invoice_id: invoiceId, transaction_id: transactionId, certificate_id: certificateId, ...(originalInvoice ? { original_invoice_id: originalInvoice.id, correction_type: payload.document_type } : {}), correlation_id: context.correlationId }),
+    JSON.stringify({ invoice_id: invoiceId, transaction_id: transactionId, certificate_id: certificateId, tax_rule_set_id: taxRule.id, tax_rule_set_version: taxRule.version, certification_hash: certificationHash, ...(originalInvoice ? { original_invoice_id: originalInvoice.id, correction_type: payload.document_type } : {}), correlation_id: context.correlationId }),
     "PENDING", 0, now, now, null, null,
   ));
   if (risk.level === "HIGH" || risk.level === "CRITICAL") {

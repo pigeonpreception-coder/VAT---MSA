@@ -4,6 +4,19 @@ origin:
   direct_public_access: deny
   accepted_sources: protected_edge_egress_only
   tls: modern_policy_with_automated_certificate_rotation
+identity_boundary:
+  production_trust_mode: SITES_DISPATCH
+  strip_untrusted_headers:
+    - oai-authenticated-user-id
+    - oai-authenticated-user-email
+    - oai-authenticated-user-full-name
+    - oai-authenticated-user-full-name-encoding
+    - x-vat-msa-step-up-evidence
+    - x-vat-msa-auth-assurance
+    - x-vat-msa-reauthenticated-at
+    - x-vat-msa-local-step-up
+  identity_headers_injected_by: authenticated_dispatch_only
+  step_up_evidence_injected_by: approved_identity_broker_only
 controls:
   - id: uri-bounds
     action: reject

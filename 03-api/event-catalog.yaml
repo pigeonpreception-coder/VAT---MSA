@@ -37,6 +37,8 @@ events:
     partition_key: taxpayer_id
     contains_tax_confidential_data: true
     purpose: Links an independently certified credit or debit note to its original invoice with reason and signed VAT effect while retaining both histories.
+    minimum_payload: [invoice_id, original_invoice_id, correction_type, certificate_id, tax_rule_set_id, tax_rule_set_version, certification_hash, correlation_id]
+    controls: [atomic_outbox, approved_effective_rule_required, append_only_correction_link, no_full_document]
   - type: na.vatmsa.document.quarantined.v1
     owner: Evidence Custody Domain
     partition_key: taxpayer_id
@@ -171,7 +173,9 @@ events:
     owner: Certification Domain
     partition_key: taxpayer_id
     contains_tax_confidential_data: true
-    purpose: Announces signed certification after invoice and VAT transaction commit.
+    purpose: Announces signed certification after the invoice, authority-approved effective tax rule, certification hash and VAT transaction commit atomically.
+    minimum_payload: [invoice_id, transaction_id, certificate_id, tax_rule_set_id, tax_rule_set_version, certification_hash, correlation_id]
+    controls: [atomic_outbox, approved_effective_rule_required, certificate_rule_version_match, no_full_document]
   - type: na.vatmsa.vat.posted.v1
     owner: VAT Ledger Domain
     partition_key: taxpayer_id

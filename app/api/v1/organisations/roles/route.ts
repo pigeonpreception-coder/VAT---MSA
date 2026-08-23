@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     await requireLicensedPermission(actor, "roles:manage", { requestedOrganisationId: organisationIdFrom(request) });
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const role = await createOrganisationRole(actor, await readBoundedJson(request, 32_768), organisationIdFrom(request));
     return controlPlaneJson({ role }, context, 201);
   } catch (error) {

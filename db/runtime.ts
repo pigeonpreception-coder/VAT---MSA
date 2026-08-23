@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
 
+export const REQUIRED_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
+
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS taxpayers (
     id TEXT PRIMARY KEY, vat_number TEXT NOT NULL UNIQUE, tin TEXT NOT NULL,
@@ -20,6 +22,7 @@ const SCHEMA_STATEMENTS = [
     supplier_taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), supplier_name TEXT NOT NULL,
     supplier_vat_number TEXT NOT NULL, customer_taxpayer_id TEXT REFERENCES taxpayers(id),
     customer_name TEXT NOT NULL, customer_vat_number TEXT, issue_date TEXT NOT NULL,
+    tax_rule_set_id TEXT REFERENCES tax_rule_sets(id),
     currency TEXT NOT NULL, line_net_cents INTEGER NOT NULL, tax_cents INTEGER NOT NULL,
     total_cents INTEGER NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL,
     payload_hash TEXT NOT NULL, transaction_id TEXT NOT NULL, certificate_id TEXT NOT NULL UNIQUE,
@@ -550,7 +553,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL UNIQUE REFERENCES invoices(id),
     verification_token TEXT NOT NULL UNIQUE, invoice_hash TEXT NOT NULL,
-    signature TEXT NOT NULL, signature_profile TEXT NOT NULL, status TEXT NOT NULL, issued_at TEXT NOT NULL
+    signature TEXT NOT NULL, signature_profile TEXT NOT NULL, rule_set_version TEXT,
+    status TEXT NOT NULL, issued_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS invoice_corrections (
     id TEXT PRIMARY KEY, original_invoice_id TEXT NOT NULL REFERENCES invoices(id),
@@ -935,6 +939,13 @@ const SCHEMA_STATEMENTS = [
     UNIQUE (user_id, organisation_id, preference_type)
   )`,
   `CREATE TABLE IF NOT EXISTS seed_state (key TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS app_schema_revisions (
+    revision TEXT PRIMARY KEY, applied_at TEXT NOT NULL, source TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS step_up_evidence_uses (
+    evidence_digest TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES app_users(id),
+    issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT NOT NULL
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_status_issue_date ON invoices(status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_taxpayer_identifiers_taxpayer ON taxpayer_identifiers(taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_invoices_supplier_issue_date ON invoices(supplier_taxpayer_id, issue_date)`,
@@ -948,6 +959,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_security_events_severity_time ON security_events(severity, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_security_events_actor_time ON security_events(actor_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_security_incidents_status_severity ON security_incidents(status, severity)`,
+  `CREATE INDEX IF NOT EXISTS idx_step_up_evidence_expiry ON step_up_evidence_uses(expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_status_available ON outbox_events(status, available_at)`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id)`,
   `CREATE INDEX IF NOT EXISTS idx_identity_links_user_status ON identity_links(user_id, status)`,
@@ -2089,8 +2101,138 @@ const EXPENSE_RECEIPT_TRIGGER_STATEMENTS = [
     )
     BEGIN
       SELECT RAISE(ABORT,'EXPENSE_CLEAN_RECEIPT_REQUIRED');
-    END`,
+  END`,
 ];
+
+const LOCAL_COMPATIBILITY_COLUMNS = [
+  ["license_plans", "plan_domain", "ALTER TABLE license_plans ADD COLUMN plan_domain TEXT NOT NULL DEFAULT 'COMMERCIAL_SAAS' CHECK (plan_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX'))"],
+  ["license_features", "authority_domain", "ALTER TABLE license_features ADD COLUMN authority_domain TEXT NOT NULL DEFAULT 'COMMERCIAL_SAAS' CHECK (authority_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX','PLATFORM_CONTROL'))"],
+  ["license_plan_entitlements", "capacity_mode", "ALTER TABLE license_plan_entitlements ADD COLUMN capacity_mode TEXT NOT NULL DEFAULT 'NOT_APPLICABLE' CHECK (capacity_mode IN ('FINITE','UNLIMITED','NOT_APPLICABLE'))"],
+  ["subscriptions", "subscription_domain", "ALTER TABLE subscriptions ADD COLUMN subscription_domain TEXT NOT NULL DEFAULT 'COMMERCIAL_SAAS' CHECK (subscription_domain='COMMERCIAL_SAAS')"],
+  ["subscriptions", "payment_mode", "ALTER TABLE subscriptions ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'DISABLED' CHECK (payment_mode IN ('DISABLED','SANDBOX','APPROVED_PROVIDER'))"],
+  ["self_serve_signup_applications", "onboarding_path", "ALTER TABLE self_serve_signup_applications ADD COLUMN onboarding_path TEXT NOT NULL DEFAULT 'COMPANY_ADMIN' CHECK (onboarding_path='COMPANY_ADMIN')"],
+  ["invoices", "tax_rule_set_id", "ALTER TABLE invoices ADD COLUMN tax_rule_set_id TEXT REFERENCES tax_rule_sets(id)"],
+  ["certificates", "rule_set_version", "ALTER TABLE certificates ADD COLUMN rule_set_version TEXT"],
+] as const;
+
+const PHASE0_REFERENCE_SEED_STATEMENTS = [
+  ...LICENSE_PERMISSION_POLICIES.map(([permission]) =>
+    `INSERT OR IGNORE INTO access_permissions (code,resource,action,description,classification,created_at)
+      VALUES ('${permission}','PHASE0_REFERENCE','USE','Phase 0 reconciled permission reference','RESTRICTED','2026-08-23T18:00:00Z')`),
+  `UPDATE license_features SET authority_domain='GOVERNMENT_TAX' WHERE feature_key='CORE_VAT'`,
+  `UPDATE license_plan_entitlements SET capacity_mode='FINITE' WHERE limit_value IS NOT NULL`,
+  `DELETE FROM license_plan_entitlements WHERE feature_key='CORE_VAT'
+    AND license_plan_id IN (SELECT id FROM license_plans WHERE plan_domain='COMMERCIAL_SAAS')`,
+  `INSERT OR IGNORE INTO license_features
+    (feature_key,name,description,metric_key,protected,created_at,authority_domain)
+    VALUES ('BUSINESS_OPERATIONS','Business operations','Expenses quotations parties imports and business documents',NULL,1,'2026-08-23T12:00:00Z','COMMERCIAL_SAAS')`,
+  `INSERT OR IGNORE INTO license_features
+    (feature_key,name,description,metric_key,protected,created_at,authority_domain)
+    VALUES ('PLATFORM_SECURITY','Platform control','Global platform security and operational control',NULL,1,'2026-08-23T12:00:00Z','PLATFORM_CONTROL')`,
+  `INSERT OR IGNORE INTO license_plans
+    (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain)
+    VALUES ('plan-tax-na-synthetic-v1','NA_GOVERNMENT_TAX','Namibia Government Tax Services',1,'ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-23T12:00:00Z','GOVERNMENT_TAX')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements
+    (id,license_plan_id,feature_key,enabled,limit_value,configuration,capacity_mode)
+    VALUES ('ent-tax-core','plan-tax-na-synthetic-v1','CORE_VAT',1,NULL,'{}','NOT_APPLICABLE')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements
+    (id,license_plan_id,feature_key,enabled,limit_value,configuration,capacity_mode)
+    SELECT 'ent-business',id,'BUSINESS_OPERATIONS',1,NULL,'{}','NOT_APPLICABLE'
+    FROM license_plans WHERE code='PILOT_PROFESSIONAL' AND plan_domain='COMMERCIAL_SAAS'`,
+  `INSERT OR IGNORE INTO countries (code,iso3_code,name,currency_code,status,created_at)
+    VALUES ('NA','NAM','Namibia','NAD','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_jurisdictions (id,country_code,code,name,status,created_at)
+    VALUES ('tax-jurisdiction-na-national','NA','NA-NATIONAL','Namibia national tax jurisdiction','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_authorities (id,jurisdiction_id,code,name,status,created_at)
+    VALUES ('tax-authority-na-namra','tax-jurisdiction-na-national','NAMRA','Namibia Revenue Agency','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_authority_administrators
+    (id,tax_authority_id,user_id,status,effective_from,effective_to,appointed_by,approval_reference)
+    VALUES ('tax-admin-na-local','tax-authority-na-namra','usr-local-admin','ACTIVE','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','LOCAL-STAGING-ADR-030')`,
+  `INSERT OR IGNORE INTO tax_authority_users
+    (id,tax_authority_id,user_id,authority_role,status,effective_from,effective_to)
+    VALUES ('tax-user-na-local','tax-authority-na-namra','usr-local-admin','SYNTHETIC_PILOT_OPERATOR','ACTIVE','2026-08-23T12:00:00Z',NULL)`,
+  `INSERT OR IGNORE INTO tax_subscriptions
+    (id,tax_authority_id,license_plan_id,status,environment,effective_from,effective_to,activation_authority,created_at)
+    VALUES ('tax-sub-na-synthetic','tax-authority-na-namra','plan-tax-na-synthetic-v1','ACTIVE','LOCAL_STAGING','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_subscription_features
+    (id,tax_subscription_id,feature_key,status,created_at)
+    VALUES ('tax-sub-feature-na-core','tax-sub-na-synthetic','CORE_VAT','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO taxpayer_authorizations
+    (id,tax_subscription_id,tax_authority_id,jurisdiction_id,organisation_id,taxpayer_id,status,vat_registration_status,effective_from,effective_to,authorization_reference,authorized_by,created_at)
+    VALUES ('tax-authz-org1','tax-sub-na-synthetic','tax-authority-na-namra','tax-jurisdiction-na-national','org-0001','tp-0001','ACTIVE','ACTIVE','2026-08-23T12:00:00Z',NULL,'SYNTHETIC-NA-TP-0001','usr-local-admin','2026-08-23T12:00:00Z')`,
+];
+
+const PHASE0_RUNTIME_TRIGGER_STATEMENTS = [
+  "DROP TRIGGER IF EXISTS require_invoice_tax_rule_set",
+  "DROP TRIGGER IF EXISTS require_invoice_tax_rule_set_update",
+  "DROP TRIGGER IF EXISTS enforce_invoice_line_tax_rule",
+  "DROP TRIGGER IF EXISTS enforce_invoice_line_tax_rule_update",
+  "DROP TRIGGER IF EXISTS require_certificate_rule_version",
+  `CREATE TRIGGER require_invoice_tax_rule_set BEFORE INSERT ON invoices
+    WHEN NEW.currency<>'NAD' OR NEW.tax_rule_set_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM tax_rule_sets r WHERE r.id=NEW.tax_rule_set_id AND r.jurisdiction='NA'
+        AND r.status='AUTHORITY_APPROVED' AND trim(COALESCE(r.legal_authority_reference,''))<>''
+        AND r.effective_from<=NEW.issue_date AND (r.effective_to IS NULL OR r.effective_to>=NEW.issue_date)
+    ) BEGIN SELECT RAISE(ABORT,'APPROVED_TAX_RULE_SET_REQUIRED'); END`,
+  `CREATE TRIGGER require_invoice_tax_rule_set_update BEFORE UPDATE OF tax_rule_set_id,issue_date,currency ON invoices
+    WHEN NEW.currency<>'NAD' OR NEW.tax_rule_set_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM tax_rule_sets r WHERE r.id=NEW.tax_rule_set_id AND r.jurisdiction='NA'
+        AND r.status='AUTHORITY_APPROVED' AND trim(COALESCE(r.legal_authority_reference,''))<>''
+        AND r.effective_from<=NEW.issue_date AND (r.effective_to IS NULL OR r.effective_to>=NEW.issue_date)
+    ) BEGIN SELECT RAISE(ABORT,'APPROVED_TAX_RULE_SET_REQUIRED'); END`,
+  `CREATE TRIGGER enforce_invoice_line_tax_rule BEFORE INSERT ON invoice_lines
+    WHEN NOT EXISTS (
+      SELECT 1 FROM invoices i JOIN tax_rule_sets r ON r.id=i.tax_rule_set_id WHERE i.id=NEW.invoice_id AND (
+        (NEW.tax_category='STANDARD' AND NEW.tax_rate_bps=r.standard_rate_bps)
+        OR (NEW.tax_category IN ('ZERO_RATED','EXEMPT','OUTSIDE_SCOPE') AND NEW.tax_rate_bps=0)
+      )
+    ) BEGIN SELECT RAISE(ABORT,'INVOICE_LINE_TAX_RULE_MISMATCH'); END`,
+  `CREATE TRIGGER enforce_invoice_line_tax_rule_update BEFORE UPDATE OF tax_rate_bps,tax_category,invoice_id ON invoice_lines
+    WHEN NOT EXISTS (
+      SELECT 1 FROM invoices i JOIN tax_rule_sets r ON r.id=i.tax_rule_set_id WHERE i.id=NEW.invoice_id AND (
+        (NEW.tax_category='STANDARD' AND NEW.tax_rate_bps=r.standard_rate_bps)
+        OR (NEW.tax_category IN ('ZERO_RATED','EXEMPT','OUTSIDE_SCOPE') AND NEW.tax_rate_bps=0)
+      )
+    ) BEGIN SELECT RAISE(ABORT,'INVOICE_LINE_TAX_RULE_MISMATCH'); END`,
+  `CREATE TRIGGER require_certificate_rule_version BEFORE INSERT ON certificates
+    WHEN NEW.rule_set_version IS NULL OR trim(NEW.rule_set_version)='' OR trim(NEW.invoice_hash)='' OR NOT EXISTS (
+      SELECT 1 FROM invoices i JOIN tax_rule_sets r ON r.id=i.tax_rule_set_id
+      WHERE i.id=NEW.invoice_id AND r.version=NEW.rule_set_version
+    ) BEGIN SELECT RAISE(ABORT,'CERTIFICATE_RULE_BINDING_REQUIRED'); END`,
+];
+
+async function tableHasColumn(db: D1Database, table: string, column: string): Promise<boolean> {
+  const result = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+  return result.results.some((item) => item.name === column);
+}
+
+async function applyLocalCompatibilityColumns(db: D1Database): Promise<void> {
+  for (const [table, column, sql] of LOCAL_COMPATIBILITY_COLUMNS) {
+    if (!await tableHasColumn(db, table, column)) await db.prepare(sql).run();
+  }
+}
+
+async function applyPhase0LocalUpgrade(db: D1Database): Promise<void> {
+  await db.batch(PHASE0_REFERENCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.prepare(`UPDATE invoices SET tax_rule_set_id='taxrule-na-pilot-2026-1'
+    WHERE tax_rule_set_id IS NULL AND EXISTS (SELECT 1 FROM tax_rule_sets WHERE id='taxrule-na-pilot-2026-1')`).run();
+  await db.prepare(`UPDATE certificates SET rule_set_version='NA-VAT-PILOT-2026.1'
+    WHERE rule_set_version IS NULL AND EXISTS (SELECT 1 FROM invoices i WHERE i.id=certificates.invoice_id AND i.tax_rule_set_id='taxrule-na-pilot-2026-1')`).run();
+  await db.batch(PHASE0_RUNTIME_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
+    VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(REQUIRED_SCHEMA_REVISION).run();
+}
+
+async function assertProductionSchema(db: D1Database): Promise<void> {
+  try {
+    const revision = await db.prepare("SELECT revision FROM app_schema_revisions WHERE revision=?")
+      .bind(REQUIRED_SCHEMA_REVISION).first<{ revision: string }>();
+    if (!revision) throw new Error("required revision is not registered");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown schema error";
+    throw new Error(`VAT-MSA production schema is not migrated to ${REQUIRED_SCHEMA_REVISION}: ${detail}`);
+  }
+}
 
 let initialization: Promise<void> | null = null;
 
@@ -2110,8 +2252,13 @@ export async function ensureDatabase(): Promise<D1Database> {
 }
 
 async function initialize(db: D1Database): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    await assertProductionSchema(db);
+    return;
+  }
   await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
-  if (process.env.NODE_ENV !== "production") {
+  await applyLocalCompatibilityColumns(db);
+  {
     const existing = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("pilot-v1").first();
     if (!existing) await db.batch(SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const securitySeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("security-v1").first();
@@ -2136,9 +2283,12 @@ async function initialize(db: D1Database): Promise<void> {
     if (!expenseGovernanceSeed) await db.batch(EXPENSE_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const expenseReceiptGovernanceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("expense-receipt-governance-v1").first();
     if (!expenseReceiptGovernanceSeed) await db.batch(EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    await applyPhase0LocalUpgrade(db);
     const licenseEnforcementSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("license-central-enforcement-v1").first();
     if (!licenseEnforcementSeed) await db.batch(LICENSE_ENFORCEMENT_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.batch(EXPENSE_RECEIPT_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  const foreignKeyViolations = await db.prepare("PRAGMA foreign_key_check").all<Record<string, unknown>>();
+  if (foreignKeyViolations.results.length > 0) throw new Error("VAT-MSA local compatibility upgrade left foreign-key violations.");
   await db.prepare("PRAGMA optimize").run();
 }

@@ -65,7 +65,7 @@ describe("self-serve signup database boundary", () => {
   it("enforces immutable pending intake without creating activation records", () => {
     const db = new DatabaseSync(":memory:");
     const migrations = readdirSync(join(process.cwd(), "drizzle")).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
-    expect(migrations.at(-1)).toBe("0014_dual_subscription_authority.sql");
+    expect(migrations.at(-1)).toBe("0015_phase0_stabilization.sql");
     for (const migration of migrations) applyMigration(db, migration);
     db.exec("PRAGMA foreign_keys=ON");
     db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain) VALUES

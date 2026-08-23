@@ -33,7 +33,7 @@ async function buildUserContext(db: D1Database, row: UserRow, isDevelopmentIdent
   const organisationId = membership?.organisation_id ?? null;
   const capabilities = organisationId
     ? (await db
-        .prepare("SELECT capability_code AS code FROM user_capability_assignments WHERE user_id=? AND organisation_id=? AND status='ACTIVE'")
+        .prepare("SELECT capability AS code FROM user_capability_assignments WHERE user_id=? AND organisation_id=? AND status='ACTIVE'")
         .bind(row.id, organisationId)
         .all<CodeRow>()).results.map((item) => item.code)
     : [];
