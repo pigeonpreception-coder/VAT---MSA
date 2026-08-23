@@ -2,6 +2,7 @@ import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import type { InvoiceSubmission } from "@/lib/domain/types";
 import { listInvoices, RepositoryConflictError, submitInvoice } from "@/lib/data/repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import {
   emitStructuredSecurityLog,
   enforceInvoiceRateLimits,
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "invoices:read");
+    await requireLicensedPermission(user, "invoices:read", { operationClass: "READ" });
     return Response.json({ invoices: await listInvoices(user) }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
@@ -38,12 +39,15 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     actorId = user.userId;
     requirePermission(user, "invoices:submit");
-    await enforceInvoiceRateLimits(user, context);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<InvoiceSubmission>(request);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       throw new RequestGuardError(400, "INVALID_DOCUMENT", "The request body must contain an invoice object.");
     }
+    await requireLicensedPermission(user, "invoices:submit", {
+      operationClass: ["CREDIT_NOTE", "DEBIT_NOTE"].includes(String(payload.document_type ?? "").toUpperCase()) ? "CORRECTION_WRITE" : "BUSINESS_WRITE",
+    });
+    await enforceInvoiceRateLimits(user, context);
     const invoice = await submitInvoice(payload, user, idempotencyKey, context);
     const verificationUrl = new URL(`/verify/${invoice.verificationToken}`, request.url).toString();
     emitStructuredSecurityLog({ level: "INFO", event: "INVOICE_SUBMISSION", correlationId: context.correlationId, actorId, outcome: "CERTIFIED", durationMs: Date.now() - startedAt });

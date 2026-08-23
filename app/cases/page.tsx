@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getComplianceSnapshot } from "@/lib/data/compliance-repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CasesPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "cases:manage");
+  await requireLicensedPermission(user, "cases:manage", { operationClass: "READ" });
   const data = await getComplianceSnapshot(user);
   return <AppShell active="cases" permission="cases:manage">
     <PageHeader eyebrow="Compliance operations" title="Evidence-led audit cases and advisory risk" description="Rules may prioritise human review, but cannot create an adverse tax decision. Officers must preserve evidence, explain findings and record a reviewable decision." />

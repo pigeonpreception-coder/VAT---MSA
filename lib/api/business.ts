@@ -1,4 +1,4 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import {
   acceptQuotation,
   BusinessResourceError,
@@ -19,6 +19,7 @@ import {
   updateQuotation,
 } from "@/lib/data/business-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { BusinessValidationError } from "@/lib/domain/business";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -55,8 +56,9 @@ export async function handleBusinessGet(request: Request, permission: string, se
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, permission);
-    const snapshot = await getBusinessPlatformSnapshot(user, requestedOrganisation(request));
+    const organisationId = requestedOrganisation(request);
+    await requireLicensedPermission(user, permission, { operationClass: "READ", requestedOrganisationId: organisationId });
+    const snapshot = await getBusinessPlatformSnapshot(user, organisationId);
     return Response.json({ organisation: snapshot.organisation, [section]: snapshot[section] }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
@@ -72,10 +74,10 @@ export async function handleBusinessPost(request: Request, permission: string, c
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, permission);
+    const organisationId = requestedOrganisation(request);
+    await requireLicensedPermission(user, permission, { requestedOrganisationId: organisationId });
     await businessLimits(user.userId, user.taxpayerId ?? `role:${user.role}`, command);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
-    const organisationId = requestedOrganisation(request);
     let resource: Record<string, unknown> | null;
     if (command === "ACCEPT_QUOTATION" || command === "EXPIRE_QUOTATION") {
       if (!resourceId) throw new BusinessResourceError("Quotation id is required.", 400);
@@ -104,7 +106,7 @@ export async function handleBusinessPost(request: Request, permission: string, c
       }
       else if (command === "CONVERT_QUOTATION") {
         if (!resourceId) throw new BusinessResourceError("Quotation id is required.", 400);
-        requirePermission(user, "invoices:submit");
+        await requireLicensedPermission(user, "invoices:submit", { requestedOrganisationId: organisationId });
         resource = await convertQuotationToInvoice(resourceId, payload, user, idempotencyKey, context, organisationId) as unknown as Record<string, unknown>;
       }
       else if (command === "POST_JOURNAL") resource = await postJournal(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;

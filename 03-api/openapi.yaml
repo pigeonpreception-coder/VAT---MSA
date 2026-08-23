@@ -1,11 +1,23 @@
 openapi: 3.1.0
 info:
   title: VAT-MSA Fiscal Transaction API
-  version: 0.7.0
-  summary: Controlled identity, business operations, quotation conversion, VAT lifecycle, evidence and platform-edge contract.
+  version: 0.8.0
+  summary: Centrally licensed identity, business, VAT, evidence, search and platform-edge contract.
   description: |
     Architecture-baseline contract only. Legal invoice particulars, authentication profiles,
     error codes, signature formats, retention and service levels require NamRA approval.
+    Every authenticated operation is denied by default unless its server-side permission policy
+    maps to an enabled licence feature and an allowed operation class. Suspended, expired and
+    cancelled licences preserve records and permit only authorised READ, EXPORT,
+    COMPLIANCE_WRITE and CORRECTION_WRITE continuity operations.
+x-vat-msa-license-enforcement:
+  policy_authority: license_permission_policies
+  evaluation_order: [identity, tenant, permission, feature, license_state, usage_limit, security_policy, workflow, segregation_of_duties]
+  restricted_states: [SUSPENDED, EXPIRED, CANCELLED]
+  continuity_operations: [READ, EXPORT, COMPLIANCE_WRITE, CORRECTION_WRITE]
+  denied_operations_after_restriction: [BUSINESS_WRITE, ADMIN_WRITE]
+  public_exemptions: [/health/live, /health/ready, '/v1/verify/{token}']
+  failure_mode: deny
 servers:
   - url: https://sandbox.api.vat-msa.na
     description: Conformance sandbox
@@ -37,6 +49,77 @@ tags:
   - name: Offline
   - name: Verification
 paths:
+  /v1/licensing/license:
+    get:
+      tags: [Organisations]
+      operationId: getEffectiveOrganisationLicense
+      summary: Read the authoritative licence, enabled features, limits and current usage for the resolved organisation.
+      security:
+        - oauth2: [licensing.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: organisation_id
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        '200':
+          description: Current non-priced placeholder plan, licence state and entitlements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [organisation, license, entitlements]
+                properties:
+                  organisation: { type: object, additionalProperties: true }
+                  license:
+                    type: object
+                    required: [state, retention_policy]
+                    properties:
+                      state: { $ref: '#/components/schemas/LicenseState' }
+                      retention_policy: { type: string }
+                      price: { type: 'null' }
+                    additionalProperties: true
+                  entitlements: { type: array, items: { type: object, additionalProperties: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/navigation/workspace:
+    get:
+      tags: [Organisations]
+      operationId: getEffectiveLicensedWorkspace
+      summary: Return only navigation destinations permitted by role, feature entitlement and current licence continuity state.
+      security:
+        - oauth2: [workspace.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Effective server-generated workspace projection including safe licence-state context.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/search:
+    get:
+      tags: [Organisations]
+      operationId: searchLicensedWorkspace
+      summary: Search only licensed, tenant-scoped, permission-visible records; historical search remains available in continuity mode.
+      security:
+        - oauth2: [search.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 80 }
+      responses:
+        '200':
+          description: Bounded authorised search results.
+          content:
+            application/json:
+              schema: { type: object, required: [query, results], properties: { query: { type: string }, results: { type: array, items: { type: object, additionalProperties: true } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/organisations:
     get:
       tags: [Organisations]
@@ -1239,6 +1322,10 @@ components:
         invoice_number_masked: { type: string, maxLength: 100 }
         total_amount: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
+    LicenseState:
+      type: string
+      enum: [TRIAL, ACTIVE, GRACE_PERIOD, PENDING_RENEWAL, SUSPENDED, EXPIRED, CANCELLED]
+      description: Server-authoritative organisation licence state; clients cannot select or change it.
     Problem:
       type: object
       description: RFC 9457-compatible problem detail.
@@ -1249,6 +1336,9 @@ components:
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string }
+        code:
+          type: string
+          description: Stable denial or validation code, including FEATURE_NOT_ENTITLED, LICENSE_SUSPENDED, LICENSE_EXPIRED, LICENSE_CANCELLED, GRACE_PERIOD_NO_EXPANSION or LICENSE_POLICY_MISSING.
         instance: { type: string, format: uri-reference }
         correlation_id: { type: string, format: uuid }
         errors:
@@ -1262,7 +1352,7 @@ components:
       description: Authentication failed.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
     Forbidden:
-      description: Authenticated identity lacks the required permission or taxpayer scope.
+      description: Authenticated identity lacks permission/scope, the feature is not entitled, or licence state forbids the operation class. Restricted licence states never delete historical records.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
     NotFound:
       description: Resource not found or not visible to the caller.

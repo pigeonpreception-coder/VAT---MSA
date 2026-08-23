@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getBusinessPlatformSnapshot } from "@/lib/data/business-repository";
 
 export const metadata: Metadata = { title: "Accounting" };
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AccountingPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "accounting:read");
+  await requireLicensedPermission(user, "accounting:read", { operationClass: "READ" });
   const snapshot = await getBusinessPlatformSnapshot(user);
   return <AppShell active="accounting" permission="accounting:read">
     <PageHeader eyebrow="Accounting domain" title="Controlled general ledger" description="Every journal is tenant-scoped, uses integer cents and must balance before it can be posted. Source references preserve traceability to operational and fiscal evidence." />

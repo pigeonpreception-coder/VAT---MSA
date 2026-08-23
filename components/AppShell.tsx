@@ -1,11 +1,12 @@
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { getEffectiveNavigation } from "@/lib/data/control-plane-repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { initials } from "@/lib/format";
 import { WorkspaceNavigation } from "@/components/WorkspaceNavigation";
 
 export async function AppShell({ active, permission, children }: { active: string; permission: string; children: React.ReactNode }) {
   const user = await getCurrentUser();
-  requirePermission(user, permission);
+  await requireLicensedPermission(user, permission, { operationClass: "READ" });
   const navigation = await getEffectiveNavigation(user);
   const activeItem = navigation.workspaces.flatMap((workspace) => workspace.folders.flatMap((folder) => folder.items.map((item) => ({ workspace, folder, item })))).find(({ item }) => item.key === active);
 
@@ -29,7 +30,13 @@ export async function AppShell({ active, permission, children }: { active: strin
             <div className="avatar" aria-hidden="true">{initials(user.displayName)}</div>
           </div>
         </header>
-        <div className="content">{children}</div>
+        <div className="content">
+          {["SUSPENDED", "EXPIRED", "CANCELLED"].includes(navigation.license.state) ? <div className="notice notice-warning" role="status">
+            <strong>Licence continuity mode</strong>
+            Historical reads, authorised exports, statutory compliance and controlled corrections remain available. New business and privileged administration actions are disabled; records are preserved.
+          </div> : null}
+          {children}
+        </div>
       </main>
     </div>
   );

@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getVatLifecycleSnapshot } from "@/lib/data/vat-lifecycle-repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { ReturnActions } from "./ReturnActions";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReturnsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "returns:read");
+  await requireLicensedPermission(user, "returns:read", { operationClass: "READ" });
   const snapshot = await getVatLifecycleSnapshot(user);
   const output = snapshot.periods.reduce((sum, item) => sum + Number(item.output_tax_cents ?? 0), 0);
   const input = snapshot.periods.reduce((sum, item) => sum + Number(item.input_tax_cents ?? 0), 0);

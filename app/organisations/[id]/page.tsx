@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getOrganisation } from "@/lib/data/identity-repository";
 
 export const metadata: Metadata = { title: "Organisation identity" };
@@ -10,8 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function OrganisationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
-  requirePermission(user, "identity:read");
   const { id } = await params;
+  await requireLicensedPermission(user, "identity:read", { operationClass: "READ", requestedOrganisationId: id });
   const organisation = await getOrganisation(user, id);
   if (!organisation) notFound();
 

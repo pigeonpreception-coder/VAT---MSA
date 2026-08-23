@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getBusinessPlatformSnapshot } from "@/lib/data/business-repository";
 import { PartyManager, type PartyRow } from "./PartyManager";
 
@@ -14,7 +15,7 @@ function optionalString(value: unknown) {
 
 export default async function BusinessPartiesPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "parties:manage");
+  await requireLicensedPermission(user, "parties:manage", { operationClass: "READ" });
   const snapshot = await getBusinessPlatformSnapshot(user);
   const parties: PartyRow[] = snapshot.parties.map((item) => ({
     id: String(item.id),

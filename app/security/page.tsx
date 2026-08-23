@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getSecurityOperationsSnapshot } from "@/lib/data/repository";
 import { formatDateTime } from "@/lib/format";
 
@@ -20,7 +21,7 @@ function details(value: unknown): string {
 
 export default async function SecurityOperationsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "security:read");
+  await requireLicensedPermission(user, "security:read", { operationClass: "READ" });
   const snapshot = await getSecurityOperationsSnapshot();
   const openIncidents = snapshot.incidents.filter((incident) => incident.status !== "CLOSED").length;
   return <AppShell active="security" permission="security:read">

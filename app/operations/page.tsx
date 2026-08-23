@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getBusinessPlatformSnapshot } from "@/lib/data/business-repository";
 import { formatMoney } from "@/lib/format";
 import { ExpenseDecisionActions } from "./ExpenseDecisionActions";
@@ -16,7 +17,7 @@ function quantity(micros: unknown) {
 
 export default async function OperationsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "expenses:read");
+  await requireLicensedPermission(user, "expenses:read", { operationClass: "READ" });
   const snapshot = await getBusinessPlatformSnapshot(user);
   const canDecideExpenses = hasPermission(user, "expenses:approve");
   const canManageExpenses = hasPermission(user, "expenses:manage");

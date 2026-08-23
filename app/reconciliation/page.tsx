@@ -4,14 +4,15 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { listExceptions } from "@/lib/data/repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 
 export const metadata: Metadata = { title: "Reconciliation" };
 export const dynamic = "force-dynamic";
 
 export default async function ReconciliationPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "exceptions:read");
+  await requireLicensedPermission(user, "exceptions:read", { operationClass: "READ" });
   const exceptions = await listExceptions(user);
   const critical = exceptions.filter((item) => item.severity === "CRITICAL").length;
   return <AppShell active="reconciliation" permission="exceptions:read">

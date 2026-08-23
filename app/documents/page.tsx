@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getPlatformSnapshot } from "@/lib/data/platform-repository";
 import { formatDateTime } from "@/lib/format";
 import { DocumentUploadForm } from "./DocumentUploadForm";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DocumentsPage({ searchParams }: { searchParams: Promise<{ owner_domain?: string; owner_resource_id?: string }> }) {
   const user = await getCurrentUser();
-  requirePermission(user, "documents:read");
+  await requireLicensedPermission(user, "documents:read", { operationClass: "READ" });
   const data = await getPlatformSnapshot(user);
   const requestedOwner = await searchParams;
   const defaultOwnerDomain = requestedOwner.owner_domain === "EXPENSE" ? "EXPENSE" : "";

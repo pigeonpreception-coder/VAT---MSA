@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getIdentityFoundationSnapshot } from "@/lib/data/identity-repository";
 
 export const metadata: Metadata = { title: "Identity foundation" };
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OrganisationsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "identity:read");
+  await requireLicensedPermission(user, "identity:read", { operationClass: "READ" });
   const snapshot = await getIdentityFoundationSnapshot(user);
   const activeBranches = Number(snapshot.access.active_branches ?? 0);
   const activeLinks = Number(snapshot.access.active_identity_links ?? 0);

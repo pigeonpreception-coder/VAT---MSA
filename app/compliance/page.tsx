@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getComplianceSnapshot } from "@/lib/data/compliance-repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CompliancePage() {
   const user = await getCurrentUser();
-  requirePermission(user, "compliance:read");
+  await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
   const data = await getComplianceSnapshot(user);
   return <AppShell active="compliance" permission="compliance:read">
     <PageHeader eyebrow="Taxpayer governance" title="Obligations, disputes and secure communications" description="Taxpayer instructions, delegations, notices and dispute rights are recorded as governed evidence. VAT-MSA does not replace the statutory account maintained by ITAS." />

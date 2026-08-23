@@ -2193,6 +2193,35 @@ export const navigationPermissions = sqliteTable("navigation_permissions", {
   safeRestrictionReason: text("safe_restriction_reason").notNull(),
 });
 
+export const licensePermissionPolicies = sqliteTable(
+  "license_permission_policies",
+  {
+    permissionCode: text("permission_code").primaryKey().references(() => accessPermissions.code),
+    featureKey: text("feature_key").notNull().references(() => licenseFeatures.key),
+    operationClass: text("operation_class").notNull(),
+    status: text("status").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check("ck_license_permission_operation", sql`${table.operationClass} IN ('READ','EXPORT','BUSINESS_WRITE','COMPLIANCE_WRITE','CORRECTION_WRITE','ADMIN_WRITE')`),
+    check("ck_license_permission_status", sql`${table.status} IN ('ACTIVE','RETIRED')`),
+  ],
+);
+
+export const licenseNavigationPolicies = sqliteTable(
+  "license_navigation_policies",
+  {
+    navigationItemId: text("navigation_item_id").primaryKey().references(() => navigationItems.id),
+    operationClass: text("operation_class").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check("ck_license_navigation_operation", sql`${table.operationClass} IN ('READ','EXPORT','BUSINESS_WRITE','COMPLIANCE_WRITE','CORRECTION_WRITE','ADMIN_WRITE')`),
+  ],
+);
+
 export const navigationPreferences = sqliteTable(
   "navigation_preferences",
   {

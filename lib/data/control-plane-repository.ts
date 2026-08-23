@@ -114,21 +114,22 @@ export async function assertEntitledOperation(
   return { organisation, license };
 }
 
-export async function getEffectiveNavigation(actor: UserContext, requestedOrganisationId?: string | null): Promise<{ organisation: OrganisationScope; workspaces: NavigationWorkspace[] }> {
+export async function getEffectiveNavigation(actor: UserContext, requestedOrganisationId?: string | null): Promise<{ organisation: OrganisationScope; license: { state: LicenseState; plan_name: string; current_period_end: string }; workspaces: NavigationWorkspace[] }> {
   const db = await ensureDatabase();
-  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
-  const license = await getLicense(db, organisation.id);
+  const { organisation, license } = await assertEntitledOperation(actor, "ADMINISTRATION", "READ", 0, requestedOrganisationId);
   const [entitlements, capabilities, rows] = await Promise.all([
     getEntitlements(db, license),
     db.prepare("SELECT capability FROM organisation_capabilities WHERE organisation_id=? AND status='ACTIVE'").bind(organisation.id).all<{ capability: string }>(),
     db.prepare(`SELECT w.id AS workspace_id,w.workspace_key,w.label AS workspace_label,w.description,w.classification AS workspace_classification,
       f.id AS folder_id,f.folder_key,f.label AS folder_label,
-      i.id AS item_id,i.item_key,i.label AS item_label,i.href,i.feature_key,i.capability,i.required_permission,i.classification AS item_classification
+      i.id AS item_id,i.item_key,i.label AS item_label,i.href,i.feature_key,i.capability,i.required_permission,i.classification AS item_classification,
+      COALESCE(lp.operation_class,'READ') AS operation_class
       FROM navigation_workspaces w JOIN navigation_folders f ON f.workspace_id=w.id AND f.status='ACTIVE'
       JOIN navigation_items i ON i.folder_id=f.id AND i.status='ACTIVE'
+      LEFT JOIN license_navigation_policies lp ON lp.navigation_item_id=i.id
       WHERE w.status='ACTIVE' ORDER BY w.sort_order,f.sort_order,i.sort_order`).all<Record<string, string | null>>(),
   ]);
-  const enabledFeatures = new Set(entitlements.filter((item) => item.enabled === 1).map((item) => item.feature_key));
+  const entitlementByFeature = new Map(entitlements.map((item) => [item.feature_key, item]));
   const capabilitySet = new Set([
     ...capabilities.results.map((item) => item.capability),
     ...actor.organisationId === organisation.id ? actor.capabilities : [],
@@ -137,7 +138,20 @@ export async function getEffectiveNavigation(actor: UserContext, requestedOrgani
   const folderIndex = new Map<string, NavigationFolder>();
   for (const row of rows.results) {
     if (!hasPermission(actor, String(row.required_permission))) continue;
-    if (row.feature_key && !enabledFeatures.has(row.feature_key)) continue;
+    if (row.feature_key) {
+      const entitlement = entitlementByFeature.get(row.feature_key);
+      const evaluation = evaluateEntitlement({
+        licenseState: license.state,
+        featureKey: row.feature_key,
+        featureEnabled: entitlement?.enabled === 1,
+        operationClass: String(row.operation_class) as OperationClass,
+        limit: entitlement?.limit_value ?? null,
+        used: entitlement?.used_value ?? 0,
+        reserved: entitlement?.reserved_value ?? 0,
+        requested: 0,
+      });
+      if (!evaluation.allowed) continue;
+    }
     if (row.capability && !capabilitySet.has(row.capability)) continue;
     const workspaceId = String(row.workspace_id);
     let workspace = byWorkspace.get(workspaceId);
@@ -154,7 +168,7 @@ export async function getEffectiveNavigation(actor: UserContext, requestedOrgani
     }
     folder.items.push({ id: String(row.item_id), key: String(row.item_key), label: String(row.item_label), href: String(row.href), classification: String(row.item_classification) });
   }
-  return { organisation, workspaces: [...byWorkspace.values()] };
+  return { organisation, license: { state: license.state, plan_name: license.plan_name, current_period_end: license.current_period_end }, workspaces: [...byWorkspace.values()] };
 }
 
 export async function getAdministrationSnapshot(actor: UserContext, requestedOrganisationId?: string | null) {

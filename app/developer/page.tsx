@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getPlatformSnapshot } from "@/lib/data/platform-repository";
 import { formatDateTime } from "@/lib/format";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DeveloperPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "developer:read");
+  await requireLicensedPermission(user, "developer:read", { operationClass: "READ" });
   const data = await getPlatformSnapshot(user);
   const pendingEvents = Number(data.outbox.find((item) => item.status === "PENDING")?.count ?? 0);
 

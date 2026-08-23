@@ -112,7 +112,13 @@ Reference checks include `CanCreateInvoice`, `CanCreateUser`, `CanCreateBranch`,
 | Upgraded | new plan/entitlements effective atomically at recorded time | expanded from effective time | new limits/scopes after policy evaluation | additional seats/features available | unchanged history |
 | Downgraded | no destructive truncation; new writes obey lower limits at effective time | historical data remains readable as policy permits | disallowed features disabled prospectively | excess seats require controlled remediation, never random deletion | preserved |
 
-Exact grace, suspension, export, legally required transaction and post-expiry access policies are **PROPOSED - REQUIRES APPROVAL** by Product, NamRA Tax, Legal, Records and Security.
+For the approved local/staging baseline, `SUSPENDED`, `EXPIRED` and `CANCELLED` preserve records and permit only authorised `READ`, `EXPORT`, `COMPLIANCE_WRITE` and `CORRECTION_WRITE`; `BUSINESS_WRITE` and `ADMIN_WRITE` fail closed. Grace prevents privileged capacity expansion. Production activation still requires the named Product, NamRA Tax, Legal, Records and Security authorities.
+
+### 4.4 Central enforcement binding
+
+`license_permission_policies` is the authoritative fail-closed registry mapping each grantable permission to one licensed feature and default operation class. A route may narrow a multi-use permission to a more exact operation class (for example a read page using a manage permission, quarterly certification as compliance continuity, or an invoice credit/debit note as a correction), but it cannot select a more permissive feature or licence state. An absent or retired policy is denied as `LICENSE_POLICY_MISSING`.
+
+Every protected page, portal, API, search request and business command resolves the tenant on the server and calls the central guard. Shared handlers cover business, VAT, compliance, platform, document, report and offline commands; direct organisation, workflow, access-governance, invoice, licensing, navigation and search routes call it explicitly. Navigation has a separate operation classification so write-only destinations disappear in continuity mode while licensed read destinations remain. Health/readiness and privacy-minimised public verification are explicit exemptions because they do not expose an organisation workspace or execute a business command.
 
 ## 5. Dynamic workspace and navigation engine
 

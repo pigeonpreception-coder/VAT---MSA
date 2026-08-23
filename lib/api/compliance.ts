@@ -1,6 +1,7 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { ComplianceResourceError, fileDispute, getComplianceSnapshot, openAuditCase, requestRefund, reviewRefund } from "@/lib/data/compliance-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { ComplianceValidationError } from "@/lib/domain/compliance";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
@@ -14,7 +15,7 @@ export async function handleComplianceList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "compliance:read");
+    await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
     return Response.json(await getComplianceSnapshot(user), { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
@@ -29,7 +30,7 @@ export async function handleComplianceCommand(request: Request, permission: stri
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, permission);
+    await requireLicensedPermission(user, permission);
     await enforceRateLimits([
       { key: `compliance:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
       { key: `compliance:${command}:scope:${user.taxpayerId ?? user.role}`, limit: 120, windowSeconds: 60 },

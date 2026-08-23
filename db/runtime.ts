@@ -819,6 +819,17 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, navigation_item_id TEXT NOT NULL REFERENCES navigation_items(id),
     policy_key TEXT NOT NULL, effect TEXT NOT NULL, safe_restriction_reason TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS license_permission_policies (
+    permission_code TEXT PRIMARY KEY REFERENCES access_permissions(code),
+    feature_key TEXT NOT NULL REFERENCES license_features(feature_key),
+    operation_class TEXT NOT NULL CHECK (operation_class IN ('READ','EXPORT','BUSINESS_WRITE','COMPLIANCE_WRITE','CORRECTION_WRITE','ADMIN_WRITE')),
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE','RETIRED')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS license_navigation_policies (
+    navigation_item_id TEXT PRIMARY KEY REFERENCES navigation_items(id),
+    operation_class TEXT NOT NULL CHECK (operation_class IN ('READ','EXPORT','BUSINESS_WRITE','COMPLIANCE_WRITE','CORRECTION_WRITE','ADMIN_WRITE')),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS navigation_preferences (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_users(id),
     organisation_id TEXT REFERENCES organisations(id), preference_type TEXT NOT NULL,
@@ -1678,6 +1689,47 @@ const EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO seed_state VALUES ('expense-receipt-governance-v1','2026-08-16T08:00:00Z')`,
 ];
 
+const LICENSE_PERMISSION_POLICIES = [
+  ['dashboard:read','CORE_VAT','READ'], ['identity:read','ADMINISTRATION','READ'], ['taxpayers:read','ADMINISTRATION','READ'],
+  ['registrations:read','ADMINISTRATION','READ'], ['registrations:submit','ADMINISTRATION','COMPLIANCE_WRITE'], ['organisations:manage','ADMINISTRATION','ADMIN_WRITE'],
+  ['invoices:read','CORE_VAT','READ'], ['invoices:submit','CORE_VAT','BUSINESS_WRITE'], ['exceptions:read','CORE_VAT','READ'],
+  ['returns:read','CORE_VAT','READ'], ['returns:generate','CORE_VAT','COMPLIANCE_WRITE'], ['returns:approve','CORE_VAT','COMPLIANCE_WRITE'],
+  ['returns:submit','CORE_VAT','COMPLIANCE_WRITE'], ['vat-adjustments:manage','CORE_VAT','CORRECTION_WRITE'], ['reconciliation:manage','CORE_VAT','COMPLIANCE_WRITE'],
+  ['audit:read','CORE_VAT','READ'], ['security:read','ADMINISTRATION','READ'], ['commercial:read','CORE_VAT','READ'],
+  ['parties:manage','CORE_VAT','BUSINESS_WRITE'], ['quotations:manage','CORE_VAT','BUSINESS_WRITE'], ['accounting:read','ACCOUNTING','READ'],
+  ['accounting:post','ACCOUNTING','BUSINESS_WRITE'], ['expenses:read','CORE_VAT','READ'], ['expenses:manage','CORE_VAT','BUSINESS_WRITE'],
+  ['expenses:approve','CORE_VAT','BUSINESS_WRITE'], ['inventory:read','INVENTORY','READ'], ['inventory:manage','INVENTORY','BUSINESS_WRITE'],
+  ['projects:read','PROJECTS','READ'], ['projects:manage','PROJECTS','BUSINESS_WRITE'], ['imports:read','CORE_VAT','READ'],
+  ['imports:manage','CORE_VAT','BUSINESS_WRITE'], ['documents:read','CORE_VAT','READ'], ['documents:upload','CORE_VAT','BUSINESS_WRITE'],
+  ['compliance:read','CORE_VAT','READ'], ['cases:manage','CORE_VAT','COMPLIANCE_WRITE'], ['disputes:manage','CORE_VAT','COMPLIANCE_WRITE'],
+  ['refunds:read','CORE_VAT','READ'], ['refunds:request','CORE_VAT','COMPLIANCE_WRITE'], ['refunds:review','CORE_VAT','COMPLIANCE_WRITE'],
+  ['risk:read','CORE_VAT','READ'], ['risk:review','CORE_VAT','COMPLIANCE_WRITE'], ['communications:manage','CORE_VAT','COMPLIANCE_WRITE'],
+  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','API_ACCESS','READ'], ['integrations:manage','API_ACCESS','BUSINESS_WRITE'],
+  ['developer:read','API_ACCESS','READ'], ['developer:manage','API_ACCESS','BUSINESS_WRITE'], ['offline:read','CORE_VAT','READ'],
+  ['offline:sync','CORE_VAT','BUSINESS_WRITE'], ['reports:read','ANALYTICS','READ'], ['reports:run','ANALYTICS','EXPORT'],
+  ['platform:read','API_ACCESS','READ'], ['platform:manage','API_ACCESS','ADMIN_WRITE'], ['payments:read','CORE_VAT','READ'],
+  ['administration:read','ADMINISTRATION','READ'], ['administration:manage','ADMINISTRATION','ADMIN_WRITE'], ['workspace:read','ADMINISTRATION','READ'],
+  ['search:read','ADMINISTRATION','READ'], ['licensing:read','ADMINISTRATION','READ'], ['licensing:request','ADMINISTRATION','ADMIN_WRITE'],
+  ['employees:read','ADMINISTRATION','READ'], ['employees:manage','USER_SEATS','ADMIN_WRITE'], ['roles:read','ADMINISTRATION','READ'],
+  ['roles:manage','ADMINISTRATION','ADMIN_WRITE'], ['workflows:read','ADVANCED_WORKFLOW','READ'], ['workflows:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
+  ['workflows:decide','ADVANCED_WORKFLOW','BUSINESS_WRITE'], ['access-governance:read','ADVANCED_WORKFLOW','READ'], ['access-governance:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
+] as const;
+
+const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
+  `INSERT OR IGNORE INTO access_permissions VALUES ('dashboard:read','DASHBOARD','READ','Read the licensed organisation dashboard','INTERNAL','2026-08-23T08:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('exceptions:read','RECONCILIATION_EXCEPTION','READ','Read authorised VAT reconciliation exceptions','RESTRICTED','2026-08-23T08:00:00Z')`,
+  ...LICENSE_PERMISSION_POLICIES.map(([permission, feature, operation]) =>
+    `INSERT OR REPLACE INTO license_permission_policies VALUES ('${permission}','${feature}','${operation}','ACTIVE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
+  ...[
+    'nitem-dashboard','nitem-portals','nitem-search','nitem-commercial','nitem-parties','nitem-invoices','nitem-operations','nitem-reconciliation',
+    'nitem-returns','nitem-compliance','nitem-cases','nitem-refunds','nitem-accounting','nitem-inventory','nitem-projects','nitem-documents',
+    'nitem-audit','nitem-offline','nitem-reports','nitem-integrations','nitem-developer','nitem-administration','nitem-organisations','nitem-taxpayers',
+    'nitem-registrations','nitem-security','nitem-licensing',
+  ].map((item) => `INSERT OR REPLACE INTO license_navigation_policies VALUES ('${item}','READ','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
+  `INSERT OR REPLACE INTO license_navigation_policies VALUES ('nitem-new-invoice','BUSINESS_WRITE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`,
+  `INSERT OR IGNORE INTO seed_state VALUES ('license-central-enforcement-v1','2026-08-23T08:00:00Z')`,
+];
+
 const EXPENSE_RECEIPT_TRIGGER_STATEMENTS = [
   `CREATE TRIGGER IF NOT EXISTS validate_expense_receipt_link
     BEFORE INSERT ON expense_receipt_links
@@ -1790,6 +1842,8 @@ async function initialize(db: D1Database): Promise<void> {
     if (!expenseGovernanceSeed) await db.batch(EXPENSE_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const expenseReceiptGovernanceSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("expense-receipt-governance-v1").first();
     if (!expenseReceiptGovernanceSeed) await db.batch(EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+    const licenseEnforcementSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("license-central-enforcement-v1").first();
+    if (!licenseEnforcementSeed) await db.batch(LICENSE_ENFORCEMENT_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.batch(EXPENSE_RECEIPT_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.prepare("PRAGMA optimize").run();

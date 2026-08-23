@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { searchWorkspace } from "@/lib/data/control-plane-repository";
 
 export const metadata: Metadata = { title: "Workspace search" };
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function WorkspaceSearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const actor = await getCurrentUser();
-  requirePermission(actor, "search:read");
+  await requireLicensedPermission(actor, "search:read", { operationClass: "READ" });
   const query = (await searchParams).q ?? "";
   const results = await searchWorkspace(actor, query);
   return <AppShell active="search" permission="search:read">

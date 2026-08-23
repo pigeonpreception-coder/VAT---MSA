@@ -1,5 +1,6 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { listOrganisations } from "@/lib/data/identity-repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { requestContext } from "@/lib/security/request";
 
 function problem(status: number, code: string, detail: string, correlationId: string) {
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "identity:read");
+    await requireLicensedPermission(user, "identity:read", { operationClass: "READ" });
     return Response.json({ organisations: await listOrganisations(user) }, {
       headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" },
     });

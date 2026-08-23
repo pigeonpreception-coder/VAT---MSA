@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getComplianceSnapshot } from "@/lib/data/compliance-repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function RefundsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "refunds:read");
+  await requireLicensedPermission(user, "refunds:read", { operationClass: "READ" });
   const data = await getComplianceSnapshot(user);
   const total = data.refunds.reduce((sum, item) => sum + Number(item.amount_cents), 0);
   return <AppShell active="refunds" permission="refunds:read">

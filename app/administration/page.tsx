@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getAdministrationSnapshot } from "@/lib/data/control-plane-repository";
 import { formatDateTime } from "@/lib/format";
 import { AdministrationActions } from "./AdministrationActions";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AdministrationPage() {
   const actor = await getCurrentUser();
-  requirePermission(actor, "administration:read");
+  await requireLicensedPermission(actor, "administration:read", { operationClass: "READ" });
   const snapshot = await getAdministrationSnapshot(actor);
   const activeEmployees = snapshot.employees.filter((employee) => employee.status === "ACTIVE").length;
   const seat = snapshot.entitlements.find((entitlement) => entitlement.feature_key === "USER_SEATS");

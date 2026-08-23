@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getBusinessPlatformSnapshot, getQuotationForEdit } from "@/lib/data/business-repository";
 import { evaluateQuotationLifecycle } from "@/lib/domain/business";
 import { QuotationEditForm, type EditableQuotationLine } from "./QuotationEditForm";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function EditQuotationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await getCurrentUser();
-  requirePermission(user, "quotations:manage");
+  await requireLicensedPermission(user, "quotations:manage");
   const [detail, snapshot] = await Promise.all([getQuotationForEdit(id, user), getBusinessPlatformSnapshot(user)]);
   const quotation = detail.quotation;
   const status = String(quotation.status);

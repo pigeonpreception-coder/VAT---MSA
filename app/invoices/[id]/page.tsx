@@ -5,7 +5,8 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { getInvoiceById } from "@/lib/data/repository";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 
 export const metadata: Metadata = { title: "Invoice evidence" };
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function InvoiceDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ created?: string }> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const user = await getCurrentUser();
-  requirePermission(user, "invoices:read");
+  await requireLicensedPermission(user, "invoices:read", { operationClass: "READ" });
   const invoice = await getInvoiceById(id, user);
   if (!invoice) notFound();
 

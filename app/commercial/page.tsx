@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getBusinessPlatformSnapshot } from "@/lib/data/business-repository";
 import { formatMoney } from "@/lib/format";
 import { QuotationActions } from "./QuotationActions";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CommercialPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "commercial:read");
+  await requireLicensedPermission(user, "commercial:read", { operationClass: "READ" });
   const snapshot = await getBusinessPlatformSnapshot(user);
   const canManageQuotations = hasPermission(user, "quotations:manage");
   const canConvertQuotations = canManageQuotations && hasPermission(user, "invoices:submit");

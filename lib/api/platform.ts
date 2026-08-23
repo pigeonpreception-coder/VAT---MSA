@@ -1,6 +1,7 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { getPlatformSnapshot, PlatformResourceError, receiveOfflineBatch, runInlineReport, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
@@ -21,7 +22,7 @@ export async function handlePlatformList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "platform:read");
+    await requireLicensedPermission(user, "platform:read", { operationClass: "READ" });
     return Response.json(await getPlatformSnapshot(user), { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context.correlationId); }
 }
@@ -33,7 +34,7 @@ export async function handleOfflineBatch(request: Request) {
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "offline:sync");
+    await requireLicensedPermission(user, "offline:sync");
     await enforceRateLimits([{ key: `offline:actor:${user.userId}`, limit: 30, windowSeconds: 60 }, { key: `offline:scope:${user.taxpayerId ?? user.role}`, limit: 120, windowSeconds: 60 }, { key: "offline:global", limit: 2_000, windowSeconds: 60 }]);
     const result = await receiveOfflineBatch(await readBoundedJson<never>(request, 5_242_880), user, context.correlationId);
     emitStructuredSecurityLog({ level: "WARN", event: "OFFLINE_BATCH", correlationId: context.correlationId, actorId, outcome: String(result?.status ?? "REJECTED"), durationMs: Date.now() - startedAt });
@@ -48,7 +49,7 @@ export async function handleReportRun(request: Request, code: string) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run");
     await enforceRateLimits([{ key: `reports:actor:${user.userId}`, limit: 20, windowSeconds: 60 }, { key: "reports:global", limit: 500, windowSeconds: 60 }]);
     const result = await runInlineReport(code, await readBoundedJson<never>(request, 32_768), user);
     return Response.json({ report_run: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -59,7 +60,7 @@ export async function handleDocumentUpload(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "documents:upload");
+    await requireLicensedPermission(user, "documents:upload");
     const contentType = request.headers.get("content-type") ?? "";
     if (!contentType.toLowerCase().startsWith("multipart/form-data")) throw new PlatformResourceError("Content-Type must be multipart/form-data.", 415);
     const length = Number(request.headers.get("content-length") ?? "0");

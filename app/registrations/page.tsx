@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { listRegistrationApplications } from "@/lib/data/identity-repository";
 
 export const metadata: Metadata = { title: "Registration intake" };
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function RegistrationsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "registrations:read");
+  await requireLicensedPermission(user, "registrations:read", { operationClass: "READ" });
   const applications = await listRegistrationApplications(user);
   return <AppShell active="registrations" permission="registrations:read">
     <PageHeader eyebrow="Controlled onboarding" title="Taxpayer registration intake" description="Applications are deduplicated and held for authoritative verification. Submission never creates a taxpayer or organisation automatically." actions={<Link className="btn btn-primary" href="/registrations/new">New application</Link>} />

@@ -5,6 +5,7 @@ This repository now contains an executable operational pilot of the VAT-MSA plat
 ## Implemented capabilities
 
 - Role-aware operations dashboard and protected application routes.
+- Central fail-closed licence enforcement across every protected page, portal, API, workspace search and business command, with data-driven permission/feature/operation policies and non-destructive expiry continuity.
 - Canonical taxpayer registry with VAT-number and TIN identities.
 - One-to-one canonical taxpayer/organisation records with database-enforced uniqueness.
 - Dynamic buyer and seller organisation capabilities rather than duplicate taxpayer accounts.
@@ -70,7 +71,7 @@ The pilot role exists only for local development. Production roles must be provi
 
 ## Database and integrity model
 
-The platform uses D1-compatible SQLite for the operational pilot. Reviewed migrations under `drizzle/` cover the canonical identity/organisation foundation, business operations, VAT lifecycle, compliance/refunds, platform-edge controls and invoice correction lineage. Monetary values are stored as integer cents and quantities as integer micros. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
+The platform uses D1-compatible SQLite for the operational pilot. Reviewed migrations under `drizzle/` cover the canonical identity/organisation foundation, business operations, VAT lifecycle, compliance/refunds, platform-edge controls, invoice correction lineage and central licence policy registry. Monetary values are stored as integer cents and quantities as integer micros. Fiscal submission uses one D1 batch to commit the invoice, lines, certificate, seller and buyer ledger entries, period aggregation, exception, idempotency outcome and audit evidence together.
 
 The generated migration is stored in `drizzle/`. The runtime initializer is an onboarding convenience for the local pilot; controlled hosted environments should apply reviewed migrations through the deployment pipeline.
 

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getPlatformSnapshot, getTechnicalPlatformSnapshot } from "@/lib/data/platform-repository";
 import { formatDateTime } from "@/lib/format";
 
@@ -9,7 +10,7 @@ export const metadata: Metadata = { title: "Integrations and platform health" };
 export const dynamic = "force-dynamic";
 
 export default async function IntegrationsPage() {
-  const user = await getCurrentUser(); requirePermission(user, "integrations:read");
+  const user = await getCurrentUser(); await requireLicensedPermission(user, "integrations:read", { operationClass: "READ" });
   const data = ["SUPER_ADMIN", "INFRASTRUCTURE_ADMIN"].includes(user.role) ? await getTechnicalPlatformSnapshot() : await getPlatformSnapshot(user);
   return <AppShell active="integrations" permission="integrations:read"><PageHeader eyebrow="Platform ecosystem" title="Integration contracts and operational health" description="Each external capability has an explicit contract, credential reference, configuration state and health outcome. Missing authority or banking agreements remain disabled rather than simulated." />
     <section className="metric-grid"><article className="metric"><div className="metric-top"><span className="metric-label">Connections</span><span className="metric-icon">I</span></div><div className="metric-value">{data.integrations.length}</div><div className="metric-foot">Government, banking and payment boundaries</div></article><article className="metric"><div className="metric-top"><span className="metric-label">Configured</span><span className="metric-icon">C</span></div><div className="metric-value">{data.integrations.filter((item) => item.configuration_status === "CONFIGURED").length}</div><div className="metric-foot">Ready for governed execution</div></article><article className="metric"><div className="metric-top"><span className="metric-label">Blocked jobs</span><span className="metric-icon">B</span></div><div className="metric-value">{data.syncJobs.filter((item) => String(item.status).includes("BLOCKED")).length}</div><div className="metric-foot warning">External setup required</div></article><article className="metric"><div className="metric-top"><span className="metric-label">Outbox pending</span><span className="metric-icon">E</span></div><div className="metric-value">{Number(data.outbox.find((item) => item.status === "PENDING")?.count ?? 0)}</div><div className="metric-foot">Durable events awaiting publisher</div></article></section>

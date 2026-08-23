@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getVatReturnDetail, VatLifecycleResourceError } from "@/lib/data/vat-lifecycle-repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
 
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function VatReturnDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
-  requirePermission(user, "returns:read");
+  await requireLicensedPermission(user, "returns:read", { operationClass: "READ" });
   const { id } = await params;
   let detail;
   try { detail = await getVatReturnDetail(id, user); } catch (error) { if (error instanceof VatLifecycleResourceError && error.status === 404) notFound(); throw error; }

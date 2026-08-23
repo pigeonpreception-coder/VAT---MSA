@@ -1,4 +1,4 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import {
   createVatAdjustment,
   decideVatApproval,
@@ -10,6 +10,7 @@ import {
   VatLifecycleResourceError,
 } from "@/lib/data/vat-lifecycle-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { VatLifecycleValidationError } from "@/lib/domain/vat-lifecycle";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
@@ -26,7 +27,7 @@ export async function handleVatLifecycleList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "returns:read");
+    await requireLicensedPermission(user, "returns:read", { operationClass: "READ" });
     return Response.json(await getVatLifecycleSnapshot(user), { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
@@ -38,7 +39,7 @@ export async function handleVatReturnDetail(request: Request, versionId: string)
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "returns:read");
+    await requireLicensedPermission(user, "returns:read", { operationClass: "READ" });
     return Response.json(await getVatReturnDetail(versionId, user), { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof VatLifecycleResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
@@ -54,7 +55,7 @@ export async function handleVatCommand(request: Request, permission: string, com
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, permission);
+    await requireLicensedPermission(user, permission);
     await enforceRateLimits([
       { key: `vat:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
       { key: `vat:${command}:tenant:${user.taxpayerId ?? user.role}`, limit: 120, windowSeconds: 60 },

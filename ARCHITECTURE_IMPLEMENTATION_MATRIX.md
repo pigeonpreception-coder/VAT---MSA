@@ -1,6 +1,6 @@
 # VAT-MSA Architecture Implementation Matrix
 
-**Evidence date:** 2026-08-22
+**Evidence date:** 2026-08-23
 **Repository scope:** executable controlled pilot and production-oriented application foundation  
 **Governing architecture:** `08-enterprise-architecture/` and its approval gate
 
@@ -54,6 +54,7 @@ This matrix is the truthful completion record for the approved architecture. It 
 | Concern | Repository evidence | Completion boundary |
 |---|---|---|
 | Tenant isolation | Organisation/taxpayer predicates in repositories, permission checks in page/API handlers, national-scope separation | Independent penetration and policy-bypass testing remains mandatory |
+| Licence enforcement | Fail-closed permission/feature/operation registry; central page, portal, API, search and command guard; state-filtered navigation; read/export/compliance/correction continuity after restriction | Production plan authority, commercial provider, independent bypass test and legally approved continuity runbook remain mandatory |
 | Data integrity | Integer cents/quantity micros, uniqueness constraints, idempotency records, immutable correction lineage and hash-chained audit | Production database selection, migration rehearsal and independent reconciliation |
 | Reliable integration | Transactional outbox, event catalogue, retry-safe commands, webhook/sync delivery state | Managed broker/relay, consumer replay tests and contracted providers |
 | Offline safety | Device/range/batch/conflict models; untrusted submissions are rejected with explicit trust failure | Legal offline authority, enrolled device client, signed ranges and field pilot |
@@ -63,14 +64,15 @@ This matrix is the truthful completion record for the approved architecture. It 
 
 ## Verified release evidence
 
-The canonical release gate passed on 2026-08-22:
+The canonical release gate passed on 2026-08-23:
 
 - ESLint and TypeScript completed without errors.
-- 65 unit/security/policy/database tests passed across eleven test files.
+- 67 unit/security/policy/database tests passed across twelve test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
 - The production build completed and exposed all application and API routes.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.
 - SQLite migration proof applied migrations `0000` through `0011`, corrected the approved synthetic expense with clean receipt custody, rejected pending/quarantined and wrong-owner evidence, applied a clean link, gated approval and proved the link immutable.
+- Central licence migration proof applied `0012` with foreign keys enabled, covered every granted permission, rejected invalid operation classes and classified read versus write-only navigation; static coverage proved every protected page and API route reaches the central guard.
 - Earlier runtime proofs covered versioned return workflows, blocked unconfigured ITAS submission, refund controls, invoice correction lineage, R2 quarantine, offline trust rejection, reports and separated portals.
 
 ## Production decision

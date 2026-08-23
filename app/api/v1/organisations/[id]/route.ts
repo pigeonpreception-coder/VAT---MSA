@@ -1,5 +1,6 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { getOrganisation } from "@/lib/data/identity-repository";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { requestContext } from "@/lib/security/request";
 
 function problem(status: number, code: string, detail: string, correlationId: string) {
@@ -16,8 +17,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "identity:read");
     const { id } = await params;
+    await requireLicensedPermission(user, "identity:read", { operationClass: "READ", requestedOrganisationId: id });
     const organisation = await getOrganisation(user, id);
     if (!organisation) return problem(404, "RESOURCE_NOT_FOUND", "The organisation was not found.", context.correlationId);
     return Response.json(organisation, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });

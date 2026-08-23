@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
-import { getCurrentUser, hasPermission, requirePermission } from "@/lib/auth";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getPlatformSnapshot } from "@/lib/data/platform-repository";
 import { formatDateTime } from "@/lib/format";
 import { ReportRunner } from "./ReportRunner";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "reports:read");
+  await requireLicensedPermission(user, "reports:read", { operationClass: "READ" });
   const data = await getPlatformSnapshot(user);
   const definitions = data.reportDefinitions.map((item) => ({ code: String(item.code), name: String(item.name), description: String(item.description) }));
 

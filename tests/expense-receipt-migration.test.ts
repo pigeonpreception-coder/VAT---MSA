@@ -30,9 +30,9 @@ describe("expense receipt migration", () => {
   it("backfills the synthetic approved record and enforces clean immutable receipt evidence", () => {
     const db = new DatabaseSync(":memory:");
     const migrations = readdirSync(join(process.cwd(), "drizzle")).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
-    const receiptMigration = migrations.at(-1);
-    expect(receiptMigration).toBe("0011_melted_weapon_omega.sql");
-    for (const migration of migrations.slice(0, -1)) applyMigration(db, migration);
+    const receiptMigration = migrations.find((name) => name === "0011_melted_weapon_omega.sql");
+    expect(receiptMigration).toBeDefined();
+    for (const migration of migrations.filter((name) => name < receiptMigration!)) applyMigration(db, migration);
     db.exec("PRAGMA foreign_keys=OFF");
 
     db.prepare(`INSERT INTO expense_categories

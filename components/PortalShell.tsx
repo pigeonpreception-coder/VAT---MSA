@@ -2,6 +2,7 @@ import Link from "next/link";
 import { hasPermission } from "@/lib/auth";
 import type { UserContext } from "@/lib/domain/types";
 import { getAvailablePortals, requirePortalAccess, type PortalKey } from "@/lib/portals";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { initials } from "@/lib/format";
 
 const PORTAL_NAVIGATION: Record<PortalKey, Array<{ href: string; label: string; permission?: string }>> = {
@@ -28,7 +29,15 @@ const PORTAL_NAVIGATION: Record<PortalKey, Array<{ href: string; label: string; 
 export async function PortalShell({ portalKey, user, children }: { portalKey: PortalKey; user: UserContext; children: React.ReactNode }) {
   const portal = await requirePortalAccess(user, portalKey);
   const available = await getAvailablePortals(user);
-  const navigation = PORTAL_NAVIGATION[portalKey].filter((item) => !item.permission || hasPermission(user, item.permission));
+  const navigation = (await Promise.all(PORTAL_NAVIGATION[portalKey].map(async (item) => {
+    if (!item.permission || !hasPermission(user, item.permission)) return item.permission ? null : item;
+    try {
+      await requireLicensedPermission(user, item.permission, { operationClass: "READ" });
+      return item;
+    } catch {
+      return null;
+    }
+  }))).filter((item): item is NonNullable<typeof item> => item !== null);
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -44,7 +53,7 @@ export async function PortalShell({ portalKey, user, children }: { portalKey: Po
     </aside>
     <main className="main">
       <header className="topbar"><div className="env-pill"><span className="pulse" /> Controlled pilot - {portal.name}</div><div className="user-block"><div><strong>{user.displayName}</strong><span>{user.role.replaceAll("_", " ")}{user.isDevelopmentIdentity ? " - local identity" : ""}</span></div><div className="avatar" aria-hidden="true">{initials(user.displayName)}</div></div></header>
-      <div className="content">{user.role === "PILOT_ADMIN" ? <div className="alert alert-info portal-pilot-alert"><strong>Combined pilot identity</strong><br />Production identities receive only their assigned portal and scope. This local identity combines roles so the separated experiences can be evaluated.</div> : null}{children}</div>
+      <div className="content">{["SUSPENDED", "EXPIRED", "CANCELLED"].includes(portal.licenseState) ? <div className="notice notice-warning" role="status"><strong>Licence continuity mode</strong><br />Historical reads, exports and statutory compliance remain available. New business and privileged administration actions are disabled; records are preserved.</div> : null}{user.role === "PILOT_ADMIN" ? <div className="alert alert-info portal-pilot-alert"><strong>Combined pilot identity</strong><br />Production identities receive only their assigned portal and scope. This local identity combines roles so the separated experiences can be evaluated.</div> : null}{children}</div>
     </main>
   </div>;
 }

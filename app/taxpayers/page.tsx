@@ -4,14 +4,15 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { listTaxpayers } from "@/lib/data/repository";
 import { formatMoney } from "@/lib/format";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 
 export const metadata: Metadata = { title: "Taxpayer registry" };
 export const dynamic = "force-dynamic";
 
 export default async function TaxpayersPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "taxpayers:read");
+  await requireLicensedPermission(user, "taxpayers:read", { operationClass: "READ" });
   const taxpayers = await listTaxpayers();
   return <AppShell active="taxpayers" permission="taxpayers:read">
     <PageHeader eyebrow="Identity and taxpayer domain" title="Canonical taxpayer registry" description="One legal taxpayer identity resolves to one organisation used across every buyer and seller transaction role." />

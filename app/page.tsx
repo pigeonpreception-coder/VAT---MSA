@@ -4,7 +4,8 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader, StatusBadge } from "@/components/PageHeader";
 import { getDashboardSnapshot } from "@/lib/data/repository";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 
 export const metadata: Metadata = { title: "Operations dashboard" };
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ function activityLabel(action: string): string {
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
-  requirePermission(user, "dashboard:read");
+  await requireLicensedPermission(user, "dashboard:read", { operationClass: "READ" });
   const snapshot = await getDashboardSnapshot(user);
   const highRisk = snapshot.riskCounts.filter((item) => item.risk_level === "HIGH" || item.risk_level === "CRITICAL").reduce((sum, item) => sum + item.count, 0);
 
