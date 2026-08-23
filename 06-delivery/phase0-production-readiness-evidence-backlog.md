@@ -21,6 +21,7 @@ Scope: VAT-MSA production acceptance dependencies that cannot be truthfully comp
 | PR-009 | Production document protection | Security / Records | Privacy, security and records owners | Malware/CDR provider; quarantine-to-clean/reject evidence; retention; legal hold; deletion governance; provider failure tests | OPEN |
 | PR-010 | Residual dependency risk | DevSecOps | Product Security | Removal or formal time-bounded acceptance of the development-only esbuild advisory; confirmation that development service is not exposed | OPEN |
 | PR-011 | Authoritative identity proofing and taxpayer uniqueness | Identity / Master Data | NamRA/ITAS authority and CISO/Privacy | Identifier precedence; lawful/minimal provider attributes; response signatures and provenance; freshness/expiry; match/mismatch and independent-review policy; merge/deregistration rules; sandbox/production conformance; rejection, outage and monitoring evidence | OPEN |
+| PR-012 | Authoritative counterparty registration and tax-status validation | Business Master Data / Tax / Finance | NamRA/ITAS/BIPA authorities and CISO/Privacy | Authoritative VAT, TIN and company-registration contracts; identifier and legal-name precedence; signed provenance; status semantics; caching, freshness and reconciliation policy; non-VAT-party handling; merge/deregistration rules; sandbox/production conformance; invalid-party rejection, outage and monitoring evidence | OPEN |
 
 ## Signature record
 
@@ -39,6 +40,7 @@ Signatures must identify the evidence version or immutable digest. Empty fields 
 | PR-009 |  |  |  |  |  |
 | PR-010 |  |  |  |  |  |
 | PR-011 |  |  |  |  |  |
+| PR-012 |  |  |  |  |  |
 
 ## Release rule
 

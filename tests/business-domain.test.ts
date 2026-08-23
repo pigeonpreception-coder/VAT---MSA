@@ -15,6 +15,7 @@ import {
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
 } from "@/lib/domain/business";
+import { evaluateCounterpartyTrust, normalizeSyntheticCounterpartyVerification } from "@/lib/domain/counterparty-trust";
 
 describe("business command validation", () => {
   it("normalizes a governed customer and supplier record", () => {
@@ -24,6 +25,7 @@ describe("business command validation", () => {
       legal_name: "Synthetic Trade Partner (Pty) Ltd",
       vat_number: "vat-1000999",
       tin: "tin-1000999",
+      company_registration_number: "cc/2026/00999",
       email: "ACCOUNTS@EXAMPLE.TEST",
       phone: "+264 61 000 999",
       relationships: ["supplier", "CUSTOMER", "SUPPLIER"],
@@ -31,9 +33,44 @@ describe("business command validation", () => {
       display_name: "Synthetic Trade Partner",
       vat_number: "VAT-1000999",
       tin: "TIN-1000999",
+      company_registration_number: "CC/2026/00999",
       email: "accounts@example.test",
       relationships: ["SUPPLIER", "CUSTOMER"],
     });
+  });
+
+  it("keeps synthetic counterparty matching explainable and non-authoritative", () => {
+    const submission = normalizeSyntheticCounterpartyVerification({
+      schema_version: "1.0.0",
+      authority_record: {
+        legal_name: "Synthetic Trade Partner (Pty) Ltd",
+        vat_number: "vat-1000999",
+        tin: "tin-1000999",
+        company_registration_number: "cc/2026/00999",
+        tax_registration_status: "ACTIVE",
+      },
+    });
+    expect(evaluateCounterpartyTrust({
+      legalName: "Synthetic Trade Partner (Pty) Ltd",
+      vatNumber: "VAT-1000999",
+      tin: "TIN-1000999",
+      companyRegistrationNumber: "CC/2026/00999",
+    }, submission.authority_record)).toMatchObject({
+      trustStatus: "SYNTHETIC_VALID",
+      confidenceBps: 10000,
+      matchedFields: ["vat_number", "tin", "company_registration_number", "legal_name"],
+    });
+  });
+
+  it("rejects conflicting and inactive tax evidence without confusing identity and tax status", () => {
+    const mismatch = evaluateCounterpartyTrust({ legalName: "Partner", vatNumber: "VAT-1" }, {
+      legal_name: "Partner", vat_number: "VAT-2", tax_registration_status: "ACTIVE",
+    });
+    expect(mismatch).toMatchObject({ trustStatus: "MISMATCH", conflictingFields: ["vat_number"], reasonCode: "COUNTERPARTY_AUTHORITY_MISMATCH" });
+    const inactive = evaluateCounterpartyTrust({ legalName: "Partner", vatNumber: "VAT-1" }, {
+      legal_name: "Partner", vat_number: "VAT-1", tax_registration_status: "SUSPENDED",
+    });
+    expect(inactive).toMatchObject({ trustStatus: "SYNTHETIC_VALID", taxRegistrationStatus: "SUSPENDED" });
   });
 
   it("rejects unsupported party relationships and short deactivation reasons", () => {
@@ -131,6 +168,13 @@ describe("business command validation", () => {
       tax_cents: 1_500,
       total_cents: 11_499,
     })).toThrowError(BusinessValidationError);
+  });
+
+  it("requires a supplier for tax-bearing expenses", () => {
+    expect(() => normalizeAndValidateExpense({
+      schema_version: "1.0.0", category_id: "expcat-0001", expense_number: "EXP-TRUST-1", expense_date: "2026-08-23",
+      description: "Taxed synthetic expense", currency: "NAD", net_cents: 10_000, tax_cents: 1_500, total_cents: 11_500,
+    })).toThrow(/validation/i);
   });
 
   it("normalizes expense decisions and disables emergency overrides", () => {

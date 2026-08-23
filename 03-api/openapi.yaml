@@ -989,6 +989,44 @@ paths:
       responses:
         '200': { description: Business party deactivated. }
         '404': { $ref: '#/components/responses/NotFound' }
+  /v1/business-parties/{business_party_id}/synthetic-verification:
+    post:
+      tags: [Verification]
+      operationId: syntheticallyVerifyBusinessParty
+      summary: Exercise the counterparty-trust workflow with explicitly non-authoritative synthetic evidence.
+      description: |
+        Available only in an approved local or explicitly enabled staging test environment. The result is labelled
+        `SYNTHETIC_TEST`, expires after 24 hours, cannot become authority verification and is denied in production.
+        It exists for controlled workflow and negative-test evidence; it does not call ITAS, NamRA or BIPA.
+      parameters:
+        - { name: business_party_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, authority_record]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                authority_record:
+                  type: object
+                  additionalProperties: false
+                  required: [legal_name, tax_registration_status]
+                  properties:
+                    legal_name: { type: string, minLength: 2, maxLength: 200 }
+                    vat_number: { type: string, minLength: 2, maxLength: 40 }
+                    tin: { type: string, minLength: 2, maxLength: 40 }
+                    company_registration_number: { type: string, minLength: 2, maxLength: 40 }
+                    tax_registration_status: { type: string, enum: [ACTIVE, INACTIVE, SUSPENDED, CANCELLED, NOT_REGISTERED] }
+      responses:
+        '200': { description: Labelled synthetic trust result and current counterparty projection. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /v1/organisations/employees:
     get:
       tags: [Organisations]

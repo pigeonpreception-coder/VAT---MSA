@@ -1,4 +1,4 @@
-catalog_version: 0.9.0
+catalog_version: 1.0.0
 envelope:
   specification: CloudEvents 1.0
   required_attributes: [specversion, id, source, type, subject, time, datacontenttype, dataschema, data]
@@ -7,6 +7,20 @@ envelope:
   idempotency: consumers persist event id and business-effect key
   compatibility: additive changes only within a major event version
 events:
+  - type: na.vatmsa.counterparty.verification-requested.v1
+    owner: Business Party Trust Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Starts or restarts fail-closed counterparty verification after creation or an identity-field change without making the party transaction-eligible.
+    minimum_payload: [business_party_id, trust_profile_id, status, correlation_id]
+    controls: [atomic_outbox, minimized_payload, no_raw_provider_evidence, identity_change_reverification]
+  - type: na.vatmsa.counterparty.trust-evaluated.v1
+    owner: Business Party Trust Domain
+    partition_key: organisation_id
+    contains_tax_confidential_data: true
+    purpose: Records a minimized current trust posture and explicit provider environment; synthetic outcomes never claim NamRA, ITAS or BIPA authority.
+    minimum_payload: [business_party_id, trust_profile_id, trust_status, provider_environment, correlation_id]
+    controls: [atomic_outbox, append_only_snapshot, freshness_expiry, synthetic_authority_separation]
   - type: na.vatmsa.identity.proofing-requested.v1
     owner: Identity Domain
     partition_key: proofing_case_id

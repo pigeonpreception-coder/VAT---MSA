@@ -36,6 +36,7 @@ domains:
     - { method: POST, path: /business-parties, permission: parties:manage, status: implemented }
     - { method: PATCH, path: "/business-parties/{id}", permission: parties:manage-and-resource-scope, status: implemented }
     - { method: POST, path: "/business-parties/{id}/deactivation", permission: parties:manage-and-resource-scope, status: implemented-non-destructive }
+    - { method: POST, path: "/business-parties/{id}/synthetic-verification", permission: parties:manage-and-local-or-explicit-staging-test-mode, status: implemented-non-authoritative-production-disabled }
   quotations:
     - { method: POST, path: /quotations, permission: quotations:manage, status: implemented }
     - { method: PATCH, path: "/quotations/{id}", permission: quotations:manage-and-resource-scope, status: implemented-issued-only-with-revisions }

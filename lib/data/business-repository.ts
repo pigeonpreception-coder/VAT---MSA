@@ -29,6 +29,11 @@ import {
   type StockMovementSubmission,
 } from "@/lib/domain/business";
 import { centsToDecimal, sha256Hex, stableStringify } from "@/lib/domain/invoice";
+import {
+  evaluateCounterpartyTrust,
+  normalizeSyntheticCounterpartyVerification,
+  type SyntheticCounterpartyVerificationSubmission,
+} from "@/lib/domain/counterparty-trust";
 import type { InvoiceSubmission, UserContext } from "@/lib/domain/types";
 import type { RequestContext } from "@/lib/security/request";
 import { getInvoiceById, RepositoryConflictError, submitInvoice } from "./repository";
@@ -273,18 +278,31 @@ async function requirePartyRelationship(
   organisationId: string,
   relationship: BusinessPartyRelationship,
   label: string,
+  requireActiveTaxRegistration = false,
 ) {
   if (!id) return;
-  const row = await db.prepare(`SELECT p.id FROM business_parties p
+  const row = await db.prepare(`SELECT p.id,t.trust_status,t.provider_environment,t.tax_registration_status,t.expires_at FROM business_parties p
     JOIN party_relationships r ON r.party_id=p.id AND r.organisation_id=p.organisation_id
+    LEFT JOIN counterparty_trust_profiles t ON t.business_party_id=p.id
     WHERE p.id=? AND p.organisation_id=? AND p.status='ACTIVE' AND r.relationship=? AND r.status='ACTIVE'`)
-    .bind(id, organisationId, relationship).first<{ id: string }>();
+    .bind(id, organisationId, relationship).first<{ id: string; trust_status: string | null; provider_environment: string | null; tax_registration_status: string | null; expires_at: string | null }>();
   if (!row) throw new BusinessResourceError(`${label} is not an active ${relationship.toLowerCase()} in the authorised organisation.`);
+  const current = Boolean(row.expires_at && Date.parse(row.expires_at) > Date.now());
+  const authorityTrusted = row.trust_status === "AUTHORITY_VERIFIED" && current;
+  const deployment = (process.env.VAT_MSA_ENVIRONMENT ?? "local").trim().toLowerCase();
+  const syntheticEnabled = deployment !== "production" && (process.env.NODE_ENV !== "production" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
+  const syntheticTrusted = syntheticEnabled && row.trust_status === "SYNTHETIC_VALID" && row.provider_environment === "SYNTHETIC_TEST" && current;
+  if (!authorityTrusted && !syntheticTrusted) throw new BusinessResourceError(`${label} is not currently trusted for new transactions. Complete an approved counterparty verification first.`);
+  if (requireActiveTaxRegistration && row.tax_registration_status !== "ACTIVE") throw new BusinessResourceError(`${label} does not have current ACTIVE tax-registration evidence for a tax-bearing transaction.`);
 }
 
 async function getBusinessParty(db: D1Database, id: string, organisationId: string) {
-  return db.prepare(`SELECT p.*,GROUP_CONCAT(r.relationship, ',') AS relationships FROM business_parties p
+  return db.prepare(`SELECT p.*,GROUP_CONCAT(r.relationship, ',') AS relationships,
+    t.trust_status,t.tax_registration_status,t.vat_verification_status,t.tin_verification_status,
+    t.company_verification_status,t.confidence_bps,t.provider_environment,t.checked_at,t.expires_at
+    FROM business_parties p
     LEFT JOIN party_relationships r ON r.party_id=p.id AND r.organisation_id=p.organisation_id AND r.status='ACTIVE'
+    LEFT JOIN counterparty_trust_profiles t ON t.business_party_id=p.id
     WHERE p.id=? AND p.organisation_id=? GROUP BY p.id`).bind(id, organisationId).first<Record<string, unknown>>();
 }
 
@@ -294,11 +312,13 @@ async function assertBusinessPartyIdentifiersAvailable(
   party: BusinessPartySubmission,
   excludedId?: string,
 ) {
-  if (!party.vat_number && !party.tin) return;
+  if (!party.vat_number && !party.tin && !party.company_registration_number) return;
   const duplicate = await db.prepare(`SELECT id,display_name FROM business_parties
     WHERE organisation_id=? AND status='ACTIVE' AND id<>COALESCE(?, '')
-      AND ((? IS NOT NULL AND vat_number=?) OR (? IS NOT NULL AND tin=?)) LIMIT 1`)
-    .bind(organisationId, excludedId ?? null, party.vat_number ?? null, party.vat_number ?? null, party.tin ?? null, party.tin ?? null)
+      AND ((? IS NOT NULL AND vat_number=?) OR (? IS NOT NULL AND tin=?)
+        OR (? IS NOT NULL AND company_registration_number=?)) LIMIT 1`)
+    .bind(organisationId, excludedId ?? null, party.vat_number ?? null, party.vat_number ?? null, party.tin ?? null, party.tin ?? null,
+      party.company_registration_number ?? null, party.company_registration_number ?? null)
     .first<{ id: string; display_name: string }>();
   if (duplicate) throw new RepositoryConflictError(`An active business party already uses that VAT number or TIN (${duplicate.display_name}, ${duplicate.id}).`);
 }
@@ -316,8 +336,12 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
       (SELECT COALESCE(SUM(total_cents),0) FROM quotations WHERE organisation_id=? AND status IN ('ISSUED','ACCEPTED','CONVERTED')) AS quoted_value_cents,
       (SELECT COALESCE(SUM(total_cents),0) FROM expenses WHERE organisation_id=? AND status='APPROVED') AS expense_value_cents`)
       .bind(org, org, org, org, org, org).first<Record<string, number>>(),
-    db.prepare(`SELECT p.*,GROUP_CONCAT(r.relationship, ',') AS relationships FROM business_parties p
+    db.prepare(`SELECT p.*,GROUP_CONCAT(r.relationship, ',') AS relationships,
+      t.trust_status,t.tax_registration_status,t.vat_verification_status,t.tin_verification_status,
+      t.company_verification_status,t.confidence_bps,t.provider_environment,t.checked_at,t.expires_at
+      FROM business_parties p
       LEFT JOIN party_relationships r ON r.party_id=p.id AND r.status='ACTIVE'
+      LEFT JOIN counterparty_trust_profiles t ON t.business_party_id=p.id
       WHERE p.organisation_id=? GROUP BY p.id ORDER BY p.display_name LIMIT 100`).bind(org).all<Record<string, string | null>>(),
     db.prepare("SELECT * FROM products WHERE organisation_id=? ORDER BY name LIMIT 100").bind(org).all<Record<string, string | number | null>>(),
     db.prepare(`SELECT q.*,p.display_name AS customer_name FROM quotations q JOIN business_parties p ON p.id=q.customer_party_id
@@ -386,6 +410,7 @@ export async function createBusinessParty(
   await assertBusinessPartyIdentifiersAvailable(db, organisation.id, party);
 
   const id = crypto.randomUUID();
+  const trustProfileId = crypto.randomUUID();
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "BUSINESS_PARTY_CREATED", "BUSINESS_PARTY", id, {
     organisationId: organisation.id,
@@ -394,11 +419,23 @@ export async function createBusinessParty(
   }, now);
   const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO business_parties
-      (id,organisation_id,display_name,legal_name,vat_number,tin,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'LOCAL',NULL,'ACTIVE',?,?)`).bind(
-      id, organisation.id, party.display_name, party.legal_name ?? null, party.vat_number ?? null, party.tin ?? null,
+      (id,organisation_id,display_name,legal_name,vat_number,tin,company_registration_number,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'LOCAL',NULL,'ACTIVE',?,?)`).bind(
+      id, organisation.id, party.display_name, party.legal_name ?? null, party.vat_number ?? null, party.tin ?? null, party.company_registration_number ?? null,
       party.email ?? null, party.phone ?? null, party.address ?? null, now, now,
     ),
+    db.prepare(`INSERT INTO counterparty_trust_profiles
+      (id,business_party_id,provider,provider_environment,trust_status,tax_registration_status,vat_verification_status,
+       tin_verification_status,company_verification_status,confidence_bps,evidence_hash,source_reference,requested_by,reviewed_by,
+       checked_at,expires_at,created_at,updated_at)
+      VALUES (?,?,'ITAS_BIPA','CONTRACT_PENDING','PENDING_PROVIDER','UNKNOWN',?,?,?,0,NULL,NULL,?,NULL,NULL,NULL,?,?)`).bind(
+      trustProfileId, id, party.vat_number ? "PENDING" : "NOT_PROVIDED", party.tin ? "PENDING" : "NOT_PROVIDED",
+      party.company_registration_number ? "PENDING" : "NOT_PROVIDED", actor.userId, now, now,
+    ),
+    db.prepare(`INSERT INTO counterparty_trust_events
+      (id,trust_profile_id,event_type,from_status,to_status,reason_code,evidence_hash,actor_id,occurred_at)
+      VALUES (?,?,'CounterpartyVerificationRequested',NULL,'PENDING_PROVIDER','AUTHORITY_PROVIDER_CONTRACT_REQUIRED',NULL,?,?)`)
+      .bind(crypto.randomUUID(), trustProfileId, actor.userId, now),
   ];
   for (const relationship of party.relationships) {
     statements.push(db.prepare(`INSERT INTO party_relationships
@@ -408,6 +445,9 @@ export async function createBusinessParty(
   statements.push(commandRecord(db, actor.userId, "CREATE_BUSINESS_PARTY", idempotencyKey, requestHash, "BUSINESS_PARTY", id, now));
   statements.push(outboxRecord(db, "BUSINESS_PARTY", id, "BusinessPartyCreated", organisation.id, {
     party_id: id, organisation_id: organisation.id, relationships: party.relationships, correlation_id: correlationId,
+  }, now));
+  statements.push(outboxRecord(db, "COUNTERPARTY_TRUST", trustProfileId, "CounterpartyVerificationRequested", organisation.id, {
+    business_party_id: id, trust_profile_id: trustProfileId, status: "PENDING_PROVIDER", provider_environment: "CONTRACT_PENDING", correlation_id: correlationId,
   }, now));
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
@@ -429,11 +469,17 @@ export async function updateBusinessParty(
   const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party_id: id, party }));
   const prior = await priorCommand(db, actor.userId, "UPDATE_BUSINESS_PARTY", idempotencyKey, requestHash);
   if (prior) return getBusinessParty(db, prior, organisation.id);
-  const existing = await db.prepare("SELECT id,status FROM business_parties WHERE id=? AND organisation_id=?")
-    .bind(id, organisation.id).first<{ id: string; status: string }>();
+  const existing = await db.prepare(`SELECT p.id,p.status,p.legal_name,p.vat_number,p.tin,p.company_registration_number,
+    t.id AS trust_profile_id,t.trust_status FROM business_parties p LEFT JOIN counterparty_trust_profiles t ON t.business_party_id=p.id
+    WHERE p.id=? AND p.organisation_id=?`)
+    .bind(id, organisation.id).first<{ id: string; status: string; legal_name: string | null; vat_number: string | null; tin: string | null; company_registration_number: string | null; trust_profile_id: string | null; trust_status: string | null }>();
   if (!existing) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
   if (existing.status !== "ACTIVE") throw new RepositoryConflictError("An inactive business party cannot be edited. Create a new active relationship record if trading resumes.");
   await assertBusinessPartyIdentifiersAvailable(db, organisation.id, party, id);
+  const identityChanged = (existing.legal_name ?? "") !== (party.legal_name ?? "")
+    || (existing.vat_number ?? "") !== (party.vat_number ?? "")
+    || (existing.tin ?? "") !== (party.tin ?? "")
+    || (existing.company_registration_number ?? "") !== (party.company_registration_number ?? "");
 
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "BUSINESS_PARTY_UPDATED", "BUSINESS_PARTY", id, {
@@ -442,12 +488,28 @@ export async function updateBusinessParty(
     correlationId,
   }, now);
   const statements: D1PreparedStatement[] = [
-    db.prepare(`UPDATE business_parties SET display_name=?,legal_name=?,vat_number=?,tin=?,email=?,phone=?,address=?,updated_at=?
+    db.prepare(`UPDATE business_parties SET display_name=?,legal_name=?,vat_number=?,tin=?,company_registration_number=?,email=?,phone=?,address=?,updated_at=?
       WHERE id=? AND organisation_id=? AND status='ACTIVE'`).bind(
-      party.display_name, party.legal_name ?? null, party.vat_number ?? null, party.tin ?? null,
+      party.display_name, party.legal_name ?? null, party.vat_number ?? null, party.tin ?? null, party.company_registration_number ?? null,
       party.email ?? null, party.phone ?? null, party.address ?? null, now, id, organisation.id,
     ),
   ];
+  if (identityChanged && existing.trust_profile_id) {
+    statements.unshift(db.prepare(`UPDATE counterparty_trust_profiles SET provider='ITAS_BIPA',provider_environment='CONTRACT_PENDING',
+      trust_status='PENDING_PROVIDER',tax_registration_status='UNKNOWN',vat_verification_status=?,tin_verification_status=?,
+      company_verification_status=?,confidence_bps=0,evidence_hash=NULL,source_reference=NULL,reviewed_by=NULL,checked_at=NULL,
+      expires_at=NULL,updated_at=? WHERE id=?`).bind(
+      party.vat_number ? "PENDING" : "NOT_PROVIDED", party.tin ? "PENDING" : "NOT_PROVIDED",
+      party.company_registration_number ? "PENDING" : "NOT_PROVIDED", now, existing.trust_profile_id,
+    ));
+    statements.push(db.prepare(`INSERT INTO counterparty_trust_events
+      (id,trust_profile_id,event_type,from_status,to_status,reason_code,evidence_hash,actor_id,occurred_at)
+      VALUES (?,?,'CounterpartyIdentityChanged',?,'PENDING_PROVIDER','IDENTITY_CHANGE_REQUIRES_REVERIFICATION',NULL,?,?)`)
+      .bind(crypto.randomUUID(), existing.trust_profile_id, existing.trust_status ?? "PENDING_PROVIDER", actor.userId, now));
+    statements.push(outboxRecord(db, "COUNTERPARTY_TRUST", existing.trust_profile_id, "CounterpartyVerificationRequested", organisation.id, {
+      business_party_id: id, trust_profile_id: existing.trust_profile_id, status: "PENDING_PROVIDER", reason: "IDENTITY_CHANGED", correlation_id: correlationId,
+    }, now));
+  }
   for (const relationship of ["CUSTOMER", "SUPPLIER"] as const) {
     if (party.relationships.includes(relationship)) {
       statements.push(db.prepare(`INSERT INTO party_relationships
@@ -469,6 +531,83 @@ export async function updateBusinessParty(
   }, now));
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
+  return getBusinessParty(db, id, organisation.id);
+}
+
+export async function syntheticallyVerifyBusinessParty(
+  id: string,
+  payload: SyntheticCounterpartyVerificationSubmission,
+  actor: UserContext,
+  idempotencyKey: string,
+  correlationId: string,
+  requestedOrganisationId?: string | null,
+) {
+  validateIdempotencyKey(idempotencyKey);
+  const deployment = (process.env.VAT_MSA_ENVIRONMENT ?? "local").trim().toLowerCase();
+  const enabled = deployment !== "production" && (process.env.NODE_ENV !== "production" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
+  if (!enabled) throw new BusinessResourceError("Synthetic counterparty verification is disabled in this environment.", 403);
+  const submission = normalizeSyntheticCounterpartyVerification(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party_id: id, submission }));
+  const prior = await priorCommand(db, actor.userId, "SYNTHETIC_VERIFY_BUSINESS_PARTY", idempotencyKey, requestHash);
+  if (prior) return getBusinessParty(db, prior, organisation.id);
+  const party = await db.prepare(`SELECT p.id,p.status,p.legal_name,p.display_name,p.vat_number,p.tin,p.company_registration_number,
+    t.id AS trust_profile_id,t.trust_status FROM business_parties p
+    JOIN counterparty_trust_profiles t ON t.business_party_id=p.id
+    WHERE p.id=? AND p.organisation_id=?`).bind(id, organisation.id).first<{
+      id: string; status: string; legal_name: string | null; display_name: string; vat_number: string | null; tin: string | null;
+      company_registration_number: string | null; trust_profile_id: string; trust_status: string;
+    }>();
+  if (!party) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  if (party.status !== "ACTIVE") throw new RepositoryConflictError("Only an active business party can enter synthetic verification.");
+  const evaluation = evaluateCounterpartyTrust({
+    legalName: party.legal_name ?? party.display_name,
+    vatNumber: party.vat_number,
+    tin: party.tin,
+    companyRegistrationNumber: party.company_registration_number,
+  }, submission.authority_record);
+  const now = new Date();
+  const checkedAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1_000).toISOString();
+  const sourceReference = `synthetic-counterparty:${crypto.randomUUID()}`;
+  const evidenceHash = await sha256Hex(stableStringify({ sourceReference, businessPartyId: id, authority: submission.authority_record, evaluation, checkedAt, expiresAt }));
+  const audit = await auditEnvelope(db, actor, "COUNTERPARTY_SYNTHETIC_VERIFICATION_RECORDED", "BUSINESS_PARTY", id, {
+    organisationId: organisation.id,
+    trustStatus: evaluation.trustStatus,
+    reasonCode: evaluation.reasonCode,
+    correlationId,
+    nonAuthoritative: true,
+  }, checkedAt);
+  await db.batch([
+    db.prepare(`UPDATE counterparty_trust_profiles SET provider='SYNTHETIC_AUTHORITY',provider_environment='SYNTHETIC_TEST',
+      trust_status=?,tax_registration_status=?,vat_verification_status=?,tin_verification_status=?,company_verification_status=?,
+      confidence_bps=?,evidence_hash=?,source_reference=?,reviewed_by=NULL,checked_at=?,expires_at=?,updated_at=? WHERE id=?`).bind(
+      evaluation.trustStatus, evaluation.taxRegistrationStatus, evaluation.vatVerificationStatus, evaluation.tinVerificationStatus,
+      evaluation.companyVerificationStatus, evaluation.confidenceBps, evidenceHash, sourceReference, checkedAt, expiresAt, checkedAt, party.trust_profile_id,
+    ),
+    db.prepare(`INSERT INTO counterparty_verification_snapshots
+      (id,trust_profile_id,provider,provider_environment,source_reference,observed_vat_number,observed_tin,
+       observed_company_registration_number,tax_registration_status,trust_status,confidence_bps,matched_fields,conflicting_fields,
+       evidence_hash,checked_at,expires_at,recorded_by)
+      VALUES (?,?,'SYNTHETIC_AUTHORITY','SYNTHETIC_TEST',?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      crypto.randomUUID(), party.trust_profile_id, sourceReference, submission.authority_record.vat_number ?? null,
+      submission.authority_record.tin ?? null, submission.authority_record.company_registration_number ?? null,
+      evaluation.taxRegistrationStatus, evaluation.trustStatus, evaluation.confidenceBps, JSON.stringify(evaluation.matchedFields),
+      JSON.stringify(evaluation.conflictingFields), evidenceHash, checkedAt, expiresAt, actor.userId,
+    ),
+    db.prepare(`INSERT INTO counterparty_trust_events
+      (id,trust_profile_id,event_type,from_status,to_status,reason_code,evidence_hash,actor_id,occurred_at)
+      VALUES (?,?,'CounterpartyTrustEvaluated',?,?,?,?,?,?)`).bind(
+      crypto.randomUUID(), party.trust_profile_id, party.trust_status, evaluation.trustStatus, evaluation.reasonCode, evidenceHash, actor.userId, checkedAt,
+    ),
+    commandRecord(db, actor.userId, "SYNTHETIC_VERIFY_BUSINESS_PARTY", idempotencyKey, requestHash, "BUSINESS_PARTY", id, checkedAt),
+    outboxRecord(db, "COUNTERPARTY_TRUST", party.trust_profile_id, "CounterpartyTrustEvaluated", organisation.id, {
+      business_party_id: id, trust_profile_id: party.trust_profile_id, trust_status: evaluation.trustStatus,
+      provider_environment: "SYNTHETIC_TEST", correlation_id: correlationId,
+    }, checkedAt),
+    auditRecord(db, actor, audit, checkedAt),
+  ]);
   return getBusinessParty(db, id, organisation.id);
 }
 
@@ -856,7 +995,7 @@ export async function createExpense(payload: ExpenseSubmission, actor: UserConte
   const prior = await priorCommand(db, actor.userId, "CREATE_EXPENSE", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
   await requireOwnedReference(db, "expense_categories", expense.category_id, organisation.id, "Expense category");
-  await requirePartyRelationship(db, expense.supplier_party_id, organisation.id, "SUPPLIER", "Supplier party");
+  await requirePartyRelationship(db, expense.supplier_party_id, organisation.id, "SUPPLIER", "Supplier party", expense.tax_cents > 0);
   await requireOwnedReference(db, "projects", expense.project_id, organisation.id, "Project");
   await requireOwnedReference(db, "branches", expense.branch_id, organisation.id, "Branch");
   const id = crypto.randomUUID();

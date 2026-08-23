@@ -54,7 +54,7 @@ function insertPendingProofingCase(db: DatabaseSync, suffix = "one") {
 describe("Issue 2 identity-proofing database enforcement", () => {
   it("registers the generated proofing schema and required revision", () => {
     const journal = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "_journal.json"), "utf8"));
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 17, tag: "0017_identity_proofing_enforcement" });
+    expect(journal.entries.find((entry: { idx: number }) => entry.idx === 17)).toMatchObject({ idx: 17, tag: "0017_identity_proofing_enforcement" });
     const snapshot = JSON.parse(readFileSync(join(process.cwd(), "drizzle", "meta", "0017_snapshot.json"), "utf8"));
     expect(snapshot.tables.identity_proofing_cases).toBeDefined();
     expect(snapshot.tables.identity_reconciliation_candidates).toBeDefined();

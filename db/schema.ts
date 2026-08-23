@@ -351,6 +351,7 @@ export const businessParties = sqliteTable(
     legalName: text("legal_name"),
     vatNumber: text("vat_number"),
     tin: text("tin"),
+    companyRegistrationNumber: text("company_registration_number"),
     email: text("email"),
     phone: text("phone"),
     address: text("address"),
@@ -362,8 +363,92 @@ export const businessParties = sqliteTable(
   },
   (table) => [
     uniqueIndex("ux_business_parties_source").on(table.organisationId, table.sourceSystem, table.sourcePartyId),
+    uniqueIndex("ux_business_parties_active_vat").on(table.organisationId, table.vatNumber).where(sql`${table.status} = 'ACTIVE' AND ${table.vatNumber} IS NOT NULL`),
+    uniqueIndex("ux_business_parties_active_tin").on(table.organisationId, table.tin).where(sql`${table.status} = 'ACTIVE' AND ${table.tin} IS NOT NULL`),
+    uniqueIndex("ux_business_parties_active_company_registration").on(table.organisationId, table.companyRegistrationNumber).where(sql`${table.status} = 'ACTIVE' AND ${table.companyRegistrationNumber} IS NOT NULL`),
     index("idx_business_parties_name").on(table.organisationId, table.displayName),
   ],
+);
+
+export const counterpartyTrustProfiles = sqliteTable(
+  "counterparty_trust_profiles",
+  {
+    id: text("id").primaryKey(),
+    businessPartyId: text("business_party_id").notNull().references(() => businessParties.id),
+    provider: text("provider").notNull(),
+    providerEnvironment: text("provider_environment").notNull(),
+    trustStatus: text("trust_status").notNull(),
+    taxRegistrationStatus: text("tax_registration_status").notNull(),
+    vatVerificationStatus: text("vat_verification_status").notNull(),
+    tinVerificationStatus: text("tin_verification_status").notNull(),
+    companyVerificationStatus: text("company_verification_status").notNull(),
+    confidenceBps: integer("confidence_bps").notNull().default(0),
+    evidenceHash: text("evidence_hash"),
+    sourceReference: text("source_reference"),
+    requestedBy: text("requested_by").notNull().references(() => appUsers.id),
+    reviewedBy: text("reviewed_by").references(() => appUsers.id),
+    checkedAt: text("checked_at"),
+    expiresAt: text("expires_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_counterparty_trust_party").on(table.businessPartyId),
+    uniqueIndex("ux_counterparty_trust_provider_reference").on(table.provider, table.sourceReference),
+    index("idx_counterparty_trust_status_expiry").on(table.trustStatus, table.expiresAt),
+    check("ck_counterparty_trust_environment", sql`${table.providerEnvironment} IN ('CONTRACT_PENDING','SYNTHETIC_TEST','PRODUCTION_EQUIVALENT','PRODUCTION')`),
+    check("ck_counterparty_trust_status", sql`${table.trustStatus} IN ('PENDING_PROVIDER','SYNTHETIC_VALID','AUTHORITY_VERIFIED','MISMATCH','INVALID','EXPIRED','UNAVAILABLE')`),
+    check("ck_counterparty_tax_registration_status", sql`${table.taxRegistrationStatus} IN ('UNKNOWN','ACTIVE','INACTIVE','SUSPENDED','CANCELLED','NOT_REGISTERED')`),
+    check("ck_counterparty_vat_verification", sql`${table.vatVerificationStatus} IN ('NOT_PROVIDED','PENDING','MATCHED','MISMATCH','INVALID')`),
+    check("ck_counterparty_tin_verification", sql`${table.tinVerificationStatus} IN ('NOT_PROVIDED','PENDING','MATCHED','MISMATCH','INVALID')`),
+    check("ck_counterparty_company_verification", sql`${table.companyVerificationStatus} IN ('NOT_PROVIDED','PENDING','MATCHED','MISMATCH','INVALID')`),
+    check("ck_counterparty_trust_confidence", sql`${table.confidenceBps} BETWEEN 0 AND 10000`),
+    check("ck_counterparty_trust_review_separation", sql`${table.reviewedBy} IS NULL OR ${table.reviewedBy} <> ${table.requestedBy}`),
+  ],
+);
+
+export const counterpartyVerificationSnapshots = sqliteTable(
+  "counterparty_verification_snapshots",
+  {
+    id: text("id").primaryKey(),
+    trustProfileId: text("trust_profile_id").notNull().references(() => counterpartyTrustProfiles.id),
+    provider: text("provider").notNull(),
+    providerEnvironment: text("provider_environment").notNull(),
+    sourceReference: text("source_reference").notNull(),
+    observedVatNumber: text("observed_vat_number"),
+    observedTin: text("observed_tin"),
+    observedCompanyRegistrationNumber: text("observed_company_registration_number"),
+    taxRegistrationStatus: text("tax_registration_status").notNull(),
+    trustStatus: text("trust_status").notNull(),
+    confidenceBps: integer("confidence_bps").notNull(),
+    matchedFields: text("matched_fields").notNull(),
+    conflictingFields: text("conflicting_fields").notNull(),
+    evidenceHash: text("evidence_hash").notNull(),
+    checkedAt: text("checked_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    recordedBy: text("recorded_by").notNull().references(() => appUsers.id),
+  },
+  (table) => [
+    uniqueIndex("ux_counterparty_snapshot_reference").on(table.provider, table.sourceReference),
+    index("idx_counterparty_snapshot_profile_time").on(table.trustProfileId, table.checkedAt),
+    check("ck_counterparty_snapshot_confidence", sql`${table.confidenceBps} BETWEEN 0 AND 10000`),
+  ],
+);
+
+export const counterpartyTrustEvents = sqliteTable(
+  "counterparty_trust_events",
+  {
+    id: text("id").primaryKey(),
+    trustProfileId: text("trust_profile_id").notNull().references(() => counterpartyTrustProfiles.id),
+    eventType: text("event_type").notNull(),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    evidenceHash: text("evidence_hash"),
+    actorId: text("actor_id").notNull().references(() => appUsers.id),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (table) => [index("idx_counterparty_events_profile_time").on(table.trustProfileId, table.occurredAt)],
 );
 
 export const partyRelationships = sqliteTable(

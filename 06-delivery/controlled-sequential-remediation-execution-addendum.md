@@ -111,3 +111,9 @@ Therefore Issue 1 remains blocked until the external PR-004 identity-and-origin 
 On 23 August 2026, the programme authority explicitly instructed implementation to move to Issue 2 because Issue 1 cannot presently be completed. This unlocks only Issue 2 for bounded local/staging implementation with synthetic data. Issue 1 remains `BLOCKED — EXTERNAL DEPENDENCY REQUIRED`; its risk and PR-004 evidence requirement are unchanged.
 
 Issue 2 may implement proofing cases, deterministic reconciliation, uniqueness and mismatch controls, fail-closed provider boundaries, contracts, migrations, UI projections and automated tests. It may not claim a national-registry result, activate a taxpayer/organisation/account/licence, or enable live ITAS. Issue 3 and later issues remain locked unless Issue 2 passes or the programme authority records another explicit sequence exception.
+
+## 10. Authorised Issue 3 sequence exception
+
+On 23 August 2026, the programme authority explicitly instructed implementation to move to Issue 3 and stated that Issue 2 was resolved and completed. The instruction is recorded as a sequence exception that unlocks only Issue 3. It does not create the missing PR-011/PR-003 authority evidence and therefore does not convert Issue 2 from `BLOCKED — EXTERNAL DEPENDENCY REQUIRED` to PASS or CLOSED.
+
+Issue 3 may implement counterparty identifiers, fail-closed trust profiles, synthetic verification clearly separated from authority evidence, freshness and tax-registration gates, immutable verification history, database enforcement, contracts, UI projections and automated tests. It may not claim a NamRA, ITAS or BIPA validation result or enable live authority calls. Issue 4 and later issues remain locked unless Issue 3 passes or the programme authority records another explicit sequence exception.

@@ -18,6 +18,7 @@ export type BusinessPartySubmission = {
   legal_name?: string;
   vat_number?: string;
   tin?: string;
+  company_registration_number?: string;
   email?: string;
   phone?: string;
   address?: string;
@@ -227,6 +228,7 @@ export function normalizeAndValidateBusinessParty(payload: unknown): BusinessPar
   const legalName = optionalText(input.legal_name, "/legal_name", "Legal name", 200, messages);
   const vatNumber = optionalText(input.vat_number, "/vat_number", "VAT number", 40, messages)?.toUpperCase();
   const tin = optionalText(input.tin, "/tin", "TIN", 40, messages)?.toUpperCase();
+  const companyRegistrationNumber = optionalText(input.company_registration_number, "/company_registration_number", "Company registration number", 40, messages)?.toUpperCase();
   const email = optionalText(input.email, "/email", "Email", 254, messages)?.toLowerCase();
   const phone = optionalText(input.phone, "/phone", "Phone", 40, messages);
   const address = optionalText(input.address, "/address", "Address", 1_000, messages);
@@ -236,6 +238,9 @@ export function normalizeAndValidateBusinessParty(payload: unknown): BusinessPar
   }
   if (tin && !/^[A-Z0-9][A-Z0-9 ._/-]{1,39}$/.test(tin)) {
     messages.push({ code: "TIN_INVALID", path: "/tin", message: "TIN contains unsupported characters." });
+  }
+  if (companyRegistrationNumber && !/^[A-Z0-9][A-Z0-9 ._/-]{1,39}$/.test(companyRegistrationNumber)) {
+    messages.push({ code: "COMPANY_REGISTRATION_NUMBER_INVALID", path: "/company_registration_number", message: "Company registration number contains unsupported characters." });
   }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     messages.push({ code: "EMAIL_INVALID", path: "/email", message: "Email must be a valid address." });
@@ -262,6 +267,7 @@ export function normalizeAndValidateBusinessParty(payload: unknown): BusinessPar
     ...(legalName ? { legal_name: legalName } : {}),
     ...(vatNumber ? { vat_number: vatNumber } : {}),
     ...(tin ? { tin } : {}),
+    ...(companyRegistrationNumber ? { company_registration_number: companyRegistrationNumber } : {}),
     ...(email ? { email } : {}),
     ...(phone ? { phone } : {}),
     ...(address ? { address } : {}),
@@ -428,6 +434,7 @@ export function normalizeAndValidateExpense(payload: unknown): ExpenseSubmission
   const taxCents = integerField(input.tax_cents, "/tax_cents", "Tax cents", messages);
   const totalCents = integerField(input.total_cents, "/total_cents", "Total cents", messages);
   if (netCents + taxCents !== totalCents) messages.push({ code: "TOTAL_MISMATCH", path: "/total_cents", message: "Total cents must equal net cents plus tax cents." });
+  if (taxCents > 0 && !supplierPartyId) messages.push({ code: "TAXED_EXPENSE_SUPPLIER_REQUIRED", path: "/supplier_party_id", message: "A tax-bearing expense requires a trusted supplier." });
   if (messages.length) throw new BusinessValidationError(messages);
   return { schema_version: "1.0.0", category_id: categoryId, ...(supplierPartyId ? { supplier_party_id: supplierPartyId } : {}), ...(projectId ? { project_id: projectId } : {}), ...(branchId ? { branch_id: branchId } : {}), expense_number: expenseNumber, expense_date: expenseDate, description, currency, net_cents: netCents, tax_cents: taxCents, total_cents: totalCents };
 }

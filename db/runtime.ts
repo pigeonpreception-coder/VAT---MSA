@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 
 const PHASE0_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
-export const REQUIRED_SCHEMA_REVISION = "issue2-identity-proofing-2026-08-23";
+const ISSUE2_SCHEMA_REVISION = "issue2-identity-proofing-2026-08-23";
+export const REQUIRED_SCHEMA_REVISION = "issue3-counterparty-trust-2026-08-23";
 
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS taxpayers (
@@ -170,12 +171,39 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS business_parties (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
-    display_name TEXT NOT NULL, legal_name TEXT, vat_number TEXT, tin TEXT,
+    display_name TEXT NOT NULL, legal_name TEXT, vat_number TEXT, tin TEXT, company_registration_number TEXT,
     email TEXT, phone TEXT, address TEXT, source_system TEXT NOT NULL,
     source_party_id TEXT, status TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (organisation_id, source_system, source_party_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS counterparty_trust_profiles (
+    id TEXT PRIMARY KEY, business_party_id TEXT NOT NULL UNIQUE REFERENCES business_parties(id),
+    provider TEXT NOT NULL, provider_environment TEXT NOT NULL CHECK (provider_environment IN ('CONTRACT_PENDING','SYNTHETIC_TEST','PRODUCTION_EQUIVALENT','PRODUCTION')),
+    trust_status TEXT NOT NULL CHECK (trust_status IN ('PENDING_PROVIDER','SYNTHETIC_VALID','AUTHORITY_VERIFIED','MISMATCH','INVALID','EXPIRED','UNAVAILABLE')),
+    tax_registration_status TEXT NOT NULL CHECK (tax_registration_status IN ('UNKNOWN','ACTIVE','INACTIVE','SUSPENDED','CANCELLED','NOT_REGISTERED')),
+    vat_verification_status TEXT NOT NULL CHECK (vat_verification_status IN ('NOT_PROVIDED','PENDING','MATCHED','MISMATCH','INVALID')),
+    tin_verification_status TEXT NOT NULL CHECK (tin_verification_status IN ('NOT_PROVIDED','PENDING','MATCHED','MISMATCH','INVALID')),
+    company_verification_status TEXT NOT NULL CHECK (company_verification_status IN ('NOT_PROVIDED','PENDING','MATCHED','MISMATCH','INVALID')),
+    confidence_bps INTEGER NOT NULL DEFAULT 0 CHECK (confidence_bps BETWEEN 0 AND 10000),
+    evidence_hash TEXT, source_reference TEXT, requested_by TEXT NOT NULL REFERENCES app_users(id),
+    reviewed_by TEXT REFERENCES app_users(id), checked_at TEXT, expires_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (provider,source_reference), CHECK (reviewed_by IS NULL OR reviewed_by<>requested_by)
+  )`,
+  `CREATE TABLE IF NOT EXISTS counterparty_verification_snapshots (
+    id TEXT PRIMARY KEY, trust_profile_id TEXT NOT NULL REFERENCES counterparty_trust_profiles(id),
+    provider TEXT NOT NULL, provider_environment TEXT NOT NULL, source_reference TEXT NOT NULL,
+    observed_vat_number TEXT, observed_tin TEXT, observed_company_registration_number TEXT,
+    tax_registration_status TEXT NOT NULL, trust_status TEXT NOT NULL,
+    confidence_bps INTEGER NOT NULL CHECK (confidence_bps BETWEEN 0 AND 10000), matched_fields TEXT NOT NULL,
+    conflicting_fields TEXT NOT NULL, evidence_hash TEXT NOT NULL, checked_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+    recorded_by TEXT NOT NULL REFERENCES app_users(id), UNIQUE (provider,source_reference)
+  )`,
+  `CREATE TABLE IF NOT EXISTS counterparty_trust_events (
+    id TEXT PRIMARY KEY, trust_profile_id TEXT NOT NULL REFERENCES counterparty_trust_profiles(id),
+    event_type TEXT NOT NULL, from_status TEXT, to_status TEXT NOT NULL, reason_code TEXT NOT NULL,
+    evidence_hash TEXT, actor_id TEXT NOT NULL REFERENCES app_users(id), occurred_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS party_relationships (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
@@ -1036,6 +1064,9 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_identity_mismatch_status_opened ON identity_mismatch_cases(status, opened_at)`,
   `CREATE INDEX IF NOT EXISTS idx_identity_proofing_events_case_time ON identity_proofing_events(proofing_case_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
+  `CREATE INDEX IF NOT EXISTS idx_counterparty_trust_status_expiry ON counterparty_trust_profiles(trust_status,expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_counterparty_snapshot_profile_time ON counterparty_verification_snapshots(trust_profile_id,checked_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_counterparty_events_profile_time ON counterparty_trust_events(trust_profile_id,occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
@@ -2178,6 +2209,7 @@ const LOCAL_COMPATIBILITY_COLUMNS = [
   ["self_serve_signup_applications", "onboarding_path", "ALTER TABLE self_serve_signup_applications ADD COLUMN onboarding_path TEXT NOT NULL DEFAULT 'COMPANY_ADMIN' CHECK (onboarding_path='COMPANY_ADMIN')"],
   ["invoices", "tax_rule_set_id", "ALTER TABLE invoices ADD COLUMN tax_rule_set_id TEXT REFERENCES tax_rule_sets(id)"],
   ["certificates", "rule_set_version", "ALTER TABLE certificates ADD COLUMN rule_set_version TEXT"],
+  ["business_parties", "company_registration_number", "ALTER TABLE business_parties ADD COLUMN company_registration_number TEXT"],
 ] as const;
 
 const PHASE0_REFERENCE_SEED_STATEMENTS = [
@@ -2336,6 +2368,94 @@ const ISSUE2_IDENTITY_TRIGGER_STATEMENTS = [
     BEGIN SELECT RAISE(ABORT,'IDENTITY_MISMATCH_INDEPENDENT_REVIEW_REQUIRED'); END`,
 ];
 
+const ISSUE3_COUNTERPARTY_INDEX_STATEMENTS = [
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_business_parties_active_vat
+    ON business_parties(organisation_id,vat_number) WHERE status='ACTIVE' AND vat_number IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_business_parties_active_tin
+    ON business_parties(organisation_id,tin) WHERE status='ACTIVE' AND tin IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_business_parties_active_company_registration
+    ON business_parties(organisation_id,company_registration_number) WHERE status='ACTIVE' AND company_registration_number IS NOT NULL`,
+];
+
+const ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS counterparty_authority_guard_insert
+    BEFORE INSERT ON counterparty_trust_profiles
+    WHEN NEW.trust_status='AUTHORITY_VERIFIED' AND (
+      NEW.provider_environment NOT IN ('PRODUCTION_EQUIVALENT','PRODUCTION')
+      OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+      OR NEW.source_reference IS NULL OR NEW.checked_at IS NULL OR NEW.expires_at IS NULL
+      OR datetime(NEW.expires_at)<=datetime(NEW.checked_at)
+      OR NEW.reviewed_by IS NULL OR NEW.reviewed_by=NEW.requested_by
+    ) BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_AUTHORITY_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_authority_guard_update
+    BEFORE UPDATE OF trust_status,provider_environment,evidence_hash,source_reference,checked_at,expires_at,reviewed_by ON counterparty_trust_profiles
+    WHEN NEW.trust_status='AUTHORITY_VERIFIED' AND (
+      NEW.provider_environment NOT IN ('PRODUCTION_EQUIVALENT','PRODUCTION')
+      OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+      OR NEW.source_reference IS NULL OR NEW.checked_at IS NULL OR NEW.expires_at IS NULL
+      OR datetime(NEW.expires_at)<=datetime(NEW.checked_at)
+      OR NEW.reviewed_by IS NULL OR NEW.reviewed_by=NEW.requested_by
+    ) BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_AUTHORITY_EVIDENCE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_synthetic_guard_insert
+    BEFORE INSERT ON counterparty_trust_profiles
+    WHEN NEW.trust_status='SYNTHETIC_VALID' AND (
+      NEW.provider_environment<>'SYNTHETIC_TEST' OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+      OR NEW.checked_at IS NULL OR NEW.expires_at IS NULL OR datetime(NEW.expires_at)<=datetime(NEW.checked_at)
+    ) BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_SYNTHETIC_EVIDENCE_INVALID'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_synthetic_guard_update
+    BEFORE UPDATE OF trust_status,provider_environment,evidence_hash,checked_at,expires_at ON counterparty_trust_profiles
+    WHEN NEW.trust_status='SYNTHETIC_VALID' AND (
+      NEW.provider_environment<>'SYNTHETIC_TEST' OR NEW.evidence_hash IS NULL OR length(trim(NEW.evidence_hash))<32
+      OR NEW.checked_at IS NULL OR NEW.expires_at IS NULL OR datetime(NEW.expires_at)<=datetime(NEW.checked_at)
+    ) BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_SYNTHETIC_EVIDENCE_INVALID'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_profile_no_delete BEFORE DELETE ON counterparty_trust_profiles
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_HISTORY_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_snapshot_no_update BEFORE UPDATE ON counterparty_verification_snapshots
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_SNAPSHOT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_snapshot_no_delete BEFORE DELETE ON counterparty_verification_snapshots
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_SNAPSHOT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_event_no_update BEFORE UPDATE ON counterparty_trust_events
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_EVENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_event_no_delete BEFORE DELETE ON counterparty_trust_events
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_EVENT_IMMUTABLE'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_identity_change_requires_reverification
+    BEFORE UPDATE OF legal_name,vat_number,tin,company_registration_number ON business_parties
+    WHEN (COALESCE(NEW.legal_name,'')<>COALESCE(OLD.legal_name,'') OR COALESCE(NEW.vat_number,'')<>COALESCE(OLD.vat_number,'')
+      OR COALESCE(NEW.tin,'')<>COALESCE(OLD.tin,'') OR COALESCE(NEW.company_registration_number,'')<>COALESCE(OLD.company_registration_number,''))
+      AND EXISTS (SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=OLD.id AND t.trust_status<>'PENDING_PROVIDER')
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_REVERIFICATION_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_relationship_trust_insert
+    BEFORE INSERT ON party_relationships WHEN NEW.status='ACTIVE' AND NOT EXISTS (
+      SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=NEW.party_id)
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_PROFILE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS counterparty_relationship_trust_update
+    BEFORE UPDATE OF status ON party_relationships WHEN NEW.status='ACTIVE' AND NOT EXISTS (
+      SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=NEW.party_id)
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_PROFILE_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS quotation_counterparty_trust_insert
+    BEFORE INSERT ON quotations WHEN NOT EXISTS (
+      SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=NEW.customer_party_id
+        AND t.trust_status IN ('AUTHORITY_VERIFIED','SYNTHETIC_VALID') AND datetime(t.expires_at)>CURRENT_TIMESTAMP)
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS quotation_counterparty_trust_update
+    BEFORE UPDATE OF customer_party_id ON quotations WHEN NOT EXISTS (
+      SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=NEW.customer_party_id
+        AND t.trust_status IN ('AUTHORITY_VERIFIED','SYNTHETIC_VALID') AND datetime(t.expires_at)>CURRENT_TIMESTAMP)
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS project_counterparty_trust_insert
+    BEFORE INSERT ON projects WHEN NEW.customer_party_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=NEW.customer_party_id
+        AND t.trust_status IN ('AUTHORITY_VERIFIED','SYNTHETIC_VALID') AND datetime(t.expires_at)>CURRENT_TIMESTAMP)
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_REQUIRED'); END`,
+  `CREATE TRIGGER IF NOT EXISTS expense_counterparty_trust_insert
+    BEFORE INSERT ON expenses WHEN (NEW.supplier_party_id IS NOT NULL OR NEW.tax_cents>0) AND (
+      NEW.supplier_party_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=NEW.supplier_party_id
+          AND t.trust_status IN ('AUTHORITY_VERIFIED','SYNTHETIC_VALID') AND datetime(t.expires_at)>CURRENT_TIMESTAMP
+          AND (NEW.tax_cents=0 OR t.tax_registration_status='ACTIVE')))
+    BEGIN SELECT RAISE(ABORT,'COUNTERPARTY_TRUST_REQUIRED'); END`,
+];
+
 async function tableHasColumn(db: D1Database, table: string, column: string): Promise<boolean> {
   const result = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
   return result.results.some((item) => item.name === column);
@@ -2372,6 +2492,30 @@ async function applyIssue2LocalUpgrade(db: D1Database): Promise<void> {
     SELECT 'proof-event-reg-0001','proof-reg-0001','IdentityProofingRequested',NULL,'PENDING_PROVIDER',0,
       'AUTHORITATIVE_PROVIDER_CONTRACT_REQUIRED',NULL,requested_by,'2026-08-23T20:00:00Z'
     FROM identity_proofing_cases WHERE id='proof-reg-0001'`).run();
+  await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
+    VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(ISSUE2_SCHEMA_REVISION).run();
+}
+
+async function applyIssue3LocalUpgrade(db: D1Database): Promise<void> {
+  await db.prepare(`INSERT OR IGNORE INTO counterparty_trust_profiles
+    (id,business_party_id,provider,provider_environment,trust_status,tax_registration_status,vat_verification_status,
+     tin_verification_status,company_verification_status,confidence_bps,evidence_hash,source_reference,requested_by,reviewed_by,
+     checked_at,expires_at,created_at,updated_at)
+    SELECT 'trust-'||p.id,p.id,'ITAS_BIPA','CONTRACT_PENDING','PENDING_PROVIDER','UNKNOWN',
+      CASE WHEN p.vat_number IS NULL THEN 'NOT_PROVIDED' ELSE 'PENDING' END,
+      CASE WHEN p.tin IS NULL THEN 'NOT_PROVIDED' ELSE 'PENDING' END,
+      CASE WHEN p.company_registration_number IS NULL THEN 'NOT_PROVIDED' ELSE 'PENDING' END,
+      0,NULL,NULL,COALESCE((SELECT id FROM app_users WHERE id='usr-local-admin'),(SELECT id FROM app_users ORDER BY id LIMIT 1)),
+      NULL,NULL,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    FROM business_parties p WHERE NOT EXISTS (SELECT 1 FROM counterparty_trust_profiles t WHERE t.business_party_id=p.id)`).run();
+  await db.prepare(`INSERT OR IGNORE INTO counterparty_trust_events
+    (id,trust_profile_id,event_type,from_status,to_status,reason_code,evidence_hash,actor_id,occurred_at)
+    SELECT 'trust-event-'||t.business_party_id,t.id,'CounterpartyVerificationRequested',NULL,'PENDING_PROVIDER',
+      'AUTHORITY_PROVIDER_CONTRACT_REQUIRED',NULL,t.requested_by,CURRENT_TIMESTAMP
+    FROM counterparty_trust_profiles t WHERE NOT EXISTS (
+      SELECT 1 FROM counterparty_trust_events e WHERE e.trust_profile_id=t.id)`).run();
+  await db.batch(ISSUE3_COUNTERPARTY_INDEX_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.prepare(`INSERT OR REPLACE INTO app_schema_revisions (revision,applied_at,source)
     VALUES (?,CURRENT_TIMESTAMP,'LOCAL_COMPATIBILITY_UPGRADE')`).bind(REQUIRED_SCHEMA_REVISION).run();
 }
@@ -2438,11 +2582,13 @@ async function initialize(db: D1Database): Promise<void> {
     if (!expenseReceiptGovernanceSeed) await db.batch(EXPENSE_RECEIPT_GOVERNANCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     await applyPhase0LocalUpgrade(db);
     await applyIssue2LocalUpgrade(db);
+    await applyIssue3LocalUpgrade(db);
     const licenseEnforcementSeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("license-central-enforcement-v1").first();
     if (!licenseEnforcementSeed) await db.batch(LICENSE_ENFORCEMENT_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   }
   await db.batch(EXPENSE_RECEIPT_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE2_IDENTITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   const foreignKeyViolations = await db.prepare("PRAGMA foreign_key_check").all<Record<string, unknown>>();
   if (foreignKeyViolations.results.length > 0) throw new Error("VAT-MSA local compatibility upgrade left foreign-key violations.");
   await db.prepare("PRAGMA optimize").run();

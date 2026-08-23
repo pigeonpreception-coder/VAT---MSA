@@ -13,6 +13,7 @@ import {
   linkExpenseReceipt,
   postJournal,
   recordStockMovement,
+  syntheticallyVerifyBusinessParty,
   rejectQuotation,
   deactivateBusinessParty,
   updateBusinessParty,
@@ -21,11 +22,12 @@ import {
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { BusinessValidationError } from "@/lib/domain/business";
+import { CounterpartyTrustValidationError } from "@/lib/domain/counterparty-trust";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "LINK_EXPENSE_RECEIPT" | "DECIDE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "SYNTHETIC_VERIFY_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "LINK_EXPENSE_RECEIPT" | "DECIDE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -95,6 +97,10 @@ export async function handleBusinessPost(request: Request, permission: string, c
         if (!resourceId) throw new BusinessResourceError("Business party id is required.", 400);
         resource = await deactivateBusinessParty(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       }
+      else if (command === "SYNTHETIC_VERIFY_BUSINESS_PARTY") {
+        if (!resourceId) throw new BusinessResourceError("Business party id is required.", 400);
+        resource = await syntheticallyVerifyBusinessParty(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
       else if (command === "CREATE_QUOTATION") resource = await createQuotation(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "UPDATE_QUOTATION") {
         if (!resourceId) throw new BusinessResourceError("Quotation id is required.", 400);
@@ -130,6 +136,7 @@ export async function handleBusinessPost(request: Request, permission: string, c
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
     if (error instanceof RequestGuardError) return problem(error.status, error.code, error.status === 429 ? "Rate limited" : "Bad request", error.message, context.correlationId, undefined, error.retryAfter);
     if (error instanceof BusinessValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
+    if (error instanceof CounterpartyTrustValidationError) return problem(422, "COUNTERPARTY_TRUST_VALIDATION_FAILED", "Validation failed", error.message, context.correlationId);
     if (error instanceof InvoiceValidationError) return problem(422, "INVOICE_VALIDATION_FAILED", "Invoice validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
     if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
     if (error instanceof RepositoryConflictError) return problem(409, "BUSINESS_CONFLICT", "Conflict", error.message, context.correlationId);
