@@ -1,6 +1,6 @@
 # VAT-MSA Architecture Implementation Matrix
 
-**Evidence date:** 2026-08-14
+**Evidence date:** 2026-08-25
 **Repository scope:** executable controlled pilot and production-oriented application foundation  
 **Governing architecture:** `08-enterprise-architecture/` and its approval gate
 
@@ -48,6 +48,18 @@ This matrix is the truthful completion record for the approved architecture. It 
 | 29 | Analytics | Operational metrics and approved report projections; no autonomous adverse decisions | ARCHITECTURE / PRODUCTION EVIDENCE | Governed warehouse/lakehouse, lineage, certified metrics, privacy and model controls |
 | 30 | Administration | Separate NamRA Admin and Super Admin policies, service-component health and finance-data exclusion from technical admin | VERIFIED FOUNDATION | Central configuration/change APIs, PAM/JIT controls and independent SoD testing |
 | 31 | Security | Bounded ingestion, layered rate limits, correlated logs/events, incidents, append-only audit, secret scan and SBOM | VERIFIED FOUNDATION | Production IAM/PAM, KMS/HSM, WAF/SIEM/SOC, penetration test, continuous SCA and response exercises |
+
+## Workspace, licensing and workflow extension coverage
+
+Five domains from the workspace/organisation/licensing/workflow extension (`08-enterprise-architecture/30-workspace-organisation-licensing-workflow-architecture.md`) have working schema and logic in the repository (migration `0008`) but were not previously tracked as their own matrix rows. Recorded here for the first time; Workflow itself is tracked under domain #8's closure work (Module 8 in `MODULE_DEVELOPMENT_PLAYBOOK.md`), not repeated below.
+
+| Domain | Current implementation | Status | Required closure before national production |
+|---|---|---|---|
+| Licensing & Entitlements | Plan/feature/entitlement/subscription/organisation-licence/usage schema, licence-continuity policy (`evaluateEntitlement`) wired into every control-plane command | CONTROLLED FOUNDATION | Standalone `Activate/Suspend/Upgrade/Renew` lifecycle commands and standalone `GetEntitlements`/`GetUsage` queries (currently read only via the bundled administration snapshot); commercial/billing provider integration |
+| Organisation Administration | Employee/position/department/business-unit/administrator schema; invite and terminate-employee commands with licence-seat and workflow-reassignment effects | CONTROLLED FOUNDATION | `AppointAdministrator` command, an activate-employee (`INVITED → ACTIVE`) transition, and NamRA/legal confirmation of administrator-proofing policy |
+| Organisation Authorization | Versioned tenant-defined roles, role-permission grants, user-role and user-capability assignment schema; role creation with a protected-permission ceiling | CONTROLLED FOUNDATION | A standalone `GrantCapability` command and formal governance approval of the protected-permission ceiling |
+| Access Governance | Request/approve/review/certify schema and commands with self-approval and segregation-of-duties guards; quarterly review cycle with auto-close on full certification | VERIFIED PILOT | Standalone `Revoke`/`Offboard` commands distinct from the existing decision flows; formal approval of the access-certification policy |
+| Workspace & Navigation | Workspace/folder/item/preference schema; permission, feature and capability-filtered navigation query | CONTROLLED FOUNDATION | `GetChildren`/`GetActions`/`SavePreference` commands; the `navigation_permissions` table exists but is not yet wired into the navigation query and should be connected or removed |
 
 ## Cross-cutting architecture evidence
 
