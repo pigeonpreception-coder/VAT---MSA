@@ -2,15 +2,20 @@ import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import {
   evaluateQuotationLifecycle,
+  normalizeAndValidateAccount,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateJournal,
+  normalizeAndValidateJournalReversal,
+  normalizeAndValidatePeriodClose,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
+  type AccountSubmission,
+  type AccountType,
   type BusinessPartyDeactivationSubmission,
   type BusinessPartyRelationship,
   type BusinessPartySubmission,
@@ -787,6 +792,19 @@ export async function convertQuotationToInvoice(
   return invoice;
 }
 
+/**
+ * Module 5 Phase C: accounting periods are implicit and open by default —
+ * there is no separate CreateAccountingPeriod command in the playbook, only
+ * ClosePeriod — so a period only exists as a row once it's been explicitly
+ * closed. Posting (including a reversal) into a period that has been closed
+ * is refused; this is the one piece of real teeth ClosePeriod has.
+ */
+async function assertPeriodOpen(db: D1Database, organisationId: string, date: string) {
+  const periodCode = date.slice(0, 7);
+  const period = await db.prepare("SELECT status FROM accounting_periods WHERE organisation_id=? AND period_code=?").bind(organisationId, periodCode).first<{ status: string }>();
+  if (period?.status === "CLOSED") throw new RepositoryConflictError(`Accounting period ${periodCode} is closed to new postings.`);
+}
+
 export async function postJournal(payload: JournalSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
   const journal = normalizeAndValidateJournal(payload);
@@ -795,6 +813,7 @@ export async function postJournal(payload: JournalSubmission, actor: UserContext
   const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, journal }));
   const prior = await priorCommand(db, actor.userId, "POST_JOURNAL", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM journal_entries WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  await assertPeriodOpen(db, organisation.id, journal.journal_date);
   for (const line of journal.lines) {
     await requireOwnedReference(db, "chart_of_accounts", line.account_id, organisation.id, "Account");
     await requireOwnedReference(db, "branches", line.branch_id, organisation.id, "Branch");
@@ -814,6 +833,194 @@ export async function postJournal(payload: JournalSubmission, actor: UserContext
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM journal_entries WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase C CreateAccount. Pre-checks the (organisation_id, code) uniqueness for a clean 409 message, backed by the table's own UNIQUE constraint as the real guarantee — the same pre-check-plus-constraint pattern used for business party VAT/TIN duplicates. */
+export async function createAccount(payload: AccountSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const account = normalizeAndValidateAccount(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, account }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_ACCOUNT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM chart_of_accounts WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,name FROM chart_of_accounts WHERE organisation_id=? AND code=?").bind(organisation.id, account.code).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`Account code ${account.code} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "ACCOUNT_CREATED", "ACCOUNT", id, { organisationId: organisation.id, code: account.code, accountType: account.account_type, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO chart_of_accounts (id,organisation_id,code,name,account_type,currency,control_type,status,created_at)
+      VALUES (?,?,?,?,?,?,?,'ACTIVE',?)`).bind(id, organisation.id, account.code, account.name, account.account_type, account.currency, account.control_type ?? null, now),
+    commandRecord(db, actor.userId, "CREATE_ACCOUNT", idempotencyKey, requestHash, "ACCOUNT", id, now),
+    outboxRecord(db, "ACCOUNT", id, "AccountCreated", organisation.id, { account_id: id, organisation_id: organisation.id, code: account.code, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM chart_of_accounts WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase C ReverseJournalEntry. A posted journal is never edited or
+ * deleted — a reversal is a brand-new, equal-and-opposite entry (every
+ * line's debit/credit swapped) posted as of today, with the original
+ * flipped to status='REVERSED' as a traceability marker only. Both entries
+ * remain in journal_lines and both count toward TrialBalance/Statements —
+ * their opposite amounts net to zero naturally, which is what makes this a
+ * real reversal rather than a deletion in disguise. A journal already
+ * reversed once cannot be reversed again (checked via
+ * reverses_journal_entry_id, not a second status value), and the reversal
+ * itself is subject to the same closed-period check as any other posting.
+ */
+export async function reverseJournalEntry(journalEntryId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateJournalReversal(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const original = await db.prepare("SELECT * FROM journal_entries WHERE id=? AND organisation_id=?").bind(journalEntryId, organisation.id).first<Record<string, string>>();
+  if (!original) throw new BusinessResourceError("Journal entry was not found in the authorised organisation.", 404);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, journal_entry_id: journalEntryId, input }));
+  const prior = await priorCommand(db, actor.userId, "REVERSE_JOURNAL_ENTRY", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM journal_entries WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (original.status !== "POSTED") throw new RepositoryConflictError(`Only a posted journal entry can be reversed; ${journalEntryId} is currently ${original.status}.`);
+  const alreadyReversed = await db.prepare("SELECT id FROM journal_entries WHERE reverses_journal_entry_id=?").bind(journalEntryId).first<{ id: string }>();
+  if (alreadyReversed) throw new RepositoryConflictError(`This journal entry was already reversed as ${alreadyReversed.id}.`);
+  const now = new Date().toISOString();
+  const journalDate = now.slice(0, 10);
+  await assertPeriodOpen(db, organisation.id, journalDate);
+  const originalLines = await db.prepare("SELECT * FROM journal_lines WHERE journal_entry_id=? ORDER BY line_number").bind(journalEntryId).all<Record<string, string | number | null>>();
+  const id = crypto.randomUUID();
+  const journalNumber = `${original.journal_number}-REV`;
+  const audit = await auditEnvelope(db, actor, "JOURNAL_REVERSED", "JOURNAL", id, { organisationId: organisation.id, reversesJournalEntryId: journalEntryId, reason: input.reason, correlationId }, now);
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO journal_entries
+      (id,organisation_id,journal_number,journal_date,reference,description,currency,status,source_type,source_id,created_by,posted_by,created_at,posted_at,reverses_journal_entry_id)
+      VALUES (?,?,?,?,?,?,?,'POSTED','ADJUSTMENT',?,?,?,?,?,?)`)
+      .bind(id, organisation.id, journalNumber, journalDate, original.journal_number, `Reversal of ${original.journal_number}: ${input.reason}`, original.currency, journalEntryId, actor.userId, actor.userId, now, now, journalEntryId),
+    db.prepare("UPDATE journal_entries SET status='REVERSED' WHERE id=?").bind(journalEntryId),
+    commandRecord(db, actor.userId, "REVERSE_JOURNAL_ENTRY", idempotencyKey, requestHash, "JOURNAL", id, now),
+    outboxRecord(db, "JOURNAL", id, "JournalReversed", organisation.id, { journal_id: id, reverses_journal_entry_id: journalEntryId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ];
+  originalLines.results.forEach((line, index) => statements.push(db.prepare(`INSERT INTO journal_lines
+    (id,journal_entry_id,line_number,account_id,branch_id,project_id,description,debit_cents,credit_cents,tax_code)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+    crypto.randomUUID(), id, index + 1, line.account_id, line.branch_id, line.project_id,
+    `Reversal: ${line.description}`, line.credit_cents, line.debit_cents, line.tax_code,
+  )));
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM journal_entries WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase C ClosePeriod. Idempotent on an already-closed period —
+ * re-closing is a no-op success, not an error, matching this codebase's
+ * established idempotent-on-already-satisfied pattern (e.g.
+ * markObligationSatisfied). A period only gains a row once it's actually
+ * closed; there is no separate "create/open a period" command, so an
+ * un-closed period simply has no row and postings proceed unchecked.
+ */
+export async function closeAccountingPeriod(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidatePeriodClose(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, input }));
+  const prior = await priorCommand(db, actor.userId, "CLOSE_ACCOUNTING_PERIOD", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM accounting_periods WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const [year, month] = input.period_code.split("-").map(Number);
+  const periodStart = `${input.period_code}-01`;
+  const periodEndDate = new Date(Date.UTC(year, month, 0));
+  const periodEnd = periodEndDate.toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  if (periodEnd > today) throw new RepositoryConflictError("A period cannot be closed before it has ended.");
+  const existing = await db.prepare("SELECT * FROM accounting_periods WHERE organisation_id=? AND period_code=?").bind(organisation.id, input.period_code).first<Record<string, unknown>>();
+  if (existing?.status === "CLOSED") return existing;
+  const now = new Date().toISOString();
+  const id = (existing?.id as string | undefined) ?? crypto.randomUUID();
+  const audit = await auditEnvelope(db, actor, "ACCOUNTING_PERIOD_CLOSED", "ACCOUNTING_PERIOD", id, { organisationId: organisation.id, periodCode: input.period_code, correlationId }, now);
+  await db.batch([
+    existing
+      ? db.prepare("UPDATE accounting_periods SET status='CLOSED', closed_by=?, closed_at=? WHERE id=?").bind(actor.userId, now, id)
+      : db.prepare(`INSERT INTO accounting_periods (id,organisation_id,period_code,period_start,period_end,status,closed_by,closed_at,created_at)
+          VALUES (?,?,?,?,?,'CLOSED',?,?,?)`).bind(id, organisation.id, input.period_code, periodStart, periodEnd, actor.userId, now, now),
+    commandRecord(db, actor.userId, "CLOSE_ACCOUNTING_PERIOD", idempotencyKey, requestHash, "ACCOUNTING_PERIOD", id, now),
+    outboxRecord(db, "ACCOUNTING_PERIOD", id, "AccountingPeriodClosed", organisation.id, { period_id: id, period_code: input.period_code, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM accounting_periods WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase C TrialBalance. Sums every journal_lines row regardless of
+ * its parent journal_entries.status — a REVERSED original's lines are real
+ * historical postings, and the reversal's opposite lines net them to zero
+ * arithmetically; excluding REVERSED entries would double-count the
+ * reversal's own correcting effect. as_of bounds journal_date, not
+ * created_at, matching how a trial balance is normally read "as of" a date.
+ */
+export async function getTrialBalance(actor: UserContext, requestedOrganisationId?: string | null, asOf?: string) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const asOfDate = asOf ?? new Date().toISOString().slice(0, 10);
+  const rows = await db.prepare(`SELECT a.id AS account_id, a.code, a.name, a.account_type,
+      COALESCE(SUM(l.debit_cents),0) AS total_debit_cents, COALESCE(SUM(l.credit_cents),0) AS total_credit_cents
+    FROM chart_of_accounts a
+    LEFT JOIN journal_lines l ON l.account_id=a.id
+    LEFT JOIN journal_entries j ON j.id=l.journal_entry_id AND j.journal_date<=?
+    WHERE a.organisation_id=? AND a.status='ACTIVE'
+    GROUP BY a.id ORDER BY a.code`).bind(asOfDate, organisation.id).all<{
+    account_id: string; code: string; name: string; account_type: AccountType; total_debit_cents: number; total_credit_cents: number;
+  }>();
+  const accounts = rows.results.map((row) => ({ ...row, balance_cents: row.total_debit_cents - row.total_credit_cents }));
+  const totalDebitCents = accounts.reduce((sum, row) => sum + row.total_debit_cents, 0);
+  const totalCreditCents = accounts.reduce((sum, row) => sum + row.total_credit_cents, 0);
+  return { organisation_id: organisation.id, as_of: asOfDate, accounts, total_debit_cents: totalDebitCents, total_credit_cents: totalCreditCents, balanced: totalDebitCents === totalCreditCents };
+}
+
+/**
+ * Module 5 Phase C Statements. A deliberately simplified pair of reports,
+ * proportionate to this module's "lighter CRUD standard" watch-out — not a
+ * full general-ledger closing cycle:
+ *  - Income statement: revenue minus expense, summed over [from, to] by
+ *    journal_date.
+ *  - Balance sheet: asset/liability/equity account balances as of `to`,
+ *    plus the same-range net income folded in as a computed "retained
+ *    earnings" line — there is no period-end closing journal that actually
+ *    zeroes revenue/expense into equity, so this stays a live computed
+ *    view rather than a posted closing entry. `balanced` should always be
+ *    true given the underlying double-entry invariant; it's surfaced
+ *    explicitly so a caller can see the check was made, not just assume it.
+ */
+export async function getFinancialStatements(actor: UserContext, requestedOrganisationId: string | null | undefined, from: string, to: string) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const rows = await db.prepare(`SELECT a.account_type, COALESCE(SUM(l.debit_cents),0) AS total_debit_cents, COALESCE(SUM(l.credit_cents),0) AS total_credit_cents
+    FROM chart_of_accounts a
+    LEFT JOIN journal_lines l ON l.account_id=a.id
+    LEFT JOIN journal_entries j ON j.id=l.journal_entry_id AND j.journal_date BETWEEN ? AND ?
+    WHERE a.organisation_id=? AND a.status='ACTIVE'
+    GROUP BY a.account_type`).bind(from, to, organisation.id).all<{ account_type: AccountType; total_debit_cents: number; total_credit_cents: number }>();
+  const byType = Object.fromEntries(rows.results.map((row) => [row.account_type, row]));
+  const revenueCents = (byType.REVENUE?.total_credit_cents ?? 0) - (byType.REVENUE?.total_debit_cents ?? 0);
+  const expenseCents = (byType.EXPENSE?.total_debit_cents ?? 0) - (byType.EXPENSE?.total_credit_cents ?? 0);
+  const netIncomeCents = revenueCents - expenseCents;
+  const assetCents = (byType.ASSET?.total_debit_cents ?? 0) - (byType.ASSET?.total_credit_cents ?? 0);
+  const liabilityCents = (byType.LIABILITY?.total_credit_cents ?? 0) - (byType.LIABILITY?.total_debit_cents ?? 0);
+  const equityCents = (byType.EQUITY?.total_credit_cents ?? 0) - (byType.EQUITY?.total_debit_cents ?? 0);
+  return {
+    organisation_id: organisation.id,
+    from,
+    to,
+    income_statement: { revenue_cents: revenueCents, expense_cents: expenseCents, net_income_cents: netIncomeCents },
+    balance_sheet: {
+      assets_cents: assetCents,
+      liabilities_cents: liabilityCents,
+      equity_cents: equityCents,
+      retained_earnings_cents: netIncomeCents,
+      total_liabilities_and_equity_cents: liabilityCents + equityCents + netIncomeCents,
+      balanced: assetCents === liabilityCents + equityCents + netIncomeCents,
+    },
+  };
 }
 
 export async function createExpense(payload: ExpenseSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {

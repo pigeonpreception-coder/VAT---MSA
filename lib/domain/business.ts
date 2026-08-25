@@ -435,6 +435,60 @@ export function normalizeAndValidateStockMovement(payload: unknown): StockMoveme
   return { schema_version: "1.0.0", warehouse_id: warehouseId, product_id: productId, movement_type: movementType, quantity_micros: quantityMicros, unit_cost_cents: unitCostCents, reference_type: referenceType, reference_id: referenceId, reason, occurred_at: occurredAt };
 }
 
+export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+
+export type AccountSubmission = {
+  schema_version: "1.0.0";
+  code: string;
+  name: string;
+  account_type: AccountType;
+  currency: string;
+  control_type?: string;
+};
+
+const ACCOUNT_TYPES = new Set<AccountType>(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
+
+/** Module 5 Phase C CreateAccount. control_type (e.g. BANK, PAYABLE, COST_OF_SALES — see the seeded chart of accounts) is a free-text sub-classification, not a fixed enum: chart_of_accounts.control_type carries no CHECK constraint, so this stays as open as the schema it feeds. */
+export function normalizeAndValidateAccount(payload: unknown): AccountSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const code = textField(input.code, "/code", "Account code", 1, 20, messages).toUpperCase();
+  if (code && !/^[A-Z0-9][A-Z0-9._-]{0,19}$/.test(code)) messages.push({ code: "CODE_INVALID", path: "/code", message: "Account code contains unsupported characters." });
+  const name = textField(input.name, "/name", "Account name", 2, 200, messages);
+  const accountType = textValue(input.account_type).toUpperCase() as AccountType;
+  if (!ACCOUNT_TYPES.has(accountType)) messages.push({ code: "ACCOUNT_TYPE_INVALID", path: "/account_type", message: `account_type must be one of: ${[...ACCOUNT_TYPES].join(", ")}.` });
+  const currency = currencyField(input.currency, messages);
+  const controlType = optionalText(input.control_type, "/control_type", "Control type", 40, messages)?.toUpperCase();
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", code, name, account_type: accountType, currency, ...(controlType ? { control_type: controlType } : {}) };
+}
+
+export type JournalReversalSubmission = { schema_version: "1.0.0"; reason: string };
+
+export function normalizeAndValidateJournalReversal(payload: unknown): JournalReversalSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const reason = textField(input.reason, "/reason", "Reversal reason", 10, 500, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}
+
+export type PeriodCloseSubmission = { schema_version: "1.0.0"; period_code: string };
+
+const PERIOD_CODE_PATTERN = /^\d{4}-\d{2}$/;
+
+export function normalizeAndValidatePeriodClose(payload: unknown): PeriodCloseSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const periodCode = textValue(input.period_code);
+  if (!PERIOD_CODE_PATTERN.test(periodCode)) messages.push({ code: "PERIOD_CODE_INVALID", path: "/period_code", message: "period_code must use YYYY-MM." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", period_code: periodCode };
+}
+
 export function normalizeAndValidateProject(payload: unknown): ProjectSubmission {
   const input = record(payload);
   const messages: BusinessValidationMessage[] = [];

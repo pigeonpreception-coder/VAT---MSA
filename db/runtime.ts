@@ -202,7 +202,15 @@ const SCHEMA_STATEMENTS = [
     description TEXT NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
     source_type TEXT NOT NULL, source_id TEXT, created_by TEXT NOT NULL REFERENCES app_users(id),
     posted_by TEXT REFERENCES app_users(id), created_at TEXT NOT NULL, posted_at TEXT,
+    reverses_journal_entry_id TEXT REFERENCES journal_entries(id),
     UNIQUE (organisation_id, journal_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accounting_periods (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    period_code TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+    status TEXT NOT NULL, closed_by TEXT REFERENCES app_users(id), closed_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, period_code)
   )`,
   `CREATE TABLE IF NOT EXISTS journal_lines (
     id TEXT PRIMARY KEY, journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id),
@@ -915,6 +923,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
   `CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id, journal_entry_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_accounting_periods_org_status ON accounting_periods(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,

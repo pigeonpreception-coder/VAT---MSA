@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   BusinessValidationError,
   evaluateQuotationLifecycle,
+  normalizeAndValidateAccount,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateJournal,
+  normalizeAndValidateJournalReversal,
+  normalizeAndValidatePeriodClose,
   normalizeAndValidateProject,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
@@ -155,5 +158,25 @@ describe("business command validation", () => {
       start_date: "2026-09-01",
       end_date: "2026-08-01",
     })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes a well-formed account and rejects an unsupported account_type", () => {
+    const result = normalizeAndValidateAccount({ schema_version: "1.0.0", code: "6000", name: "Office supplies", account_type: "expense", currency: "nad", control_type: "expense" });
+    expect(result).toEqual({ schema_version: "1.0.0", code: "6000", name: "Office supplies", account_type: "EXPENSE", currency: "NAD", control_type: "EXPENSE" });
+    expect(() => normalizeAndValidateAccount({ schema_version: "1.0.0", code: "6001", name: "Office supplies", account_type: "CONTRA", currency: "NAD" })).toThrowError(BusinessValidationError);
+  });
+
+  it("rejects an account code containing unsupported characters", () => {
+    expect(() => normalizeAndValidateAccount({ schema_version: "1.0.0", code: "6000 A", name: "Office supplies", account_type: "EXPENSE", currency: "NAD" })).toThrowError(BusinessValidationError);
+  });
+
+  it("requires a meaningful journal reversal reason", () => {
+    expect(normalizeAndValidateJournalReversal({ schema_version: "1.0.0", reason: "Posted against the wrong account in error." })).toEqual({ schema_version: "1.0.0", reason: "Posted against the wrong account in error." });
+    expect(() => normalizeAndValidateJournalReversal({ schema_version: "1.0.0", reason: "Oops" })).toThrowError(BusinessValidationError);
+  });
+
+  it("requires period_code to use YYYY-MM", () => {
+    expect(normalizeAndValidatePeriodClose({ schema_version: "1.0.0", period_code: "2026-07" })).toEqual({ schema_version: "1.0.0", period_code: "2026-07" });
+    expect(() => normalizeAndValidatePeriodClose({ schema_version: "1.0.0", period_code: "Q3-2026" })).toThrowError(BusinessValidationError);
   });
 });
