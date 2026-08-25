@@ -129,8 +129,8 @@ export type QuotationRejectionSubmission = {
   reason: string;
 };
 
-export type QuotationLifecycleAction = "EDIT" | "ACCEPT" | "REJECT" | "EXPIRE" | "CONVERT";
-export type QuotationLifecycleStatus = "ISSUED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "CONVERTED";
+export type QuotationLifecycleAction = "SEND" | "EDIT" | "ACCEPT" | "REJECT" | "EXPIRE" | "CONVERT";
+export type QuotationLifecycleStatus = "DRAFT" | "ISSUED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "CONVERTED";
 
 export type QuotationLifecycleEvaluation = {
   allowed: boolean;
@@ -373,24 +373,44 @@ export function normalizeAndValidateQuotationRejection(payload: unknown): Quotat
   return { schema_version: "1.0.0", reason };
 }
 
+/**
+ * Module 5 Phase B added DRAFT/SEND: a quotation is now created as DRAFT
+ * (previously it landed directly in ISSUED, with no draft→send transition
+ * the playbook's own action list implies). Every other transition below is
+ * unchanged from before this phase — ACCEPT/REJECT/EXPIRE/CONVERT still
+ * require ISSUED, and the overdue-blocks-everything-but-EXPIRE rule still
+ * applies once a quotation has actually been sent.
+ */
 export function evaluateQuotationLifecycle(input: {
   status: string;
   action: QuotationLifecycleAction;
   validUntil: string;
   today: string;
 }): QuotationLifecycleEvaluation {
-  const targetStatus: Record<QuotationLifecycleAction, QuotationLifecycleStatus> = {
-    EDIT: "ISSUED",
-    ACCEPT: "ACCEPTED",
-    REJECT: "REJECTED",
-    EXPIRE: "EXPIRED",
-    CONVERT: "CONVERTED",
-  };
+  if (input.action === "SEND") {
+    return input.status === "DRAFT"
+      ? { allowed: true, targetStatus: "ISSUED", reason: "A draft quotation may be sent to the customer." }
+      : { allowed: false, targetStatus: "ISSUED", reason: `Only a draft quotation can be sent; current status is ${input.status}.` };
+  }
   if (input.action === "CONVERT") {
     return input.status === "ACCEPTED"
       ? { allowed: true, targetStatus: "CONVERTED", reason: "Accepted quotation may be converted." }
       : { allowed: false, targetStatus: "CONVERTED", reason: `Only an accepted quotation can be converted; current status is ${input.status}.` };
   }
+  if (input.action === "EDIT") {
+    if (input.status !== "DRAFT" && input.status !== "ISSUED") {
+      return { allowed: false, targetStatus: input.status as QuotationLifecycleStatus, reason: `A quotation can only be edited while draft or issued; current status is ${input.status}.` };
+    }
+    if (input.status === "ISSUED" && input.validUntil < input.today) {
+      return { allowed: false, targetStatus: "ISSUED", reason: "The quotation validity period has ended; expire it instead." };
+    }
+    return { allowed: true, targetStatus: input.status as QuotationLifecycleStatus, reason: `The ${input.status.toLowerCase()} quotation may be edited.` };
+  }
+  const targetStatus: Record<"ACCEPT" | "REJECT" | "EXPIRE", QuotationLifecycleStatus> = {
+    ACCEPT: "ACCEPTED",
+    REJECT: "REJECTED",
+    EXPIRE: "EXPIRED",
+  };
   if (input.status !== "ISSUED") {
     return { allowed: false, targetStatus: targetStatus[input.action], reason: `Only an issued quotation can be ${input.action.toLowerCase()}ed; current status is ${input.status}.` };
   }
@@ -404,6 +424,52 @@ export function evaluateQuotationLifecycle(input: {
     return { allowed: false, targetStatus: targetStatus[input.action], reason: "The quotation validity period has ended; expire it instead." };
   }
   return { allowed: true, targetStatus: targetStatus[input.action], reason: `The issued quotation may be ${input.action.toLowerCase()}ed.` };
+}
+
+const QUOTATION_STATUSES = new Set<QuotationLifecycleStatus>(["DRAFT", "ISSUED", "ACCEPTED", "REJECTED", "EXPIRED", "CONVERTED"]);
+const MAX_QUOTATION_SEARCH_LIMIT = 200;
+const DEFAULT_QUOTATION_SEARCH_LIMIT = 50;
+
+export type QuotationSearchQuery = {
+  status: QuotationLifecycleStatus | null;
+  customerPartyId: string | null;
+  q: string | null;
+  limit: number;
+  offset: number;
+};
+
+/** Module 5 Phase B SearchQuotes, the same bounded/paginated shape as Phase A's normalizePartySearchQuery. */
+export function normalizeQuotationSearchQuery(params: URLSearchParams): QuotationSearchQuery {
+  const messages: BusinessValidationMessage[] = [];
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as QuotationLifecycleStatus) : null;
+  if (status && !QUOTATION_STATUSES.has(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: `status must be one of: ${[...QUOTATION_STATUSES].join(", ")}.` });
+
+  const customerPartyId = idField(params.get("customer_party_id") ?? undefined, "/customer_party_id", "Customer party", messages, true) ?? null;
+
+  const qRaw = textValue(params.get("q"));
+  if (qRaw.length > 200) messages.push({ code: "QUERY_TOO_LONG", path: "/q", message: "q must not exceed 200 characters." });
+  const q = qRaw || null;
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_QUOTATION_SEARCH_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_QUOTATION_SEARCH_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_QUOTATION_SEARCH_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { status, customerPartyId, q, limit, offset };
 }
 
 export function normalizeAndValidateJournal(payload: unknown): JournalSubmission {

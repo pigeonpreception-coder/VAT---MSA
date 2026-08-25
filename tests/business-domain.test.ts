@@ -19,6 +19,7 @@ import {
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
   normalizePartySearchQuery,
+  normalizeQuotationSearchQuery,
 } from "@/lib/domain/business";
 
 describe("business command validation", () => {
@@ -62,6 +63,20 @@ describe("business command validation", () => {
     expect(evaluateQuotationLifecycle({ status: "ACCEPTED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
     expect(evaluateQuotationLifecycle({ status: "ACCEPTED", action: "CONVERT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(true);
     expect(evaluateQuotationLifecycle({ status: "CONVERTED", action: "REJECT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+  });
+
+  it("allows sending a draft quotation and blocks sending a non-draft one", () => {
+    expect(evaluateQuotationLifecycle({ status: "DRAFT", action: "SEND", validUntil: "2026-09-01", today: "2026-08-14" })).toMatchObject({ allowed: true, targetStatus: "ISSUED" });
+    expect(evaluateQuotationLifecycle({ status: "ISSUED", action: "SEND", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+    expect(evaluateQuotationLifecycle({ status: "ACCEPTED", action: "SEND", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+  });
+
+  it("allows editing a draft or issued quotation but blocks editing any other status", () => {
+    expect(evaluateQuotationLifecycle({ status: "DRAFT", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" })).toMatchObject({ allowed: true, targetStatus: "DRAFT" });
+    expect(evaluateQuotationLifecycle({ status: "ISSUED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" })).toMatchObject({ allowed: true, targetStatus: "ISSUED" });
+    expect(evaluateQuotationLifecycle({ status: "REJECTED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+    expect(evaluateQuotationLifecycle({ status: "EXPIRED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
+    expect(evaluateQuotationLifecycle({ status: "CONVERTED", action: "EDIT", validUntil: "2026-09-01", today: "2026-08-14" }).allowed).toBe(false);
   });
 
   it("requires a meaningful quotation rejection reason", () => {
@@ -258,5 +273,24 @@ describe("party search query normalization", () => {
     const result = normalizePartySearchQuery(new URLSearchParams({ limit: "10", offset: "20" }));
     expect(result.limit).toBe(10);
     expect(result.offset).toBe(20);
+  });
+
+  it("defaults an empty quotation search query", () => {
+    expect(normalizeQuotationSearchQuery(new URLSearchParams())).toEqual({ status: null, customerPartyId: null, q: null, limit: 50, offset: 0 });
+  });
+
+  it("normalizes quotation status and passes through customer_party_id and q", () => {
+    const result = normalizeQuotationSearchQuery(new URLSearchParams({ status: "issued", customer_party_id: "party-001", q: "Q-2026" }));
+    expect(result).toEqual({ status: "ISSUED", customerPartyId: "party-001", q: "Q-2026", limit: 50, offset: 0 });
+  });
+
+  it("rejects an unsupported quotation status", () => {
+    expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ status: "PENDING" }))).toThrowError(BusinessValidationError);
+  });
+
+  it("rejects a quotation search limit outside 1 to 200 and a negative offset", () => {
+    expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ limit: "0" }))).toThrowError(BusinessValidationError);
+    expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ limit: "500" }))).toThrowError(BusinessValidationError);
+    expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ offset: "-5" }))).toThrowError(BusinessValidationError);
   });
 });

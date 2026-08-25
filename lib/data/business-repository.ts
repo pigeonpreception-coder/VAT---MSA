@@ -19,6 +19,7 @@ import {
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
+  normalizeQuotationSearchQuery,
   type AccountSubmission,
   type AccountType,
   type BusinessPartyDeactivationSubmission,
@@ -231,7 +232,7 @@ async function quotationRevisionRecord(
     quotationId: string;
     organisationId: string;
     revisionNumber: number;
-    action: "ISSUE" | "EDIT";
+    action: "CREATE" | "EDIT" | "SEND";
     status: string;
     snapshot: Record<string, unknown>;
     previousHash: string | null;
@@ -391,6 +392,46 @@ export async function getQuotationForEdit(id: string, actor: UserContext, reques
     net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines
     WHERE quotation_id=? ORDER BY line_number`).bind(id).all<Record<string, string | number | null>>();
   return { organisation, quotation, lines: lines.results };
+}
+
+/**
+ * Module 5 Phase B SearchQuotes. The same bounded/paginated, real-total_count
+ * shape Phase A's searchBusinessParties established — distinct from
+ * getBusinessPlatformSnapshot's fixed "quotations" list (still used as-is
+ * by existing dashboard pages).
+ */
+export async function searchQuotations(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const query = normalizeQuotationSearchQuery(params);
+
+  const conditions: string[] = ["q.organisation_id = ?"];
+  const values: unknown[] = [organisation.id];
+  if (query.status) {
+    conditions.push("q.status = ?");
+    values.push(query.status);
+  }
+  if (query.customerPartyId) {
+    conditions.push("q.customer_party_id = ?");
+    values.push(query.customerPartyId);
+  }
+  if (query.q) {
+    conditions.push("(q.quotation_number LIKE ? OR p.display_name LIKE ?)");
+    const like = `%${query.q}%`;
+    values.push(like, like);
+  }
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+  const [items, count] = await Promise.all([
+    db.prepare(`SELECT q.*, p.display_name AS customer_name FROM quotations q
+      JOIN business_parties p ON p.id=q.customer_party_id AND p.organisation_id=q.organisation_id
+      ${whereClause}
+      ORDER BY q.issue_date DESC, q.created_at DESC
+      LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, string | number | null>>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM quotations q JOIN business_parties p ON p.id=q.customer_party_id AND p.organisation_id=q.organisation_id ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+
+  return { organisation_id: organisation.id, quotations: items.results, total_count: count?.n ?? 0, limit: query.limit, offset: query.offset };
 }
 
 export async function createBusinessParty(
@@ -612,14 +653,14 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   if (duplicate) throw new RepositoryConflictError(`Quotation number already exists as ${duplicate.id}.`);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const audit = await auditEnvelope(db, actor, "QUOTATION_ISSUED", "QUOTATION", id, { organisationId: organisation.id, quotationNumber: quotation.quotation_number, totalCents: quotation.total_cents, correlationId }, now);
+  const audit = await auditEnvelope(db, actor, "QUOTATION_CREATED", "QUOTATION", id, { organisationId: organisation.id, quotationNumber: quotation.quotation_number, totalCents: quotation.total_cents, correlationId }, now);
   const revision = await quotationRevisionRecord(db, {
     quotationId: id,
     organisationId: organisation.id,
     revisionNumber: 1,
-    action: "ISSUE",
-    status: "ISSUED",
-    snapshot: quotationSnapshot(quotation, "ISSUED"),
+    action: "CREATE",
+    status: "DRAFT",
+    snapshot: quotationSnapshot(quotation, "DRAFT"),
     previousHash: null,
     actorId: actor.userId,
     now,
@@ -627,17 +668,63 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO quotations
       (id,organisation_id,branch_id,customer_party_id,quotation_number,currency,issue_date,valid_until,status,subtotal_cents,tax_cents,total_cents,notes,created_by,approved_by,accepted_at,converted_invoice_id,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?)`).bind(id, organisation.id, quotation.branch_id ?? null, quotation.customer_party_id, quotation.quotation_number, quotation.currency, quotation.issue_date, quotation.valid_until, "ISSUED", quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, actor.userId, now, now),
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?)`).bind(id, organisation.id, quotation.branch_id ?? null, quotation.customer_party_id, quotation.quotation_number, quotation.currency, quotation.issue_date, quotation.valid_until, "DRAFT", quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, actor.userId, now, now),
   ];
   for (const line of quotation.lines) statements.push(db.prepare(`INSERT INTO quotation_lines
     (id,quotation_id,line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), id, line.line_number, line.product_id ?? null, line.description, line.quantity_micros, line.unit_code, line.unit_price_cents, line.net_amount_cents, line.tax_category, line.tax_rate_bps, line.tax_amount_cents));
   statements.push(revision.statement);
   statements.push(commandRecord(db, actor.userId, "CREATE_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now));
-  statements.push(outboxRecord(db, "QUOTATION", id, "QuotationIssued", organisation.id, { quotation_id: id, organisation_id: organisation.id, total_cents: quotation.total_cents, correlation_id: correlationId }, now));
+  statements.push(outboxRecord(db, "QUOTATION", id, "QuotationCreated", organisation.id, { quotation_id: id, organisation_id: organisation.id, total_cents: quotation.total_cents, correlation_id: correlationId }, now));
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM quotations WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase B SendQuotation: DRAFT -> ISSUED, the new explicit
+ * transition the playbook's Create/Edit/Send/Accept/... sequence implies.
+ * Previously CreateQuotation landed directly in ISSUED with no draft
+ * state at all.
+ */
+export async function sendQuotation(id: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation_id: id, action: "SEND" }));
+  const prior = await priorCommand(db, actor.userId, "SEND_QUOTATION", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<QuotationRecord>();
+  if (!existing) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  const transition = evaluateQuotationLifecycle({ status: existing.status, action: "SEND", validUntil: existing.valid_until, today: new Date().toISOString().slice(0, 10) });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
+
+  const lines = await db.prepare(`SELECT line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,
+    net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines WHERE quotation_id=? ORDER BY line_number`)
+    .bind(id).all<QuotationLineRecord>();
+  const priorRevision = await db.prepare(`SELECT revision_number,snapshot_hash FROM quotation_revisions
+    WHERE quotation_id=? ORDER BY revision_number DESC LIMIT 1`).bind(id).first<{ revision_number: number; snapshot_hash: string }>();
+  const now = new Date().toISOString();
+  const revision = await quotationRevisionRecord(db, {
+    quotationId: id,
+    organisationId: organisation.id,
+    revisionNumber: (priorRevision?.revision_number ?? 0) + 1,
+    action: "SEND",
+    status: "ISSUED",
+    snapshot: storedQuotationSnapshot({ ...existing, status: "ISSUED" }, lines.results),
+    previousHash: priorRevision?.snapshot_hash ?? null,
+    actorId: actor.userId,
+    now,
+  });
+  const audit = await auditEnvelope(db, actor, "QUOTATION_SENT", "QUOTATION", id, { organisationId: organisation.id, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE quotations SET status='ISSUED',updated_at=? WHERE id=? AND organisation_id=? AND status='DRAFT'").bind(now, id, organisation.id),
+    revision.statement,
+    commandRecord(db, actor.userId, "SEND_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now),
+    outboxRecord(db, "QUOTATION", id, "QuotationSent", organisation.id, { quotation_id: id, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
 }
 
 export async function updateQuotation(
@@ -678,7 +765,7 @@ export async function updateQuotation(
       quotationId: id,
       organisationId: organisation.id,
       revisionNumber: 1,
-      action: "ISSUE",
+      action: "CREATE",
       status: existing.status,
       snapshot: storedQuotationSnapshot(existing, existingLines.results),
       previousHash: null,
@@ -694,8 +781,8 @@ export async function updateQuotation(
     organisationId: organisation.id,
     revisionNumber,
     action: "EDIT",
-    status: "ISSUED",
-    snapshot: quotationSnapshot(quotation, "ISSUED"),
+    status: existing.status,
+    snapshot: quotationSnapshot(quotation, existing.status),
     previousHash,
     actorId: actor.userId,
     now,
@@ -707,10 +794,14 @@ export async function updateQuotation(
     totalCents: quotation.total_cents,
     correlationId,
   }, now);
+  // Edit is legal from DRAFT or ISSUED (see evaluateQuotationLifecycle) — the
+  // WHERE clause pins the update to whichever status the transition check
+  // above already confirmed, matching that same-actor-race-safety pattern
+  // used everywhere else status-gated UPDATEs appear in this file.
   statements.push(db.prepare(`UPDATE quotations SET branch_id=?,customer_party_id=?,currency=?,issue_date=?,valid_until=?,
-    subtotal_cents=?,tax_cents=?,total_cents=?,notes=?,updated_at=? WHERE id=? AND organisation_id=? AND status='ISSUED'`).bind(
+    subtotal_cents=?,tax_cents=?,total_cents=?,notes=?,updated_at=? WHERE id=? AND organisation_id=? AND status=?`).bind(
     quotation.branch_id ?? null, quotation.customer_party_id, quotation.currency, quotation.issue_date, quotation.valid_until,
-    quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, now, id, organisation.id,
+    quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, now, id, organisation.id, existing.status,
   ));
   statements.push(db.prepare("DELETE FROM quotation_lines WHERE quotation_id=?").bind(id));
   for (const line of quotation.lines) statements.push(db.prepare(`INSERT INTO quotation_lines
