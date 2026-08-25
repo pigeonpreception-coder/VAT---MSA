@@ -32,6 +32,7 @@ type CorrectionOriginal = {
   line_net_cents: number;
   tax_cents: number;
   total_cents: number;
+  transaction_id: string;
 };
 
 export class RepositoryConflictError extends Error {
@@ -157,9 +158,9 @@ export async function cancelInvoice(
   const { reason } = normalizeInvoiceCancellation(input);
   const db = await ensureDatabase();
   const invoice = await db.prepare(`SELECT id, document_type, status, supplier_taxpayer_id, customer_taxpayer_id,
-    tax_cents, issue_date FROM invoices WHERE id = ?`).bind(invoiceId).first<{
+    tax_cents, issue_date, transaction_id FROM invoices WHERE id = ?`).bind(invoiceId).first<{
       id: string; document_type: string; status: string; supplier_taxpayer_id: string; customer_taxpayer_id: string | null;
-      tax_cents: number; issue_date: string;
+      tax_cents: number; issue_date: string; transaction_id: string;
     }>();
   if (!invoice) throw new InvoiceValidationError([{ code: "INVOICE_NOT_FOUND", path: "/invoice_id", message: "The invoice does not exist." }]);
   requireTaxpayerScope(actor, invoice.supplier_taxpayer_id);
@@ -178,6 +179,12 @@ export async function cancelInvoice(
   const period = invoice.issue_date.slice(0, 7);
   const statements: D1PreparedStatement[] = [
     db.prepare("UPDATE invoices SET status='CANCELLED' WHERE id=?").bind(invoice.id),
+    // Module 2 Phase D: Reverse. A new VATTransaction linked back to the
+    // certification it reverses via reference_transaction_id — the
+    // certification row itself is never mutated.
+    db.prepare("INSERT INTO vat_transactions VALUES (?,?,?,?,?,?)").bind(
+      transactionId, invoice.id, invoice.supplier_taxpayer_id, "CANCELLATION", invoice.transaction_id, now,
+    ),
     db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
       crypto.randomUUID(), transactionId, invoice.id, invoice.supplier_taxpayer_id, "OUTPUT_VAT", "DEBIT", invoice.tax_cents, period, now,
     ),
@@ -270,6 +277,85 @@ export async function explainInvoiceVat(id: string, user: UserContext): Promise<
       vatRuleVersion: line.vat_rule_version,
       ruleEffectiveFrom: line.rule_effective_from,
       ruleEffectiveTo: line.rule_effective_to,
+    })),
+  };
+}
+
+export type TransactionTimelineEvent = {
+  transactionId: string;
+  transactionType: string;
+  referenceTransactionId: string | null;
+  invoiceId: string;
+  invoiceNumber: string;
+  documentType: string;
+  occurredAt: string;
+  ledgerEntries: Array<{ taxpayerName: string; entryType: string; direction: string; amountCents: number; period: string }>;
+};
+export type TransactionTimeline = { rootInvoiceId: string; rootInvoiceNumber: string; events: TransactionTimelineEvent[] };
+
+/**
+ * Module 2 Phase D GetTransactionTimeline: the complete audit narrative for
+ * one invoice's lineage — its certification, every correction issued
+ * against it, and its cancellation if any — as a chronological sequence of
+ * VATTransaction events, each with the ledger postings it actually made.
+ * Accepts any invoice id within a lineage (the true original, or one of its
+ * corrections) and always resolves to the same timeline, rooted at the
+ * original. Tenant scope is checked once, against the invoice the caller
+ * asked for; that transitively secures the rest of the lineage, since a
+ * correction's supplier and customer are invariant with its original by
+ * construction (submitInvoice enforces both).
+ */
+export async function getTransactionTimeline(id: string, user: UserContext): Promise<TransactionTimeline | null> {
+  const db = await ensureDatabase();
+  const invoice = isNationalScope(user)
+    ? await db.prepare("SELECT id, invoice_number FROM invoices WHERE id = ?").bind(id).first<{ id: string; invoice_number: string }>()
+    : await db.prepare("SELECT id, invoice_number FROM invoices WHERE id = ? AND (supplier_taxpayer_id = ? OR customer_taxpayer_id = ?)")
+      .bind(id, user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").first<{ id: string; invoice_number: string }>();
+  if (!invoice) return null;
+
+  const asCorrectionOf = await db.prepare("SELECT original_invoice_id FROM invoice_corrections WHERE correction_invoice_id = ?")
+    .bind(invoice.id).first<{ original_invoice_id: string }>();
+  const rootId = asCorrectionOf?.original_invoice_id ?? invoice.id;
+  const root = rootId === invoice.id
+    ? invoice
+    : await db.prepare("SELECT id, invoice_number FROM invoices WHERE id = ?").bind(rootId).first<{ id: string; invoice_number: string }>();
+  if (!root) return null;
+
+  const corrections = await db.prepare("SELECT correction_invoice_id FROM invoice_corrections WHERE original_invoice_id = ? ORDER BY created_at")
+    .bind(rootId).all<{ correction_invoice_id: string }>();
+  const lineageInvoiceIds = [rootId, ...corrections.results.map((row) => row.correction_invoice_id)];
+
+  const transactions = await db.prepare(`SELECT t.id, t.transaction_type, t.reference_transaction_id, t.invoice_id, t.created_at,
+      i.invoice_number, i.document_type
+    FROM vat_transactions t JOIN invoices i ON i.id = t.invoice_id
+    WHERE t.invoice_id IN (${lineageInvoiceIds.map(() => "?").join(",")}) ORDER BY t.created_at`)
+    .bind(...lineageInvoiceIds).all<{
+      id: string; transaction_type: string; reference_transaction_id: string | null; invoice_id: string; created_at: string;
+      invoice_number: string; document_type: string;
+    }>();
+
+  const ledgerByTransaction = await Promise.all(transactions.results.map((transaction) =>
+    db.prepare(`SELECT l.entry_type, l.direction, l.amount_cents, l.period, tp.legal_name AS taxpayer_name
+      FROM ledger_entries l JOIN taxpayers tp ON tp.id = l.taxpayer_id
+      WHERE l.transaction_id = ? ORDER BY l.entry_type DESC`)
+      .bind(transaction.id).all<{ entry_type: string; direction: string; amount_cents: number; period: string; taxpayer_name: string }>(),
+  ));
+
+  return {
+    rootInvoiceId: root.id,
+    rootInvoiceNumber: root.invoice_number,
+    events: transactions.results.map((transaction, index) => ({
+      transactionId: transaction.id,
+      transactionType: transaction.transaction_type,
+      referenceTransactionId: transaction.reference_transaction_id,
+      invoiceId: transaction.invoice_id,
+      invoiceNumber: transaction.invoice_number,
+      documentType: transaction.document_type,
+      occurredAt: transaction.created_at,
+      ledgerEntries: ledgerByTransaction[index].results.map((entry) => ({
+        taxpayerName: entry.taxpayer_name, entryType: entry.entry_type, direction: entry.direction,
+        amountCents: entry.amount_cents, period: entry.period,
+      })),
     })),
   };
 }
@@ -480,14 +566,14 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
     const reference = payload.original_document_reference!;
     if (reference.vat_msa_invoice_id) {
       originalInvoice = await db.prepare(`SELECT id,invoice_number,document_type,source_document_id,customer_taxpayer_id,customer_vat_number,
-        issue_date,currency,line_net_cents,tax_cents,total_cents FROM invoices WHERE id=? AND supplier_taxpayer_id=?`)
+        issue_date,currency,line_net_cents,tax_cents,total_cents,transaction_id FROM invoices WHERE id=? AND supplier_taxpayer_id=?`)
         .bind(reference.vat_msa_invoice_id, supplier.id).first<CorrectionOriginal>();
       if (originalInvoice && originalInvoice.source_document_id !== reference.source_document_id) {
         throw new RepositoryConflictError("The correction's VAT-MSA invoice id and source document reference do not identify the same original invoice.");
       }
     } else {
       const candidates = await db.prepare(`SELECT id,invoice_number,document_type,source_document_id,customer_taxpayer_id,customer_vat_number,
-        issue_date,currency,line_net_cents,tax_cents,total_cents FROM invoices WHERE source_document_id=? AND supplier_taxpayer_id=? LIMIT 2`)
+        issue_date,currency,line_net_cents,tax_cents,total_cents,transaction_id FROM invoices WHERE source_document_id=? AND supplier_taxpayer_id=? LIMIT 2`)
         .bind(reference.source_document_id, supplier.id).all<CorrectionOriginal>();
       if (candidates.results.length > 1) throw new RepositoryConflictError("The source document reference is ambiguous; include vat_msa_invoice_id.");
       originalInvoice = candidates.results[0] ?? null;
@@ -558,6 +644,14 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   }
   statements.push(db.prepare("INSERT INTO certificates VALUES (?,?,?,?,?,?,?,?)").bind(
     certificateId, invoiceId, verificationToken, requestHash, signature, "DEV-SHA256", "VALID", now,
+  ));
+  // Module 2 Phase D: PostTransaction. transactionId already groups this
+  // submission's ledger_entries; this row formalizes it as its own record
+  // (VATTransaction) rather than only an implicit tag, and — for a
+  // correction — links back to the original's transaction so
+  // GetTransactionTimeline can walk the full lineage.
+  statements.push(db.prepare("INSERT INTO vat_transactions VALUES (?,?,?,?,?,?)").bind(
+    transactionId, invoiceId, supplier.id, originalInvoice ? "CORRECTION" : "CERTIFICATION", originalInvoice?.transaction_id ?? null, now,
   ));
   const reversesVat = payload.document_type === "CREDIT_NOTE";
   const ledgerVatCents = Math.abs(calculated.taxCents);

@@ -570,6 +570,11 @@ const SCHEMA_STATEMENTS = [
     taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), entry_type TEXT NOT NULL,
     direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, period TEXT NOT NULL, created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS vat_transactions (
+    id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), transaction_type TEXT NOT NULL,
+    reference_transaction_id TEXT REFERENCES vat_transactions(id), created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS reconciliation_exceptions (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
     taxpayer_id TEXT REFERENCES taxpayers(id), exception_type TEXT NOT NULL,
@@ -858,6 +863,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_user_invitations_org_email_status ON user_invitations(organisation_id, email, status)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_rules_lookup ON vat_rules(tax_category, country, status, effective_from)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_transactions_invoice ON vat_transactions(invoice_id)`,
 
   // Statutory VAT rate catalogue (Module 2 Phase A). Unlike the pilot demo
   // seed below, this is real reference data — the actual Namibian VAT
