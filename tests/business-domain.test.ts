@@ -11,6 +11,7 @@ import {
   normalizeAndValidateJournal,
   normalizeAndValidateJournalReversal,
   normalizeAndValidatePeriodClose,
+  normalizeAndValidateProduct,
   normalizeAndValidateProject,
   normalizeAndValidateProjectBudgetApproval,
   normalizeAndValidateProjectCost,
@@ -18,6 +19,8 @@ import {
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
+  normalizeAndValidateStockTransfer,
+  normalizeAndValidateWarehouse,
   normalizePartySearchQuery,
   normalizeQuotationSearchQuery,
 } from "@/lib/domain/business";
@@ -292,5 +295,56 @@ describe("party search query normalization", () => {
     expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ limit: "0" }))).toThrowError(BusinessValidationError);
     expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ limit: "500" }))).toThrowError(BusinessValidationError);
     expect(() => normalizeQuotationSearchQuery(new URLSearchParams({ offset: "-5" }))).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes a governed product record", () => {
+    expect(normalizeAndValidateProduct({
+      schema_version: "1.0.0",
+      sku: "  desk-lamp  ",
+      name: "Desk Lamp",
+      description: "LED desk lamp",
+      unit_code: "ea",
+      tax_category: "standard",
+      tax_rate_bps: 1_500,
+      sales_price_cents: 9_900,
+      cost_price_cents: 5_000,
+    })).toMatchObject({ sku: "DESK-LAMP", unit_code: "EA", tax_category: "STANDARD" });
+  });
+
+  it("rejects a product with an unsupported tax category or a non-zero rate on a non-standard category", () => {
+    expect(() => normalizeAndValidateProduct({ schema_version: "1.0.0", sku: "X1", name: "Item", unit_code: "EA", tax_category: "MADE_UP", tax_rate_bps: 0, sales_price_cents: 100, cost_price_cents: 50 })).toThrowError(BusinessValidationError);
+    expect(() => normalizeAndValidateProduct({ schema_version: "1.0.0", sku: "X2", name: "Item", unit_code: "EA", tax_category: "ZERO_RATED", tax_rate_bps: 1_500, sales_price_cents: 100, cost_price_cents: 50 })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes a governed warehouse record", () => {
+    expect(normalizeAndValidateWarehouse({
+      schema_version: "1.0.0",
+      code: "wh-north",
+      name: "Northern Warehouse",
+      address: "1 Storage Road",
+    })).toMatchObject({ code: "WH-NORTH", name: "Northern Warehouse" });
+  });
+
+  it("rejects a warehouse with a too-short address or an invalid code", () => {
+    expect(() => normalizeAndValidateWarehouse({ schema_version: "1.0.0", code: "WH-1", name: "Warehouse", address: "X" })).toThrowError(BusinessValidationError);
+    expect(() => normalizeAndValidateWarehouse({ schema_version: "1.0.0", code: "wh 1!", name: "Warehouse", address: "1 Storage Road" })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes a stock transfer and derives no unit cost from the payload", () => {
+    const transfer = normalizeAndValidateStockTransfer({
+      schema_version: "1.0.0",
+      from_warehouse_id: "wh-0001",
+      to_warehouse_id: "wh-0002",
+      product_id: "prod-0001",
+      quantity_micros: 5_000_000,
+      reason: "Rebalancing stock between sites",
+    });
+    expect(transfer).toMatchObject({ from_warehouse_id: "wh-0001", to_warehouse_id: "wh-0002", quantity_micros: 5_000_000 });
+    expect(transfer).not.toHaveProperty("unit_cost_cents");
+  });
+
+  it("rejects a stock transfer between the same warehouse or a non-positive quantity", () => {
+    expect(() => normalizeAndValidateStockTransfer({ schema_version: "1.0.0", from_warehouse_id: "wh-0001", to_warehouse_id: "wh-0001", product_id: "prod-0001", quantity_micros: 1_000_000, reason: "Same warehouse" })).toThrowError(BusinessValidationError);
+    expect(() => normalizeAndValidateStockTransfer({ schema_version: "1.0.0", from_warehouse_id: "wh-0001", to_warehouse_id: "wh-0002", product_id: "prod-0001", quantity_micros: 0, reason: "Zero quantity" })).toThrowError(BusinessValidationError);
   });
 });

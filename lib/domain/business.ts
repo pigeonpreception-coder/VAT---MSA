@@ -631,6 +631,96 @@ export function normalizeAndValidateStockMovement(payload: unknown): StockMoveme
   return { schema_version: "1.0.0", warehouse_id: warehouseId, product_id: productId, movement_type: movementType, quantity_micros: quantityMicros, unit_cost_cents: unitCostCents, reference_type: referenceType, reference_id: referenceId, reason, occurred_at: occurredAt };
 }
 
+export type ProductSubmission = {
+  schema_version: "1.0.0";
+  sku: string;
+  name: string;
+  description?: string;
+  unit_code: string;
+  tax_category: "STANDARD" | "ZERO_RATED" | "EXEMPT" | "OUT_OF_SCOPE";
+  tax_rate_bps: number;
+  sales_price_cents: number;
+  cost_price_cents: number;
+};
+
+/** Module 5 Phase D CreateProduct: unsticks the previously seed-only `products` table, mirroring Phase C's CreateAccount fix for chart_of_accounts. */
+export function normalizeAndValidateProduct(payload: unknown): ProductSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const sku = textField(input.sku, "/sku", "SKU", 1, 40, messages).toUpperCase();
+  if (sku && !CODE_PATTERN.test(sku)) messages.push({ code: "CODE_INVALID", path: "/sku", message: "SKU contains unsupported characters." });
+  const name = textField(input.name, "/name", "Product name", 2, 200, messages);
+  const description = optionalText(input.description, "/description", "Description", 2_000, messages);
+  const unitCode = textField(input.unit_code, "/unit_code", "Unit code", 1, 12, messages).toUpperCase();
+  const taxCategory = textValue(input.tax_category).toUpperCase() as ProductSubmission["tax_category"];
+  if (!TAX_CATEGORIES.has(taxCategory)) messages.push({ code: "TAX_CATEGORY_INVALID", path: "/tax_category", message: "Select a supported tax category." });
+  const taxRateBps = integerField(input.tax_rate_bps, "/tax_rate_bps", "Tax rate basis points", messages);
+  if (taxRateBps > 10_000) messages.push({ code: "TAX_RATE_INVALID", path: "/tax_rate_bps", message: "Tax rate cannot exceed 10000 basis points." });
+  if (taxCategory !== "STANDARD" && taxRateBps !== 0) messages.push({ code: "TAX_RATE_CATEGORY_MISMATCH", path: "/tax_rate_bps", message: "Only standard-rated products may have a non-zero tax rate." });
+  const salesPriceCents = integerField(input.sales_price_cents, "/sales_price_cents", "Sales price cents", messages);
+  const costPriceCents = integerField(input.cost_price_cents, "/cost_price_cents", "Cost price cents", messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", sku, name, ...(description ? { description } : {}), unit_code: unitCode, tax_category: taxCategory, tax_rate_bps: taxRateBps, sales_price_cents: salesPriceCents, cost_price_cents: costPriceCents };
+}
+
+export type WarehouseSubmission = {
+  schema_version: "1.0.0";
+  branch_id?: string;
+  code: string;
+  name: string;
+  address: string;
+};
+
+/** Module 5 Phase D CreateWarehouse: unsticks the previously seed-only `warehouses` table. */
+export function normalizeAndValidateWarehouse(payload: unknown): WarehouseSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const branchId = idField(input.branch_id, "/branch_id", "Branch", messages, true);
+  const code = textField(input.code, "/code", "Warehouse code", 1, 20, messages).toUpperCase();
+  if (code && !/^[A-Z0-9][A-Z0-9._-]{0,19}$/.test(code)) messages.push({ code: "CODE_INVALID", path: "/code", message: "Warehouse code contains unsupported characters." });
+  const name = textField(input.name, "/name", "Warehouse name", 2, 200, messages);
+  const address = textField(input.address, "/address", "Address", 2, 1_000, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", ...(branchId ? { branch_id: branchId } : {}), code, name, address };
+}
+
+export type StockTransferSubmission = {
+  schema_version: "1.0.0";
+  from_warehouse_id: string;
+  to_warehouse_id: string;
+  product_id: string;
+  quantity_micros: number;
+  reason: string;
+  occurred_at: string;
+};
+
+/**
+ * Module 5 Phase D TransferStock. Unlike RecordStockMovement, this does not
+ * take a caller-supplied unit_cost_cents: a transfer moves the same
+ * physical stock between warehouses, so the repository derives cost from
+ * the source warehouse's own current average cost rather than letting the
+ * caller fabricate a new one.
+ */
+export function normalizeAndValidateStockTransfer(payload: unknown): StockTransferSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const fromWarehouseId = idField(input.from_warehouse_id, "/from_warehouse_id", "Source warehouse", messages) ?? "";
+  const toWarehouseId = idField(input.to_warehouse_id, "/to_warehouse_id", "Destination warehouse", messages) ?? "";
+  if (fromWarehouseId && toWarehouseId && fromWarehouseId === toWarehouseId) {
+    messages.push({ code: "TRANSFER_SAME_WAREHOUSE", path: "/to_warehouse_id", message: "Source and destination warehouse must be different." });
+  }
+  const productId = idField(input.product_id, "/product_id", "Product", messages) ?? "";
+  const quantityMicros = integerField(input.quantity_micros, "/quantity_micros", "Quantity micros", messages, 1);
+  const reason = textField(input.reason, "/reason", "Reason", 2, 500, messages);
+  const occurredAt = textValue(input.occurred_at) || new Date().toISOString();
+  if (!ISO_PATTERN.test(occurredAt) || Number.isNaN(Date.parse(occurredAt))) messages.push({ code: "TIMESTAMP_INVALID", path: "/occurred_at", message: "occurred_at must be an ISO UTC timestamp." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", from_warehouse_id: fromWarehouseId, to_warehouse_id: toWarehouseId, product_id: productId, quantity_micros: quantityMicros, reason, occurred_at: occurredAt };
+}
+
 export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
 
 export type AccountSubmission = {

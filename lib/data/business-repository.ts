@@ -12,6 +12,7 @@ import {
   normalizeAndValidateJournalReversal,
   normalizePartySearchQuery,
   normalizeAndValidatePeriodClose,
+  normalizeAndValidateProduct,
   normalizeAndValidateProject,
   normalizeAndValidateProjectBudgetApproval,
   normalizeAndValidateProjectCost,
@@ -19,6 +20,8 @@ import {
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
+  normalizeAndValidateStockTransfer,
+  normalizeAndValidateWarehouse,
   normalizeQuotationSearchQuery,
   type AccountSubmission,
   type AccountType,
@@ -1376,6 +1379,46 @@ export async function getExpenseReport(actor: UserContext, requestedOrganisation
   return { organisation_id: organisation.id, from, to, total_cents: totalCents, by_status: byStatus.results, by_category: byCategory.results, items: items.results };
 }
 
+/**
+ * Shared by RecordStockMovement and TransferStock. A 2026-08-25
+ * investigation (prompted by TransferStock's new second-write-to-an-
+ * existing-balance-row path, which no prior test had ever exercised) found
+ * the previous `INSERT ... ON CONFLICT DO UPDATE` upsert crashed with a
+ * false "CHECK constraint failed: quantity_micros >= 0" on its UPDATE
+ * branch whenever the delta was negative, even against a healthy existing
+ * balance — reproduced in isolation against the exact SQLite engine this
+ * suite runs on: it evaluates the table's CHECK constraint against the
+ * `excluded` pseudo-row's raw pre-update column values, not the resolved
+ * post-update row. This was a real, pre-existing bug in already-shipped
+ * `recordStockMovement`, not something new — it had simply never been
+ * exercised by a second write to the same (warehouse, product) balance row.
+ * Computing the new quantity/average cost in JS and issuing a plain INSERT
+ * (new row) or UPDATE (existing row) sidesteps that engine behavior
+ * entirely; both callers already fetch the current balance to run their own
+ * non-negative check before calling this, so no extra query is added.
+ */
+function inventoryBalanceStatement(
+  db: D1Database,
+  organisationId: string,
+  warehouseId: string,
+  productId: string,
+  quantityDelta: number,
+  unitCostCents: number,
+  existing: { quantity_micros: number; average_cost_cents: number } | null,
+  now: string,
+): D1PreparedStatement {
+  if (!existing) {
+    return db.prepare(`INSERT INTO inventory_balances (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
+      VALUES (?,?,?,?,?,?,1,?)`).bind(crypto.randomUUID(), organisationId, warehouseId, productId, quantityDelta, unitCostCents, now);
+  }
+  const newQuantity = existing.quantity_micros + quantityDelta;
+  const newAverageCostCents = quantityDelta > 0 && newQuantity > 0
+    ? Math.round((existing.quantity_micros * existing.average_cost_cents + quantityDelta * unitCostCents) / newQuantity)
+    : existing.average_cost_cents;
+  return db.prepare(`UPDATE inventory_balances SET quantity_micros=?,average_cost_cents=?,version=version+1,updated_at=?
+    WHERE warehouse_id=? AND product_id=?`).bind(newQuantity, newAverageCostCents, now, warehouseId, productId);
+}
+
 export async function recordStockMovement(payload: StockMovementSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
   const movement = normalizeAndValidateStockMovement(payload);
@@ -1386,19 +1429,13 @@ export async function recordStockMovement(payload: StockMovementSubmission, acto
   if (prior) return db.prepare("SELECT * FROM stock_movements WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
   await requireOwnedReference(db, "warehouses", movement.warehouse_id, organisation.id, "Warehouse");
   await requireOwnedReference(db, "products", movement.product_id, organisation.id, "Product");
-  const balance = await db.prepare("SELECT quantity_micros FROM inventory_balances WHERE warehouse_id=? AND product_id=?").bind(movement.warehouse_id, movement.product_id).first<{ quantity_micros: number }>();
+  const balance = await db.prepare("SELECT quantity_micros,average_cost_cents FROM inventory_balances WHERE warehouse_id=? AND product_id=?").bind(movement.warehouse_id, movement.product_id).first<{ quantity_micros: number; average_cost_cents: number }>();
   if ((balance?.quantity_micros ?? 0) + movement.quantity_micros < 0) throw new RepositoryConflictError("The movement would make on-hand inventory negative.");
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "STOCK_MOVEMENT_RECORDED", "STOCK_MOVEMENT", id, { organisationId: organisation.id, productId: movement.product_id, quantityMicros: movement.quantity_micros, correlationId }, now);
   await db.batch([
-    db.prepare(`INSERT INTO inventory_balances (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
-      VALUES (?,?,?,?,?,?,1,?) ON CONFLICT(warehouse_id,product_id) DO UPDATE SET
-      average_cost_cents=CASE WHEN excluded.quantity_micros>0 AND inventory_balances.quantity_micros+excluded.quantity_micros>0
-        THEN CAST(ROUND((inventory_balances.quantity_micros*inventory_balances.average_cost_cents+excluded.quantity_micros*excluded.average_cost_cents)*1.0/(inventory_balances.quantity_micros+excluded.quantity_micros)) AS INTEGER)
-        ELSE inventory_balances.average_cost_cents END,
-      quantity_micros=inventory_balances.quantity_micros+excluded.quantity_micros,
-      version=inventory_balances.version+1,updated_at=excluded.updated_at`).bind(crypto.randomUUID(), organisation.id, movement.warehouse_id, movement.product_id, movement.quantity_micros, movement.unit_cost_cents, now),
+    inventoryBalanceStatement(db, organisation.id, movement.warehouse_id, movement.product_id, movement.quantity_micros, movement.unit_cost_cents, balance ?? null, now),
     db.prepare(`INSERT INTO stock_movements
       (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, organisation.id, movement.warehouse_id, movement.product_id, movement.movement_type, movement.quantity_micros, movement.unit_cost_cents, movement.reference_type, movement.reference_id, movement.reason, movement.occurred_at, actor.userId),
@@ -1407,6 +1444,177 @@ export async function recordStockMovement(payload: StockMovementSubmission, acto
     auditRecord(db, actor, audit, now),
   ]);
   return db.prepare("SELECT * FROM stock_movements WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase D CreateProduct: unsticks the previously seed-only `products` table, mirroring Phase C's CreateAccount fix for chart_of_accounts. */
+export async function createProduct(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const product = normalizeAndValidateProduct(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, product }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_PRODUCT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM products WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,name FROM products WHERE organisation_id=? AND sku=?").bind(organisation.id, product.sku).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`SKU ${product.sku} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "PRODUCT_CREATED", "PRODUCT", id, { organisationId: organisation.id, sku: product.sku, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO products (id,organisation_id,sku,name,description,unit_code,tax_category,tax_rate_bps,sales_price_cents,cost_price_cents,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)`).bind(id, organisation.id, product.sku, product.name, product.description ?? null, product.unit_code, product.tax_category, product.tax_rate_bps, product.sales_price_cents, product.cost_price_cents, now, now),
+    commandRecord(db, actor.userId, "CREATE_PRODUCT", idempotencyKey, requestHash, "PRODUCT", id, now),
+    outboxRecord(db, "PRODUCT", id, "ProductCreated", organisation.id, { product_id: id, organisation_id: organisation.id, sku: product.sku, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM products WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase D CreateWarehouse: unsticks the previously seed-only `warehouses` table. */
+export async function createWarehouse(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const warehouse = normalizeAndValidateWarehouse(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, warehouse }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_WAREHOUSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM warehouses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  await requireOwnedReference(db, "branches", warehouse.branch_id, organisation.id, "Branch");
+  const existing = await db.prepare("SELECT id,name FROM warehouses WHERE organisation_id=? AND code=?").bind(organisation.id, warehouse.code).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`Warehouse code ${warehouse.code} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "WAREHOUSE_CREATED", "WAREHOUSE", id, { organisationId: organisation.id, code: warehouse.code, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO warehouses (id,organisation_id,branch_id,code,name,address,status,created_at)
+      VALUES (?,?,?,?,?,?,'ACTIVE',?)`).bind(id, organisation.id, warehouse.branch_id ?? null, warehouse.code, warehouse.name, warehouse.address, now),
+    commandRecord(db, actor.userId, "CREATE_WAREHOUSE", idempotencyKey, requestHash, "WAREHOUSE", id, now),
+    outboxRecord(db, "WAREHOUSE", id, "WarehouseCreated", organisation.id, { warehouse_id: id, organisation_id: organisation.id, code: warehouse.code, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM warehouses WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase D TransferStock: the one real atomicity gap a 2026-08-25
+ * audit found. Previously a "transfer" needed a caller to issue two
+ * separate, unlinked RecordStockMovement calls themselves, with nothing
+ * tying them together or protecting against a partial failure. Both legs
+ * post in one db.batch, sharing a single transfer id via reference_id
+ * (TRANSFER_OUT and TRANSFER_IN reference_type keep the two stock_movements
+ * rows distinct under that table's own UNIQUE(organisation_id,
+ * reference_type, reference_id) constraint). The destination leg's cost is
+ * read from the source warehouse's own current average_cost_cents rather
+ * than caller-supplied — a transfer moves the same physical stock, so it
+ * must preserve cost basis, not let the caller fabricate a new one.
+ */
+export async function transferStock(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const transfer = normalizeAndValidateStockTransfer(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, transfer }));
+  const prior = await priorCommand(db, actor.userId, "TRANSFER_STOCK", idempotencyKey, requestHash);
+  if (prior) {
+    const movements = await db.prepare("SELECT * FROM stock_movements WHERE organisation_id=? AND reference_id=? ORDER BY movement_type")
+      .bind(organisation.id, prior).all<Record<string, unknown>>();
+    return { id: prior, movements: movements.results };
+  }
+  await requireOwnedReference(db, "warehouses", transfer.from_warehouse_id, organisation.id, "Source warehouse");
+  await requireOwnedReference(db, "warehouses", transfer.to_warehouse_id, organisation.id, "Destination warehouse");
+  await requireOwnedReference(db, "products", transfer.product_id, organisation.id, "Product");
+  const sourceBalance = await db.prepare("SELECT quantity_micros,average_cost_cents FROM inventory_balances WHERE warehouse_id=? AND product_id=?")
+    .bind(transfer.from_warehouse_id, transfer.product_id).first<{ quantity_micros: number; average_cost_cents: number }>();
+  if ((sourceBalance?.quantity_micros ?? 0) - transfer.quantity_micros < 0) throw new RepositoryConflictError("The transfer would make on-hand inventory negative at the source warehouse.");
+  const unitCostCents = sourceBalance?.average_cost_cents ?? 0;
+  const destinationBalance = await db.prepare("SELECT quantity_micros,average_cost_cents FROM inventory_balances WHERE warehouse_id=? AND product_id=?")
+    .bind(transfer.to_warehouse_id, transfer.product_id).first<{ quantity_micros: number; average_cost_cents: number }>();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "STOCK_TRANSFERRED", "STOCK_TRANSFER", id, {
+    organisationId: organisation.id, productId: transfer.product_id, fromWarehouseId: transfer.from_warehouse_id,
+    toWarehouseId: transfer.to_warehouse_id, quantityMicros: transfer.quantity_micros, correlationId,
+  }, now);
+  const outMovementId = crypto.randomUUID();
+  const inMovementId = crypto.randomUUID();
+  await db.batch([
+    inventoryBalanceStatement(db, organisation.id, transfer.from_warehouse_id, transfer.product_id, -transfer.quantity_micros, unitCostCents, sourceBalance ?? null, now),
+    inventoryBalanceStatement(db, organisation.id, transfer.to_warehouse_id, transfer.product_id, transfer.quantity_micros, unitCostCents, destinationBalance ?? null, now),
+    db.prepare(`INSERT INTO stock_movements (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
+      VALUES (?,?,?,?,'TRANSFER_OUT',?,?,?,?,?,?,?)`).bind(outMovementId, organisation.id, transfer.from_warehouse_id, transfer.product_id, -transfer.quantity_micros, unitCostCents, "TRANSFER_OUT", id, transfer.reason, transfer.occurred_at, actor.userId),
+    db.prepare(`INSERT INTO stock_movements (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
+      VALUES (?,?,?,?,'TRANSFER_IN',?,?,?,?,?,?,?)`).bind(inMovementId, organisation.id, transfer.to_warehouse_id, transfer.product_id, transfer.quantity_micros, unitCostCents, "TRANSFER_IN", id, transfer.reason, transfer.occurred_at, actor.userId),
+    commandRecord(db, actor.userId, "TRANSFER_STOCK", idempotencyKey, requestHash, "STOCK_TRANSFER", id, now),
+    outboxRecord(db, "STOCK_TRANSFER", id, "StockTransferred", organisation.id, { stock_transfer_id: id, organisation_id: organisation.id, product_id: transfer.product_id, quantity_micros: transfer.quantity_micros, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  const movements = await db.prepare("SELECT * FROM stock_movements WHERE organisation_id=? AND reference_id=? ORDER BY movement_type")
+    .bind(organisation.id, id).all<Record<string, unknown>>();
+  return { id, from_warehouse_id: transfer.from_warehouse_id, to_warehouse_id: transfer.to_warehouse_id, product_id: transfer.product_id, quantity_micros: transfer.quantity_micros, unit_cost_cents: unitCostCents, movements: movements.results };
+}
+
+type InventoryBalanceRow = { product_id: string; sku: string; product_name: string; warehouse_id: string; warehouse_code: string; warehouse_name: string; quantity_micros: number; average_cost_cents: number };
+
+async function queryInventoryBalances(db: D1Database, organisationId: string, params: URLSearchParams): Promise<InventoryBalanceRow[]> {
+  const productId = params.get("product_id")?.trim() || null;
+  const warehouseId = params.get("warehouse_id")?.trim() || null;
+  const conditions: string[] = ["b.organisation_id = ?"];
+  const values: unknown[] = [organisationId];
+  if (productId) { conditions.push("b.product_id = ?"); values.push(productId); }
+  if (warehouseId) { conditions.push("b.warehouse_id = ?"); values.push(warehouseId); }
+  const rows = await db.prepare(`SELECT b.product_id,p.sku,p.name AS product_name,b.warehouse_id,w.code AS warehouse_code,w.name AS warehouse_name,
+    b.quantity_micros,b.average_cost_cents
+    FROM inventory_balances b JOIN products p ON p.id=b.product_id JOIN warehouses w ON w.id=b.warehouse_id
+    WHERE ${conditions.join(" AND ")} ORDER BY p.name,w.name`).bind(...values).all<InventoryBalanceRow>();
+  return rows.results;
+}
+
+/**
+ * Module 5 Phase D GetAvailability: an aggregated on-hand-quantity read.
+ * getBusinessPlatformSnapshot's "balances" section already surfaces
+ * inventory_balances, but only as a raw per-(warehouse,product) list with
+ * no per-product total across warehouses — that aggregation is the actual
+ * gap this closes.
+ */
+export async function getInventoryAvailability(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const rows = await queryInventoryBalances(db, organisation.id, params);
+  const byProduct = new Map<string, { product_id: string; sku: string; name: string; total_quantity_micros: number; by_warehouse: Array<{ warehouse_id: string; code: string; name: string; quantity_micros: number }> }>();
+  for (const row of rows) {
+    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, { product_id: row.product_id, sku: row.sku, name: row.product_name, total_quantity_micros: 0, by_warehouse: [] });
+    const entry = byProduct.get(row.product_id)!;
+    entry.total_quantity_micros += row.quantity_micros;
+    entry.by_warehouse.push({ warehouse_id: row.warehouse_id, code: row.warehouse_code, name: row.warehouse_name, quantity_micros: row.quantity_micros });
+  }
+  return { organisation_id: organisation.id, products: [...byProduct.values()] };
+}
+
+/**
+ * Module 5 Phase D Valuation: on-hand quantity valued at each balance's own
+ * weighted-average cost, aggregated per product and as an organisation-wide
+ * grand total — the other half of the "raw list only, no aggregated total"
+ * gap GetAvailability closes for quantity.
+ */
+export async function getInventoryValuation(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const rows = await queryInventoryBalances(db, organisation.id, params);
+  const byProduct = new Map<string, {
+    product_id: string; sku: string; name: string; total_quantity_micros: number; total_value_cents: number;
+    by_warehouse: Array<{ warehouse_id: string; code: string; name: string; quantity_micros: number; average_cost_cents: number; value_cents: number }>;
+  }>();
+  let grandTotalValueCents = 0;
+  for (const row of rows) {
+    const valueCents = Math.round((row.quantity_micros * row.average_cost_cents) / 1_000_000);
+    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, { product_id: row.product_id, sku: row.sku, name: row.product_name, total_quantity_micros: 0, total_value_cents: 0, by_warehouse: [] });
+    const entry = byProduct.get(row.product_id)!;
+    entry.total_quantity_micros += row.quantity_micros;
+    entry.total_value_cents += valueCents;
+    entry.by_warehouse.push({ warehouse_id: row.warehouse_id, code: row.warehouse_code, name: row.warehouse_name, quantity_micros: row.quantity_micros, average_cost_cents: row.average_cost_cents, value_cents: valueCents });
+    grandTotalValueCents += valueCents;
+  }
+  return { organisation_id: organisation.id, total_value_cents: grandTotalValueCents, products: [...byProduct.values()] };
 }
 
 export async function createProject(payload: ProjectSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {

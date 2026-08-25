@@ -10,11 +10,15 @@ import {
   createBusinessParty,
   createExpense,
   createExpenseCategory,
+  createProduct,
   createProject,
   createQuotation,
+  createWarehouse,
   getBusinessPlatformSnapshot,
   getExpenseReport,
   getFinancialStatements,
+  getInventoryAvailability,
+  getInventoryValuation,
   getProjectProfitability,
   getSupplierVerificationHistory,
   getTrialBalance,
@@ -30,6 +34,7 @@ import {
   searchQuotations,
   sendQuotation,
   submitExpense,
+  transferStock,
   updateBusinessParty,
   updateQuotation,
   verifySupplier,
@@ -39,8 +44,8 @@ import { BusinessValidationError } from "@/lib/domain/business";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
-export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts" | "categories";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "SEND_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER";
+export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts" | "categories" | "products" | "warehouses";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "SEND_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER" | "CREATE_PRODUCT" | "CREATE_WAREHOUSE" | "TRANSFER_STOCK";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -204,6 +209,36 @@ export async function handleProjectProfitability(request: Request, projectId: st
   }
 }
 
+/** Module 5 Phase D GetAvailability: aggregated on-hand quantity per product, with a per-warehouse breakdown. Optional product_id/warehouse_id filters. */
+export async function handleInventoryAvailability(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "inventory:read");
+    const result = await getInventoryAvailability(user, requestedOrganisation(request), new URL(request.url).searchParams);
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The inventory availability report is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 5 Phase D Valuation: on-hand quantity valued at weighted-average cost, per product and as an organisation-wide grand total. */
+export async function handleInventoryValuation(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "inventory:read");
+    const result = await getInventoryValuation(user, requestedOrganisation(request), new URL(request.url).searchParams);
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The inventory valuation report is temporarily unavailable.", context.correlationId);
+  }
+}
+
 export async function handleBusinessPost(request: Request, permission: string, command: BusinessCommand, resourceId?: string) {
   const context = await requestContext(request);
   const startedAt = Date.now();
@@ -259,6 +294,9 @@ export async function handleBusinessPost(request: Request, permission: string, c
       else if (command === "POST_JOURNAL") resource = await postJournal(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "CREATE_EXPENSE") resource = await createExpense(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "RECORD_STOCK_MOVEMENT") resource = await recordStockMovement(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "CREATE_PRODUCT") resource = await createProduct(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "CREATE_WAREHOUSE") resource = await createWarehouse(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "TRANSFER_STOCK") resource = await transferStock(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "CREATE_PROJECT") resource = await createProject(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "CREATE_ACCOUNT") resource = await createAccount(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       else if (command === "REVERSE_JOURNAL_ENTRY") {
