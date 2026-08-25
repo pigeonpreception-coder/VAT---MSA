@@ -1,10 +1,32 @@
 import { ensureDatabase } from "@/db/runtime";
 import { isNationalScope, requireTaxpayerScope } from "@/lib/auth";
-import { IdentityValidationError, normalizeAndValidateRegistration, type RegistrationSubmission } from "@/lib/domain/identity";
+import {
+  IdentityValidationError,
+  normalizeAndValidateRegistration,
+  normalizeMembershipAssignment,
+  normalizeRegistrationDecision,
+  type RegistrationSubmission,
+} from "@/lib/domain/identity";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import type { UserContext } from "@/lib/domain/types";
 import { getItasIdentityPort } from "@/lib/integrations/itas";
 import { RepositoryConflictError } from "./repository";
+
+async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const prior = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
+  const body = stableStringify(details);
+  const hash = await sha256Hex(`${prior?.event_hash ?? "GENESIS"}|${id}|${actor.userId}|${body}|${now}`);
+  return db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id, actor.userId, actor.role, action, resourceType, resourceId, "SUCCESS", body, prior?.event_hash ?? null, hash, now);
+}
+
+function outboxEvent(db: D1Database, aggregateType: string, aggregateId: string, eventType: string, partitionKey: string, payload: Record<string, unknown>) {
+  const now = new Date().toISOString();
+  return db.prepare(`INSERT INTO outbox_events
+    (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), aggregateType, aggregateId, eventType, 1, partitionKey, JSON.stringify(payload), "PENDING", 0, now, now, null, null);
+}
 
 export type OrganisationSummary = {
   id: string;
@@ -194,4 +216,170 @@ export async function submitRegistrationApplication(
     submitted_by: actor.userId,
     submitted_at: now,
   };
+}
+
+type RegistrationRow = {
+  id: string;
+  vat_number: string;
+  tin: string;
+  legal_name: string;
+  trading_name: string | null;
+  taxpayer_type: string;
+  return_frequency: string;
+  address: string;
+  email: string;
+  status: string;
+  submitted_by: string;
+};
+
+export type RegistrationDecisionResult = {
+  registrationId: string;
+  status: "APPROVED" | "REJECTED";
+  taxpayerId: string | null;
+  organisationId: string | null;
+};
+
+/**
+ * The standalone (non-ITAS) registration approval path: an authorised NamRA
+ * or pilot-admin officer reviews a pending registration application. This is
+ * Module 1's ActivateOrganisation + EnableCapability, combined into one
+ * command because they only ever make sense together at this boundary —
+ * approving materializes the taxpayer, organisation, head-office branch,
+ * buyer/seller capabilities and the submitter's owner membership in one
+ * atomic write; rejecting leaves no trace beyond the registration record.
+ */
+export async function decideRegistrationApplication(
+  actor: UserContext,
+  registrationId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<RegistrationDecisionResult> {
+  const { decision, reason } = normalizeRegistrationDecision(input);
+  const db = await ensureDatabase();
+  const registration = await db.prepare(`SELECT id,vat_number,tin,legal_name,trading_name,taxpayer_type,return_frequency,address,email,status,submitted_by
+    FROM registration_applications WHERE id=?`).bind(registrationId).first<RegistrationRow>();
+  if (!registration) {
+    throw new IdentityValidationError([{ code: "REGISTRATION_NOT_FOUND", path: "/registration_id", message: "The registration application does not exist." }]);
+  }
+  if (!["PENDING_VERIFICATION", "UNDER_REVIEW", "VERIFIED"].includes(registration.status)) {
+    throw new IdentityValidationError([{ code: "REGISTRATION_NOT_PENDING", path: "/status", message: `The registration application is already ${registration.status}.` }]);
+  }
+  if (actor.userId === registration.submitted_by) {
+    throw new IdentityValidationError([{ code: "SELF_APPROVAL_DENIED", path: "/actor", message: "The submitting user cannot decide their own registration application." }]);
+  }
+
+  const now = new Date().toISOString();
+  const verificationId = crypto.randomUUID();
+
+  if (decision === "REJECT") {
+    await db.batch([
+      db.prepare("UPDATE registration_applications SET status='REJECTED',reviewed_at=?,review_reason=? WHERE id=?").bind(now, reason, registration.id),
+      db.prepare(`INSERT INTO registration_verifications
+        (id,registration_application_id,provider,request_reference,status,response_hash,verified_taxpayer_id,checked_at,expires_at)
+        VALUES (?,?,?,?,?,NULL,NULL,?,NULL)`).bind(verificationId, registration.id, "MANUAL_REVIEW", `manual:${registration.id}`, "REJECTED", now),
+      outboxEvent(db, "REGISTRATION", registration.id, "TaxpayerRegistrationRejected", registration.vat_number, { registration_id: registration.id, reason, correlation_id: correlationId }),
+      await appendAudit(db, actor, "TAXPAYER_REGISTRATION_REJECTED", "REGISTRATION", registration.id, { reason }),
+    ]);
+    return { registrationId: registration.id, status: "REJECTED", taxpayerId: null, organisationId: null };
+  }
+
+  const conflict = await db.prepare(`SELECT id FROM taxpayers WHERE vat_number=? OR tin=?
+    UNION SELECT taxpayer_id AS id FROM taxpayer_identifiers WHERE (identifier_type='VAT_NUMBER' AND identifier_value=?) OR (identifier_type='TIN' AND identifier_value=?) LIMIT 1`)
+    .bind(registration.vat_number, registration.tin, registration.vat_number, registration.tin).first<{ id: string }>();
+  if (conflict) throw new RepositoryConflictError("A canonical taxpayer already exists for this VAT number or TIN.");
+
+  const taxpayerId = crypto.randomUUID();
+  const organisationId = crypto.randomUUID();
+  const branchId = crypto.randomUUID();
+  const membershipId = crypto.randomUUID();
+
+  await db.batch([
+    db.prepare(`INSERT INTO taxpayers (id,vat_number,tin,legal_name,trading_name,taxpayer_type,vat_status,return_frequency,address,email,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(
+        taxpayerId, registration.vat_number, registration.tin, registration.legal_name, registration.trading_name,
+        registration.taxpayer_type, "ACTIVE", registration.return_frequency, registration.address, registration.email, now,
+      ),
+    db.prepare(`INSERT INTO taxpayer_identifiers (id,taxpayer_id,identifier_type,identifier_value,country,status,source,verified_at,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), taxpayerId, "VAT_NUMBER", registration.vat_number, "NA", "ACTIVE", "MANUAL_REVIEW", now, now),
+    db.prepare(`INSERT INTO taxpayer_identifiers (id,taxpayer_id,identifier_type,identifier_value,country,status,source,verified_at,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), taxpayerId, "TIN", registration.tin, "NA", "ACTIVE", "MANUAL_REVIEW", now, now),
+    db.prepare(`INSERT INTO organisations (id,taxpayer_id,legal_name,trading_name,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?)`).bind(organisationId, taxpayerId, registration.legal_name, registration.trading_name, "ACTIVE", now, now),
+    db.prepare(`INSERT INTO branches (id,organisation_id,code,name,address,status,is_head_office,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(branchId, organisationId, "HEAD", `${registration.legal_name} Head Office`, registration.address, "ACTIVE", 1, now, now),
+    db.prepare(`INSERT INTO organisation_capabilities (id,organisation_id,capability,status,effective_from,effective_to,approved_by,created_at)
+      VALUES (?,?,?,?,?,NULL,?,?)`).bind(crypto.randomUUID(), organisationId, "BUYER", "ACTIVE", now, actor.userId, now),
+    db.prepare(`INSERT INTO organisation_capabilities (id,organisation_id,capability,status,effective_from,effective_to,approved_by,created_at)
+      VALUES (?,?,?,?,?,NULL,?,?)`).bind(crypto.randomUUID(), organisationId, "SELLER", "ACTIVE", now, actor.userId, now),
+    db.prepare(`INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      VALUES (?,?,?,?,?,?,?,NULL,?,?)`).bind(membershipId, organisationId, registration.submitted_by, "TAXPAYER_OWNER", branchId, "ACTIVE", now, actor.userId, now),
+    db.prepare("UPDATE app_users SET role='TAXPAYER_OWNER',taxpayer_id=? WHERE id=? AND taxpayer_id IS NULL").bind(taxpayerId, registration.submitted_by),
+    db.prepare("UPDATE registration_applications SET status='APPROVED',reviewed_at=?,review_reason=? WHERE id=?").bind(now, reason, registration.id),
+    db.prepare(`INSERT INTO registration_verifications
+      (id,registration_application_id,provider,request_reference,status,response_hash,verified_taxpayer_id,checked_at,expires_at)
+      VALUES (?,?,?,?,?,NULL,?,?,NULL)`).bind(verificationId, registration.id, "MANUAL_REVIEW", `manual:${registration.id}`, "VERIFIED", taxpayerId, now),
+    outboxEvent(db, "ORGANISATION", organisationId, "OrganisationActivated", registration.vat_number, { organisation_id: organisationId, taxpayer_id: taxpayerId, registration_id: registration.id, correlation_id: correlationId }),
+    await appendAudit(db, actor, "TAXPAYER_REGISTRATION_APPROVED", "REGISTRATION", registration.id, { reason, taxpayerId, organisationId }),
+  ]);
+
+  return { registrationId: registration.id, status: "APPROVED", taxpayerId, organisationId };
+}
+
+export type MembershipAssignmentResult = {
+  id: string;
+  organisationId: string;
+  userId: string;
+  roleCode: string;
+  branchId: string | null;
+  status: string;
+};
+
+/**
+ * Module 1 AssignMembership: an organisation admin (or NamRA) grants an
+ * existing, already-provisioned app_users row a taxpayer-side membership in
+ * one of their organisations. Deliberately does not provision a brand-new
+ * user identity — see MODULE_DEVELOPMENT_PLAYBOOK.md's Module 1 gap notes on
+ * self-service provisioning being an open security-policy decision, not an
+ * engineering default this command should make unilaterally.
+ */
+export async function assignMembership(
+  actor: UserContext,
+  organisationId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<MembershipAssignmentResult> {
+  const assignment = normalizeMembershipAssignment(input);
+  const db = await ensureDatabase();
+  const organisation = await db.prepare("SELECT id,taxpayer_id FROM organisations WHERE id=?").bind(organisationId).first<{ id: string; taxpayer_id: string }>();
+  if (!organisation) {
+    throw new IdentityValidationError([{ code: "ORGANISATION_NOT_FOUND", path: "/organisation_id", message: "The organisation does not exist." }]);
+  }
+  requireTaxpayerScope(actor, organisation.taxpayer_id);
+
+  const targetUser = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(assignment.userId).first<{ id: string; status: string }>();
+  if (!targetUser) {
+    throw new IdentityValidationError([{ code: "USER_NOT_FOUND", path: "/user_id", message: "The target user does not exist." }]);
+  }
+  if (targetUser.status !== "ACTIVE") {
+    throw new IdentityValidationError([{ code: "USER_NOT_ACTIVE", path: "/user_id", message: "The target user is not active." }]);
+  }
+  if (assignment.branchId) {
+    const branch = await db.prepare("SELECT id FROM branches WHERE id=? AND organisation_id=?").bind(assignment.branchId, organisationId).first<{ id: string }>();
+    if (!branch) throw new IdentityValidationError([{ code: "BRANCH_OUT_OF_SCOPE", path: "/branch_id", message: "The branch is outside this organisation." }]);
+  }
+  const existing = await db.prepare("SELECT id FROM organisation_memberships WHERE organisation_id=? AND user_id=? AND status='ACTIVE'")
+    .bind(organisationId, assignment.userId).first<{ id: string }>();
+  if (existing) throw new RepositoryConflictError("The user already has an active membership in this organisation.");
+
+  const now = new Date().toISOString();
+  const membershipId = crypto.randomUUID();
+  await db.batch([
+    db.prepare(`INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      VALUES (?,?,?,?,?,?,?,NULL,?,?)`).bind(membershipId, organisationId, assignment.userId, assignment.roleCode, assignment.branchId, "ACTIVE", now, actor.userId, now),
+    db.prepare("UPDATE app_users SET taxpayer_id=? WHERE id=? AND taxpayer_id IS NULL").bind(organisation.taxpayer_id, assignment.userId),
+    outboxEvent(db, "ORGANISATION", organisationId, "OrganisationMembershipAssigned", organisation.taxpayer_id, { organisation_id: organisationId, user_id: assignment.userId, role_code: assignment.roleCode, correlation_id: correlationId }),
+    await appendAudit(db, actor, "MEMBERSHIP_ASSIGNED", "ORGANISATION_MEMBERSHIP", membershipId, { organisationId, userId: assignment.userId, roleCode: assignment.roleCode }),
+  ]);
+
+  return { id: membershipId, organisationId, userId: assignment.userId, roleCode: assignment.roleCode, branchId: assignment.branchId, status: "ACTIVE" };
 }

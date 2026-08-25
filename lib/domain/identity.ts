@@ -139,3 +139,65 @@ export function normalizeAndValidateRegistration(payload: unknown): NormalizedRe
 export function isDynamicTradingCapability(value: string): value is "BUYER" | "SELLER" {
   return value === "BUYER" || value === "SELLER";
 }
+
+export type RegistrationDecision = { decision: "APPROVE" | "REJECT"; reason: string };
+
+/**
+ * Validates a NamRA/pilot-admin officer's decision on a pending registration
+ * application (the standalone, non-ITAS approval path — ActivateOrganisation
+ * per MODULE_DEVELOPMENT_PLAYBOOK.md). Approving materializes the taxpayer,
+ * organisation, head-office branch, buyer/seller capabilities and the
+ * submitter's owner membership; rejecting leaves no trace beyond the
+ * registration record itself.
+ */
+export function normalizeRegistrationDecision(input: unknown): RegistrationDecision {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A registration decision object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const decision = String(source.decision ?? "").trim().toUpperCase();
+  if (decision !== "APPROVE" && decision !== "REJECT") {
+    throw new IdentityValidationError([{ code: "DECISION_INVALID", path: "/decision", message: "decision must be APPROVE or REJECT." }]);
+  }
+  const reason = textValue(source.reason).replaceAll(/\s+/g, " ");
+  if (reason.length < 5 || reason.length > 240) {
+    throw new IdentityValidationError([{ code: "REASON_INVALID", path: "/reason", message: "Provide a 5 to 240 character decision reason." }]);
+  }
+  return { decision: decision as "APPROVE" | "REJECT", reason };
+}
+
+/**
+ * Roles a taxpayer-side administrator (or NamRA) may grant via
+ * AssignMembership. Deliberately excludes NamRA roles, PILOT_ADMIN, platform
+ * roles and the seller/buyer portal roles — granting those is out of scope
+ * for this command and must never become reachable through it, since that
+ * would be a privilege-escalation path for an organisation admin to hand out
+ * NamRA or platform authority.
+ */
+export const ASSIGNABLE_MEMBERSHIP_ROLES = [
+  "TAXPAYER_OWNER",
+  "TAXPAYER_ADMIN",
+  "TAXPAYER_ACCOUNTANT",
+  "TAXPAYER_STAFF",
+  "TAXPAYER_VIEWER",
+] as const;
+export type AssignableMembershipRole = (typeof ASSIGNABLE_MEMBERSHIP_ROLES)[number];
+
+export type MembershipAssignment = { userId: string; roleCode: AssignableMembershipRole; branchId: string | null };
+
+export function normalizeMembershipAssignment(input: unknown): MembershipAssignment {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A membership assignment object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const userId = textValue(source.user_id);
+  if (!userId) {
+    throw new IdentityValidationError([{ code: "USER_ID_REQUIRED", path: "/user_id", message: "user_id is required." }]);
+  }
+  const roleCode = textValue(source.role_code).toUpperCase();
+  if (!(ASSIGNABLE_MEMBERSHIP_ROLES as readonly string[]).includes(roleCode)) {
+    throw new IdentityValidationError([{ code: "ROLE_NOT_ASSIGNABLE", path: "/role_code", message: `role_code must be one of: ${ASSIGNABLE_MEMBERSHIP_ROLES.join(", ")}.` }]);
+  }
+  const branchId = textValue(source.branch_id) || null;
+  return { userId, roleCode: roleCode as AssignableMembershipRole, branchId };
+}

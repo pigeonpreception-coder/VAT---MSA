@@ -18,8 +18,8 @@ This matrix is the truthful completion record for the approved architecture. It 
 | # | Domain | Current implementation | Status | Required closure before national production |
 |---:|---|---|---|---|
 | 1 | Identity | Provider registry, immutable provider-subject links, provisioned-user checks, role/capability policy and development-only identity fallback | CONTROLLED FOUNDATION | Approved ITAS/enterprise IdP claims, MFA, recovery, lifecycle and assurance tests |
-| 2 | Taxpayer | Canonical taxpayers, identifiers, VAT status, scoped queries and idempotent registration intake | CONTROLLED FOUNDATION | Authoritative ITAS verification, merge/deregistration rules and signed identifier precedence |
-| 3 | Organisation | One taxpayer/one organisation constraint, branches, memberships and effective-dated buyer/seller capabilities | VERIFIED PILOT | NamRA lifecycle authority and enterprise policy enforcement evidence |
+| 2 | Taxpayer | Canonical taxpayers, identifiers, VAT status, scoped queries, idempotent registration intake and a standalone (non-ITAS) manual-review approval path (`POST /api/v1/registration-applications/:id/decision`) that materializes the taxpayer on approval | CONTROLLED FOUNDATION | Authoritative ITAS verification, merge/deregistration rules and signed identifier precedence |
+| 3 | Organisation | One taxpayer/one organisation constraint, branches, memberships, effective-dated buyer/seller capabilities, and standalone `ActivateOrganisation`+`EnableCapability` (via the registration decision above, which also creates the head-office branch and owner membership) and `AssignMembership` (`POST /api/v1/organisations/:id/memberships`) commands | VERIFIED PILOT | NamRA lifecycle authority and enterprise policy enforcement evidence |
 | 4 | User management | Users, memberships, roles, permissions, grants, separated privileged portal projections and a standalone `GetUserAccess` query (`GET /api/v1/me/access`) returning the full effective RBAC+ABAC predicate set, computed live and never cached | CONTROLLED FOUNDATION | Enterprise provisioning, invitation/suspension workflows, PAM and periodic access certification |
 | 5 | Buyer/Seller | Dynamic organisation capabilities and transaction-context roles without duplicate taxpayer identities | VERIFIED PILOT | Legal terminology and operating-policy approval |
 | 6 | Customer | Tenant-scoped create/update and non-destructive deactivate lifecycle, duplicate identifier checks, active-relationship enforcement, audit/outbox evidence and immutable transaction snapshots | VERIFIED PILOT | Authoritative customer lookup/verification contract and conformance evidence |
@@ -75,12 +75,12 @@ Five domains from the workspace/organisation/licensing/workflow extension (`08-e
 
 ## Verified release evidence
 
-The canonical release gate passed on 2026-08-14:
+The canonical release gate passed on 2026-08-25:
 
 - ESLint and TypeScript completed without errors.
-- 61 unit/security/policy tests passed across ten test files.
+- 84 unit/security/policy tests passed across eleven test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
-- The production build completed and exposed all application and API routes.
+- The production build completed and exposed all application and API routes, including the new `GET /api/v1/me/access`, `POST /api/v1/registration-applications/:id/decision` and `POST /api/v1/organisations/:id/memberships`.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.
 - Earlier runtime proofs covered versioned return workflows, blocked unconfigured ITAS submission, refund controls, invoice correction lineage, R2 quarantine, offline trust rejection, reports and separated portals.
 
