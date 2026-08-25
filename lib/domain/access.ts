@@ -48,6 +48,7 @@ const WORKSPACE_READ = ["workspace:read", "search:read", "licensing:read"];
 const ORGANISATION_CONTROL = [
   ...WORKSPACE_READ,
   "licensing:request",
+  "licensing:manage",
   "administration:read",
   "administration:manage",
   "employees:read",

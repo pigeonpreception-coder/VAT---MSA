@@ -236,6 +236,58 @@ export function hasRecentStepUp(input: { assurance: string | null; reauthenticat
   return age >= 0 && age <= (input.maxAgeMs ?? 5 * 60_000);
 }
 
+export type LicenseStateAction = "ACTIVATE" | "SUSPEND" | "RENEW";
+export type LicenseStateChangeInput = { action: LicenseStateAction; reason: string };
+
+const LICENSE_STATE_ACTIONS: readonly LicenseStateAction[] = ["ACTIVATE", "SUSPEND", "RENEW"];
+
+/** Licensing & Entitlements lifecycle commands (Activate/Suspend/Renew combined —
+ * they're the same "move the licence to a new state" shape; Upgrade is a
+ * distinct plan-change operation, see normalizeLicenseUpgrade below). */
+export function normalizeLicenseStateChange(input: unknown): LicenseStateChangeInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A licence state-change object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const action = String(source.action ?? "").trim().toUpperCase();
+  if (!LICENSE_STATE_ACTIONS.includes(action as LicenseStateAction)) {
+    throw new ControlPlaneValidationError("LICENSE_ACTION_INVALID", `action must be one of: ${LICENSE_STATE_ACTIONS.join(", ")}.`);
+  }
+  const reason = String(source.reason ?? "").trim().replace(/\s+/g, " ");
+  if (reason.length < 5 || reason.length > 240) {
+    throw new ControlPlaneValidationError("REASON_REQUIRED", "Provide a 5 to 240 character reason.");
+  }
+  return { action: action as LicenseStateAction, reason };
+}
+
+const LICENSE_STATE_TRANSITIONS: Record<LicenseStateAction, readonly LicenseState[]> = {
+  ACTIVATE: ["TRIAL", "GRACE_PERIOD", "PENDING_RENEWAL", "SUSPENDED"],
+  SUSPEND: ["TRIAL", "ACTIVE", "GRACE_PERIOD", "PENDING_RENEWAL"],
+  RENEW: ["ACTIVE", "GRACE_PERIOD", "PENDING_RENEWAL", "EXPIRED"],
+};
+
+/** EXPIRED/CANCELLED are deliberately terminal for these three actions — reaching
+ * either from here requires a new subscription, not a state-change command. */
+export function assertLicenseStateTransition(action: LicenseStateAction, currentState: LicenseState): void {
+  if (!LICENSE_STATE_TRANSITIONS[action].includes(currentState)) {
+    throw new ControlPlaneValidationError("LICENSE_TRANSITION_INVALID", `Cannot ${action.toLowerCase()} a licence currently in state ${currentState}.`);
+  }
+}
+
+export type LicenseUpgradeInput = { licensePlanCode: string };
+
+export function normalizeLicenseUpgrade(input: unknown): LicenseUpgradeInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A licence upgrade object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const licensePlanCode = String(source.license_plan_code ?? "").trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_-]{1,39}$/.test(licensePlanCode)) {
+    throw new ControlPlaneValidationError("LICENSE_PLAN_CODE_INVALID", "license_plan_code must contain 2 to 40 letters, numbers, hyphens or underscores.");
+  }
+  return { licensePlanCode };
+}
+
 export function quarterlyAccessReviewWindow(date = new Date()): { key: string; periodStart: string; dueAt: string } {
   const year = date.getUTCFullYear();
   const quarter = Math.floor(date.getUTCMonth() / 3) + 1;

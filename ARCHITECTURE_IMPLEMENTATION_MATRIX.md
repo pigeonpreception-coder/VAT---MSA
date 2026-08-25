@@ -55,7 +55,7 @@ Five domains from the workspace/organisation/licensing/workflow extension (`08-e
 
 | Domain | Current implementation | Status | Required closure before national production |
 |---|---|---|---|
-| Licensing & Entitlements | Plan/feature/entitlement/subscription/organisation-licence/usage schema, licence-continuity policy (`evaluateEntitlement`) wired into every control-plane command | CONTROLLED FOUNDATION | Standalone `Activate/Suspend/Upgrade/Renew` lifecycle commands and standalone `GetEntitlements`/`GetUsage` queries (currently read only via the bundled administration snapshot); commercial/billing provider integration |
+| Licensing & Entitlements | Plan/feature/entitlement/subscription/organisation-licence/usage schema, licence-continuity policy (`evaluateEntitlement`) wired into every control-plane command, standalone `GetEntitlements`/`GetUsage` queries (`GET /api/v1/licensing/entitlements`, `GET /api/v1/licensing/usage`), and standalone `Activate`/`Suspend`/`Renew` (`POST /api/v1/licensing/state`) plus `Upgrade` (`POST /api/v1/licensing/upgrade`, versioned plan-change history, not an in-place mutation) — the previously-dead `license_events` table now records every transition | VERIFIED PILOT | Commercial/billing provider integration; formal approval of the state-transition and plan-tiering rules |
 | Organisation Administration | Employee/position/department/business-unit/administrator schema; invite and terminate-employee commands with licence-seat and workflow-reassignment effects | CONTROLLED FOUNDATION | `AppointAdministrator` command, an activate-employee (`INVITED → ACTIVE`) transition, and NamRA/legal confirmation of administrator-proofing policy |
 | Organisation Authorization | Versioned tenant-defined roles, role-permission grants, user-role and user-capability assignment schema; role creation with a protected-permission ceiling | CONTROLLED FOUNDATION | A standalone `GrantCapability` command and formal governance approval of the protected-permission ceiling |
 | Access Governance | Request/approve/review/certify schema and commands with self-approval and segregation-of-duties guards; quarterly review cycle with auto-close on full certification | VERIFIED PILOT | Standalone `Revoke`/`Offboard` commands distinct from the existing decision flows; formal approval of the access-certification policy |
@@ -78,9 +78,9 @@ Five domains from the workspace/organisation/licensing/workflow extension (`08-e
 The canonical release gate passed on 2026-08-25:
 
 - ESLint and TypeScript completed without errors.
-- 96 unit/security/policy tests passed across eleven test files.
+- 105 unit/security/policy tests passed across eleven test files.
 - Heuristic secret scan passed and a CycloneDX SBOM was generated.
-- The production build completed and exposed all application and API routes, including the new `GET /api/v1/me/access`, `POST /api/v1/registration-applications/:id/decision`, `POST /api/v1/organisations/:id/memberships`, `POST /api/v1/taxpayers/:id/suspension`, `GET`/`POST /api/v1/organisations/:id/branches` (+ `PATCH .../branches/:branchId`), `GET /api/v1/portals` and `GET /api/v1/counterparties/classification`.
+- The production build completed and exposed all application and API routes, including the new `GET /api/v1/me/access`, `POST /api/v1/registration-applications/:id/decision`, `POST /api/v1/organisations/:id/memberships`, `POST /api/v1/taxpayers/:id/suspension`, `GET`/`POST /api/v1/organisations/:id/branches` (+ `PATCH .../branches/:branchId`), `GET /api/v1/portals`, `GET /api/v1/counterparties/classification`, `GET /api/v1/licensing/entitlements`, `GET /api/v1/licensing/usage`, `POST /api/v1/licensing/state` and `POST /api/v1/licensing/upgrade`.
 - Runtime proof converted one accepted quotation to one certified invoice, linked the source quotation, created seller/buyer VAT ledger entries and returned the same invoice on an identical retry.
 - Earlier runtime proofs covered versioned return workflows, blocked unconfigured ITAS submission, refund controls, invoice correction lineage, R2 quarantine, offline trust rejection, reports and separated portals.
 

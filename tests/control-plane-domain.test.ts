@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   ControlPlaneValidationError,
+  assertLicenseStateTransition,
   assertWorkflowDecision,
   evaluateEntitlement,
   hasRecentStepUp,
+  normalizeLicenseStateChange,
+  normalizeLicenseUpgrade,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -68,5 +71,53 @@ describe("organisation access and workflow safety", () => {
     expect(quarterlyAccessReviewWindow(new Date("2026-08-10T12:00:00Z"))).toEqual({
       key: "2026-Q3", periodStart: "2026-07-01", dueAt: "2026-09-30T23:59:59.000Z",
     });
+  });
+});
+
+describe("licence lifecycle (Activate/Suspend/Renew/Upgrade)", () => {
+  it("normalizes a well-formed state-change action and reason", () => {
+    expect(normalizeLicenseStateChange({ action: "activate", reason: "Payment received, lifting the grace-period hold." })).toEqual({
+      action: "ACTIVATE",
+      reason: "Payment received, lifting the grace-period hold.",
+    });
+  });
+
+  it("rejects an unsupported action", () => {
+    expect(() => normalizeLicenseStateChange({ action: "CANCEL", reason: "Not a supported action here." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeLicenseStateChange({ action: "SUSPEND", reason: "no" })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("allows ACTIVATE from TRIAL, GRACE_PERIOD, PENDING_RENEWAL and SUSPENDED", () => {
+    for (const state of ["TRIAL", "GRACE_PERIOD", "PENDING_RENEWAL", "SUSPENDED"] as const) {
+      expect(() => assertLicenseStateTransition("ACTIVATE", state)).not.toThrow();
+    }
+  });
+
+  it("denies ACTIVATE from the terminal EXPIRED and CANCELLED states", () => {
+    for (const state of ["EXPIRED", "CANCELLED"] as const) {
+      expect(() => assertLicenseStateTransition("ACTIVATE", state)).toThrowError(ControlPlaneValidationError);
+    }
+  });
+
+  it("allows SUSPEND from any non-terminal state but denies it once already terminal", () => {
+    expect(() => assertLicenseStateTransition("SUSPEND", "ACTIVE")).not.toThrow();
+    expect(() => assertLicenseStateTransition("SUSPEND", "EXPIRED")).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("allows RENEW even from EXPIRED, unlike ACTIVATE and SUSPEND", () => {
+    expect(() => assertLicenseStateTransition("RENEW", "EXPIRED")).not.toThrow();
+    expect(() => assertLicenseStateTransition("RENEW", "CANCELLED")).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("normalizes and uppercases a licence plan code for Upgrade", () => {
+    expect(normalizeLicenseUpgrade({ license_plan_code: "growth-plus" })).toEqual({ licensePlanCode: "GROWTH-PLUS" });
+  });
+
+  it("rejects a malformed licence plan code", () => {
+    expect(() => normalizeLicenseUpgrade({ license_plan_code: "a" })).toThrowError(ControlPlaneValidationError);
+    expect(() => normalizeLicenseUpgrade({ license_plan_code: "" })).toThrowError(ControlPlaneValidationError);
   });
 });

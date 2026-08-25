@@ -3,8 +3,11 @@ import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
 import {
   ControlPlaneValidationError,
   evaluateEntitlement,
+  assertLicenseStateTransition,
   assertWorkflowDecision,
   normalizeEmployee,
+  normalizeLicenseStateChange,
+  normalizeLicenseUpgrade,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -112,6 +115,108 @@ export async function assertEntitledOperation(
     }
   }
   return { organisation, license };
+}
+
+/** Licensing & Entitlements standalone GetEntitlements — previously readable only bundled inside getAdministrationSnapshot. */
+export async function getEntitlementsSnapshot(actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const license = await getLicense(db, organisation.id);
+  return {
+    organisation,
+    license: { ...license, price: null, pricingConfigured: false },
+    entitlements: await getEntitlements(db, license),
+  };
+}
+
+/** Licensing & Entitlements standalone GetUsage — previously not queryable at all outside the administration snapshot's bundled entitlement view. */
+export async function getUsageSnapshot(actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const license = await getLicense(db, organisation.id);
+  const usage = await db.prepare(`SELECT metric_key,period_key,used_value,reserved_value,version,updated_at
+    FROM license_usage WHERE organisation_license_id=? ORDER BY metric_key`).bind(license.id)
+    .all<{ metric_key: string; period_key: string; used_value: number; reserved_value: number; version: number; updated_at: string }>();
+  return { organisation, licenseId: license.id, usage: usage.results };
+}
+
+const LICENSE_STATE_EVENT_TYPE: Record<"ACTIVATE" | "SUSPEND" | "RENEW", string> = {
+  ACTIVATE: "LICENSE_ACTIVATED",
+  SUSPEND: "LICENSE_SUSPENDED",
+  RENEW: "LICENSE_RENEWED",
+};
+
+/**
+ * Licensing & Entitlements Activate/Suspend/Renew. Combined into one command
+ * (three actions, one state-machine shape) since license_events already
+ * models every transition as from_state/to_state/authority/reason — nothing
+ * previously wrote to that table despite it existing since migration 0008.
+ */
+export async function changeLicenseState(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
+  const { action, reason } = normalizeLicenseStateChange(input);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const license = await getLicense(db, organisation.id);
+  assertLicenseStateTransition(action, license.state);
+  const toState: LicenseState = action === "SUSPEND" ? "SUSPENDED" : "ACTIVE";
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [
+    db.prepare("UPDATE organisation_licenses SET state=?,state_version=state_version+1,updated_at=? WHERE id=?").bind(toState, now, license.id),
+    db.prepare(`INSERT INTO license_events (id,organisation_license_id,organisation_id,event_type,from_state,to_state,authority,reason,occurred_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), license.id, organisation.id, LICENSE_STATE_EVENT_TYPE[action], license.state, toState, actor.userId, reason, now),
+  ];
+  if (action === "RENEW") {
+    const currentEndMs = Date.parse(license.current_period_end);
+    const baseMs = Number.isFinite(currentEndMs) ? Math.max(currentEndMs, Date.now()) : Date.now();
+    const newStart = new Date(baseMs);
+    const newEnd = new Date(baseMs);
+    newEnd.setUTCFullYear(newEnd.getUTCFullYear() + 1);
+    statements.push(
+      db.prepare(`UPDATE subscriptions SET current_period_start=?,current_period_end=?,updated_at=?
+        WHERE id=(SELECT subscription_id FROM organisation_licenses WHERE id=?)`)
+        .bind(newStart.toISOString(), newEnd.toISOString(), now, license.id),
+    );
+  }
+  statements.push(await appendAudit(db, actor, LICENSE_STATE_EVENT_TYPE[action], "ORGANISATION_LICENSE", license.id, { organisationId: organisation.id, fromState: license.state, toState, reason }));
+  await db.batch(statements);
+  return { licenseId: license.id, state: toState, previousState: license.state };
+}
+
+/**
+ * Licensing & Entitlements Upgrade: a distinct plan-change operation, not a
+ * state transition. Closes the current organisation_licenses row
+ * (effective_to=now) and inserts a new one on the target plan — a versioned
+ * history of plan changes, not an in-place mutation, matching how the rest
+ * of this repository treats structural records.
+ */
+export async function upgradeLicense(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
+  const { licensePlanCode } = normalizeLicenseUpgrade(input);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const license = await getLicense(db, organisation.id);
+  if (licensePlanCode === license.plan_code) {
+    throw new ControlPlaneValidationError("LICENSE_PLAN_UNCHANGED", "The organisation is already on this licence plan.");
+  }
+  if (!["ACTIVE", "TRIAL"].includes(license.state)) {
+    throw new ControlPlaneValidationError("LICENSE_TRANSITION_INVALID", `Cannot upgrade a licence currently in state ${license.state}.`);
+  }
+  const targetPlan = await db.prepare("SELECT id,code,name,version FROM license_plans WHERE code=? AND status='ACTIVE' ORDER BY version DESC LIMIT 1")
+    .bind(licensePlanCode).first<{ id: string; code: string; name: string; version: number }>();
+  if (!targetPlan) throw new ControlPlaneValidationError("LICENSE_PLAN_NOT_FOUND", "The requested licence plan is not available.");
+
+  const now = new Date().toISOString();
+  const newLicenseId = crypto.randomUUID();
+  const statements: D1PreparedStatement[] = [
+    db.prepare("UPDATE organisation_licenses SET effective_to=? WHERE id=?").bind(now, license.id),
+    db.prepare(`INSERT INTO organisation_licenses (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
+      VALUES (?,?,(SELECT subscription_id FROM organisation_licenses WHERE id=?),?,?,?,?,NULL,NULL,?,?)`)
+      .bind(newLicenseId, organisation.id, license.id, targetPlan.id, "ACTIVE", 1, now, license.retention_policy, now),
+    db.prepare(`INSERT INTO license_events (id,organisation_license_id,organisation_id,event_type,from_state,to_state,authority,reason,occurred_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), newLicenseId, organisation.id, "LICENSE_PLAN_UPGRADED", license.state, "ACTIVE", actor.userId, `Upgraded from ${license.plan_code} to ${targetPlan.code}`, now),
+    await appendAudit(db, actor, "LICENSE_PLAN_UPGRADED", "ORGANISATION_LICENSE", newLicenseId, { organisationId: organisation.id, fromPlan: license.plan_code, toPlan: targetPlan.code }),
+  ];
+  await db.batch(statements);
+  return { licenseId: newLicenseId, planCode: targetPlan.code, planName: targetPlan.name, state: "ACTIVE" };
 }
 
 export async function getEffectiveNavigation(actor: UserContext, requestedOrganisationId?: string | null): Promise<{ organisation: OrganisationScope; workspaces: NavigationWorkspace[] }> {
