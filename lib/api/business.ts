@@ -16,6 +16,7 @@ import {
   getExpenseReport,
   getFinancialStatements,
   getProjectProfitability,
+  getSupplierVerificationHistory,
   getTrialBalance,
   expireQuotation,
   postJournal,
@@ -25,9 +26,11 @@ import {
   rejectQuotation,
   reverseJournalEntry,
   deactivateBusinessParty,
+  searchBusinessParties,
   submitExpense,
   updateBusinessParty,
   updateQuotation,
+  verifySupplier,
 } from "@/lib/data/business-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { BusinessValidationError } from "@/lib/domain/business";
@@ -35,7 +38,7 @@ import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts" | "categories";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -73,6 +76,37 @@ export async function handleBusinessGet(request: Request, permission: string, se
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
     if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
     return problem(500, "INTERNAL_ERROR", "Internal error", "The requested business records are temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 5 Phase A SearchCustomers/SearchSuppliers over the shared business_parties model — filter by relationship for either. */
+export async function handlePartySearch(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "parties:manage");
+    const result = await searchBusinessParties(user, requestedOrganisation(request), new URL(request.url).searchParams);
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof BusinessValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
+    if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The party search is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 5 Phase A: a supplier's verification history, most recent first. */
+export async function handleSupplierVerificationHistory(request: Request, partyId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "parties:manage");
+    const history = await getSupplierVerificationHistory(partyId, user, requestedOrganisation(request));
+    return Response.json(history, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The supplier verification history is temporarily unavailable.", context.correlationId);
   }
 }
 
@@ -174,6 +208,9 @@ export async function handleBusinessPost(request: Request, permission: string, c
       resource = command === "SUBMIT_EXPENSE"
         ? await submitExpense(resourceId, user, idempotencyKey, context.correlationId, organisationId)
         : await approveExpense(resourceId, user, idempotencyKey, context.correlationId, organisationId);
+    } else if (command === "VERIFY_SUPPLIER") {
+      if (!resourceId) throw new BusinessResourceError("Business party id is required.", 400);
+      resource = await verifySupplier(resourceId, user, idempotencyKey, context.correlationId, organisationId);
     } else {
       const payload = await readBoundedJson<never>(request, 262_144);
       if (command === "CREATE_BUSINESS_PARTY") resource = await createBusinessParty(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
@@ -225,7 +262,7 @@ export async function handleBusinessPost(request: Request, permission: string, c
     }
     if (!resource) throw new RepositoryConflictError("The idempotent resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "APPROVE_PROJECT_BUDGET"].includes(command) ? 200 : 201;
+    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "APPROVE_PROJECT_BUDGET", "VERIFY_SUPPLIER"].includes(command) ? 200 : 201;
     return Response.json({ resource }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });

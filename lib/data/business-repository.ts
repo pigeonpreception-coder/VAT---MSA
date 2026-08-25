@@ -10,6 +10,7 @@ import {
   normalizeAndValidateExpenseRejection,
   normalizeAndValidateJournal,
   normalizeAndValidateJournalReversal,
+  normalizePartySearchQuery,
   normalizeAndValidatePeriodClose,
   normalizeAndValidateProject,
   normalizeAndValidateProjectBudgetApproval,
@@ -32,6 +33,7 @@ import {
   type QuotationConversionSubmission,
   type StockMovementSubmission,
 } from "@/lib/domain/business";
+import { classifyTransaction } from "./identity-repository";
 import { centsToDecimal, sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import type { InvoiceSubmission, UserContext } from "@/lib/domain/types";
 import type { RequestContext } from "@/lib/security/request";
@@ -333,6 +335,50 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
   return { organisation, metrics: metrics ?? {}, parties: parties.results, products: products.results, quotations: quotations.results, accounts: accounts.results, journals: journals.results, expenses: expenses.results, balances: balances.results, projects: projects.results, imports: imports.results, categories: categories.results, warehouses: warehouses.results };
 }
 
+/**
+ * Module 5 Phase A SearchCustomers/SearchSuppliers. One search over the
+ * shared business_parties model — SearchCustomers is this with
+ * relationship=CUSTOMER, SearchSuppliers is relationship=SUPPLIER; there is
+ * no separate Customer/Supplier table to search independently. Distinct
+ * from getBusinessPlatformSnapshot's fixed "parties" list (still used
+ * as-is by existing dashboard pages) — this is a genuinely filterable,
+ * paginated query with a real totalCount, the same shape Module 3 Phase B's
+ * GetWorkQueue established.
+ */
+export async function searchBusinessParties(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const query = normalizePartySearchQuery(params);
+
+  const conditions: string[] = ["p.organisation_id = ?"];
+  const values: unknown[] = [organisation.id];
+  if (query.status) {
+    conditions.push("p.status = ?");
+    values.push(query.status);
+  }
+  if (query.relationship) {
+    conditions.push("EXISTS (SELECT 1 FROM party_relationships r2 WHERE r2.party_id=p.id AND r2.relationship=? AND r2.status='ACTIVE')");
+    values.push(query.relationship);
+  }
+  if (query.q) {
+    conditions.push("(p.display_name LIKE ? OR p.legal_name LIKE ? OR p.vat_number LIKE ? OR p.tin LIKE ?)");
+    const like = `%${query.q}%`;
+    values.push(like, like, like, like);
+  }
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+  const [items, count] = await Promise.all([
+    db.prepare(`SELECT p.*, GROUP_CONCAT(r.relationship, ',') AS relationships FROM business_parties p
+      LEFT JOIN party_relationships r ON r.party_id=p.id AND r.organisation_id=p.organisation_id AND r.status='ACTIVE'
+      ${whereClause}
+      GROUP BY p.id ORDER BY p.display_name
+      LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, string | null>>(),
+    db.prepare(`SELECT COUNT(DISTINCT p.id) AS n FROM business_parties p ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+
+  return { organisation_id: organisation.id, parties: items.results, total_count: count?.n ?? 0, limit: query.limit, offset: query.offset };
+}
+
 export async function getQuotationForEdit(id: string, actor: UserContext, requestedOrganisationId?: string | null) {
   const db = await ensureDatabase();
   const organisation = await resolveOrganisation(actor, requestedOrganisationId);
@@ -487,6 +533,68 @@ export async function deactivateBusinessParty(
     auditRecord(db, actor, audit, now),
   ]);
   return getBusinessParty(db, id, organisation.id);
+}
+
+/**
+ * Module 5 Phase A VerifySupplier. "Against Module 1's taxpayer adapter,
+ * not a fresh identity concept" per the playbook: this calls
+ * classifyTransaction (lib/data/identity-repository.ts), the exact same
+ * cross-tenant VAT-number resolution invoice certification and Module 1's
+ * ClassifyTransaction pre-flight check already use, rather than a second
+ * supplier-specific lookup. Unlike most commands in this file, this always
+ * re-checks live and writes a brand-new snapshot row rather than returning
+ * stored data on a replayed key — the same deliberate departure Module 4's
+ * evaluateRisk took, since "was this supplier valid as of today" cannot be
+ * answered from a cached result. The replay check here only prevents a
+ * literal retry from writing a second redundant audit/outbox pair.
+ */
+export async function verifySupplier(partyId: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const party = await db.prepare("SELECT id,vat_number FROM business_parties WHERE id=? AND organisation_id=?").bind(partyId, organisation.id).first<{ id: string; vat_number: string | null }>();
+  if (!party) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  const relationship = await db.prepare("SELECT id FROM party_relationships WHERE party_id=? AND organisation_id=? AND relationship='SUPPLIER' AND status='ACTIVE'").bind(partyId, organisation.id).first<{ id: string }>();
+  if (!relationship) throw new BusinessResourceError("This business party is not an active supplier.", 409);
+  if (!party.vat_number) throw new BusinessResourceError("This supplier has no VAT number recorded to verify against the national taxpayer register.", 409);
+
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party_id: partyId, vat_number: party.vat_number }));
+  const prior = await priorCommand(db, actor.userId, "VERIFY_SUPPLIER", idempotencyKey, requestHash);
+  const classification = await classifyTransaction(party.vat_number);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO party_verification_snapshots
+      (id,organisation_id,party_id,vat_number,taxpayer_active,organisation_active,can_act_as_seller,capabilities,verified_by,verified_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+      id, organisation.id, partyId, classification.vatNumber, classification.taxpayerActive ? 1 : 0, classification.organisationActive ? 1 : 0,
+      classification.canActAsSeller ? 1 : 0, JSON.stringify(classification.capabilities), actor.userId, now,
+    ),
+  ];
+  if (!prior) {
+    const audit = await auditEnvelope(db, actor, "SUPPLIER_VERIFIED", "BUSINESS_PARTY", partyId, {
+      organisationId: organisation.id, vatNumber: classification.vatNumber, taxpayerActive: classification.taxpayerActive, canActAsSeller: classification.canActAsSeller, correlationId,
+    }, now);
+    statements.push(
+      commandRecord(db, actor.userId, "VERIFY_SUPPLIER", idempotencyKey, requestHash, "PARTY_VERIFICATION_SNAPSHOT", id, now),
+      outboxRecord(db, "PARTY_VERIFICATION_SNAPSHOT", id, "SupplierVerified", organisation.id, { snapshot_id: id, party_id: partyId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+      auditRecord(db, actor, audit, now),
+    );
+  }
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM party_verification_snapshots WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase A: the verification history for one supplier, most recent first. */
+export async function getSupplierVerificationHistory(partyId: string, actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const party = await getBusinessParty(db, partyId, organisation.id);
+  if (!party) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  const snapshots = await db.prepare("SELECT * FROM party_verification_snapshots WHERE party_id=? AND organisation_id=? ORDER BY verified_at DESC")
+    .bind(partyId, organisation.id).all<Record<string, unknown>>();
+  return { party, snapshots: snapshots.results };
 }
 
 export async function createQuotation(payload: QuotationSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {

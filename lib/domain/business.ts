@@ -261,6 +261,54 @@ export function normalizeAndValidateBusinessPartyDeactivation(payload: unknown):
   return { schema_version: "1.0.0", reason };
 }
 
+const PARTY_STATUSES = new Set(["ACTIVE", "INACTIVE"]);
+const MAX_PARTY_SEARCH_LIMIT = 200;
+const DEFAULT_PARTY_SEARCH_LIMIT = 50;
+
+export type PartySearchQuery = {
+  relationship: BusinessPartyRelationship | null;
+  q: string | null;
+  status: "ACTIVE" | "INACTIVE" | null;
+  limit: number;
+  offset: number;
+};
+
+/** Module 5 Phase A SearchCustomers/SearchSuppliers: one search over the shared business_parties model, filtered by relationship — mirrors Module 3 Phase B's normalizeWorkQueueQuery (bounded limit, explicit offset, designed in rather than retrofitted). */
+export function normalizePartySearchQuery(params: URLSearchParams): PartySearchQuery {
+  const messages: BusinessValidationMessage[] = [];
+
+  const relationshipRaw = params.get("relationship");
+  const relationship = relationshipRaw ? (relationshipRaw.trim().toUpperCase() as BusinessPartyRelationship) : null;
+  if (relationship && !PARTY_RELATIONSHIPS.has(relationship)) messages.push({ code: "RELATIONSHIP_INVALID", path: "/relationship", message: "relationship must be CUSTOMER or SUPPLIER." });
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as PartySearchQuery["status"]) : null;
+  if (status && !PARTY_STATUSES.has(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: "status must be ACTIVE or INACTIVE." });
+
+  const qRaw = textValue(params.get("q"));
+  if (qRaw.length > 200) messages.push({ code: "QUERY_TOO_LONG", path: "/q", message: "q must not exceed 200 characters." });
+  const q = qRaw || null;
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_PARTY_SEARCH_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_PARTY_SEARCH_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_PARTY_SEARCH_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { relationship, q, status, limit, offset };
+}
+
 export function normalizeAndValidateQuotation(payload: unknown): NormalizedQuotation {
   const input = record(payload);
   const messages: BusinessValidationMessage[] = [];

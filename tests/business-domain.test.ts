@@ -18,6 +18,7 @@ import {
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
+  normalizePartySearchQuery,
 } from "@/lib/domain/business";
 
 describe("business command validation", () => {
@@ -229,5 +230,33 @@ describe("business command validation", () => {
 
   it("rejects an unsupported project cost_type", () => {
     expect(() => normalizeAndValidateProjectCost({ schema_version: "1.0.0", cost_type: "AUTOMATIC", source_id: "x" })).toThrowError(BusinessValidationError);
+  });
+});
+
+describe("party search query normalization", () => {
+  it("applies defaults when the query is empty", () => {
+    expect(normalizePartySearchQuery(new URLSearchParams())).toEqual({ relationship: null, q: null, status: null, limit: 50, offset: 0 });
+  });
+
+  it("normalizes relationship and status, uppercasing both", () => {
+    const result = normalizePartySearchQuery(new URLSearchParams({ relationship: "supplier", status: "active", q: "acme" }));
+    expect(result).toEqual({ relationship: "SUPPLIER", status: "ACTIVE", q: "acme", limit: 50, offset: 0 });
+  });
+
+  it("rejects an unsupported relationship or status", () => {
+    expect(() => normalizePartySearchQuery(new URLSearchParams({ relationship: "TAX_AUTHORITY" }))).toThrowError(BusinessValidationError);
+    expect(() => normalizePartySearchQuery(new URLSearchParams({ status: "PENDING" }))).toThrowError(BusinessValidationError);
+  });
+
+  it("rejects a limit outside 1 to 200 and a negative offset", () => {
+    expect(() => normalizePartySearchQuery(new URLSearchParams({ limit: "0" }))).toThrowError(BusinessValidationError);
+    expect(() => normalizePartySearchQuery(new URLSearchParams({ limit: "500" }))).toThrowError(BusinessValidationError);
+    expect(() => normalizePartySearchQuery(new URLSearchParams({ offset: "-5" }))).toThrowError(BusinessValidationError);
+  });
+
+  it("accepts an explicit limit and offset within bounds", () => {
+    const result = normalizePartySearchQuery(new URLSearchParams({ limit: "10", offset: "20" }));
+    expect(result.limit).toBe(10);
+    expect(result.offset).toBe(20);
   });
 });

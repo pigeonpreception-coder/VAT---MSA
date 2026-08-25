@@ -132,6 +132,13 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (organisation_id, party_id, relationship)
   )`,
+  `CREATE TABLE IF NOT EXISTS party_verification_snapshots (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    party_id TEXT NOT NULL REFERENCES business_parties(id), vat_number TEXT NOT NULL,
+    taxpayer_active INTEGER NOT NULL, organisation_active INTEGER NOT NULL,
+    can_act_as_seller INTEGER NOT NULL, capabilities TEXT NOT NULL,
+    verified_by TEXT NOT NULL REFERENCES app_users(id), verified_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     sku TEXT NOT NULL, name TEXT NOT NULL, description TEXT, unit_code TEXT NOT NULL,
@@ -927,6 +934,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_accounting_periods_org_status ON accounting_periods(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_org_status ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_project_costs_project ON project_costs(project_id, cost_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_party_verification_snapshots_party ON party_verification_snapshots(party_id, verified_at)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
