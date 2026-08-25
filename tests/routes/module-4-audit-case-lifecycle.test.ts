@@ -78,9 +78,9 @@ async function seedFixture(): Promise<void> {
   ]);
 }
 
-async function openCase(title: string): Promise<string> {
+async function openCase(title: string, opener: FixtureUser = nextNationalActor()): Promise<string> {
   const { POST } = await import("@/app/api/v1/audit-cases/route");
-  actingAs(nextNationalActor());
+  actingAs(opener);
   const response = await POST(jsonRequest("https://vat-msa.local/api/v1/audit-cases", {
     schema_version: "1.0.0", taxpayer_id: "tp-ac-taxpayer", case_type: "VAT_AUDIT", title,
     opening_reason: "Matched evidence fell below the controlled review threshold for the period.", risk_tier: "HIGH",
@@ -280,7 +280,10 @@ describe("Module 4 audit case lifecycle (Phase C)", () => {
   });
 
   it("is idempotent on issueFinding under a repeated key", async () => {
-    const caseId = await openCase("Idempotent finding issuance");
+    // Opened by a different actor than the one issuing the finding below —
+    // Module 4 Phase E's segregation-of-duties rule blocks a case's own
+    // opener from issuing a finding on it, which this test isn't about.
+    const caseId = await openCase("Idempotent finding issuance", NAMRA_SUPERVISOR);
     await transition(caseId, "AUTHORIZE");
     await transition(caseId, "ASSIGN", { officer_id: NAMRA_OFFICER.userId });
     await transition(caseId, "ADVANCE");

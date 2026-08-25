@@ -1,5 +1,5 @@
 import { ensureDatabase } from "@/db/runtime";
-import { AccessDeniedError, isNationalScope } from "@/lib/auth";
+import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   assertCaseTransition,
@@ -279,7 +279,26 @@ export async function markObligationSatisfied(obligationId: string, payload: Obl
   return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(obligation.id).first<Record<string, unknown>>();
 }
 
-type AuditCaseRow = { id: string; taxpayer_id: string; status: AuditCaseStatus; suspended_from_status: AuditCaseStatus | null };
+type AuditCaseRow = { id: string; taxpayer_id: string; status: AuditCaseStatus; suspended_from_status: AuditCaseStatus | null; opened_by: string };
+
+/**
+ * Module 4 Phase E: segregation of duties. The officer who opened a case
+ * (audit_cases.opened_by — set the same way whether the case came from a
+ * manual OpenAuditCase or a risk-driven ApproveAction escalation, see that
+ * function) may not also close it or issue a finding on it. Returns
+ * whether an exceptional override was applied, so the caller can log a
+ * distinct, clearly-findable audit event for it — never a silent bypass.
+ */
+function enforceSegregationOfDuties(actor: UserContext, openedBy: string, overrideReason: string | undefined, actionDescription: string): boolean {
+  if (openedBy !== actor.userId) return false;
+  if (!overrideReason) {
+    throw new AccessDeniedError(`Segregation of duties: the officer who opened this case cannot also ${actionDescription}. An authorised supervisor may override with cases:override-sod and a recorded reason.`);
+  }
+  if (!hasPermission(actor, "cases:override-sod")) {
+    throw new AccessDeniedError(`Overriding this segregation-of-duties control to ${actionDescription} requires cases:override-sod.`);
+  }
+  return true;
+}
 
 /**
  * Module 4 Phase C: the single code path that can ever change an audit
@@ -296,7 +315,7 @@ export async function transitionCase(caseId: string, payload: unknown, actor: Us
   if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may transition an audit case.");
   const input = validateCaseTransition(payload);
   const db = await ensureDatabase();
-  const auditCase = await db.prepare("SELECT id,taxpayer_id,status,suspended_from_status FROM audit_cases WHERE id=?").bind(caseId).first<AuditCaseRow>();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id,status,suspended_from_status,opened_by FROM audit_cases WHERE id=?").bind(caseId).first<AuditCaseRow>();
   if (!auditCase) throw new ComplianceResourceError("Audit case was not found.", 404);
   const hash = await sha256Hex(stableStringify({ case_id: caseId, input }));
   const prior = await replay(db, actor.userId, "TRANSITION_CASE", key, hash);
@@ -317,13 +336,15 @@ export async function transitionCase(caseId: string, payload: unknown, actor: Us
     if (!officer) throw new ComplianceResourceError("The assigned officer does not exist.", 404);
     if (officer.status !== "ACTIVE") throw new ComplianceResourceError("The assigned officer is not active.", 409);
   }
+  let sodOverrideApplied = false;
   if (input.action === "CLOSE") {
     const findingCount = await db.prepare("SELECT COUNT(*) AS n FROM audit_findings WHERE audit_case_id=?").bind(caseId).first<{ n: number }>();
     if (!findingCount?.n) throw new RepositoryConflictError("A case cannot be closed with no findings on record.");
+    sodOverrideApplied = enforceSegregationOfDuties(actor, auditCase.opened_by, input.overrideReason, "close it");
   }
 
   const now = new Date().toISOString();
-  await db.batch([
+  const statements: D1PreparedStatement[] = [
     db.prepare(`UPDATE audit_cases SET
         status=?, updated_at=?, suspended_from_status=?,
         assigned_officer_id=COALESCE(?, assigned_officer_id),
@@ -342,10 +363,21 @@ export async function transitionCase(caseId: string, payload: unknown, actor: Us
       .bind(crypto.randomUUID(), caseId, input.action, auditCase.status, targetStatus, actor.userId, input.reason, now),
     commandRecord(db, actor.userId, "TRANSITION_CASE", key, hash, "AUDIT_CASE", caseId, now),
     outbox(db, "AUDIT_CASE", caseId, `AuditCase${input.action.charAt(0)}${input.action.slice(1).toLowerCase().replaceAll("_", "")}`, auditCase.taxpayer_id, {
-      case_id: caseId, action: input.action, from_status: auditCase.status, to_status: targetStatus, correlation_id: correlationId,
+      case_id: caseId, action: input.action, from_status: auditCase.status, to_status: targetStatus, correlation_id: correlationId, sod_override: sodOverrideApplied,
     }, now),
-    await auditRecord(db, actor, `AUDIT_CASE_${input.action}`, "AUDIT_CASE", caseId, { action: input.action, fromStatus: auditCase.status, toStatus: targetStatus, reason: input.reason, correlationId }, now),
-  ]);
+    // A single audit_events row per command, not two: auditRecord reads
+    // "the latest hash" from the DB at call time, so calling it twice while
+    // building one batch (neither insert committed yet) would give both
+    // rows the same previous_hash and break the chain's linearity. The
+    // override is instead a distinctly-named action plus full detail on
+    // this one row — still a genuinely logged, clearly findable exception,
+    // just one row rather than a fabricated second link in the chain.
+    await auditRecord(db, actor, sodOverrideApplied ? `AUDIT_CASE_${input.action}_SOD_OVERRIDE` : `AUDIT_CASE_${input.action}`, "AUDIT_CASE", caseId, {
+      action: input.action, fromStatus: auditCase.status, toStatus: targetStatus, reason: input.reason, correlationId,
+      ...(sodOverrideApplied ? { sodOverride: true, openedBy: auditCase.opened_by, overriddenBy: actor.userId, overrideReason: input.overrideReason } : {}),
+    }, now),
+  ];
+  await db.batch(statements);
   return db.prepare("SELECT * FROM audit_cases WHERE id=?").bind(caseId).first<Record<string, unknown>>();
 }
 
@@ -360,11 +392,12 @@ export async function issueFinding(caseId: string, payload: unknown, actor: User
   if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may issue an audit finding.");
   const input = validateFindingIssuance(payload);
   const db = await ensureDatabase();
-  const auditCase = await db.prepare("SELECT id,taxpayer_id,status FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string; status: AuditCaseStatus }>();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id,status,opened_by FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string; status: AuditCaseStatus; opened_by: string }>();
   if (!auditCase) throw new ComplianceResourceError("Audit case was not found.", 404);
   if (!["ANALYSIS", "TAXPAYER_RESPONSE", "FINDINGS_REVIEW"].includes(auditCase.status)) {
     throw new RepositoryConflictError(`Findings cannot be issued while the case is ${auditCase.status}.`);
   }
+  const sodOverrideApplied = enforceSegregationOfDuties(actor, auditCase.opened_by, input.overrideReason, "issue a finding on it");
   const hash = await sha256Hex(stableStringify({ case_id: caseId, input }));
   const prior = await replay(db, actor.userId, "ISSUE_FINDING", key, hash);
   if (prior) return db.prepare("SELECT * FROM audit_findings WHERE id=?").bind(prior).first<Record<string, unknown>>();
@@ -376,8 +409,11 @@ export async function issueFinding(caseId: string, payload: unknown, actor: User
     db.prepare(`INSERT INTO audit_findings (id,audit_case_id,finding_code,title,description,legal_reference,amount_cents,currency,status,author_id,created_at,resolved_at)
       VALUES (?,?,?,?,?,?,?,?,'PRELIMINARY',?,?,NULL)`).bind(id, caseId, input.finding_code, input.title, input.description, input.legal_reference ?? null, input.amount_cents, input.currency, actor.userId, now),
     commandRecord(db, actor.userId, "ISSUE_FINDING", key, hash, "AUDIT_FINDING", id, now),
-    outbox(db, "AUDIT_FINDING", id, "AuditFindingIssued", auditCase.taxpayer_id, { finding_id: id, audit_case_id: caseId, correlation_id: correlationId }, now),
-    await auditRecord(db, actor, "AUDIT_FINDING_ISSUED", "AUDIT_FINDING", id, { auditCaseId: caseId, findingCode: input.finding_code, correlationId }, now),
+    outbox(db, "AUDIT_FINDING", id, "AuditFindingIssued", auditCase.taxpayer_id, { finding_id: id, audit_case_id: caseId, correlation_id: correlationId, sod_override: sodOverrideApplied }, now),
+    await auditRecord(db, actor, sodOverrideApplied ? "AUDIT_FINDING_ISSUED_SOD_OVERRIDE" : "AUDIT_FINDING_ISSUED", "AUDIT_FINDING", id, {
+      auditCaseId: caseId, findingCode: input.finding_code, correlationId,
+      ...(sodOverrideApplied ? { sodOverride: true, openedBy: auditCase.opened_by, overriddenBy: actor.userId, overrideReason: input.overrideReason } : {}),
+    }, now),
   ]);
   return db.prepare("SELECT * FROM audit_findings WHERE id=?").bind(id).first<Record<string, unknown>>();
 }

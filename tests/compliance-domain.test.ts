@@ -128,6 +128,17 @@ describe("audit case lifecycle state machine", () => {
   it("rejects a reason outside the 10 to 2000 character bound", () => {
     expect(() => validateCaseTransition({ schema_version: "1.0.0", action: "ADVANCE", reason: "short" })).toThrowError(ComplianceValidationError);
   });
+
+  it("leaves override_reason undefined when absent, and normalizes it when present and long enough", () => {
+    const withoutOverride = validateCaseTransition({ schema_version: "1.0.0", action: "CLOSE", reason: "Closing after final determination and taxpayer response." });
+    expect(withoutOverride.overrideReason).toBeUndefined();
+    const withOverride = validateCaseTransition({ schema_version: "1.0.0", action: "CLOSE", reason: "Closing after final determination and taxpayer response.", override_reason: "Sole available officer for this taxpayer's region; supervisor authorised the exception." });
+    expect(withOverride.overrideReason).toBe("Sole available officer for this taxpayer's region; supervisor authorised the exception.");
+  });
+
+  it("rejects a present-but-too-short override_reason", () => {
+    expect(() => validateCaseTransition({ schema_version: "1.0.0", action: "CLOSE", reason: "Closing after final determination and taxpayer response.", override_reason: "too short" })).toThrowError(ComplianceValidationError);
+  });
 });
 
 describe("finding issuance validation", () => {
@@ -150,6 +161,17 @@ describe("finding issuance validation", () => {
   it("rejects a title or description outside their character bounds", () => {
     expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Bad", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 1000, currency: "NAD" })).toThrowError(ComplianceValidationError);
     expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "too short", amount_cents: 1000, currency: "NAD" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("leaves override_reason undefined when absent, and normalizes it when present and long enough", () => {
+    const base = { schema_version: "1.0.0" as const, finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 1000, currency: "NAD" };
+    expect(validateFindingIssuance(base).overrideReason).toBeUndefined();
+    const withOverride = validateFindingIssuance({ ...base, override_reason: "Sole available officer for this taxpayer's region; supervisor authorised the exception." });
+    expect(withOverride.overrideReason).toBe("Sole available officer for this taxpayer's region; supervisor authorised the exception.");
+  });
+
+  it("rejects a present-but-too-short override_reason", () => {
+    expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 1000, currency: "NAD", override_reason: "too short" })).toThrowError(ComplianceValidationError);
   });
 });
 

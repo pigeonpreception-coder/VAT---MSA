@@ -68,6 +68,14 @@ function bounded(value: unknown, path: string, label: string, min: number, max: 
   return normalized;
 }
 
+/** Like bounded(), but absent entirely is fine — only a present-and-too-short/too-long value is rejected. */
+function optionalBounded(value: unknown, path: string, label: string, min: number, max: number, messages: ComplianceValidationMessage[]) {
+  const normalized = text(value);
+  if (!normalized) return undefined;
+  if (normalized.length < min || normalized.length > max) messages.push({ code: "FIELD_LENGTH_INVALID", path, message: `${label} must contain ${min} to ${max} characters.` });
+  return normalized;
+}
+
 function schema(input: Record<string, unknown>, messages: ComplianceValidationMessage[]) {
   if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
 }
@@ -153,8 +161,15 @@ export function assertCaseTransition(action: AuditCaseAction, currentStatus: Aud
   return rule[action] ?? null;
 }
 
-export type CaseTransitionInput = { schema_version: "1.0.0"; action: AuditCaseAction; reason: string; officerId?: string; appealReference?: string };
+export type CaseTransitionInput = { schema_version: "1.0.0"; action: AuditCaseAction; reason: string; officerId?: string; appealReference?: string; overrideReason?: string };
 
+/**
+ * override_reason is always optional at this layer — whether it's actually
+ * *required* depends on whether the acting officer is also the case's own
+ * opener, which only the repository (which has the case row) can know. See
+ * lib/data/compliance-repository.ts's enforceSegregationOfDuties (Module 4
+ * Phase E): CLOSE is the one transition action it gates.
+ */
 export function validateCaseTransition(payload: unknown): CaseTransitionInput {
   const input = object(payload);
   const messages: ComplianceValidationMessage[] = [];
@@ -164,8 +179,9 @@ export function validateCaseTransition(payload: unknown): CaseTransitionInput {
   const reason = bounded(input.reason, "/reason", "Reason", 10, 2_000, messages);
   const officerId = action === "ASSIGN" ? id(input.officer_id, "/officer_id", messages) : undefined;
   const appealReference = action === "LINK_APPEAL" ? bounded(input.appeal_reference, "/appeal_reference", "Appeal reference", 3, 100, messages) : undefined;
+  const overrideReason = optionalBounded(input.override_reason, "/override_reason", "Override reason", 10, 2_000, messages);
   if (messages.length) throw new ComplianceValidationError(messages);
-  return { schema_version: "1.0.0", action, reason, ...(officerId ? { officerId } : {}), ...(appealReference ? { appealReference } : {}) };
+  return { schema_version: "1.0.0", action, reason, ...(officerId ? { officerId } : {}), ...(appealReference ? { appealReference } : {}), ...(overrideReason ? { overrideReason } : {}) };
 }
 
 export type FindingIssuance = {
@@ -176,9 +192,16 @@ export type FindingIssuance = {
   legal_reference?: string;
   amount_cents: number;
   currency: string;
+  overrideReason?: string;
 };
 
-/** Module 4 Phase C IssueFinding — a sub-resource creation, not a case-status transition, so it's validated and committed separately from validateCaseTransition above. */
+/**
+ * Module 4 Phase C IssueFinding — a sub-resource creation, not a case-status
+ * transition, so it's validated and committed separately from
+ * validateCaseTransition above. override_reason is the same Module 4 Phase E
+ * segregation-of-duties override as CaseTransitionInput's, optional here for
+ * the same reason: only the repository knows whether it's actually required.
+ */
 export function validateFindingIssuance(payload: unknown): FindingIssuance {
   const input = object(payload);
   const messages: ComplianceValidationMessage[] = [];
@@ -191,8 +214,9 @@ export function validateFindingIssuance(payload: unknown): FindingIssuance {
   if (!Number.isSafeInteger(amount) || amount < 0) messages.push({ code: "AMOUNT_INVALID", path: "/amount_cents", message: "amount_cents must be a non-negative safe integer." });
   const currency = text(input.currency).toUpperCase();
   if (!CURRENCY_PATTERN.test(currency)) messages.push({ code: "CURRENCY_INVALID", path: "/currency", message: "Currency must be a three-letter ISO 4217 code." });
+  const overrideReason = optionalBounded(input.override_reason, "/override_reason", "Override reason", 10, 2_000, messages);
   if (messages.length) throw new ComplianceValidationError(messages);
-  return { schema_version: "1.0.0", finding_code: findingCode, title, description, ...(legalReference ? { legal_reference: legalReference } : {}), amount_cents: amount, currency };
+  return { schema_version: "1.0.0", finding_code: findingCode, title, description, ...(legalReference ? { legal_reference: legalReference } : {}), amount_cents: amount, currency, ...(overrideReason ? { overrideReason } : {}) };
 }
 
 export function validateDispute(payload: unknown): DisputeSubmission {
