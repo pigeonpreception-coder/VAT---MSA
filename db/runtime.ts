@@ -228,7 +228,7 @@ const SCHEMA_STATEMENTS = [
     currency TEXT NOT NULL, net_cents INTEGER NOT NULL, tax_cents INTEGER NOT NULL,
     total_cents INTEGER NOT NULL, status TEXT NOT NULL, receipt_document_id TEXT,
     created_by TEXT NOT NULL REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
-    created_at TEXT NOT NULL, approved_at TEXT, UNIQUE (organisation_id, expense_number)
+    created_at TEXT NOT NULL, approved_at TEXT, rejection_reason TEXT, UNIQUE (organisation_id, expense_number)
   )`,
   `CREATE TABLE IF NOT EXISTS inventory_balances (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
@@ -254,7 +254,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS project_costs (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), cost_type TEXT NOT NULL,
     source_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL,
-    occurred_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    description TEXT, occurred_at TEXT NOT NULL, created_by TEXT REFERENCES app_users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (project_id, cost_type, source_id)
   )`,
   `CREATE TABLE IF NOT EXISTS import_records (
@@ -924,6 +925,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
   `CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id, journal_entry_id)`,
   `CREATE INDEX IF NOT EXISTS idx_accounting_periods_org_status ON accounting_periods(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_org_status ON expenses(organisation_id, status, expense_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_project_costs_project ON project_costs(project_id, cost_type)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_owner ON document_metadata(organisation_id, owner_domain, owner_resource_id)`,
@@ -1223,7 +1226,8 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO expenses
     (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
     VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
-  `INSERT OR IGNORE INTO project_costs VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO project_costs (id,project_id,cost_type,source_id,amount_cents,currency,occurred_at,created_at)
+    VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO inventory_balances
     (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
     VALUES ('balance-0001','org-0001','wh-0001','prod-0001',12000000,290000,1,'2026-08-09T10:00:00Z')`,

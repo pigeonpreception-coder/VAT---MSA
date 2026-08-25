@@ -415,6 +415,88 @@ export function normalizeAndValidateExpense(payload: unknown): ExpenseSubmission
   return { schema_version: "1.0.0", category_id: categoryId, ...(supplierPartyId ? { supplier_party_id: supplierPartyId } : {}), ...(projectId ? { project_id: projectId } : {}), ...(branchId ? { branch_id: branchId } : {}), expense_number: expenseNumber, expense_date: expenseDate, description, currency, net_cents: netCents, tax_cents: taxCents, total_cents: totalCents };
 }
 
+export type ExpenseCategorySubmission = {
+  schema_version: "1.0.0";
+  code: string;
+  name: string;
+  default_tax_category: "STANDARD" | "ZERO_RATED" | "EXEMPT" | "OUT_OF_SCOPE";
+  requires_receipt: boolean;
+};
+
+/** Module 5 Phase E CreateExpenseCategory. expense_categories was previously seed-only, like chart_of_accounts before Phase C's CreateAccount — same fix, same reasoning. */
+export function normalizeAndValidateExpenseCategory(payload: unknown): ExpenseCategorySubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const code = textField(input.code, "/code", "Category code", 1, 20, messages).toUpperCase();
+  if (code && !/^[A-Z0-9][A-Z0-9._-]{0,19}$/.test(code)) messages.push({ code: "CODE_INVALID", path: "/code", message: "Category code contains unsupported characters." });
+  const name = textField(input.name, "/name", "Category name", 2, 200, messages);
+  const defaultTaxCategory = textValue(input.default_tax_category).toUpperCase() as ExpenseCategorySubmission["default_tax_category"];
+  if (!TAX_CATEGORIES.has(defaultTaxCategory)) messages.push({ code: "TAX_CATEGORY_INVALID", path: "/default_tax_category", message: "Select a supported default tax category." });
+  const requiresReceipt = input.requires_receipt === undefined ? true : Boolean(input.requires_receipt);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", code, name, default_tax_category: defaultTaxCategory, requires_receipt: requiresReceipt };
+}
+
+export type ExpenseRejectionSubmission = { schema_version: "1.0.0"; reason: string };
+
+export function normalizeAndValidateExpenseRejection(payload: unknown): ExpenseRejectionSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const reason = textField(input.reason, "/reason", "Rejection reason", 5, 500, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}
+
+export type ProjectBudgetApprovalSubmission = { schema_version: "1.0.0"; approved_amount_cents: number; notes?: string };
+
+/** Module 5 Phase E ApproveBudget. approved_amount_cents is deliberately independent of the originally proposed amount — an approver may approve less (or more, e.g. a pre-approved overrun) than what was proposed. */
+export function normalizeAndValidateProjectBudgetApproval(payload: unknown): ProjectBudgetApprovalSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const approvedAmountCents = integerField(input.approved_amount_cents, "/approved_amount_cents", "Approved amount cents", messages);
+  const notes = optionalText(input.notes, "/notes", "Notes", 1_000, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", approved_amount_cents: approvedAmountCents, ...(notes ? { notes } : {}) };
+}
+
+export type ProjectCostSubmission =
+  | { schema_version: "1.0.0"; cost_type: "EXPENSE"; source_id: string }
+  | { schema_version: "1.0.0"; cost_type: "MANUAL"; source_id: string; amount_cents: number; currency: string; description: string; occurred_at: string };
+
+const PROJECT_COST_TYPES = new Set(["EXPENSE", "MANUAL"]);
+
+/**
+ * Module 5 Phase E PostCost. project_costs.UNIQUE(project_id, cost_type,
+ * source_id) is the schema's own hint at the intended design: EXPENSE costs
+ * cite an approved expense already tagged to this project (amount/currency/
+ * date derived from that expense, never re-entered — the repository layer
+ * resolves and validates it), so the same expense can never be posted as a
+ * cost twice. MANUAL costs are for expenditure this system has no other
+ * record of (e.g. an external invoice), so the caller supplies everything.
+ */
+export function normalizeAndValidateProjectCost(payload: unknown): ProjectCostSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const costType = textValue(input.cost_type).toUpperCase();
+  if (!PROJECT_COST_TYPES.has(costType)) messages.push({ code: "COST_TYPE_INVALID", path: "/cost_type", message: "cost_type must be EXPENSE or MANUAL." });
+  if (costType === "MANUAL") {
+    const sourceId = textField(input.source_id, "/source_id", "Source reference", 2, 100, messages);
+    const amountCents = integerField(input.amount_cents, "/amount_cents", "Amount cents", messages, 1);
+    const currency = currencyField(input.currency, messages);
+    const description = textField(input.description, "/description", "Description", 2, 500, messages);
+    const occurredAt = dateField(input.occurred_at ?? new Date().toISOString().slice(0, 10), "/occurred_at", "Occurred at", messages);
+    if (messages.length) throw new BusinessValidationError(messages);
+    return { schema_version: "1.0.0", cost_type: "MANUAL", source_id: sourceId, amount_cents: amountCents, currency, description, occurred_at: occurredAt };
+  }
+  const sourceId = idField(input.source_id, "/source_id", "Source expense", messages) ?? "";
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", cost_type: "EXPENSE", source_id: sourceId };
+}
+
 export function normalizeAndValidateStockMovement(payload: unknown): StockMovementSubmission {
   const input = record(payload);
   const messages: BusinessValidationMessage[] = [];

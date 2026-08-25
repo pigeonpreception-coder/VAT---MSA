@@ -6,10 +6,14 @@ import {
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
+  normalizeAndValidateExpenseCategory,
+  normalizeAndValidateExpenseRejection,
   normalizeAndValidateJournal,
   normalizeAndValidateJournalReversal,
   normalizeAndValidatePeriodClose,
   normalizeAndValidateProject,
+  normalizeAndValidateProjectBudgetApproval,
+  normalizeAndValidateProjectCost,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
@@ -1023,6 +1027,30 @@ export async function getFinancialStatements(actor: UserContext, requestedOrgani
   };
 }
 
+/** Module 5 Phase E CreateExpenseCategory. expense_categories was previously seed-only, mirroring chart_of_accounts before Phase C's CreateAccount — same fix, same reasoning. */
+export async function createExpenseCategory(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const category = normalizeAndValidateExpenseCategory(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, category }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_EXPENSE_CATEGORY", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expense_categories WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,name FROM expense_categories WHERE organisation_id=? AND code=?").bind(organisation.id, category.code).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`Category code ${category.code} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_CATEGORY_CREATED", "EXPENSE_CATEGORY", id, { organisationId: organisation.id, code: category.code, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO expense_categories (id,organisation_id,code,name,default_tax_category,requires_receipt,status,created_at)
+      VALUES (?,?,?,?,?,?,'ACTIVE',?)`).bind(id, organisation.id, category.code, category.name, category.default_tax_category, category.requires_receipt ? 1 : 0, now),
+    commandRecord(db, actor.userId, "CREATE_EXPENSE_CATEGORY", idempotencyKey, requestHash, "EXPENSE_CATEGORY", id, now),
+    outboxRecord(db, "EXPENSE_CATEGORY", id, "ExpenseCategoryCreated", organisation.id, { category_id: id, organisation_id: organisation.id, code: category.code, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expense_categories WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
 export async function createExpense(payload: ExpenseSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
   const expense = normalizeAndValidateExpense(payload);
@@ -1047,6 +1075,106 @@ export async function createExpense(payload: ExpenseSubmission, actor: UserConte
     auditRecord(db, actor, audit, now),
   ]);
   return db.prepare("SELECT * FROM expenses WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+type ExpenseRow = { id: string; organisation_id: string; status: string; created_by: string; total_cents: number };
+
+async function loadExpenseForTransition(db: D1Database, expenseId: string, organisationId: string): Promise<ExpenseRow> {
+  const expense = await db.prepare("SELECT id,organisation_id,status,created_by,total_cents FROM expenses WHERE id=? AND organisation_id=?").bind(expenseId, organisationId).first<ExpenseRow>();
+  if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
+  return expense;
+}
+
+/** Module 5 Phase E SubmitExpense: DRAFT -> SUBMITTED, the maker-checker gate's starting line. */
+export async function submitExpense(expenseId: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const expense = await loadExpenseForTransition(db, expenseId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, action: "SUBMIT" }));
+  const prior = await priorCommand(db, actor.userId, "SUBMIT_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (expense.status !== "DRAFT") throw new RepositoryConflictError(`Only a draft expense can be submitted; ${expenseId} is currently ${expense.status}.`);
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_SUBMITTED", "EXPENSE", expenseId, { organisationId: organisation.id, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE expenses SET status='SUBMITTED' WHERE id=?").bind(expenseId),
+    commandRecord(db, actor.userId, "SUBMIT_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseSubmitted", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E ApproveExpense/RejectExpense share this: maker-checker
+ * separation denies the expense's own creator from reviewing it, the same
+ * "cannot review your own request" rule Module 3's reviewRefund already
+ * established — enforced by an actor check, not a separate permission
+ * tier, matching this module's lighter CRUD standard.
+ */
+function assertNotSelfReview(actor: UserContext, createdBy: string, action: string) {
+  if (actor.userId === createdBy) throw new AccessDeniedError(`Maker-checker separation prevents ${action} an expense you created yourself.`);
+}
+
+export async function approveExpense(expenseId: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const expense = await loadExpenseForTransition(db, expenseId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, action: "APPROVE" }));
+  const prior = await priorCommand(db, actor.userId, "APPROVE_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (expense.status !== "SUBMITTED") throw new RepositoryConflictError(`Only a submitted expense can be approved; ${expenseId} is currently ${expense.status}.`);
+  assertNotSelfReview(actor, expense.created_by, "approving");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_APPROVED", "EXPENSE", expenseId, { organisationId: organisation.id, totalCents: expense.total_cents, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE expenses SET status='APPROVED', approved_by=?, approved_at=? WHERE id=?").bind(actor.userId, now, expenseId),
+    commandRecord(db, actor.userId, "APPROVE_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseApproved", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+export async function rejectExpense(expenseId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateExpenseRejection(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const expense = await loadExpenseForTransition(db, expenseId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, input }));
+  const prior = await priorCommand(db, actor.userId, "REJECT_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (expense.status !== "SUBMITTED") throw new RepositoryConflictError(`Only a submitted expense can be rejected; ${expenseId} is currently ${expense.status}.`);
+  assertNotSelfReview(actor, expense.created_by, "rejecting");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_REJECTED", "EXPENSE", expenseId, { organisationId: organisation.id, reason: input.reason, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE expenses SET status='REJECTED', approved_by=?, approved_at=?, rejection_reason=? WHERE id=?").bind(actor.userId, now, input.reason, expenseId),
+    commandRecord(db, actor.userId, "REJECT_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseRejected", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, reason: input.reason, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase E ExpenseReport: totals by status and by category over [from, to], plus the matching line items. */
+export async function getExpenseReport(actor: UserContext, requestedOrganisationId: string | null | undefined, from: string, to: string) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const [byStatus, byCategory, items] = await Promise.all([
+    db.prepare(`SELECT status, COUNT(*) AS count, COALESCE(SUM(total_cents),0) AS total_cents FROM expenses
+      WHERE organisation_id=? AND expense_date BETWEEN ? AND ? GROUP BY status`).bind(organisation.id, from, to).all<{ status: string; count: number; total_cents: number }>(),
+    db.prepare(`SELECT c.id AS category_id, c.name AS category_name, COUNT(*) AS count, COALESCE(SUM(e.total_cents),0) AS total_cents
+      FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+      WHERE e.organisation_id=? AND e.expense_date BETWEEN ? AND ? GROUP BY c.id ORDER BY total_cents DESC`).bind(organisation.id, from, to).all<{ category_id: string; category_name: string; count: number; total_cents: number }>(),
+    db.prepare(`SELECT e.*, c.name AS category_name FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+      WHERE e.organisation_id=? AND e.expense_date BETWEEN ? AND ? ORDER BY e.expense_date DESC LIMIT 500`).bind(organisation.id, from, to).all<Record<string, unknown>>(),
+  ]);
+  const totalCents = byStatus.results.reduce((sum, row) => sum + row.total_cents, 0);
+  return { organisation_id: organisation.id, from, to, total_cents: totalCents, by_status: byStatus.results, by_category: byCategory.results, items: items.results };
 }
 
 export async function recordStockMovement(payload: StockMovementSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
@@ -1106,4 +1234,133 @@ export async function createProject(payload: ProjectSubmission, actor: UserConte
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM projects WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+type ProjectRow = { id: string; organisation_id: string; manager_user_id: string | null; currency: string };
+
+async function loadProject(db: D1Database, projectId: string, organisationId: string): Promise<ProjectRow> {
+  const project = await db.prepare("SELECT id,organisation_id,manager_user_id,currency FROM projects WHERE id=? AND organisation_id=?").bind(projectId, organisationId).first<ProjectRow>();
+  if (!project) throw new BusinessResourceError("Project was not found in the authorised organisation.", 404);
+  return project;
+}
+
+/**
+ * Module 5 Phase E ApproveBudget. Acts on the project's one 'TOTAL' budget
+ * row — the only category CreateProject ever inserts, so this doesn't
+ * invent a multi-category budget-management surface the rest of the
+ * codebase has no other support for. Maker-checker: the project's own
+ * manager (set to whoever called CreateProject) cannot approve their own
+ * project's budget, the same self-review rule Expense's Approve/Reject use.
+ */
+export async function approveProjectBudget(projectId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateProjectBudgetApproval(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const project = await loadProject(db, projectId, organisation.id);
+  const budget = await db.prepare("SELECT * FROM project_budgets WHERE project_id=? AND category='TOTAL'").bind(projectId).first<{ id: string; status: string }>();
+  if (!budget) throw new BusinessResourceError("This project has no proposed budget to approve.", 404);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, project_id: projectId, input }));
+  const prior = await priorCommand(db, actor.userId, "APPROVE_PROJECT_BUDGET", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM project_budgets WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  if (budget.status !== "PROPOSED") throw new RepositoryConflictError(`Only a proposed budget can be approved; this project's budget is currently ${budget.status}.`);
+  if (project.manager_user_id && actor.userId === project.manager_user_id) throw new AccessDeniedError("Maker-checker separation prevents the project's own manager from approving its budget.");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "PROJECT_BUDGET_APPROVED", "PROJECT_BUDGET", budget.id, { organisationId: organisation.id, projectId, approvedAmountCents: input.approved_amount_cents, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE project_budgets SET status='APPROVED', approved_amount_cents=?, approved_by=?, approved_at=? WHERE id=?").bind(input.approved_amount_cents, actor.userId, now, budget.id),
+    commandRecord(db, actor.userId, "APPROVE_PROJECT_BUDGET", idempotencyKey, requestHash, "PROJECT_BUDGET", budget.id, now),
+    outboxRecord(db, "PROJECT_BUDGET", budget.id, "ProjectBudgetApproved", organisation.id, { project_budget_id: budget.id, project_id: projectId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM project_budgets WHERE id=?").bind(budget.id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E PostCost. project_costs.UNIQUE(project_id, cost_type,
+ * source_id) is what actually prevents the same EXPENSE from ever being
+ * posted as a cost twice — this function's own pre-check exists only for a
+ * clean 409 message ahead of that constraint, the same pre-check-plus-
+ * constraint pattern used throughout this file.
+ */
+export async function postProjectCost(projectId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateProjectCost(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  await loadProject(db, projectId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, project_id: projectId, input }));
+  const prior = await priorCommand(db, actor.userId, "POST_PROJECT_COST", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM project_costs WHERE id=? AND project_id=?").bind(prior, projectId).first<Record<string, unknown>>();
+
+  let amountCents: number;
+  let currency: string;
+  let occurredAt: string;
+  let description: string | null;
+  if (input.cost_type === "EXPENSE") {
+    const expense = await db.prepare("SELECT id,status,total_cents,currency,expense_date,description,project_id FROM expenses WHERE id=? AND organisation_id=?")
+      .bind(input.source_id, organisation.id).first<{ id: string; status: string; total_cents: number; currency: string; expense_date: string; description: string; project_id: string | null }>();
+    if (!expense) throw new BusinessResourceError("The cited expense was not found in the authorised organisation.", 404);
+    if (expense.status !== "APPROVED") throw new RepositoryConflictError("Only an approved expense can be posted as a project cost.");
+    if (expense.project_id !== projectId) throw new RepositoryConflictError("This expense is not tagged to the project it's being posted against.");
+    const alreadyPosted = await db.prepare("SELECT id FROM project_costs WHERE project_id=? AND cost_type='EXPENSE' AND source_id=?").bind(projectId, input.source_id).first<{ id: string }>();
+    if (alreadyPosted) throw new RepositoryConflictError(`This expense was already posted as project cost ${alreadyPosted.id}.`);
+    amountCents = expense.total_cents;
+    currency = expense.currency;
+    occurredAt = expense.expense_date;
+    description = expense.description;
+  } else {
+    amountCents = input.amount_cents;
+    currency = input.currency;
+    occurredAt = input.occurred_at;
+    description = input.description;
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "PROJECT_COST_POSTED", "PROJECT_COST", id, { organisationId: organisation.id, projectId, costType: input.cost_type, amountCents, correlationId }, now);
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO project_costs (id,project_id,cost_type,source_id,amount_cents,currency,description,occurred_at,created_by,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, projectId, input.cost_type, input.source_id, amountCents, currency, description, occurredAt, actor.userId, now),
+      commandRecord(db, actor.userId, "POST_PROJECT_COST", idempotencyKey, requestHash, "PROJECT_COST", id, now),
+      outboxRecord(db, "PROJECT_COST", id, "ProjectCostPosted", organisation.id, { project_cost_id: id, project_id: projectId, cost_type: input.cost_type, correlation_id: correlationId }, now),
+      auditRecord(db, actor, audit, now),
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/unique constraint failed/i.test(message)) throw error;
+    throw new RepositoryConflictError("This source was already posted as a project cost — supersession is not supported, only a single posting per source.");
+  }
+  return db.prepare("SELECT * FROM project_costs WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E ProfitabilityReport. Cost and budget were already
+ * available (getBusinessPlatformSnapshot's dashboard rollup computed
+ * both); revenue is new here, reusing Module 5 Phase C's accounting
+ * infrastructure rather than inventing a second revenue concept — REVENUE-
+ * type journal_lines already carry project_id, so this sums exactly the
+ * postings an accountant tagged to this project, nothing re-derived.
+ */
+export async function getProjectProfitability(projectId: string, actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const project = await loadProject(db, projectId, organisation.id);
+  const [budget, costs, revenue] = await Promise.all([
+    db.prepare("SELECT * FROM project_budgets WHERE project_id=? AND category='TOTAL'").bind(projectId).first<Record<string, unknown>>(),
+    db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS total_cents FROM project_costs WHERE project_id=?").bind(projectId).first<{ total_cents: number }>(),
+    db.prepare(`SELECT COALESCE(SUM(l.credit_cents),0) - COALESCE(SUM(l.debit_cents),0) AS net_cents
+      FROM journal_lines l JOIN chart_of_accounts a ON a.id=l.account_id WHERE l.project_id=? AND a.account_type='REVENUE'`).bind(projectId).first<{ net_cents: number }>(),
+  ]);
+  const costCents = costs?.total_cents ?? 0;
+  const revenueCents = revenue?.net_cents ?? 0;
+  return {
+    project_id: projectId,
+    currency: project.currency,
+    budget,
+    revenue_cents: revenueCents,
+    cost_cents: costCents,
+    profit_cents: revenueCents - costCents,
+  };
 }

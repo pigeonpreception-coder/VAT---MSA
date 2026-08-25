@@ -6,10 +6,14 @@ import {
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
+  normalizeAndValidateExpenseCategory,
+  normalizeAndValidateExpenseRejection,
   normalizeAndValidateJournal,
   normalizeAndValidateJournalReversal,
   normalizeAndValidatePeriodClose,
   normalizeAndValidateProject,
+  normalizeAndValidateProjectBudgetApproval,
+  normalizeAndValidateProjectCost,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
@@ -178,5 +182,52 @@ describe("business command validation", () => {
   it("requires period_code to use YYYY-MM", () => {
     expect(normalizeAndValidatePeriodClose({ schema_version: "1.0.0", period_code: "2026-07" })).toEqual({ schema_version: "1.0.0", period_code: "2026-07" });
     expect(() => normalizeAndValidatePeriodClose({ schema_version: "1.0.0", period_code: "Q3-2026" })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes a well-formed expense category, defaulting requires_receipt to true", () => {
+    const result = normalizeAndValidateExpenseCategory({ schema_version: "1.0.0", code: "travel", name: "Travel", default_tax_category: "standard" });
+    expect(result).toEqual({ schema_version: "1.0.0", code: "TRAVEL", name: "Travel", default_tax_category: "STANDARD", requires_receipt: true });
+  });
+
+  it("honors an explicit requires_receipt=false on an expense category", () => {
+    const result = normalizeAndValidateExpenseCategory({ schema_version: "1.0.0", code: "BANK-FEES", name: "Bank fees", default_tax_category: "EXEMPT", requires_receipt: false });
+    expect(result.requires_receipt).toBe(false);
+  });
+
+  it("rejects an expense category with an unsupported default_tax_category", () => {
+    expect(() => normalizeAndValidateExpenseCategory({ schema_version: "1.0.0", code: "TRAVEL", name: "Travel", default_tax_category: "LUXURY" })).toThrowError(BusinessValidationError);
+  });
+
+  it("requires a meaningful expense rejection reason", () => {
+    expect(normalizeAndValidateExpenseRejection({ schema_version: "1.0.0", reason: "Receipt does not match the claimed amount." })).toEqual({ schema_version: "1.0.0", reason: "Receipt does not match the claimed amount." });
+    expect(() => normalizeAndValidateExpenseRejection({ schema_version: "1.0.0", reason: "No" })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes a project budget approval with an independent approved amount", () => {
+    const result = normalizeAndValidateProjectBudgetApproval({ schema_version: "1.0.0", approved_amount_cents: 750_000, notes: "Approved at a reduced amount pending phase 2 scoping." });
+    expect(result.approved_amount_cents).toBe(750_000);
+    expect(result.notes).toContain("reduced amount");
+  });
+
+  it("rejects a negative approved_amount_cents", () => {
+    expect(() => normalizeAndValidateProjectBudgetApproval({ schema_version: "1.0.0", approved_amount_cents: -1 })).toThrowError(BusinessValidationError);
+  });
+
+  it("normalizes an EXPENSE-type project cost citing only a source_id", () => {
+    const result = normalizeAndValidateProjectCost({ schema_version: "1.0.0", cost_type: "expense", source_id: "expense-0001" });
+    expect(result).toEqual({ schema_version: "1.0.0", cost_type: "EXPENSE", source_id: "expense-0001" });
+  });
+
+  it("normalizes a MANUAL-type project cost requiring amount/currency/description", () => {
+    const result = normalizeAndValidateProjectCost({ schema_version: "1.0.0", cost_type: "MANUAL", source_id: "ext-invoice-001", amount_cents: 45_000, currency: "nad", description: "External contractor invoice not yet in the system.", occurred_at: "2026-07-15" });
+    expect(result).toMatchObject({ cost_type: "MANUAL", amount_cents: 45_000, currency: "NAD", occurred_at: "2026-07-15" });
+  });
+
+  it("rejects a MANUAL project cost missing amount_cents", () => {
+    expect(() => normalizeAndValidateProjectCost({ schema_version: "1.0.0", cost_type: "MANUAL", source_id: "ext-invoice-002", currency: "NAD", description: "Missing amount." })).toThrowError(BusinessValidationError);
+  });
+
+  it("rejects an unsupported project cost_type", () => {
+    expect(() => normalizeAndValidateProjectCost({ schema_version: "1.0.0", cost_type: "AUTOMATIC", source_id: "x" })).toThrowError(BusinessValidationError);
   });
 });

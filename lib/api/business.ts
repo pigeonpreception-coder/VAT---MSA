@@ -1,23 +1,31 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
 import {
   acceptQuotation,
+  approveExpense,
+  approveProjectBudget,
   BusinessResourceError,
   closeAccountingPeriod,
   convertQuotationToInvoice,
   createAccount,
   createBusinessParty,
   createExpense,
+  createExpenseCategory,
   createProject,
   createQuotation,
   getBusinessPlatformSnapshot,
+  getExpenseReport,
   getFinancialStatements,
+  getProjectProfitability,
   getTrialBalance,
   expireQuotation,
   postJournal,
+  postProjectCost,
   recordStockMovement,
+  rejectExpense,
   rejectQuotation,
   reverseJournalEntry,
   deactivateBusinessParty,
+  submitExpense,
   updateBusinessParty,
   updateQuotation,
 } from "@/lib/data/business-repository";
@@ -26,8 +34,8 @@ import { BusinessValidationError } from "@/lib/domain/business";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
-export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD";
+export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts" | "categories";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -108,6 +116,42 @@ export async function handleFinancialStatements(request: Request) {
   }
 }
 
+/** Module 5 Phase E ExpenseReport. from/to default to the current calendar month, matching Statements' convention. */
+export async function handleExpenseReport(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "expenses:read");
+    const url = new URL(request.url);
+    const today = new Date().toISOString().slice(0, 10);
+    const from = url.searchParams.get("from")?.trim() || `${today.slice(0, 7)}-01`;
+    const to = url.searchParams.get("to")?.trim() || today;
+    if (!REPORT_DATE_PATTERN.test(from) || !REPORT_DATE_PATTERN.test(to)) return problem(422, "VALIDATION_FAILED", "Validation failed", "from/to must be ISO dates (YYYY-MM-DD).", context.correlationId);
+    if (to < from) return problem(422, "VALIDATION_FAILED", "Validation failed", "to cannot be earlier than from.", context.correlationId);
+    const report = await getExpenseReport(user, requestedOrganisation(request), from, to);
+    return Response.json(report, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The expense report is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 5 Phase E ProfitabilityReport for a single project. */
+export async function handleProjectProfitability(request: Request, projectId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "projects:read");
+    const report = await getProjectProfitability(projectId, user, requestedOrganisation(request));
+    return Response.json(report, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof BusinessResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The project profitability report is temporarily unavailable.", context.correlationId);
+  }
+}
+
 export async function handleBusinessPost(request: Request, permission: string, command: BusinessCommand, resourceId?: string) {
   const context = await requestContext(request);
   const startedAt = Date.now();
@@ -125,6 +169,11 @@ export async function handleBusinessPost(request: Request, permission: string, c
       resource = command === "ACCEPT_QUOTATION"
         ? await acceptQuotation(resourceId, user, idempotencyKey, context.correlationId, organisationId)
         : await expireQuotation(resourceId, user, idempotencyKey, context.correlationId, organisationId);
+    } else if (command === "SUBMIT_EXPENSE" || command === "APPROVE_EXPENSE") {
+      if (!resourceId) throw new BusinessResourceError("Expense id is required.", 400);
+      resource = command === "SUBMIT_EXPENSE"
+        ? await submitExpense(resourceId, user, idempotencyKey, context.correlationId, organisationId)
+        : await approveExpense(resourceId, user, idempotencyKey, context.correlationId, organisationId);
     } else {
       const payload = await readBoundedJson<never>(request, 262_144);
       if (command === "CREATE_BUSINESS_PARTY") resource = await createBusinessParty(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
@@ -159,11 +208,24 @@ export async function handleBusinessPost(request: Request, permission: string, c
         if (!resourceId) throw new BusinessResourceError("Journal entry id is required.", 400);
         resource = await reverseJournalEntry(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
       }
-      else resource = await closeAccountingPeriod(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "CLOSE_ACCOUNTING_PERIOD") resource = await closeAccountingPeriod(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "CREATE_EXPENSE_CATEGORY") resource = await createExpenseCategory(payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      else if (command === "REJECT_EXPENSE") {
+        if (!resourceId) throw new BusinessResourceError("Expense id is required.", 400);
+        resource = await rejectExpense(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
+      else if (command === "APPROVE_PROJECT_BUDGET") {
+        if (!resourceId) throw new BusinessResourceError("Project id is required.", 400);
+        resource = await approveProjectBudget(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
+      else {
+        if (!resourceId) throw new BusinessResourceError("Project id is required.", 400);
+        resource = await postProjectCost(resourceId, payload, user, idempotencyKey, context.correlationId, organisationId) as Record<string, unknown> | null;
+      }
     }
     if (!resource) throw new RepositoryConflictError("The idempotent resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD"].includes(command) ? 200 : 201;
+    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "APPROVE_PROJECT_BUDGET"].includes(command) ? 200 : 201;
     return Response.json({ resource }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
