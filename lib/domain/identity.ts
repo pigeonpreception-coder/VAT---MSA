@@ -185,6 +185,70 @@ export type AssignableMembershipRole = (typeof ASSIGNABLE_MEMBERSHIP_ROLES)[numb
 
 export type MembershipAssignment = { userId: string; roleCode: AssignableMembershipRole; branchId: string | null };
 
+export type TaxpayerSuspension = { reason: string };
+
+/** Module 1 SuspendTaxpayer: a NamRA/pilot-admin officer suspending vat_status
+ * has real enforcement effect — counterparty resolution and taxpayer listing
+ * queries already filter on vat_status='ACTIVE' (lib/data/repository.ts), so
+ * a suspended taxpayer immediately stops being resolvable as an invoice
+ * counterparty without any further code change. */
+export function normalizeTaxpayerSuspension(input: unknown): TaxpayerSuspension {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A suspension object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const messages: IdentityValidationMessage[] = [];
+  const reason = boundedText(source.reason, "/reason", "Suspension reason", 5, 240, messages);
+  if (messages.length) throw new IdentityValidationError(messages);
+  return { reason };
+}
+
+const BRANCH_CODE_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,19}$/;
+
+export type BranchInput = { code: string; name: string; address: string };
+
+export function normalizeBranch(input: unknown): BranchInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A branch object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const messages: IdentityValidationMessage[] = [];
+  const code = textValue(source.code).toUpperCase();
+  if (!BRANCH_CODE_PATTERN.test(code)) {
+    messages.push({ code: "BRANCH_CODE_INVALID", path: "/code", message: "code must contain 2 to 20 uppercase letters, numbers or hyphens." });
+  }
+  const name = boundedText(source.name, "/name", "Branch name", 2, 120, messages);
+  const address = boundedText(source.address, "/address", "Branch address", 5, 500, messages);
+  if (messages.length) throw new IdentityValidationError(messages);
+  return { code, name, address };
+}
+
+export type BranchUpdate = { name?: string; address?: string; status?: "ACTIVE" | "INACTIVE" };
+
+export function normalizeBranchUpdate(input: unknown): BranchUpdate {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A branch update object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const messages: IdentityValidationMessage[] = [];
+  const result: BranchUpdate = {};
+  if (source.name !== undefined) result.name = boundedText(source.name, "/name", "Branch name", 2, 120, messages);
+  if (source.address !== undefined) result.address = boundedText(source.address, "/address", "Branch address", 5, 500, messages);
+  if (source.status !== undefined) {
+    const status = textValue(source.status).toUpperCase();
+    if (status !== "ACTIVE" && status !== "INACTIVE") {
+      messages.push({ code: "STATUS_INVALID", path: "/status", message: "status must be ACTIVE or INACTIVE." });
+    } else {
+      result.status = status;
+    }
+  }
+  if (messages.length) throw new IdentityValidationError(messages);
+  if (!Object.keys(result).length) {
+    throw new IdentityValidationError([{ code: "NO_FIELDS", path: "/", message: "Provide at least one field to update: name, address or status." }]);
+  }
+  return result;
+}
+
 export function normalizeMembershipAssignment(input: unknown): MembershipAssignment {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A membership assignment object is required." }]);

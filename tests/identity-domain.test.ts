@@ -3,8 +3,11 @@ import {
   IdentityValidationError,
   isDynamicTradingCapability,
   normalizeAndValidateRegistration,
+  normalizeBranch,
+  normalizeBranchUpdate,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
+  normalizeTaxpayerSuspension,
 } from "@/lib/domain/identity";
 
 function registration(overrides: Record<string, unknown> = {}) {
@@ -108,5 +111,54 @@ describe("membership assignment (AssignMembership role ceiling)", () => {
       expect(error).toBeInstanceOf(IdentityValidationError);
       expect((error as InstanceType<typeof IdentityValidationError>).messages[0]).toMatchObject({ code: "ROLE_NOT_ASSIGNABLE", path: "/role_code" });
     }
+  });
+});
+
+describe("taxpayer suspension (SuspendTaxpayer)", () => {
+  it("accepts a well-formed suspension reason", () => {
+    expect(normalizeTaxpayerSuspension({ reason: "Repeated non-filing beyond the statutory deadline." })).toEqual({
+      reason: "Repeated non-filing beyond the statutory deadline.",
+    });
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeTaxpayerSuspension({ reason: "no" })).toThrow(IdentityValidationError);
+    expect(() => normalizeTaxpayerSuspension({ reason: "x".repeat(241) })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects a missing body", () => {
+    expect(() => normalizeTaxpayerSuspension(null)).toThrow(IdentityValidationError);
+  });
+});
+
+describe("branch validation (ListBranches / branch CRUD)", () => {
+  it("normalizes a well-formed branch, uppercasing the code", () => {
+    expect(normalizeBranch({ code: "swk-01", name: "Swakopmund Branch", address: "8 Theo-Ben Gurirab Street, Swakopmund" })).toEqual({
+      code: "SWK-01",
+      name: "Swakopmund Branch",
+      address: "8 Theo-Ben Gurirab Street, Swakopmund",
+    });
+  });
+
+  it("rejects a branch code outside the allowed pattern", () => {
+    expect(() => normalizeBranch({ code: "s", name: "Swakopmund Branch", address: "8 Theo-Ben Gurirab Street, Swakopmund" })).toThrow(IdentityValidationError);
+    expect(() => normalizeBranch({ code: "swk 01", name: "Swakopmund Branch", address: "8 Theo-Ben Gurirab Street, Swakopmund" })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects a short branch name or address", () => {
+    expect(() => normalizeBranch({ code: "SWK-01", name: "S", address: "8 Theo-Ben Gurirab Street, Swakopmund" })).toThrow(IdentityValidationError);
+    expect(() => normalizeBranch({ code: "SWK-01", name: "Swakopmund Branch", address: "8" })).toThrow(IdentityValidationError);
+  });
+
+  it("accepts a partial update with only one field", () => {
+    expect(normalizeBranchUpdate({ status: "inactive" })).toEqual({ status: "INACTIVE" });
+  });
+
+  it("rejects an update with no fields", () => {
+    expect(() => normalizeBranchUpdate({})).toThrow(IdentityValidationError);
+  });
+
+  it("rejects an unsupported status value", () => {
+    expect(() => normalizeBranchUpdate({ status: "CLOSED" })).toThrow(IdentityValidationError);
   });
 });

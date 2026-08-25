@@ -3,8 +3,11 @@ import { isNationalScope, requireTaxpayerScope } from "@/lib/auth";
 import {
   IdentityValidationError,
   normalizeAndValidateRegistration,
+  normalizeBranch,
+  normalizeBranchUpdate,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
+  normalizeTaxpayerSuspension,
   type RegistrationSubmission,
 } from "@/lib/domain/identity";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
@@ -350,11 +353,7 @@ export async function assignMembership(
 ): Promise<MembershipAssignmentResult> {
   const assignment = normalizeMembershipAssignment(input);
   const db = await ensureDatabase();
-  const organisation = await db.prepare("SELECT id,taxpayer_id FROM organisations WHERE id=?").bind(organisationId).first<{ id: string; taxpayer_id: string }>();
-  if (!organisation) {
-    throw new IdentityValidationError([{ code: "ORGANISATION_NOT_FOUND", path: "/organisation_id", message: "The organisation does not exist." }]);
-  }
-  requireTaxpayerScope(actor, organisation.taxpayer_id);
+  const organisation = await requireOrganisationInScope(db, actor, organisationId);
 
   const targetUser = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(assignment.userId).first<{ id: string; status: string }>();
   if (!targetUser) {
@@ -382,4 +381,108 @@ export async function assignMembership(
   ]);
 
   return { id: membershipId, organisationId, userId: assignment.userId, roleCode: assignment.roleCode, branchId: assignment.branchId, status: "ACTIVE" };
+}
+
+export type TaxpayerSuspensionResult = { taxpayerId: string; vatStatus: string };
+
+/**
+ * Module 1 SuspendTaxpayer. Flips taxpayers.vat_status to SUSPENDED, which
+ * already has real enforcement effect elsewhere (lib/data/repository.ts
+ * resolves invoice counterparties and lists taxpayers filtered on
+ * vat_status='ACTIVE') — no further wiring needed for suspension to take
+ * hold. Idempotent: suspending an already-suspended taxpayer is a no-op
+ * that returns the current state rather than erroring.
+ */
+export async function suspendTaxpayer(
+  actor: UserContext,
+  taxpayerId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<TaxpayerSuspensionResult> {
+  const { reason } = normalizeTaxpayerSuspension(input);
+  const db = await ensureDatabase();
+  const taxpayer = await db.prepare("SELECT id,vat_status FROM taxpayers WHERE id=?").bind(taxpayerId).first<{ id: string; vat_status: string }>();
+  if (!taxpayer) {
+    throw new IdentityValidationError([{ code: "TAXPAYER_NOT_FOUND", path: "/taxpayer_id", message: "The taxpayer does not exist." }]);
+  }
+  if (taxpayer.vat_status === "SUSPENDED") {
+    return { taxpayerId: taxpayer.id, vatStatus: "SUSPENDED" };
+  }
+  await db.batch([
+    db.prepare("UPDATE taxpayers SET vat_status='SUSPENDED' WHERE id=?").bind(taxpayerId),
+    outboxEvent(db, "TAXPAYER", taxpayerId, "TaxpayerSuspended", taxpayerId, { taxpayer_id: taxpayerId, reason, correlation_id: correlationId }),
+    await appendAudit(db, actor, "TAXPAYER_SUSPENDED", "TAXPAYER", taxpayerId, { reason, previousStatus: taxpayer.vat_status }),
+  ]);
+  return { taxpayerId, vatStatus: "SUSPENDED" };
+}
+
+type OrganisationScopeRow = { id: string; taxpayer_id: string };
+
+async function requireOrganisationInScope(db: D1Database, actor: UserContext, organisationId: string): Promise<OrganisationScopeRow> {
+  const organisation = await db.prepare("SELECT id,taxpayer_id FROM organisations WHERE id=?").bind(organisationId).first<OrganisationScopeRow>();
+  if (!organisation) {
+    throw new IdentityValidationError([{ code: "ORGANISATION_NOT_FOUND", path: "/organisation_id", message: "The organisation does not exist." }]);
+  }
+  requireTaxpayerScope(actor, organisation.taxpayer_id);
+  return organisation;
+}
+
+export type BranchSummary = { id: string; code: string; name: string; address: string; status: string; is_head_office: number };
+
+/** Module 1 ListBranches, as its own standalone query — previously branches were only readable nested inside GetOrganisation. */
+export async function listBranches(actor: UserContext, organisationId: string): Promise<BranchSummary[]> {
+  const db = await ensureDatabase();
+  await requireOrganisationInScope(db, actor, organisationId);
+  const result = await db.prepare("SELECT id,code,name,address,status,is_head_office FROM branches WHERE organisation_id=? ORDER BY is_head_office DESC, name")
+    .bind(organisationId).all<BranchSummary>();
+  return result.results;
+}
+
+export type BranchResult = { id: string; organisationId: string; code: string; name: string; address: string; status: string; isHeadOffice: boolean };
+
+export async function createBranch(actor: UserContext, organisationId: string, input: unknown, correlationId: string): Promise<BranchResult> {
+  const branch = normalizeBranch(input);
+  const db = await ensureDatabase();
+  const organisation = await requireOrganisationInScope(db, actor, organisationId);
+  const duplicate = await db.prepare("SELECT id FROM branches WHERE organisation_id=? AND code=?").bind(organisationId, branch.code).first<{ id: string }>();
+  if (duplicate) throw new RepositoryConflictError(`A branch with code ${branch.code} already exists for this organisation.`);
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  await db.batch([
+    db.prepare(`INSERT INTO branches (id,organisation_id,code,name,address,status,is_head_office,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, organisationId, branch.code, branch.name, branch.address, "ACTIVE", 0, now, now),
+    outboxEvent(db, "ORGANISATION", organisationId, "BranchCreated", organisation.taxpayer_id, { organisation_id: organisationId, branch_id: id, code: branch.code, correlation_id: correlationId }),
+    await appendAudit(db, actor, "BRANCH_CREATED", "BRANCH", id, { organisationId, code: branch.code }),
+  ]);
+  return { id, organisationId, code: branch.code, name: branch.name, address: branch.address, status: "ACTIVE", isHeadOffice: false };
+}
+
+export async function updateBranch(
+  actor: UserContext,
+  organisationId: string,
+  branchId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<BranchResult> {
+  const update = normalizeBranchUpdate(input);
+  const db = await ensureDatabase();
+  const organisation = await requireOrganisationInScope(db, actor, organisationId);
+  const branch = await db.prepare("SELECT id,code,name,address,status,is_head_office FROM branches WHERE id=? AND organisation_id=?")
+    .bind(branchId, organisationId).first<{ id: string; code: string; name: string; address: string; status: string; is_head_office: number }>();
+  if (!branch) {
+    throw new IdentityValidationError([{ code: "BRANCH_NOT_FOUND", path: "/branch_id", message: "The branch is outside this organisation." }]);
+  }
+  if (update.status === "INACTIVE" && branch.is_head_office) {
+    throw new IdentityValidationError([{ code: "HEAD_OFFICE_CANNOT_DEACTIVATE", path: "/status", message: "The head office branch cannot be deactivated." }]);
+  }
+  const name = update.name ?? branch.name;
+  const address = update.address ?? branch.address;
+  const status = update.status ?? branch.status;
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE branches SET name=?,address=?,status=?,updated_at=? WHERE id=? AND organisation_id=?").bind(name, address, status, now, branchId, organisationId),
+    outboxEvent(db, "ORGANISATION", organisationId, "BranchUpdated", organisation.taxpayer_id, { organisation_id: organisationId, branch_id: branchId, changes: update, correlation_id: correlationId }),
+    await appendAudit(db, actor, "BRANCH_UPDATED", "BRANCH", branchId, { organisationId, changes: update }),
+  ]);
+  return { id: branchId, organisationId, code: branch.code, name, address, status, isHeadOffice: Boolean(branch.is_head_office) };
 }
