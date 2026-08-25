@@ -6,6 +6,7 @@ import {
   normalizeBranch,
   normalizeBranchUpdate,
   normalizeCounterpartyVatNumber,
+  normalizeIdentityLink,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
@@ -531,4 +532,88 @@ export async function classifyTransaction(vatNumberInput: unknown): Promise<Tran
     canActAsSeller: capabilities.includes("SELLER"),
     canActAsBuyer: capabilities.includes("BUYER"),
   };
+}
+
+export type IdentityLinkSummary = {
+  id: string;
+  providerKey: string;
+  subject: string;
+  assuranceLevel: string;
+  status: string;
+  linkedAt: string;
+  lastAuthenticatedAt: string | null;
+};
+
+/** Module 1 ResolveIdentity: list identity links for a user — self by default, or an admin-specified user_id (administration:manage checked at the route). */
+export async function listIdentityLinks(userId: string): Promise<IdentityLinkSummary[]> {
+  const db = await ensureDatabase();
+  const result = await db.prepare(`SELECT l.id,p.provider_key,l.subject,l.assurance_level,l.status,l.linked_at,l.last_authenticated_at
+    FROM identity_links l JOIN identity_providers p ON p.id=l.provider_id
+    WHERE l.user_id=? ORDER BY l.linked_at`).bind(userId)
+    .all<{ id: string; provider_key: string; subject: string; assurance_level: string; status: string; linked_at: string; last_authenticated_at: string | null }>();
+  return result.results.map((row) => ({
+    id: row.id, providerKey: row.provider_key, subject: row.subject, assuranceLevel: row.assurance_level,
+    status: row.status, linkedAt: row.linked_at, lastAuthenticatedAt: row.last_authenticated_at,
+  }));
+}
+
+/**
+ * Module 1 LinkIdentity: administratively links an additional identity
+ * provider subject to an existing, active app_users row. The provider must
+ * already be ACTIVE and CONFIGURED — today that is only SITES_WORKSPACE;
+ * attempting to link against ITAS or the standalone provider correctly
+ * fails closed until their configuration_status becomes CONFIGURED, which
+ * is a security/regulatory decision this command cannot grant itself.
+ * Deliberately records assurance_level='ADMINISTRATIVE_LINK' rather than
+ * letting the caller assert a stronger level this manual action didn't
+ * actually establish.
+ */
+export async function linkIdentity(actor: UserContext, input: unknown, correlationId: string): Promise<IdentityLinkSummary> {
+  const link = normalizeIdentityLink(input);
+  const db = await ensureDatabase();
+  const targetUser = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(link.userId).first<{ id: string; status: string }>();
+  if (!targetUser) throw new IdentityValidationError([{ code: "USER_NOT_FOUND", path: "/user_id", message: "The target user does not exist." }]);
+  if (targetUser.status !== "ACTIVE") throw new IdentityValidationError([{ code: "USER_NOT_ACTIVE", path: "/user_id", message: "The target user is not active." }]);
+  const provider = await db.prepare("SELECT id,status,configuration_status FROM identity_providers WHERE provider_key=?").bind(link.providerKey)
+    .first<{ id: string; status: string; configuration_status: string }>();
+  if (!provider) throw new IdentityValidationError([{ code: "PROVIDER_NOT_FOUND", path: "/provider_key", message: "The identity provider is not registered." }]);
+  if (provider.status !== "ACTIVE" || provider.configuration_status !== "CONFIGURED") {
+    throw new IdentityValidationError([{ code: "PROVIDER_NOT_CONFIGURED", path: "/provider_key", message: `${link.providerKey} is not yet configured for production linking (${provider.configuration_status}).` }]);
+  }
+  const existing = await db.prepare("SELECT id FROM identity_links WHERE provider_id=? AND subject=?").bind(provider.id, link.subject).first<{ id: string }>();
+  if (existing) throw new RepositoryConflictError("This provider subject is already linked to an identity.");
+
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  await db.batch([
+    db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
+      VALUES (?,?,?,?,NULL,?,?,?,NULL)`).bind(id, link.userId, provider.id, link.subject, "ADMINISTRATIVE_LINK", "ACTIVE", now),
+    outboxEvent(db, "IDENTITY", id, "IdentityLinked", link.userId, { userId: link.userId, providerKey: link.providerKey, correlationId }),
+    await appendAudit(db, actor, "IDENTITY_LINKED", "IDENTITY_LINK", id, { userId: link.userId, providerKey: link.providerKey }),
+  ]);
+  return { id, providerKey: link.providerKey, subject: link.subject, assuranceLevel: "ADMINISTRATIVE_LINK", status: "ACTIVE", linkedAt: now, lastAuthenticatedAt: null };
+}
+
+/**
+ * Module 1 RevokeSession — per MODULE_DEVELOPMENT_PLAYBOOK.md's Identity
+ * Phase A decision: there is no separate session record this system
+ * actually controls (no cookie, no JWT; the ChatGPT/OpenAI platform is the
+ * real authentication authority), so "revoke a session" means revoke the
+ * identity_link. This has a real, verifiable effect: getCurrentUser's join
+ * requires identity_links.status='ACTIVE', so a revoked link stops
+ * authenticating on its very next request. Admin-only: self-revocation in
+ * a header-trust model with no separate login screen risks a lockout with
+ * no recovery path.
+ */
+export async function revokeIdentityLink(actor: UserContext, identityLinkId: string, correlationId: string): Promise<{ id: string; status: string }> {
+  const db = await ensureDatabase();
+  const link = await db.prepare("SELECT id,user_id,status FROM identity_links WHERE id=?").bind(identityLinkId).first<{ id: string; user_id: string; status: string }>();
+  if (!link) throw new IdentityValidationError([{ code: "IDENTITY_LINK_NOT_FOUND", path: "/identity_link_id", message: "The identity link does not exist." }]);
+  if (link.status === "REVOKED") return { id: link.id, status: "REVOKED" };
+  await db.batch([
+    db.prepare("UPDATE identity_links SET status='REVOKED' WHERE id=?").bind(link.id),
+    outboxEvent(db, "IDENTITY", link.id, "SessionRevoked", link.user_id, { identityLinkId: link.id, userId: link.user_id, correlationId }),
+    await appendAudit(db, actor, "SESSION_REVOKED", "IDENTITY_LINK", link.id, { userId: link.user_id }),
+  ]);
+  return { id: link.id, status: "REVOKED" };
 }

@@ -49,32 +49,40 @@ Modules 8–10 have components you can and should start early (platform/security
 
 **Domains:** Identity, Taxpayer, Organisation, User Management, Buyer/Seller capability, Licensing & Entitlements, Organisation Administration, Organisation Authorization, Access Governance, Workspace & Navigation.
 **Depends on:** nothing — this is the foundation. **Unlocks:** every other module.
-**Maturity today:** `CONTROLLED FOUNDATION` (Identity, Taxpayer, User Management), `VERIFIED PILOT` (Organisation, Buyer/Seller).
+**Maturity today:** `CONTROLLED FOUNDATION` (Identity — see Phase A decision below), `VERIFIED PILOT` (Taxpayer, Organisation, User Management, Buyer/Seller, Licensing & Entitlements, Organisation Administration, Organisation Authorization, Workspace & Navigation).
 
-**Data model anchors:** `Provider`, `IdentityLink`, `Session`, `CredentialMetadata` · `Taxpayer`, `VATRegistration`, `TIN`, `IdentifierVersion` · `Organisation` aggregate, `Branch`, `Capability` · `User`, `Membership`, `Invitation`, `LifecycleCase` · `OrganisationCapability`, `TransactionRole` · `LicensePlan`, `Subscription`, `OrganisationLicense`, `Entitlement`, `LicenseUsage` · `Employee`, `Position`, `Department`, `BusinessUnit`, `OrganisationAdministrator` · `OrganisationRole`, `RolePermission`, `UserRole`, `UserCapability` · `AccessRequest`, `AccessReview`, `AccessCertification` · `NavigationWorkspace`, `NavigationFolder`, `NavigationItem`, `NavigationPermission`.
+**Two decisions recorded 2026-08-25** (were open questions; both now settled and built against):
+1. **Identity/Session model:** this system has no session it actually controls — no cookie, no JWT; the ChatGPT/OpenAI platform is the real authentication authority, and `getCurrentUser()` just trusts a fresh header per request. Building a literal `Session`/`CredentialMetadata` table would be synthetic and could make `RevokeSession` look like it does something it can't fully back. **Decision: "session" = the `identity_link`.** `RevokeSession` revokes the identity_link (a real, verifiable effect — `getCurrentUser()`'s join requires `status='ACTIVE'`, so a revoked link stops authenticating on its very next request). `Session`/`CredentialMetadata` tables stay deferred until a real credential-issuing mechanism exists (ITAS confirmed, or the standalone `VAT_MSA_STANDALONE` identity provider — seeded but `PENDING`/`REQUIRES_SECURITY_DECISION` — is activated).
+2. **Self-service provisioning:** there is still no path for a brand-new person (no existing `app_users` row) to get their first account — `getCurrentUser()` deliberately throws rather than auto-provisioning. **Decision: explicit invite-and-claim**, generalizing the `inviteEmployee`/`activateEmployee` pattern beyond employees. **Not yet built** — `ProvisionUser` remains open pending that generalized invite-and-claim design.
+
+**Data model anchors:** `Provider`, `IdentityLink`, ~~`Session`, `CredentialMetadata`~~ (deferred, see decision above) · `Taxpayer`, `VATRegistration`, `TIN`, `IdentifierVersion` · `Organisation` aggregate, `Branch`, `Capability` · `User`, `Membership`, `Invitation`, `LifecycleCase` · `OrganisationCapability`, `TransactionRole` · `LicensePlan`, `Subscription`, `OrganisationLicense`, `Entitlement`, `LicenseUsage` · `Employee`, `Position`, `Department`, `BusinessUnit`, `OrganisationAdministrator` · `OrganisationRole`, `RolePermission`, `UserRole`, `UserCapability` · `AccessRequest`, `AccessReview`, `AccessCertification` · `NavigationWorkspace`, `NavigationFolder`, `NavigationItem`, `NavigationPermission`.
 
 ### Phase A — Canonical identity & session (M)
-- [ ] `Provider`, `IdentityLink`, `Session`, `CredentialMetadata` model.
-- [ ] `LinkIdentity` / `RevokeSession` commands with session/device metadata.
-- [ ] `ResolveIdentity` / `GetAssurance` queries returning an explicit assurance level, not a bare authenticated boolean.
+- [x] `Provider`, `IdentityLink` model (`Session`/`CredentialMetadata` deferred — see decision above).
+- [x] `LinkIdentity` (`POST /api/v1/identity/links`, admin-only, fails closed against any provider not `ACTIVE`+`CONFIGURED`) / `RevokeSession` (`POST /api/v1/identity/links/:id/revocation`, = revoke the identity_link).
+- [x] `ResolveIdentity` (`GET /api/v1/identity/links`) / `GetAssurance` (`GET /api/v1/identity/assurance`, combines identity-link assurance with request-level step-up freshness) queries.
 
 ### Phase B — Taxpayer & organisation core (M)
-- [ ] `Taxpayer`, `VATRegistration`, `TIN`, `IdentifierVersion` model; `SubmitVerification` / `SuspendTaxpayer`, `VerifyIdentifiers` against the *standalone* identity path only — ITAS-linked verification stays behind the Module 10 adapter and a feature flag.
-- [ ] `Organisation` aggregate, `Branch`, `Capability`; `ActivateOrganisation`, `EnableCapability`, `GetOrganisation`, `ListBranches` — real branch scoping for Module 2's Buyer/Seller activation to key off.
+- [x] `SuspendTaxpayer` (`POST /api/v1/taxpayers/:id/suspension`, idempotent, immediately enforced via existing `vat_status='ACTIVE'` filters).
+- [ ] `IdentifierVersion`/effective-dating on `taxpayer_identifiers` — still open; corrections would currently overwrite rows.
+- [ ] `VerifyIdentifiers` standalone (non-ITAS) path — partially covered as a side effect of the registration-decision command below, but no standalone query/command exists outside that one flow.
+- [x] `ActivateOrganisation`, `EnableCapability` (both via `POST /api/v1/registration-applications/:id/decision`, which also creates the head-office branch and owner membership) — `GetOrganisation` pre-existing, `ListBranches` + branch create/update now standalone (`GET`/`POST /api/v1/organisations/:id/branches`, `PATCH .../branches/:branchId`).
 
 ### Phase C — Users, roles & buyer/seller capability (M)
-- [ ] `User`, `Membership`, `Invitation`, `LifecycleCase`; `ProvisionUser`, `SuspendUser`, `AssignMembership`; `GetUserAccess` returning the **full effective RBAC+ABAC predicate set** for a session, not just a role name — every other module's authorization checks depend on this being complete and correct.
-- [ ] `OrganisationRole`, `RolePermission`, `UserRole`, `UserCapability`; `CreateRole` / `AssignPermission` / `GrantCapability` against a protected catalogue and ceiling.
-- [ ] `OrganisationCapability`, `TransactionRole`; `ActivateBuyer` / `ActivateSeller`, `ClassifyTransaction`, `GetAvailablePortals`.
+- [ ] `ProvisionUser` — deferred, see decision above. `SuspendUser` still open (suspension today happens as a side effect of `terminateEmployee`, not a standalone command).
+- [x] `AssignMembership` (`POST /api/v1/organisations/:id/memberships`, restricted to TAXPAYER_* roles — a deliberate privilege-escalation guard).
+- [x] `GetUserAccess` (`GET /api/v1/me/access`) — the full effective RBAC+ABAC predicate set, computed live.
+- [x] `CreateRole`/`AssignPermission` pre-existing; `GrantCapability` now standalone (`GET`/`POST /api/v1/organisations/capabilities`, upserts, requires the org to already hold the capability).
+- [x] `ClassifyTransaction` (`GET /api/v1/counterparties/classification`) and `GetAvailablePortals` (`GET /api/v1/portals` — the underlying logic already existed, gating every portal page; this exposed it as its own endpoint).
 
 ### Phase D — Licensing, administration & access governance (L)
-- [ ] `LicensePlan`, `Subscription`, `OrganisationLicense`, `Entitlement`, `LicenseUsage`; `Activate/Suspend/Upgrade/Renew`, `GetEntitlements`/`GetUsage` — every other module's capability flags gate off this, never off a hardcoded check.
-- [ ] `Employee`, `Position`, `Department`, `BusinessUnit`, `OrganisationAdministrator`; `Invite/Activate/Suspend/TerminateEmployee`, `AppointAdministrator`.
-- [ ] `AccessRequest`, `AccessReview`, `AccessCertification`; `Request/Approve/Reject/Certify/Revoke/Offboard` — this is what makes "bulk download requires step-up approval" (used from Audit to Reporting) actually enforceable.
+- [x] `Activate`/`Suspend`/`Renew` (`POST /api/v1/licensing/state`) and `Upgrade` (`POST /api/v1/licensing/upgrade`, a distinct plan-change operation, not a state transition); standalone `GetEntitlements`/`GetUsage` (`GET /api/v1/licensing/entitlements`, `GET /api/v1/licensing/usage`).
+- [x] `AppointAdministrator` (`GET`/`POST /api/v1/organisations/administrators`) and employee `INVITED → ACTIVE` (`POST /api/v1/organisations/employees/:id/activation`, also converts the USER_SEATS licence reservation into usage).
+- [ ] `AccessRequest`/`AccessReview`/`AccessCertification` request/approve/certify already existed; standalone `Revoke`/`Offboard` as commands distinct from `decideAccessRequest`'s REJECT branch and `terminateEmployee`'s implicit revocation — still open.
 
 ### Phase E — Workspace projection & hardening (S)
-- [ ] `NavigationWorkspace`, `NavigationFolder`, `NavigationItem`, `NavigationPermission`; `GetWorkspace`/`GetChildren`/`GetActions`/`SavePreference` — projection only; re-derive and re-check authorization at the endpoint it navigates to, never trust the navigation payload as an authorization decision.
-- [ ] Negative-test suite: cross-organisation access, cross-role access, expired session, insufficient assurance level — all must be provably rejected.
+- [x] `GetWorkspace` pre-existing; `GetChildren` (`GET /api/v1/navigation/children`, properly traverses nested `parent_folder_id`), `GetActions` (`GET /api/v1/navigation/actions`, explainable single-item access check) and `SavePreference` (`POST /api/v1/navigation/preferences`, upserts) now built. `NavigationPermission`/`navigation_permissions` remains unwired — flagged, not fixed.
+- [ ] Negative-test suite: cross-organisation access, cross-role access, expired session, insufficient assurance level — pure-function-level negative tests now exist across several test files, but **zero route-level/DB-integration tests exist anywhere in the repo** (a pre-existing limitation, not introduced by this work) — still open, and would need test DB/fixture infrastructure this repo doesn't have yet before it can be closed.
 
 **Watch-outs:**
 - `GetUserAccess` must never be a cached/stale snapshot — every module trusts it live.

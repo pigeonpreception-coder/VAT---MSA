@@ -6,6 +6,7 @@ import {
   normalizeBranch,
   normalizeBranchUpdate,
   normalizeCounterpartyVatNumber,
+  normalizeIdentityLink,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
@@ -175,5 +176,28 @@ describe("counterparty VAT number validation (ClassifyTransaction)", () => {
 
   it("rejects a malformed VAT number", () => {
     expect(() => normalizeCounterpartyVatNumber("<script>")).toThrow(IdentityValidationError);
+  });
+});
+
+describe("identity link validation (LinkIdentity)", () => {
+  it("normalizes a well-formed link, uppercasing the provider key", () => {
+    expect(normalizeIdentityLink({ user_id: "usr-1", provider_key: "sites_workspace", subject: "external-subject-123" })).toEqual({
+      userId: "usr-1",
+      providerKey: "SITES_WORKSPACE",
+      subject: "external-subject-123",
+    });
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeIdentityLink({ provider_key: "SITES_WORKSPACE", subject: "sub-1" })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects a malformed provider key", () => {
+    expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "sites workspace!", subject: "sub-1" })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects an empty or oversized subject", () => {
+    expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "ITAS", subject: "" })).toThrow(IdentityValidationError);
+    expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "ITAS", subject: "x".repeat(201) })).toThrow(IdentityValidationError);
   });
 });

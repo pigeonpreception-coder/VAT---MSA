@@ -140,6 +140,33 @@ export function isDynamicTradingCapability(value: string): value is "BUYER" | "S
   return value === "BUYER" || value === "SELLER";
 }
 
+export type IdentityLinkInput = { userId: string; providerKey: string; subject: string };
+
+/**
+ * Module 1 Identity LinkIdentity: administratively links an additional
+ * identity provider subject to an existing user. See linkIdentity in
+ * lib/data/identity-repository.ts for why the provider must already be
+ * ACTIVE + CONFIGURED (today, only SITES_WORKSPACE) and why the resulting
+ * assurance_level is always 'ADMINISTRATIVE_LINK', never caller-supplied.
+ */
+export function normalizeIdentityLink(input: unknown): IdentityLinkInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "An identity link object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const userId = textValue(source.user_id);
+  if (!userId) throw new IdentityValidationError([{ code: "USER_ID_REQUIRED", path: "/user_id", message: "user_id is required." }]);
+  const providerKey = textValue(source.provider_key).toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(providerKey)) {
+    throw new IdentityValidationError([{ code: "PROVIDER_KEY_INVALID", path: "/provider_key", message: "provider_key must contain 2 to 40 uppercase letters, numbers or underscores." }]);
+  }
+  const subject = textValue(source.subject);
+  if (!subject || subject.length > 200) {
+    throw new IdentityValidationError([{ code: "SUBJECT_INVALID", path: "/subject", message: "subject must contain 1 to 200 characters." }]);
+  }
+  return { userId, providerKey, subject };
+}
+
 export type RegistrationDecision = { decision: "APPROVE" | "REJECT"; reason: string };
 
 /**
