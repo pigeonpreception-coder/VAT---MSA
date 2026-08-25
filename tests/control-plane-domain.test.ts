@@ -5,6 +5,7 @@ import {
   assertWorkflowDecision,
   evaluateEntitlement,
   hasRecentStepUp,
+  normalizeAccessRevocation,
   normalizeAdministratorAppointment,
   normalizeCapabilityGrant,
   normalizeEmployeeActivation,
@@ -12,6 +13,7 @@ import {
   normalizeLicenseUpgrade,
   normalizeNavigationChildrenQuery,
   normalizeNavigationPreference,
+  normalizeOffboarding,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -216,5 +218,44 @@ describe("navigation preference (SavePreference)", () => {
 
   it("rejects an oversized value", () => {
     expect(() => normalizeNavigationPreference({ preference_type: "big", value: "x".repeat(9_000) })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("access grant revocation (Access Governance RevokeAccess)", () => {
+  it("normalizes a well-formed revocation, uppercasing grant_type", () => {
+    expect(normalizeAccessRevocation({ grant_type: "role", grant_id: "ura-1", reason: "Role no longer required for this position." })).toEqual({
+      grantType: "ROLE",
+      grantId: "ura-1",
+      reason: "Role no longer required for this position.",
+    });
+  });
+
+  it("rejects a grant_type outside ROLE/CAPABILITY", () => {
+    expect(() => normalizeAccessRevocation({ grant_type: "MEMBERSHIP", grant_id: "ura-1", reason: "Role no longer required for this position." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a missing grant_id", () => {
+    expect(() => normalizeAccessRevocation({ grant_type: "CAPABILITY", reason: "Role no longer required for this position." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeAccessRevocation({ grant_type: "ROLE", grant_id: "ura-1", reason: "no" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("offboarding (Access Governance Offboard)", () => {
+  it("normalizes a well-formed offboarding", () => {
+    expect(normalizeOffboarding({ user_id: "usr-4", reason: "Access-only exit following a security incident review." })).toEqual({
+      userId: "usr-4",
+      reason: "Access-only exit following a security incident review.",
+    });
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeOffboarding({ reason: "Access-only exit following a security incident review." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeOffboarding({ user_id: "usr-4", reason: "no" })).toThrowError(ControlPlaneValidationError);
   });
 });

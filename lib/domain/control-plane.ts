@@ -346,6 +346,58 @@ export function normalizeEmployeeActivation(input: unknown): EmployeeActivationI
   return { userId };
 }
 
+export type AccessGrantType = "ROLE" | "CAPABILITY";
+export type AccessRevocationInput = { grantType: AccessGrantType; grantId: string; reason: string };
+
+/**
+ * Access Governance RevokeAccess: revokes one specific already-granted role
+ * (user_role_assignments, granted via decideAccessRequest's APPROVE branch)
+ * or capability (user_capability_assignments, granted via GrantCapability)
+ * on demand — see revokeAccessGrant in lib/data/control-plane-repository.ts
+ * for why this didn't already exist as its own command.
+ */
+export function normalizeAccessRevocation(input: unknown): AccessRevocationInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "An access revocation object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const grantType = String(source.grant_type ?? "").trim().toUpperCase();
+  if (grantType !== "ROLE" && grantType !== "CAPABILITY") {
+    throw new ControlPlaneValidationError("GRANT_TYPE_INVALID", "grant_type must be ROLE or CAPABILITY.");
+  }
+  const grantId = String(source.grant_id ?? "").trim();
+  if (!grantId) throw new ControlPlaneValidationError("GRANT_ID_REQUIRED", "grant_id is required.");
+  const reason = String(source.reason ?? "").trim().replace(/\s+/g, " ");
+  if (reason.length < 5 || reason.length > 240) {
+    throw new ControlPlaneValidationError("REASON_REQUIRED", "Provide a 5 to 240 character revocation reason.");
+  }
+  return { grantType: grantType as AccessGrantType, grantId, reason };
+}
+
+export type OffboardingInput = { userId: string; reason: string };
+
+/**
+ * Access Governance Offboard: revokes every active role/capability grant and
+ * the organisation membership itself for one user, immediately — the
+ * access-only counterpart to terminateEmployee (which also ends the
+ * employment record and a licence seat) and to certifyQuarterlyAccess's
+ * REVOKE disposition (which is gated behind an open review reaching full
+ * completion across every active member).
+ */
+export function normalizeOffboarding(input: unknown): OffboardingInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "An offboarding object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const userId = String(source.user_id ?? "").trim();
+  if (!userId) throw new ControlPlaneValidationError("USER_ID_REQUIRED", "user_id is required.");
+  const reason = String(source.reason ?? "").trim().replace(/\s+/g, " ");
+  if (reason.length < 5 || reason.length > 240) {
+    throw new ControlPlaneValidationError("REASON_REQUIRED", "Provide a 5 to 240 character offboarding reason.");
+  }
+  return { userId, reason };
+}
+
 export type LicenseStateAction = "ACTIVATE" | "SUSPEND" | "RENEW";
 export type LicenseStateChangeInput = { action: LicenseStateAction; reason: string };
 

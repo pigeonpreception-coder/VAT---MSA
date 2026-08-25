@@ -5,6 +5,7 @@ import {
   evaluateEntitlement,
   assertLicenseStateTransition,
   assertWorkflowDecision,
+  normalizeAccessRevocation,
   normalizeAdministratorAppointment,
   normalizeCapabilityGrant,
   normalizeEmployee,
@@ -13,6 +14,7 @@ import {
   normalizeLicenseUpgrade,
   normalizeNavigationChildrenQuery,
   normalizeNavigationPreference,
+  normalizeOffboarding,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -831,6 +833,92 @@ export async function certifyQuarterlyAccess(actor: UserContext, reviewId: strin
   );
   await db.batch(statements);
   return { id, reviewId: review.id, subjectUserId, disposition, certifiedAt: now };
+}
+
+export type AccessGrantRevocationResult = { id: string; grantType: "ROLE" | "CAPABILITY"; userId: string; status: string };
+
+/**
+ * Access Governance RevokeAccess: revokes a single active role or capability
+ * grant on demand. Previously the only ways to walk back an already-granted
+ * role/capability were the bulk "revoke everything" paths inside
+ * certifyQuarterlyAccess (gated behind an open review reaching full
+ * completion across every active member) and terminateEmployee (a one-way
+ * offboarding that also ends the employment record and a licence seat) —
+ * there was no way to revoke just one grant without either.
+ */
+export async function revokeAccessGrant(
+  actor: UserContext,
+  input: unknown,
+  requestedOrganisationId?: string | null,
+): Promise<AccessGrantRevocationResult> {
+  const revocation = normalizeAccessRevocation(input);
+  const { organisation } = await assertEntitledOperation(actor, "ADMINISTRATION", "ADMIN_WRITE", 0, requestedOrganisationId);
+  const db = await ensureDatabase();
+  const table = revocation.grantType === "ROLE" ? "user_role_assignments" : "user_capability_assignments";
+  const resourceType = revocation.grantType === "ROLE" ? "USER_ROLE_ASSIGNMENT" : "USER_CAPABILITY_ASSIGNMENT";
+
+  const grant = await db.prepare(`SELECT id,user_id,status FROM ${table} WHERE id=? AND organisation_id=?`)
+    .bind(revocation.grantId, organisation.id).first<{ id: string; user_id: string; status: string }>();
+  if (!grant) throw new ControlPlaneValidationError("GRANT_NOT_FOUND", "The access grant is outside the active organisation.");
+  if (actor.userId === grant.user_id) throw new ControlPlaneValidationError("SELF_REVOCATION_DENIED", "You cannot revoke your own access grant.");
+  if (grant.status !== "ACTIVE") return { id: grant.id, grantType: revocation.grantType, userId: grant.user_id, status: grant.status };
+
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`UPDATE ${table} SET status='REVOKED',effective_to=? WHERE id=?`).bind(now, grant.id),
+    await appendAudit(db, actor, "ACCESS_REVOKED", resourceType, grant.id, { organisationId: organisation.id, userId: grant.user_id, grantType: revocation.grantType, reason: revocation.reason }),
+  ]);
+  return { id: grant.id, grantType: revocation.grantType, userId: grant.user_id, status: "REVOKED" };
+}
+
+export type OffboardingResult = {
+  userId: string;
+  organisationId: string;
+  membershipRevoked: boolean;
+  roleAssignmentsRevoked: number;
+  capabilityAssignmentsRevoked: number;
+};
+
+/**
+ * Access Governance Offboard: revokes every active role/capability grant and
+ * the organisation membership itself for one user, immediately — the
+ * access-only counterpart to terminateEmployee (which also ends the
+ * employment record and a licence seat) and to certifyQuarterlyAccess's
+ * REVOKE disposition (gated behind an open review reaching full completion
+ * across every active member). For a security incident or an access-only
+ * exit where the employment/licence side should stay untouched. Idempotent.
+ */
+export async function offboardUser(
+  actor: UserContext,
+  input: unknown,
+  requestedOrganisationId?: string | null,
+): Promise<OffboardingResult> {
+  const offboarding = normalizeOffboarding(input);
+  const { organisation } = await assertEntitledOperation(actor, "ADMINISTRATION", "ADMIN_WRITE", 0, requestedOrganisationId);
+  if (actor.userId === offboarding.userId) throw new ControlPlaneValidationError("SELF_OFFBOARD_DENIED", "You cannot offboard your own access.");
+  const db = await ensureDatabase();
+
+  const [membership, roleCount, capabilityCount] = await Promise.all([
+    db.prepare("SELECT id FROM organisation_memberships WHERE organisation_id=? AND user_id=? AND status='ACTIVE'").bind(organisation.id, offboarding.userId).first<{ id: string }>(),
+    db.prepare("SELECT COUNT(*) AS n FROM user_role_assignments WHERE organisation_id=? AND user_id=? AND status='ACTIVE'").bind(organisation.id, offboarding.userId).first<{ n: number }>(),
+    db.prepare("SELECT COUNT(*) AS n FROM user_capability_assignments WHERE organisation_id=? AND user_id=? AND status='ACTIVE'").bind(organisation.id, offboarding.userId).first<{ n: number }>(),
+  ]);
+  const roleAssignmentsRevoked = roleCount?.n ?? 0;
+  const capabilityAssignmentsRevoked = capabilityCount?.n ?? 0;
+  if (!membership && !roleAssignmentsRevoked && !capabilityAssignmentsRevoked) {
+    return { userId: offboarding.userId, organisationId: organisation.id, membershipRevoked: false, roleAssignmentsRevoked: 0, capabilityAssignmentsRevoked: 0 };
+  }
+
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE organisation_memberships SET status='REVOKED',valid_to=? WHERE organisation_id=? AND user_id=? AND status='ACTIVE'").bind(now, organisation.id, offboarding.userId),
+    db.prepare("UPDATE user_role_assignments SET status='REVOKED',effective_to=? WHERE organisation_id=? AND user_id=? AND status='ACTIVE'").bind(now, organisation.id, offboarding.userId),
+    db.prepare("UPDATE user_capability_assignments SET status='REVOKED',effective_to=? WHERE organisation_id=? AND user_id=? AND status='ACTIVE'").bind(now, organisation.id, offboarding.userId),
+    await appendAudit(db, actor, "USER_OFFBOARDED", "ORGANISATION_MEMBERSHIP", offboarding.userId, {
+      organisationId: organisation.id, reason: offboarding.reason, roleAssignmentsRevoked, capabilityAssignmentsRevoked,
+    }),
+  ]);
+  return { userId: offboarding.userId, organisationId: organisation.id, membershipRevoked: Boolean(membership), roleAssignmentsRevoked, capabilityAssignmentsRevoked };
 }
 
 export async function searchWorkspace(actor: UserContext, query: string, requestedOrganisationId?: string | null) {
