@@ -54,6 +54,93 @@ export function normalizeExceptionResolution(input: unknown): ExceptionResolutio
   return { notes };
 }
 
+const EXCEPTION_STATUSES = ["OPEN", "ASSIGNED", "RESOLVED"] as const;
+const EXCEPTION_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+const MAX_WORK_QUEUE_LIMIT = 200;
+const DEFAULT_WORK_QUEUE_LIMIT = 50;
+
+export type WorkQueueQuery = {
+  status: (typeof EXCEPTION_STATUSES)[number] | null;
+  severity: (typeof EXCEPTION_SEVERITIES)[number] | null;
+  assignedOfficerId: string | null;
+  unassignedOnly: boolean;
+  minAgeDays: number | null;
+  maxAgeDays: number | null;
+  limit: number;
+  offset: number;
+};
+
+/**
+ * Module 3 Phase B GetWorkQueue: the filter/status/officer/age predicates a
+ * real reconciliation work queue needs — listExceptions previously took only
+ * the caller for tenant scoping, with no filtering at all. Pagination is
+ * designed in from the start (bounded limit, explicit offset) rather than
+ * retrofitted after the first performance complaint, per this module's own
+ * watch-out note.
+ */
+export function normalizeWorkQueueQuery(params: URLSearchParams): WorkQueueQuery {
+  const messages: ReconciliationValidationMessage[] = [];
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as WorkQueueQuery["status"]) : null;
+  if (status && !EXCEPTION_STATUSES.includes(status)) {
+    messages.push({ code: "STATUS_INVALID", path: "/status", message: `status must be one of: ${EXCEPTION_STATUSES.join(", ")}.` });
+  }
+
+  const severityRaw = params.get("severity");
+  const severity = severityRaw ? (severityRaw.trim().toUpperCase() as WorkQueueQuery["severity"]) : null;
+  if (severity && !EXCEPTION_SEVERITIES.includes(severity)) {
+    messages.push({ code: "SEVERITY_INVALID", path: "/severity", message: `severity must be one of: ${EXCEPTION_SEVERITIES.join(", ")}.` });
+  }
+
+  const assignedOfficerId = params.get("assigned_officer_id")?.trim() || null;
+  const unassignedOnly = params.get("unassigned_only") === "true";
+  if (assignedOfficerId && unassignedOnly) {
+    messages.push({ code: "ASSIGNMENT_FILTER_CONFLICT", path: "/assigned_officer_id", message: "assigned_officer_id and unassigned_only=true cannot both be set." });
+  }
+
+  const minAgeDays = parseAgeDays(params.get("min_age_days"), "/min_age_days", messages);
+  const maxAgeDays = parseAgeDays(params.get("max_age_days"), "/max_age_days", messages);
+  if (minAgeDays !== null && maxAgeDays !== null && minAgeDays > maxAgeDays) {
+    messages.push({ code: "AGE_RANGE_INVALID", path: "/min_age_days", message: "min_age_days must not exceed max_age_days." });
+  }
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_WORK_QUEUE_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_WORK_QUEUE_LIMIT) {
+      messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_WORK_QUEUE_LIMIT}.` });
+    } else {
+      limit = parsed;
+    }
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    } else {
+      offset = parsed;
+    }
+  }
+
+  if (messages.length) throw new ReconciliationValidationError(messages);
+  return { status, severity, assignedOfficerId, unassignedOnly, minAgeDays, maxAgeDays, limit, offset };
+}
+
+function parseAgeDays(raw: string | null, path: string, messages: ReconciliationValidationMessage[]): number | null {
+  if (raw === null) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    messages.push({ code: "AGE_INVALID", path, message: `${path.slice(1)} must be a non-negative integer.` });
+    return null;
+  }
+  return parsed;
+}
+
 export type InvoiceMatchCheckInput = {
   invoiceTaxCents: number;
   outputVatLedgerCents: number | null;

@@ -147,7 +147,7 @@ Modules 8–10 have components you can and should start early (platform/security
 - [x] `RunMatch` idempotency: backed by `reconciliation_matches`' own `UNIQUE(invoice_id, taxpayer_id)` constraint — a retry against an already-matched invoice returns the existing match rather than re-evaluating or duplicating.
 
 ### Phase B — Work queue (M)
-- [ ] **Not built.** `listExceptions(user)` takes only the actor for taxpayer scoping — no status/officer/age filter parameters exist in its signature or query, and the reconciliation page has no filter UI. Still open.
+- [x] `GetWorkQueue` (`getWorkQueue`, `GET /api/v1/exceptions`) now exists: real `status`/`severity`/`assigned_officer_id`/`unassigned_only`/`min_age_days`/`max_age_days` predicates, plus bounded `limit`/`offset` pagination with a genuine `totalCount` — designed in from the start (two covering indexes, `idx_reconciliation_exceptions_queue` and `idx_reconciliation_exceptions_officer`, added alongside the query itself) per this module's own watch-out note, not retrofitted after a performance complaint. Age is computed live (`julianday('now') - julianday(created_at)`), not stored, so it's always current. Tenant-scoped the same way the pre-existing `listExceptions` was (kept as-is for its one existing caller, `app/reconciliation/page.tsx`, rather than migrated — no behavioural need to touch it).
 
 ### Phase C — Return assembly (M)
 - [x] `VATPeriod`/`VATReturn`/`ReturnLine`/`Submission` exist and are solid (`lib/data/vat-lifecycle-repository.ts`, routed via `app/api/v1/vat-periods*`, `app/api/v1/vat-returns/*`): `generateVatReturn` computes from real ledger/certificate data with status filtering and approved adjustments, versioned and idempotent; `decideVatApproval` is real maker-checker (self-approval denied); `submitVatReturn` correctly stops at the ITAS boundary with an explicit `BLOCKED_CONFIGURATION` status and reason, never a silent success.
@@ -165,7 +165,7 @@ Modules 8–10 have components you can and should start early (platform/security
 - Match/Exception volume can get large fast — design `GetWorkQueue` pagination and indexing up front, don't retrofit it after the first performance complaint.
 - Compliance deadlines must derive from the same rule-version source Module 2 uses — a second, independently-maintained deadline calendar will drift.
 
-**Definition of done:** a return can be generated from reconciled, evidenced data, locked, and taken right up to (but not through) the ITAS submission boundary; every reconciliation exception is queued, assignable, and auditable to resolution. Phase A, C and E now meet this — exceptions are real, raised by a genuine independent matching pass, assignable and resolvable. Phase B (`GetWorkQueue` — no status/officer/age filtering exists yet, so exceptions are assignable but not yet *queued* in a filterable, prioritizable sense) and Phase D's obligation/deadline gap remain open.
+**Definition of done:** a return can be generated from reconciled, evidenced data, locked, and taken right up to (but not through) the ITAS submission boundary; every reconciliation exception is queued, assignable, and auditable to resolution. Phases A, B, C and E now meet this in full — exceptions are real, raised by a genuine independent matching pass, filterable/queryable as a real work queue, assignable and resolvable. Only Phase D (no `Obligation`/`Deadline`/`CreateObligation`/`MarkSatisfied` — a real audit/dispute/refund centre exists in its place, but not a calendar/deadline tracker) remains open.
 
 ---
 

@@ -860,6 +860,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_user_invitations_org_email_status ON user_invitations(organisation_id, email, status)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_rules_lookup ON vat_rules(tax_category, country, status, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_vat_transactions_invoice ON vat_transactions(invoice_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_queue ON reconciliation_exceptions(status, severity, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_officer ON reconciliation_exceptions(assigned_officer_id, status)`,
 
   // Statutory VAT rate catalogue (Module 2 Phase A). Unlike the pilot demo
   // seed below, this is real reference data — the actual Namibian VAT

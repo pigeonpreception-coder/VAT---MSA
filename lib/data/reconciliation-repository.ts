@@ -1,10 +1,11 @@
 import { ensureDatabase } from "@/db/runtime";
-import { requireTaxpayerScope } from "@/lib/auth";
+import { isNationalScope, requireTaxpayerScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   evaluateInvoiceMatch,
   normalizeExceptionAssignment,
   normalizeExceptionResolution,
+  normalizeWorkQueueQuery,
   ReconciliationValidationError,
 } from "@/lib/domain/reconciliation";
 import type { UserContext } from "@/lib/domain/types";
@@ -169,4 +170,111 @@ export async function resolveException(actor: UserContext, exceptionId: string, 
     await appendAudit(db, actor, "EXCEPTION_RESOLVED", "RECONCILIATION_EXCEPTION", exceptionId, { notes }),
   ]);
   return { id: exceptionId, status: "RESOLVED" };
+}
+
+export type WorkQueueItem = {
+  id: string;
+  invoiceId: string;
+  taxpayerId: string | null;
+  exceptionType: string;
+  severity: string;
+  status: string;
+  summary: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  assignedOfficerId: string | null;
+  assignedOfficerName: string | null;
+  resolvedBy: string | null;
+  resolutionNotes: string | null;
+  invoiceNumber: string;
+  supplierName: string;
+  totalCents: number;
+  currency: string;
+  ageDays: number;
+};
+
+export type WorkQueueResult = { items: WorkQueueItem[]; totalCount: number; limit: number; offset: number };
+
+type WorkQueueRow = {
+  id: string; invoice_id: string; taxpayer_id: string | null; exception_type: string; severity: string; status: string;
+  summary: string; created_at: string; resolved_at: string | null; assigned_officer_id: string | null;
+  assigned_officer_name: string | null; resolved_by: string | null; resolution_notes: string | null;
+  invoice_number: string; supplier_name: string; total_cents: number; currency: string; age_days: number;
+};
+
+const AGE_DAYS_EXPRESSION = "CAST((julianday('now') - julianday(e.created_at)) AS INTEGER)";
+
+/**
+ * Module 3 Phase B GetWorkQueue: filter/status/officer/age predicates over
+ * reconciliation_exceptions — listExceptions (above) took only the caller
+ * for tenant scoping, with no filtering. Pagination (bounded limit, explicit
+ * offset, a real totalCount) and covering indexes
+ * (idx_reconciliation_exceptions_queue, idx_reconciliation_exceptions_officer
+ * in db/runtime.ts) are designed in from the start, per this module's own
+ * watch-out note about not retrofitting them after the first performance
+ * complaint.
+ */
+export async function getWorkQueue(actor: UserContext, params: URLSearchParams): Promise<WorkQueueResult> {
+  const query = normalizeWorkQueueQuery(params);
+  const db = await ensureDatabase();
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  if (!isNationalScope(actor)) {
+    conditions.push("(i.supplier_taxpayer_id = ? OR i.customer_taxpayer_id = ?)");
+    values.push(actor.taxpayerId ?? "__none__", actor.taxpayerId ?? "__none__");
+  }
+  if (query.status) {
+    conditions.push("e.status = ?");
+    values.push(query.status);
+  }
+  if (query.severity) {
+    conditions.push("e.severity = ?");
+    values.push(query.severity);
+  }
+  if (query.assignedOfficerId) {
+    conditions.push("e.assigned_officer_id = ?");
+    values.push(query.assignedOfficerId);
+  }
+  if (query.unassignedOnly) {
+    conditions.push("e.assigned_officer_id IS NULL");
+  }
+  if (query.minAgeDays !== null) {
+    conditions.push(`${AGE_DAYS_EXPRESSION} >= ?`);
+    values.push(query.minAgeDays);
+  }
+  if (query.maxAgeDays !== null) {
+    conditions.push(`${AGE_DAYS_EXPRESSION} <= ?`);
+    values.push(query.maxAgeDays);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const [items, count] = await Promise.all([
+    db.prepare(`SELECT e.id, e.invoice_id, e.taxpayer_id, e.exception_type, e.severity, e.status, e.summary,
+        e.created_at, e.resolved_at, e.assigned_officer_id, officer.display_name AS assigned_officer_name,
+        e.resolved_by, e.resolution_notes, i.invoice_number, i.supplier_name, i.total_cents, i.currency,
+        ${AGE_DAYS_EXPRESSION} AS age_days
+      FROM reconciliation_exceptions e
+      JOIN invoices i ON i.id = e.invoice_id
+      LEFT JOIN app_users officer ON officer.id = e.assigned_officer_id
+      ${whereClause}
+      ORDER BY CASE e.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, e.created_at DESC
+      LIMIT ? OFFSET ?`)
+      .bind(...values, query.limit, query.offset).all<WorkQueueRow>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM reconciliation_exceptions e JOIN invoices i ON i.id = e.invoice_id ${whereClause}`)
+      .bind(...values).first<{ n: number }>(),
+  ]);
+
+  return {
+    items: items.results.map((row) => ({
+      id: row.id, invoiceId: row.invoice_id, taxpayerId: row.taxpayer_id, exceptionType: row.exception_type,
+      severity: row.severity, status: row.status, summary: row.summary, createdAt: row.created_at, resolvedAt: row.resolved_at,
+      assignedOfficerId: row.assigned_officer_id, assignedOfficerName: row.assigned_officer_name, resolvedBy: row.resolved_by,
+      resolutionNotes: row.resolution_notes, invoiceNumber: row.invoice_number, supplierName: row.supplier_name,
+      totalCents: row.total_cents, currency: row.currency, ageDays: row.age_days,
+    })),
+    totalCount: count?.n ?? 0,
+    limit: query.limit,
+    offset: query.offset,
+  };
 }
