@@ -5,6 +5,7 @@ import {
   normalizeAndValidateRegistration,
   normalizeBranch,
   normalizeBranchUpdate,
+  normalizeCounterpartyVatNumber,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
@@ -160,5 +161,19 @@ describe("branch validation (ListBranches / branch CRUD)", () => {
 
   it("rejects an unsupported status value", () => {
     expect(() => normalizeBranchUpdate({ status: "CLOSED" })).toThrow(IdentityValidationError);
+  });
+});
+
+describe("counterparty VAT number validation (ClassifyTransaction)", () => {
+  it("normalizes a well-formed VAT number to uppercase", () => {
+    expect(normalizeCounterpartyVatNumber("vat1000123")).toBe("VAT1000123");
+  });
+
+  it("rejects a missing VAT number", () => {
+    expect(() => normalizeCounterpartyVatNumber(null)).toThrow(IdentityValidationError);
+  });
+
+  it("rejects a malformed VAT number", () => {
+    expect(() => normalizeCounterpartyVatNumber("<script>")).toThrow(IdentityValidationError);
   });
 });

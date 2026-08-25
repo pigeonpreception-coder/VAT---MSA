@@ -5,6 +5,7 @@ import {
   normalizeAndValidateRegistration,
   normalizeBranch,
   normalizeBranchUpdate,
+  normalizeCounterpartyVatNumber,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
@@ -485,4 +486,49 @@ export async function updateBranch(
     await appendAudit(db, actor, "BRANCH_UPDATED", "BRANCH", branchId, { organisationId, changes: update }),
   ]);
   return { id: branchId, organisationId, code: branch.code, name, address, status, isHeadOffice: Boolean(branch.is_head_office) };
+}
+
+export type TransactionClassification = {
+  vatNumber: string;
+  taxpayerActive: boolean;
+  organisationActive: boolean;
+  capabilities: string[];
+  canActAsSeller: boolean;
+  canActAsBuyer: boolean;
+};
+
+/**
+ * Module 1 Buyer/Seller ClassifyTransaction: a pre-flight check for whether
+ * a VAT number would resolve as a valid transaction counterparty, using the
+ * exact same taxpayer/organisation/capability resolution rules invoice
+ * certification already enforces (lib/data/repository.ts's supplier/customer
+ * resolution) — single-sourced here rather than duplicated. Reveals nothing
+ * a caller couldn't already learn indirectly from a rejected invoice
+ * submission, so no tenant scoping is required: this is a cross-tenant,
+ * public-posture lookup by design, not a privilege boundary.
+ */
+export async function classifyTransaction(vatNumberInput: unknown): Promise<TransactionClassification> {
+  const vatNumber = normalizeCounterpartyVatNumber(vatNumberInput);
+  const db = await ensureDatabase();
+  const taxpayer = await db.prepare("SELECT id FROM taxpayers WHERE vat_number=? AND vat_status='ACTIVE'").bind(vatNumber).first<{ id: string }>();
+  if (!taxpayer) {
+    return { vatNumber, taxpayerActive: false, organisationActive: false, capabilities: [], canActAsSeller: false, canActAsBuyer: false };
+  }
+  const organisation = await db.prepare("SELECT id FROM organisations WHERE taxpayer_id=? AND status='ACTIVE'").bind(taxpayer.id).first<{ id: string }>();
+  if (!organisation) {
+    return { vatNumber, taxpayerActive: true, organisationActive: false, capabilities: [], canActAsSeller: false, canActAsBuyer: false };
+  }
+  const active = await db.prepare(`SELECT capability FROM organisation_capabilities
+    WHERE organisation_id=? AND status='ACTIVE'
+      AND datetime(effective_from)<=CURRENT_TIMESTAMP AND (effective_to IS NULL OR datetime(effective_to)>CURRENT_TIMESTAMP)`)
+    .bind(organisation.id).all<{ capability: string }>();
+  const capabilities = active.results.map((row) => row.capability);
+  return {
+    vatNumber,
+    taxpayerActive: true,
+    organisationActive: true,
+    capabilities,
+    canActAsSeller: capabilities.includes("SELLER"),
+    canActAsBuyer: capabilities.includes("BUYER"),
+  };
 }

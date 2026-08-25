@@ -249,6 +249,19 @@ export function normalizeBranchUpdate(input: unknown): BranchUpdate {
   return result;
 }
 
+/**
+ * Module 1 Buyer/Seller ClassifyTransaction: validates the counterparty VAT
+ * number a caller wants to classify before attempting an invoice. Reuses the
+ * same identifier pattern as registration so a malformed VAT number is
+ * rejected the same way everywhere.
+ */
+export function normalizeCounterpartyVatNumber(rawVatNumber: unknown): string {
+  const messages: IdentityValidationMessage[] = [];
+  const vatNumber = identifier(rawVatNumber, "/vat_number", "VAT number", messages);
+  if (messages.length) throw new IdentityValidationError(messages);
+  return vatNumber;
+}
+
 export function normalizeMembershipAssignment(input: unknown): MembershipAssignment {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A membership assignment object is required." }]);
