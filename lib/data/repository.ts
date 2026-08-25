@@ -648,7 +648,7 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   let exceptionId: string | null = null;
   if (risk.reasons.length) {
     exceptionId = crypto.randomUUID();
-    statements.push(db.prepare("INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL)").bind(
+    statements.push(db.prepare("INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)").bind(
       exceptionId, invoiceId, supplier.id, customer ? "RISK_REVIEW" : "UNREGISTERED_BUYER",
       risk.level === "LOW" ? "MEDIUM" : risk.level, "OPEN", risk.reasons.join(" "), now,
     ));

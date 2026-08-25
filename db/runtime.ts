@@ -579,7 +579,9 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
     taxpayer_id TEXT REFERENCES taxpayers(id), exception_type TEXT NOT NULL,
     severity TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL,
-    created_at TEXT NOT NULL, resolved_at TEXT
+    created_at TEXT NOT NULL, resolved_at TEXT,
+    assigned_officer_id TEXT REFERENCES app_users(id), resolved_by TEXT REFERENCES app_users(id),
+    resolution_notes TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, actor_role TEXT NOT NULL, action TEXT NOT NULL,
@@ -987,8 +989,8 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0004a','txn-0004','inv-0004','tp-0004','OUTPUT_VAT','CREDIT',18000000,'2026-08','2026-08-06T09:32:11Z')`,
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0004b','txn-0004','inv-0004','tp-0001','INPUT_VAT','DEBIT',18000000,'2026-08','2026-08-06T09:32:11Z')`,
 
-  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0001','inv-0004','tp-0004','HIGH_VALUE_TRANSACTION','CRITICAL','OPEN','Transaction value exceeds the pilot high-value threshold and requires officer review.','2026-08-06T09:32:11Z',NULL)`,
-  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0002','inv-0003','tp-0003','UNREGISTERED_BUYER','MEDIUM','OPEN','Buyer does not have a VAT registration in the pilot registry; input VAT was not posted.','2026-08-07T12:04:04Z',NULL)`,
+  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0001','inv-0004','tp-0004','HIGH_VALUE_TRANSACTION','CRITICAL','OPEN','Transaction value exceeds the pilot high-value threshold and requires officer review.','2026-08-06T09:32:11Z',NULL,NULL,NULL,NULL)`,
+  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0002','inv-0003','tp-0003','UNREGISTERED_BUYER','MEDIUM','OPEN','Buyer does not have a VAT registration in the pilot registry; input VAT was not posted.','2026-08-07T12:04:04Z',NULL,NULL,NULL,NULL)`,
 
 
   `INSERT OR IGNORE INTO audit_events VALUES ('aud-0001','system','SYSTEM','INVOICE_CERTIFIED','INVOICE','inv-0001','SUCCESS','{"invoice_number":"INV-2026-0182","transaction_id":"txn-0001"}',NULL,'a000000000000000000000000000000000000000000000000000000000000001','2026-08-08T08:12:45Z')`,
