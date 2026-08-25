@@ -3,6 +3,7 @@ import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   assertCaseTransition,
+  normalizeRiskIndicatorQuery,
   validateCaseOpening,
   validateCaseTransition,
   validateDispute,
@@ -12,6 +13,7 @@ import {
   validateRefundRequest,
   validateRefundReview,
   validateRiskActionApproval,
+  validateRiskEvaluationRequest,
   validateRiskReviewAssignment,
   type AuditCaseStatus,
   type CaseOpeningSubmission,
@@ -477,4 +479,181 @@ export async function approveRiskAction(indicatorId: string, payload: unknown, a
     await auditRecord(db, actor, "RISK_ACTION_ESCALATED", "RISK_INDICATOR", indicatorId, { rationale: input.rationale, caseId, caseNumber, correlationId }, now),
   ]);
   return db.prepare("SELECT * FROM risk_indicators WHERE id=?").bind(indicatorId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 4 Phase A: a small, fixed, code-versioned rule catalogue — see
+ * lib/domain/compliance.ts's comment on why this is not a governed DB
+ * table at pilot scale. Every rule reuses evidence this codebase has
+ * already computed elsewhere rather than re-deriving it independently:
+ * HIGH_VALUE_INVOICE_PATTERN reuses Module 2's own per-invoice
+ * scoreInvoice risk_level, RECONCILIATION_EXCEPTION_BACKLOG reuses Module
+ * 3's reconciliation_exceptions queue, OBLIGATION_OVERDUE reuses Module 3
+ * Phase D's tax_obligations. EvaluateRisk raises a NamRA-restricted,
+ * taxpayer-level signal from patterns across that evidence — a coarser
+ * granularity and a different purpose (case authorisation) than either
+ * source, not a duplicate of either.
+ */
+const RISK_RULE_VERSION = "RISK-PILOT-2026.2";
+
+type RiskRuleResult = {
+  indicatorCode: string;
+  fired: boolean;
+  scoreBps: number;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  rationale: string;
+};
+
+async function evaluateHighValueInvoicePattern(db: D1Database, taxpayerId: string): Promise<RiskRuleResult> {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM invoices WHERE supplier_taxpayer_id=? AND status!='CANCELLED' AND risk_level IN ('HIGH','CRITICAL')`).bind(taxpayerId).first<{ n: number }>();
+  const count = row?.n ?? 0;
+  const fired = count >= 2;
+  return {
+    indicatorCode: "HIGH_VALUE_INVOICE_PATTERN",
+    fired,
+    scoreBps: fired ? Math.min(9_000, 4_000 + count * 1_000) : 0,
+    severity: count >= 5 ? "CRITICAL" : "HIGH",
+    rationale: `${count} active invoice(s) independently scored HIGH or CRITICAL risk at submission time (Module 2's own per-invoice check).`,
+  };
+}
+
+async function evaluateReconciliationExceptionBacklog(db: D1Database, taxpayerId: string): Promise<RiskRuleResult> {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM reconciliation_exceptions WHERE taxpayer_id=? AND status IN ('OPEN','ASSIGNED')`).bind(taxpayerId).first<{ n: number }>();
+  const count = row?.n ?? 0;
+  const fired = count >= 3;
+  return {
+    indicatorCode: "RECONCILIATION_EXCEPTION_BACKLOG",
+    fired,
+    scoreBps: fired ? Math.min(9_000, 3_500 + count * 800) : 0,
+    severity: count >= 8 ? "CRITICAL" : "HIGH",
+    rationale: `${count} reconciliation exception(s) remain unresolved (OPEN or ASSIGNED) for this taxpayer.`,
+  };
+}
+
+async function evaluateObligationOverdue(db: D1Database, taxpayerId: string): Promise<RiskRuleResult> {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM tax_obligations WHERE taxpayer_id=? AND status='PENDING' AND due_date < date('now')`).bind(taxpayerId).first<{ n: number }>();
+  const count = row?.n ?? 0;
+  const fired = count >= 1;
+  return {
+    indicatorCode: "OBLIGATION_OVERDUE",
+    fired,
+    scoreBps: fired ? Math.min(9_500, 5_000 + count * 1_500) : 0,
+    severity: count >= 3 ? "CRITICAL" : "HIGH",
+    rationale: `${count} statutory obligation(s) remain PENDING past their due date.`,
+  };
+}
+
+/**
+ * Module 4 Phase A EvaluateRisk. Unlike every other command in this file,
+ * a replay match does NOT short-circuit to stale stored data: this
+ * command's contract is "current risk given current evidence," and
+ * factors are computed live rather than persisted, so a retried key still
+ * re-runs the same deterministic rules against whatever evidence exists
+ * now. The replay check's only job here is to (a) surface a genuine
+ * conflict if the key was reused for a different taxpayer, and (b) skip
+ * writing a second, redundant audit/outbox event for what is really the
+ * same logical request. The indicator writes themselves are already
+ * naturally idempotent at the row level — same rule+subject+version
+ * always resolves to the same risk_indicators row, refreshed not
+ * duplicated — regardless of the idempotency key at all.
+ */
+export async function evaluateRisk(taxpayerId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national risk role may evaluate risk for a taxpayer.");
+  validateRiskEvaluationRequest(payload);
+  const db = await ensureDatabase();
+  const scope = await db.prepare(`SELECT t.id AS taxpayer_id, o.id AS organisation_id
+    FROM taxpayers t JOIN organisations o ON o.taxpayer_id=t.id AND o.status='ACTIVE' WHERE t.id=?`).bind(taxpayerId).first<{ taxpayer_id: string; organisation_id: string }>();
+  if (!scope) throw new ComplianceResourceError("The taxpayer does not resolve to an active organisation.", 404);
+
+  const hash = await sha256Hex(stableStringify({ taxpayer_id: taxpayerId }));
+  const prior = await replay(db, actor.userId, "EVALUATE_RISK", key, hash);
+
+  const results = await Promise.all([
+    evaluateHighValueInvoicePattern(db, scope.taxpayer_id),
+    evaluateReconciliationExceptionBacklog(db, scope.taxpayer_id),
+    evaluateObligationOverdue(db, scope.taxpayer_id),
+  ]);
+
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  const touchedIndicatorIds: string[] = [];
+  for (const result of results) {
+    if (!result.fired) continue;
+    const existing = await db.prepare(`SELECT id,status FROM risk_indicators WHERE subject_type='TAXPAYER' AND subject_id=? AND indicator_code=? AND rule_version=?`)
+      .bind(scope.taxpayer_id, result.indicatorCode, RISK_RULE_VERSION).first<{ id: string; status: string }>();
+    if (existing && existing.status !== "OPEN") {
+      touchedIndicatorIds.push(existing.id);
+      continue;
+    }
+    if (existing) {
+      statements.push(db.prepare("UPDATE risk_indicators SET score_bps=?,severity=?,rationale=?,detected_at=? WHERE id=?").bind(result.scoreBps, result.severity, result.rationale, now, existing.id));
+      touchedIndicatorIds.push(existing.id);
+    } else {
+      const id = crypto.randomUUID();
+      statements.push(db.prepare(`INSERT INTO risk_indicators
+        (id,organisation_id,taxpayer_id,subject_type,subject_id,indicator_code,score_bps,severity,rationale,rule_version,decision_effect,status,detected_at,reviewed_by,reviewed_at,assigned_officer_id,escalated_case_id)
+        VALUES (?,?,?,'TAXPAYER',?,?,?,?,?,?,'ADVISORY_ONLY','OPEN',?,NULL,NULL,NULL,NULL)`)
+        .bind(id, scope.organisation_id, scope.taxpayer_id, scope.taxpayer_id, result.indicatorCode, result.scoreBps, result.severity, result.rationale, RISK_RULE_VERSION, now));
+      statements.push(outbox(db, "RISK_INDICATOR", id, "RiskIndicatorRaised", scope.taxpayer_id, { indicator_id: id, indicator_code: result.indicatorCode, correlation_id: correlationId }, now));
+      touchedIndicatorIds.push(id);
+    }
+  }
+  if (!prior) {
+    statements.push(commandRecord(db, actor.userId, "EVALUATE_RISK", key, hash, "TAXPAYER", taxpayerId, now));
+    statements.push(await auditRecord(db, actor, "RISK_EVALUATED", "TAXPAYER", taxpayerId, { factors: results.map((r) => ({ code: r.indicatorCode, fired: r.fired })), correlationId }, now));
+  }
+  if (statements.length) await db.batch(statements);
+
+  const indicators = touchedIndicatorIds.length
+    ? (await db.prepare(`SELECT * FROM risk_indicators WHERE id IN (${touchedIndicatorIds.map(() => "?").join(",")})`).bind(...touchedIndicatorIds).all<Record<string, unknown>>()).results
+    : [];
+
+  return {
+    taxpayer_id: taxpayerId,
+    evaluated_at: now,
+    rule_version: RISK_RULE_VERSION,
+    factors: results.map((r) => ({ indicator_code: r.indicatorCode, fired: r.fired, score_bps: r.scoreBps, severity: r.severity, rationale: r.rationale })),
+    indicators,
+  };
+}
+
+/**
+ * Module 4 Phase A GetRestrictedRisk. Deliberately NOT taxpayer-visible at
+ * all — unlike CaseTimeline (Phase C), which a taxpayer may read for their
+ * own case, risk indicators carry the RESTRICTED_RISK classification in
+ * the data dictionary and the NamRA portal's own copy already states
+ * "internal indicators appear only for authorised NamRA roles." Gated on
+ * risk:read (broader than risk:review — e.g. NAMRA_REFUND_OFFICER can
+ * read risk context without being able to action it).
+ */
+export async function getRestrictedRisk(actor: UserContext, params: URLSearchParams) {
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Risk indicators are restricted to authorised national risk roles.");
+  const query = normalizeRiskIndicatorQuery(params);
+  const db = await ensureDatabase();
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  if (query.taxpayerId) {
+    conditions.push("r.taxpayer_id = ?");
+    values.push(query.taxpayerId);
+  }
+  if (query.status) {
+    conditions.push("r.status = ?");
+    values.push(query.status);
+  }
+  if (query.severity) {
+    conditions.push("r.severity = ?");
+    values.push(query.severity);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const [items, count] = await Promise.all([
+    db.prepare(`SELECT r.*, t.legal_name, t.vat_number FROM risk_indicators r JOIN taxpayers t ON t.id=r.taxpayer_id ${whereClause}
+      ORDER BY CASE r.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END, r.detected_at DESC
+      LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, unknown>>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM risk_indicators r ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+
+  return { items: items.results, totalCount: count?.n ?? 0, limit: query.limit, offset: query.offset };
 }

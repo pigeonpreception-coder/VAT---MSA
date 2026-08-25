@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertCaseTransition,
   ComplianceValidationError,
+  normalizeRiskIndicatorQuery,
   validateCaseOpening,
   validateCaseTransition,
   validateDispute,
@@ -11,6 +12,7 @@ import {
   validateRefundRequest,
   validateRefundReview,
   validateRiskActionApproval,
+  validateRiskEvaluationRequest,
   validateRiskReviewAssignment,
 } from "@/lib/domain/compliance";
 
@@ -187,5 +189,44 @@ describe("risk action approval validation", () => {
 
   it("rejects a rationale outside the 20 to 2000 character bound", () => {
     expect(() => validateRiskActionApproval({ schema_version: "1.0.0", decision: "DISMISS", rationale: "too short" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("risk evaluation request validation", () => {
+  it("accepts a well-formed request", () => {
+    expect(validateRiskEvaluationRequest({ schema_version: "1.0.0" })).toEqual({ schema_version: "1.0.0" });
+  });
+
+  it("rejects an unsupported schema_version", () => {
+    expect(() => validateRiskEvaluationRequest({ schema_version: "2.0.0" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("restricted risk query normalization", () => {
+  it("applies the default limit and no filters when the query is empty", () => {
+    const result = normalizeRiskIndicatorQuery(new URLSearchParams());
+    expect(result).toEqual({ taxpayerId: null, status: null, severity: null, limit: 50, offset: 0 });
+  });
+
+  it("normalizes taxpayer_id/status/severity filters, uppercasing status and severity", () => {
+    const result = normalizeRiskIndicatorQuery(new URLSearchParams({ taxpayer_id: "tp-0001", status: "open", severity: "high" }));
+    expect(result).toEqual({ taxpayerId: "tp-0001", status: "OPEN", severity: "HIGH", limit: 50, offset: 0 });
+  });
+
+  it("rejects an unsupported status or severity", () => {
+    expect(() => normalizeRiskIndicatorQuery(new URLSearchParams({ status: "CLOSED" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeRiskIndicatorQuery(new URLSearchParams({ severity: "EXTREME" }))).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects a limit outside 1 to 200 and a negative offset", () => {
+    expect(() => normalizeRiskIndicatorQuery(new URLSearchParams({ limit: "0" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeRiskIndicatorQuery(new URLSearchParams({ limit: "201" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeRiskIndicatorQuery(new URLSearchParams({ offset: "-1" }))).toThrowError(ComplianceValidationError);
+  });
+
+  it("accepts an explicit limit and offset within bounds", () => {
+    const result = normalizeRiskIndicatorQuery(new URLSearchParams({ limit: "10", offset: "20" }));
+    expect(result.limit).toBe(10);
+    expect(result.offset).toBe(20);
   });
 });

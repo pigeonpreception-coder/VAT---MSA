@@ -342,3 +342,83 @@ export function validateRiskActionApproval(payload: unknown): RiskActionApproval
   if (messages.length) throw new ComplianceValidationError(messages);
   return { schema_version: "1.0.0", decision: "DISMISS", rationale };
 }
+
+/**
+ * Module 4 Phase A: EvaluateRisk and GetRestrictedRisk. RiskIndicator
+ * itself and its OPEN/UNDER_REVIEW/ESCALATED_TO_CASE/DISMISSED lifecycle
+ * already exist (Phase B built the human gate that consumes it); this
+ * phase builds the engine that raises new indicators and the restricted
+ * query that reads them back.
+ *
+ * Two deliberate scope decisions, both because the domain catalog names
+ * concepts the data dictionary never gives distinct fields to:
+ *  - "ModelVersion" is NOT a separate governed database table here. At
+ *    pilot scale the rule catalogue is a small, fixed, code-versioned set
+ *    (see rule_version on every raised indicator) — the same way a git
+ *    commit versions any other deployed logic. Module 2's vat_rules
+ *    earned a real maker-checker propose/approve workflow because VAT
+ *    rate changes are a live regulatory event officers must action; risk
+ *    thresholds at this stage are not. Revisit if/when NamRA needs
+ *    officer-editable risk-rule proposals the same way.
+ *  - "RiskCase" is NOT a second aggregate alongside RiskIndicator. A risk
+ *    indicator's own review lifecycle (Phase B) already IS the reviewable
+ *    "case" for a risk signal, and escalation produces a real AuditCase —
+ *    a parallel RiskCase table would duplicate that with no distinct
+ *    fields to justify it.
+ */
+export type RiskEvaluationRequest = { schema_version: "1.0.0" };
+
+export function validateRiskEvaluationRequest(payload: unknown): RiskEvaluationRequest {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0" };
+}
+
+const RISK_INDICATOR_STATUSES = ["OPEN", "UNDER_REVIEW", "ESCALATED_TO_CASE", "DISMISSED"] as const;
+const RISK_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+const MAX_RISK_QUERY_LIMIT = 200;
+const DEFAULT_RISK_QUERY_LIMIT = 50;
+
+export type RiskIndicatorQuery = {
+  taxpayerId: string | null;
+  status: (typeof RISK_INDICATOR_STATUSES)[number] | null;
+  severity: (typeof RISK_SEVERITIES)[number] | null;
+  limit: number;
+  offset: number;
+};
+
+/** GetRestrictedRisk's filter/pagination predicates, mirroring Module 3 Phase B's normalizeWorkQueueQuery. */
+export function normalizeRiskIndicatorQuery(params: URLSearchParams): RiskIndicatorQuery {
+  const messages: ComplianceValidationMessage[] = [];
+
+  const taxpayerId = params.get("taxpayer_id")?.trim() || null;
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as RiskIndicatorQuery["status"]) : null;
+  if (status && !RISK_INDICATOR_STATUSES.includes(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: `status must be one of: ${RISK_INDICATOR_STATUSES.join(", ")}.` });
+
+  const severityRaw = params.get("severity");
+  const severity = severityRaw ? (severityRaw.trim().toUpperCase() as RiskIndicatorQuery["severity"]) : null;
+  if (severity && !RISK_SEVERITIES.includes(severity)) messages.push({ code: "SEVERITY_INVALID", path: "/severity", message: `severity must be one of: ${RISK_SEVERITIES.join(", ")}.` });
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_RISK_QUERY_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_RISK_QUERY_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_RISK_QUERY_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { taxpayerId, status, severity, limit, offset };
+}
