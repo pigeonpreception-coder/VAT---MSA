@@ -6,6 +6,7 @@ import {
   evaluateEntitlement,
   hasRecentStepUp,
   normalizeAdministratorAppointment,
+  normalizeCapabilityGrant,
   normalizeEmployeeActivation,
   normalizeLicenseStateChange,
   normalizeLicenseUpgrade,
@@ -158,5 +159,20 @@ describe("employee activation (INVITED -> ACTIVE)", () => {
 
   it("rejects a missing user id", () => {
     expect(() => normalizeEmployeeActivation({})).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("capability grant (Organisation Authorization GrantCapability)", () => {
+  it("normalizes a well-formed grant, uppercasing the capability", () => {
+    expect(normalizeCapabilityGrant({ user_id: "usr-3", capability: "buyer" })).toEqual({ userId: "usr-3", capability: "BUYER" });
+    expect(normalizeCapabilityGrant({ user_id: "usr-3", capability: "seller" }).capability).toBe("SELLER");
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeCapabilityGrant({ capability: "BUYER" })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a capability outside BUYER/SELLER", () => {
+    expect(() => normalizeCapabilityGrant({ user_id: "usr-3", capability: "ADMIN" })).toThrowError(ControlPlaneValidationError);
   });
 });

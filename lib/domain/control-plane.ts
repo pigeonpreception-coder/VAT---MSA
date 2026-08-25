@@ -236,6 +236,30 @@ export function hasRecentStepUp(input: { assurance: string | null; reauthenticat
   return age >= 0 && age <= (input.maxAgeMs ?? 5 * 60_000);
 }
 
+export type CapabilityGrantInput = { userId: string; capability: "BUYER" | "SELLER" };
+
+/**
+ * Organisation Authorization GrantCapability. Distinct from Organisation's
+ * EnableCapability (which turns BUYER/SELLER on for the organisation as a
+ * whole): this grants an individual, already-active member of that
+ * organisation visibility into the corresponding capability-scoped
+ * navigation and portal — the repository layer additionally requires the
+ * organisation itself to already hold the capability being granted.
+ */
+export function normalizeCapabilityGrant(input: unknown): CapabilityGrantInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A capability grant object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const userId = String(source.user_id ?? "").trim();
+  if (!userId) throw new ControlPlaneValidationError("USER_ID_REQUIRED", "user_id is required.");
+  const capability = String(source.capability ?? "").trim().toUpperCase();
+  if (capability !== "BUYER" && capability !== "SELLER") {
+    throw new ControlPlaneValidationError("CAPABILITY_INVALID", "capability must be BUYER or SELLER.");
+  }
+  return { userId, capability: capability as "BUYER" | "SELLER" };
+}
+
 export type AdministratorAppointmentInput = { userId: string; administratorRoleCode: string; isPrimary: boolean; approvalReference: string };
 
 /**

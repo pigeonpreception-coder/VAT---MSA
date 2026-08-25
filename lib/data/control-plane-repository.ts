@@ -6,6 +6,7 @@ import {
   assertLicenseStateTransition,
   assertWorkflowDecision,
   normalizeAdministratorAppointment,
+  normalizeCapabilityGrant,
   normalizeEmployee,
   normalizeEmployeeActivation,
   normalizeLicenseStateChange,
@@ -446,6 +447,64 @@ export async function createOrganisationRole(actor: UserContext, input: unknown,
   ];
   await db.batch(statements);
   return { id, ...role, version, status: "ACTIVE" };
+}
+
+/** Organisation Authorization standalone read of user_capability_assignments — no prior read of this table existed outside the internal buildUserContext join. */
+export async function listCapabilityGrants(actor: UserContext, requestedOrganisationId?: string | null) {
+  const { organisation } = await assertEntitledOperation(actor, "ADMINISTRATION", "READ", 0, requestedOrganisationId);
+  const db = await ensureDatabase();
+  const result = await db.prepare(`SELECT uca.id,uca.user_id,u.display_name,u.email,uca.capability,uca.status,uca.effective_from,uca.effective_to
+    FROM user_capability_assignments uca JOIN app_users u ON u.id=uca.user_id
+    WHERE uca.organisation_id=? ORDER BY u.display_name,uca.capability`).bind(organisation.id)
+    .all<Record<string, string | null>>();
+  return { organisation, capabilities: result.results };
+}
+
+/**
+ * Organisation Authorization GrantCapability. Requires the organisation
+ * itself to already hold the capability (organisation_capabilities) and the
+ * target to be an active member — this only ever narrows visibility within
+ * what the organisation is already entitled to, never grants something the
+ * org itself doesn't hold. Upserts rather than blind-inserts: the unique
+ * index on (organisation_id, user_id, capability) means a prior revoked
+ * grant must be reactivated in place, not duplicated.
+ */
+export async function grantCapability(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
+  const grant = normalizeCapabilityGrant(input);
+  const { organisation } = await assertEntitledOperation(actor, "ADMINISTRATION", "ADMIN_WRITE", 0, requestedOrganisationId);
+  const db = await ensureDatabase();
+
+  const targetUser = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(grant.userId).first<{ id: string; status: string }>();
+  if (!targetUser) throw new ControlPlaneValidationError("USER_NOT_FOUND", "The target user does not exist.");
+  if (targetUser.status !== "ACTIVE") throw new ControlPlaneValidationError("USER_NOT_ACTIVE", "The target user is not active.");
+
+  const orgCapability = await db.prepare(`SELECT id FROM organisation_capabilities
+    WHERE organisation_id=? AND capability=? AND status='ACTIVE'
+      AND datetime(effective_from)<=CURRENT_TIMESTAMP AND (effective_to IS NULL OR datetime(effective_to)>CURRENT_TIMESTAMP)`)
+    .bind(organisation.id, grant.capability).first<{ id: string }>();
+  if (!orgCapability) throw new ControlPlaneValidationError("ORGANISATION_CAPABILITY_INACTIVE", `The organisation does not currently hold ${grant.capability} capability.`);
+
+  const membership = await db.prepare("SELECT id FROM organisation_memberships WHERE organisation_id=? AND user_id=? AND status='ACTIVE'")
+    .bind(organisation.id, grant.userId).first<{ id: string }>();
+  if (!membership) throw new ControlPlaneValidationError("USER_NOT_MEMBER", "The target user is not an active member of this organisation.");
+
+  const existing = await db.prepare("SELECT id,status FROM user_capability_assignments WHERE organisation_id=? AND user_id=? AND capability=?")
+    .bind(organisation.id, grant.userId, grant.capability).first<{ id: string; status: string }>();
+  if (existing?.status === "ACTIVE") {
+    return { id: existing.id, organisationId: organisation.id, userId: grant.userId, capability: grant.capability, status: "ACTIVE" };
+  }
+
+  const now = new Date().toISOString();
+  const id = existing?.id ?? crypto.randomUUID();
+  const statements: D1PreparedStatement[] = [
+    existing
+      ? db.prepare("UPDATE user_capability_assignments SET status='ACTIVE',effective_from=?,effective_to=NULL,assigned_by=? WHERE id=?").bind(now, actor.userId, id)
+      : db.prepare(`INSERT INTO user_capability_assignments (id,organisation_id,user_id,capability,status,effective_from,effective_to,assigned_by)
+          VALUES (?,?,?,?,?,?,NULL,?)`).bind(id, organisation.id, grant.userId, grant.capability, "ACTIVE", now, actor.userId),
+    await appendAudit(db, actor, "CAPABILITY_GRANTED", "USER_CAPABILITY_ASSIGNMENT", id, { organisationId: organisation.id, userId: grant.userId, capability: grant.capability }),
+  ];
+  await db.batch(statements);
+  return { id, organisationId: organisation.id, userId: grant.userId, capability: grant.capability, status: "ACTIVE" };
 }
 
 export async function terminateEmployee(actor: UserContext, employeeId: string, reason: string, requestedOrganisationId?: string | null) {
