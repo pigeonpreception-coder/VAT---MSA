@@ -422,3 +422,100 @@ export function normalizeRiskIndicatorQuery(params: URLSearchParams): RiskIndica
   if (messages.length) throw new ComplianceValidationError(messages);
   return { taxpayerId, status, severity, limit, offset };
 }
+
+/**
+ * Module 4 Phase D: the evidence sub-model. audit_evidence already existed
+ * in the schema (a Phase A-adjacent anchor, like risk_indicators before
+ * Phase A) but no application code had ever written to it. This phase
+ * builds AddEvidence, evidence custody events (verify / legal hold), and
+ * append-only case notes — the three concrete things the playbook names.
+ *
+ * Deliberately NOT reinvented here: file storage, hashing, quarantine
+ * scanning and classification. Module 22 (Document)'s uploadDocument
+ * already does all of that — audit_evidence.document_id already existed
+ * as a foreign key into document_metadata, and 'AUDIT_CASE' was already an
+ * accepted owner_domain there. This phase's AddEvidence either cites an
+ * already-uploaded, clean-scanned document, or cites another canonical
+ * system record this codebase already computes a real hash for (an
+ * invoice's payload_hash, a VAT return version's ledger_snapshot_hash) —
+ * never a second, parallel file-hashing implementation.
+ *
+ * "Immutable versioning" means exactly what it says: an evidence row is
+ * never UPDATEd once inserted (only its status/legal_hold flip via
+ * dedicated, audited actions). A correction adds a NEW row that supersedes
+ * the old one (previous_version_id), and only one PRESERVED row may exist
+ * per (case, source resource) at a time — enforced by a partial unique
+ * index in db/runtime.ts, not just application-level discipline.
+ */
+export type EvidenceSourceType = "INVOICE" | "VAT_RETURN" | "DOCUMENT" | "OTHER";
+
+const EVIDENCE_SOURCE_TYPES: readonly EvidenceSourceType[] = ["INVOICE", "VAT_RETURN", "DOCUMENT", "OTHER"];
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+
+export type EvidenceAddition = {
+  schema_version: "1.0.0";
+  sourceResourceType: EvidenceSourceType;
+  sourceResourceId: string;
+  description: string;
+  checksumSha256?: string;
+  supersedesEvidenceId?: string;
+};
+
+/**
+ * checksum_sha256 is only accepted (and required) for source_resource_type
+ * OTHER — an officer-supplied hash of external material this system has no
+ * canonical record for (e.g. a bank statement, a witness account). For
+ * every other source type the repository derives the hash authoritatively
+ * from the cited record itself; a caller-supplied value would just be an
+ * unverified claim, so it is never accepted there.
+ */
+export function validateEvidenceAddition(payload: unknown): EvidenceAddition {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const sourceResourceType = text(input.source_resource_type).toUpperCase() as EvidenceSourceType;
+  if (!EVIDENCE_SOURCE_TYPES.includes(sourceResourceType)) messages.push({ code: "SOURCE_TYPE_INVALID", path: "/source_resource_type", message: `source_resource_type must be one of: ${EVIDENCE_SOURCE_TYPES.join(", ")}.` });
+  const sourceResourceId = id(input.source_resource_id, "/source_resource_id", messages) ?? "";
+  const description = bounded(input.description, "/description", "Description", 10, 2_000, messages);
+  const supersedesEvidenceId = id(input.supersedes_evidence_id, "/supersedes_evidence_id", messages, true);
+  let checksumSha256: string | undefined;
+  if (sourceResourceType === "OTHER") {
+    const raw = text(input.checksum_sha256).toLowerCase();
+    if (!SHA256_PATTERN.test(raw)) messages.push({ code: "CHECKSUM_INVALID", path: "/checksum_sha256", message: "checksum_sha256 is required and must be a 64-character hex SHA-256 digest for externally supplied evidence." });
+    else checksumSha256 = raw;
+  }
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", sourceResourceType, sourceResourceId, description, ...(checksumSha256 ? { checksumSha256 } : {}), ...(supersedesEvidenceId ? { supersedesEvidenceId } : {}) };
+}
+
+export type EvidenceCustodyAction = "VERIFY" | "SET_LEGAL_HOLD" | "RELEASE_LEGAL_HOLD";
+
+const EVIDENCE_CUSTODY_ACTIONS: readonly EvidenceCustodyAction[] = ["VERIFY", "SET_LEGAL_HOLD", "RELEASE_LEGAL_HOLD"];
+
+export type EvidenceCustodyEventInput = { schema_version: "1.0.0"; action: EvidenceCustodyAction; notes?: string };
+
+/** SET_LEGAL_HOLD/RELEASE_LEGAL_HOLD require a recorded justification; VERIFY's notes are optional context on a routine integrity check. */
+export function validateEvidenceCustodyEvent(payload: unknown): EvidenceCustodyEventInput {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const action = text(input.action).toUpperCase() as EvidenceCustodyAction;
+  if (!EVIDENCE_CUSTODY_ACTIONS.includes(action)) messages.push({ code: "ACTION_INVALID", path: "/action", message: `action must be one of: ${EVIDENCE_CUSTODY_ACTIONS.join(", ")}.` });
+  const requiresNotes = action === "SET_LEGAL_HOLD" || action === "RELEASE_LEGAL_HOLD";
+  const notes = requiresNotes ? bounded(input.notes, "/notes", "Notes", 10, 2_000, messages) : (text(input.notes) || undefined);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", action, ...(notes ? { notes } : {}) };
+}
+
+export type CaseNoteAddition = { schema_version: "1.0.0"; body: string; supersedesNoteId?: string };
+
+/** Append-only case notes: a correction is a new note with supersedes_note_id pointing at the prior one — the prior note is never edited or deleted. */
+export function validateCaseNoteAddition(payload: unknown): CaseNoteAddition {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const body = bounded(input.body, "/body", "Note body", 5, 4_000, messages);
+  const supersedesNoteId = id(input.supersedes_note_id, "/supersedes_note_id", messages, true);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", body, ...(supersedesNoteId ? { supersedesNoteId } : {}) };
+}

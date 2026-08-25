@@ -1,17 +1,22 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
 import {
+  addCaseNote,
+  addEvidence,
   approveRiskAction,
   assignRiskReview,
   ComplianceResourceError,
   createObligation,
   evaluateRisk,
   fileDispute,
+  getCaseEvidence,
+  getCaseNotes,
   getCaseTimeline,
   getComplianceSnapshot,
   getRestrictedRisk,
   issueFinding,
   markObligationSatisfied,
   openAuditCase,
+  recordEvidenceCustodyEvent,
   requestRefund,
   reviewRefund,
   transitionCase,
@@ -23,7 +28,8 @@ import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSe
 export type ComplianceCommand =
   | "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "REVIEW_REFUND"
   | "CREATE_OBLIGATION" | "MARK_OBLIGATION_SATISFIED" | "TRANSITION_CASE" | "ISSUE_FINDING"
-  | "ASSIGN_RISK_REVIEW" | "APPROVE_RISK_ACTION" | "EVALUATE_RISK";
+  | "ASSIGN_RISK_REVIEW" | "APPROVE_RISK_ACTION" | "EVALUATE_RISK"
+  | "ADD_EVIDENCE" | "RECORD_EVIDENCE_CUSTODY_EVENT" | "ADD_CASE_NOTE";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId, ...(errors ? { errors } : {}) }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store", ...(retryAfter ? { "retry-after": String(retryAfter) } : {}) } });
@@ -53,6 +59,36 @@ export async function handleCaseTimeline(request: Request, resourceId: string) {
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
     return problem(500, "INTERNAL_ERROR", "Internal error", "The case timeline is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 4 Phase D GetCaseEvidence. Same tenant-visibility rule as CaseTimeline: national-scope or the case's own taxpayer. */
+export async function handleCaseEvidence(request: Request, resourceId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "compliance:read");
+    const evidence = await getCaseEvidence(resourceId, user);
+    if (!evidence) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
+    return Response.json(evidence, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The case evidence register is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 4 Phase D GetCaseNotes. Same tenant-visibility rule as CaseTimeline/GetCaseEvidence. */
+export async function handleCaseNotes(request: Request, resourceId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "compliance:read");
+    const notes = await getCaseNotes(resourceId, user);
+    if (!notes) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
+    return Response.json(notes, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The case notes are temporarily unavailable.", context.correlationId);
   }
 }
 
@@ -110,13 +146,22 @@ export async function handleComplianceCommand(request: Request, permission: stri
     } else if (command === "APPROVE_RISK_ACTION") {
       if (!resourceId) throw new ComplianceResourceError("Risk indicator id is required.", 400);
       result = await approveRiskAction(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
-    } else {
+    } else if (command === "EVALUATE_RISK") {
       if (!resourceId) throw new ComplianceResourceError("Taxpayer id is required.", 400);
       result = await evaluateRisk(resourceId, payload, user, key, context.correlationId) as unknown as Record<string, unknown> | null;
+    } else if (command === "ADD_EVIDENCE") {
+      if (!resourceId) throw new ComplianceResourceError("Audit case id is required.", 400);
+      result = await addEvidence(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else if (command === "RECORD_EVIDENCE_CUSTODY_EVENT") {
+      if (!resourceId) throw new ComplianceResourceError("Evidence id is required.", 400);
+      result = await recordEvidenceCustodyEvent(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else {
+      if (!resourceId) throw new ComplianceResourceError("Audit case id is required.", 400);
+      result = await addCaseNote(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
     }
     if (!result) throw new RepositoryConflictError("The idempotent compliance resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" || command === "ASSIGN_RISK_REVIEW" || command === "APPROVE_RISK_ACTION" || command === "EVALUATE_RISK" ? 200 : 201;
+    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" || command === "ASSIGN_RISK_REVIEW" || command === "APPROVE_RISK_ACTION" || command === "EVALUATE_RISK" || command === "RECORD_EVIDENCE_CUSTODY_EVENT" ? 200 : 201;
     return Response.json({ resource: result }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });

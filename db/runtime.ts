@@ -402,7 +402,17 @@ const SCHEMA_STATEMENTS = [
     document_id TEXT REFERENCES document_metadata(id), checksum_sha256 TEXT NOT NULL,
     description TEXT NOT NULL, status TEXT NOT NULL,
     added_by TEXT NOT NULL REFERENCES app_users(id), added_at TEXT NOT NULL,
-    UNIQUE (audit_case_id, source_resource_type, source_resource_id)
+    previous_version_id TEXT REFERENCES audit_evidence(id), legal_hold INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_evidence_custody_events (
+    id TEXT PRIMARY KEY, audit_evidence_id TEXT NOT NULL REFERENCES audit_evidence(id),
+    action TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES app_users(id), notes TEXT,
+    integrity_verified INTEGER, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_case_notes (
+    id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
+    author_id TEXT NOT NULL REFERENCES app_users(id), body TEXT NOT NULL,
+    supersedes_note_id TEXT REFERENCES audit_case_notes(id), created_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS audit_findings (
     id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
@@ -870,6 +880,15 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_queue ON reconciliation_exceptions(status, severity, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_officer ON reconciliation_exceptions(assigned_officer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_case_transitions_case ON audit_case_transitions(audit_case_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_evidence_case ON audit_evidence(audit_case_id, added_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_evidence_custody_events_evidence ON audit_evidence_custody_events(audit_evidence_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_case_notes_case ON audit_case_notes(audit_case_id, created_at)`,
+  // Partial unique index (not an inline table constraint): only one PRESERVED
+  // evidence row may exist per (case, source resource) at a time — a
+  // superseded historical row keeps its place in the table without blocking
+  // its replacement. This is the immutable-versioning guarantee Module 4
+  // Phase D requires: corrections supersede, never overwrite.
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_evidence_active_source ON audit_evidence(audit_case_id, source_resource_type, source_resource_id) WHERE status='PRESERVED'`,
 
   // Statutory VAT rate catalogue (Module 2 Phase A). Unlike the pilot demo
   // seed below, this is real reference data — the actual Namibian VAT

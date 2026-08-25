@@ -3,9 +3,12 @@ import {
   assertCaseTransition,
   ComplianceValidationError,
   normalizeRiskIndicatorQuery,
+  validateCaseNoteAddition,
   validateCaseOpening,
   validateCaseTransition,
   validateDispute,
+  validateEvidenceAddition,
+  validateEvidenceCustodyEvent,
   validateFindingIssuance,
   validateObligationCreation,
   validateObligationSatisfaction,
@@ -228,5 +231,66 @@ describe("restricted risk query normalization", () => {
     const result = normalizeRiskIndicatorQuery(new URLSearchParams({ limit: "10", offset: "20" }));
     expect(result.limit).toBe(10);
     expect(result.offset).toBe(20);
+  });
+});
+
+describe("evidence addition validation", () => {
+  it("normalizes a citation of a canonical system record, uppercasing source_resource_type", () => {
+    const result = validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "invoice", source_resource_id: "inv-0001", description: "The certified invoice underpinning this finding." });
+    expect(result.sourceResourceType).toBe("INVOICE");
+    expect(result.checksumSha256).toBeUndefined();
+  });
+
+  it("requires a valid 64-character hex checksum for OTHER evidence", () => {
+    expect(() => validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "OTHER", source_resource_id: "ext-doc-1", description: "An externally supplied bank statement." })).toThrowError(ComplianceValidationError);
+    expect(() => validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "OTHER", source_resource_id: "ext-doc-1", description: "An externally supplied bank statement.", checksum_sha256: "not-a-hash" })).toThrowError(ComplianceValidationError);
+    const result = validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "OTHER", source_resource_id: "ext-doc-1", description: "An externally supplied bank statement.", checksum_sha256: "A".repeat(64) });
+    expect(result.checksumSha256).toBe("a".repeat(64));
+  });
+
+  it("rejects an unsupported source_resource_type", () => {
+    expect(() => validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "EMAIL", source_resource_id: "msg-1", description: "An email thread between the taxpayer and supplier." })).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes an optional supersedes_evidence_id", () => {
+    const result = validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "INVOICE", source_resource_id: "inv-0001", description: "A corrected citation replacing the earlier one.", supersedes_evidence_id: "evid-0001" });
+    expect(result.supersedesEvidenceId).toBe("evid-0001");
+  });
+
+  it("rejects a description outside the 10 to 2000 character bound", () => {
+    expect(() => validateEvidenceAddition({ schema_version: "1.0.0", source_resource_type: "INVOICE", source_resource_id: "inv-0001", description: "short" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("evidence custody event validation", () => {
+  it("normalizes a VERIFY action without requiring notes", () => {
+    const result = validateEvidenceCustodyEvent({ schema_version: "1.0.0", action: "verify" });
+    expect(result.action).toBe("VERIFY");
+    expect(result.notes).toBeUndefined();
+  });
+
+  it("requires notes for SET_LEGAL_HOLD and RELEASE_LEGAL_HOLD", () => {
+    expect(() => validateEvidenceCustodyEvent({ schema_version: "1.0.0", action: "SET_LEGAL_HOLD" })).toThrowError(ComplianceValidationError);
+    const result = validateEvidenceCustodyEvent({ schema_version: "1.0.0", action: "SET_LEGAL_HOLD", notes: "Preserved pending the taxpayer's formal dispute of finding-0001." });
+    expect(result.notes).toContain("Preserved pending");
+  });
+
+  it("rejects an unrecognised action", () => {
+    expect(() => validateEvidenceCustodyEvent({ schema_version: "1.0.0", action: "DESTROY" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("case note addition validation", () => {
+  it("normalizes a well-formed note", () => {
+    expect(validateCaseNoteAddition({ schema_version: "1.0.0", body: "Contacted the taxpayer's accountant to confirm the delivery date." }).body).toBe("Contacted the taxpayer's accountant to confirm the delivery date.");
+  });
+
+  it("normalizes an optional supersedes_note_id", () => {
+    const result = validateCaseNoteAddition({ schema_version: "1.0.0", body: "Correction: the accountant confirmed a different delivery date than first recorded.", supersedes_note_id: "note-0001" });
+    expect(result.supersedesNoteId).toBe("note-0001");
+  });
+
+  it("rejects a note body outside the 5 to 4000 character bound", () => {
+    expect(() => validateCaseNoteAddition({ schema_version: "1.0.0", body: "Hi" })).toThrowError(ComplianceValidationError);
   });
 });

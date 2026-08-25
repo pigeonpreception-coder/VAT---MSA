@@ -4,9 +4,12 @@ import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   assertCaseTransition,
   normalizeRiskIndicatorQuery,
+  validateCaseNoteAddition,
   validateCaseOpening,
   validateCaseTransition,
   validateDispute,
+  validateEvidenceAddition,
+  validateEvidenceCustodyEvent,
   validateFindingIssuance,
   validateObligationCreation,
   validateObligationSatisfaction,
@@ -18,6 +21,7 @@ import {
   type AuditCaseStatus,
   type CaseOpeningSubmission,
   type DisputeSubmission,
+  type EvidenceSourceType,
   type ObligationCreation,
   type ObligationSatisfaction,
   type RefundRequestSubmission,
@@ -656,4 +660,237 @@ export async function getRestrictedRisk(actor: UserContext, params: URLSearchPar
   ]);
 
   return { items: items.results, totalCount: count?.n ?? 0, limit: query.limit, offset: query.offset };
+}
+
+/**
+ * Module 4 Phase D: resolves the current, authoritative hash for a cited
+ * canonical record — the single place both AddEvidence (at insertion time)
+ * and RecordEvidenceCustodyEvent's VERIFY action (re-checked later) derive
+ * it from, so the two can never silently disagree about what "the hash"
+ * means for a given source type.
+ */
+async function resolveEvidenceChecksum(db: D1Database, sourceResourceType: EvidenceSourceType, sourceResourceId: string): Promise<{ checksum: string; evidenceType: string; documentId: string | null } | null> {
+  if (sourceResourceType === "INVOICE") {
+    const row = await db.prepare("SELECT payload_hash FROM invoices WHERE id=?").bind(sourceResourceId).first<{ payload_hash: string }>();
+    return row ? { checksum: row.payload_hash, evidenceType: "CERTIFIED_RECORD", documentId: null } : null;
+  }
+  if (sourceResourceType === "VAT_RETURN") {
+    const row = await db.prepare("SELECT ledger_snapshot_hash FROM vat_return_versions WHERE id=?").bind(sourceResourceId).first<{ ledger_snapshot_hash: string }>();
+    return row ? { checksum: row.ledger_snapshot_hash, evidenceType: "CERTIFIED_RECORD", documentId: null } : null;
+  }
+  if (sourceResourceType === "DOCUMENT") {
+    const row = await db.prepare("SELECT checksum_sha256, scan_status FROM document_metadata WHERE id=?").bind(sourceResourceId).first<{ checksum_sha256: string; scan_status: string }>();
+    if (!row) return null;
+    return { checksum: row.checksum_sha256, evidenceType: "UPLOADED_DOCUMENT", documentId: sourceResourceId };
+  }
+  return null;
+}
+
+type EvidenceRow = { id: string; audit_case_id: string; source_resource_type: EvidenceSourceType; source_resource_id: string; document_id: string | null; checksum_sha256: string; status: string; case_taxpayer_id: string };
+
+/**
+ * Module 4 Phase D AddEvidence. A document citation must already be
+ * clean-scanned (Module 22's quarantine pipeline) — evidence integrity
+ * can't rest on a file that hasn't finished its malware scan. A
+ * supersedes_evidence_id flips the prior row to SUPERSEDED in the same
+ * batch as the new row's insert; the partial unique index in db/runtime.ts
+ * (WHERE status='PRESERVED') is what actually enforces that only one
+ * PRESERVED row can exist per (case, source) at a time.
+ */
+export async function addEvidence(caseId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may add case evidence.");
+  const input = validateEvidenceAddition(payload);
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id,status FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string; status: string }>();
+  if (!auditCase) throw new ComplianceResourceError("Audit case was not found.", 404);
+  if (auditCase.status === "CANCELLED") throw new RepositoryConflictError("Evidence cannot be added to a cancelled case.");
+
+  const hash = await sha256Hex(stableStringify({ case_id: caseId, input }));
+  const prior = await replay(db, actor.userId, "ADD_EVIDENCE", key, hash);
+  if (prior) return db.prepare("SELECT * FROM audit_evidence WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  let checksum: string;
+  let evidenceType: string;
+  let documentId: string | null = null;
+  if (input.sourceResourceType === "OTHER") {
+    checksum = input.checksumSha256 as string;
+    evidenceType = "EXTERNAL_RECORD";
+  } else {
+    const resolved = await resolveEvidenceChecksum(db, input.sourceResourceType, input.sourceResourceId);
+    if (!resolved) throw new ComplianceResourceError(`The cited ${input.sourceResourceType.toLowerCase()} was not found.`, 404);
+    if (input.sourceResourceType === "DOCUMENT") {
+      const doc = await db.prepare("SELECT scan_status FROM document_metadata WHERE id=?").bind(input.sourceResourceId).first<{ scan_status: string }>();
+      if (doc?.scan_status !== "CLEAN") throw new RepositoryConflictError("Only a clean-scanned document may be cited as evidence.");
+    }
+    checksum = resolved.checksum;
+    evidenceType = resolved.evidenceType;
+    documentId = resolved.documentId;
+  }
+
+  if (input.supersedesEvidenceId) {
+    const superseded = await db.prepare("SELECT id,status FROM audit_evidence WHERE id=? AND audit_case_id=?").bind(input.supersedesEvidenceId, caseId).first<{ id: string; status: string }>();
+    if (!superseded) throw new ComplianceResourceError("The evidence being superseded was not found on this case.", 404);
+    if (superseded.status !== "PRESERVED") throw new RepositoryConflictError("Only currently preserved evidence can be superseded.");
+  } else {
+    const activeCitation = await db.prepare("SELECT id FROM audit_evidence WHERE audit_case_id=? AND source_resource_type=? AND source_resource_id=? AND status='PRESERVED'")
+      .bind(caseId, input.sourceResourceType, input.sourceResourceId).first<{ id: string }>();
+    if (activeCitation) throw new RepositoryConflictError(`This source is already cited as active evidence (${activeCitation.id}) — supersede it instead of adding a duplicate.`);
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  // The old row must flip to SUPERSEDED *before* the new PRESERVED row is
+  // inserted: the partial unique index (WHERE status='PRESERVED') checks
+  // each statement immediately as db.batch() executes it, not at the end
+  // of the batch — inserting the new row first would collide with the old
+  // one that's still (momentarily) PRESERVED.
+  const statements: D1PreparedStatement[] = [];
+  if (input.supersedesEvidenceId) {
+    statements.push(
+      db.prepare("UPDATE audit_evidence SET status='SUPERSEDED' WHERE id=?").bind(input.supersedesEvidenceId),
+      db.prepare(`INSERT INTO audit_evidence_custody_events (id,audit_evidence_id,action,actor_id,notes,integrity_verified,occurred_at) VALUES (?,?,'SUPERSEDED',?,?,NULL,?)`)
+        .bind(crypto.randomUUID(), input.supersedesEvidenceId, actor.userId, `Superseded by evidence ${id}.`, now),
+    );
+  }
+  statements.push(
+    db.prepare(`INSERT INTO audit_evidence
+      (id,audit_case_id,evidence_type,source_resource_type,source_resource_id,document_id,checksum_sha256,description,status,added_by,added_at,previous_version_id,legal_hold)
+      VALUES (?,?,?,?,?,?,?,?,'PRESERVED',?,?,?,0)`)
+      .bind(id, caseId, evidenceType, input.sourceResourceType, input.sourceResourceId, documentId, checksum, input.description, actor.userId, now, input.supersedesEvidenceId ?? null),
+    db.prepare(`INSERT INTO audit_evidence_custody_events (id,audit_evidence_id,action,actor_id,notes,integrity_verified,occurred_at) VALUES (?,?,'ADDED',?,?,NULL,?)`)
+      .bind(crypto.randomUUID(), id, actor.userId, input.description, now),
+  );
+  statements.push(
+    commandRecord(db, actor.userId, "ADD_EVIDENCE", key, hash, "AUDIT_EVIDENCE", id, now),
+    outbox(db, "AUDIT_EVIDENCE", id, "AuditEvidenceAdded", auditCase.taxpayer_id, { evidence_id: id, audit_case_id: caseId, source_resource_type: input.sourceResourceType, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "AUDIT_EVIDENCE_ADDED", "AUDIT_EVIDENCE", id, { auditCaseId: caseId, sourceResourceType: input.sourceResourceType, sourceResourceId: input.sourceResourceId, correlationId }, now),
+  );
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    // Defense in depth against a genuine concurrent race between the
+    // pre-check above and this insert: the partial unique index in
+    // db/runtime.ts (WHERE status='PRESERVED') is the actual guarantee,
+    // this just recovers its violation into the same clean 409 rather than
+    // letting it leak out as an unhandled 500 — mirrors lib/data/repository.ts's
+    // submitInvoice recovery for the same class of race.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/unique constraint failed/i.test(message)) throw error;
+    throw new RepositoryConflictError("This source is already cited as active evidence — supersede it instead of adding a duplicate.");
+  }
+  return db.prepare("SELECT * FROM audit_evidence WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 4 Phase D RecordEvidenceCustodyEvent. VERIFY re-derives the
+ * cited record's CURRENT hash and compares it against the hash stored at
+ * addition time — a genuine tamper/drift detector, not a rubber stamp.
+ * A mismatch is recorded, not thrown: this is an audit trail feeding
+ * human judgement, the same advisory-only posture Module 4's risk
+ * indicators already take, not an automated adverse action. Externally
+ * supplied (OTHER) evidence has nothing this system can re-derive, so its
+ * integrity_verified always stays NULL rather than a false CLAIM either way.
+ * SET_LEGAL_HOLD/RELEASE_LEGAL_HOLD cascade to the underlying
+ * document_metadata row when the evidence cites an uploaded document, so
+ * Module 22's retention/deletion path and this case's hold stay in sync.
+ */
+export async function recordEvidenceCustodyEvent(evidenceId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may record an evidence custody event.");
+  const input = validateEvidenceCustodyEvent(payload);
+  const db = await ensureDatabase();
+  const evidence = await db.prepare(`SELECT e.id,e.audit_case_id,e.source_resource_type,e.source_resource_id,e.document_id,e.checksum_sha256,e.status,ac.taxpayer_id AS case_taxpayer_id
+    FROM audit_evidence e JOIN audit_cases ac ON ac.id=e.audit_case_id WHERE e.id=?`).bind(evidenceId).first<EvidenceRow>();
+  if (!evidence) throw new ComplianceResourceError("Evidence record was not found.", 404);
+
+  const hash = await sha256Hex(stableStringify({ evidence_id: evidenceId, input }));
+  const prior = await replay(db, actor.userId, "RECORD_EVIDENCE_CUSTODY_EVENT", key, hash);
+  if (prior) return db.prepare("SELECT * FROM audit_evidence WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  let integrityVerified: number | null = null;
+
+  if (input.action === "VERIFY") {
+    if (evidence.source_resource_type !== "OTHER") {
+      const current = await resolveEvidenceChecksum(db, evidence.source_resource_type, evidence.source_resource_id);
+      integrityVerified = current && current.checksum === evidence.checksum_sha256 ? 1 : 0;
+    }
+  } else if (input.action === "SET_LEGAL_HOLD") {
+    statements.push(db.prepare("UPDATE audit_evidence SET legal_hold=1 WHERE id=?").bind(evidenceId));
+    if (evidence.document_id) statements.push(db.prepare("UPDATE document_metadata SET legal_hold=1 WHERE id=?").bind(evidence.document_id));
+  } else {
+    statements.push(db.prepare("UPDATE audit_evidence SET legal_hold=0 WHERE id=?").bind(evidenceId));
+    if (evidence.document_id) statements.push(db.prepare("UPDATE document_metadata SET legal_hold=0 WHERE id=?").bind(evidence.document_id));
+  }
+
+  statements.push(
+    db.prepare(`INSERT INTO audit_evidence_custody_events (id,audit_evidence_id,action,actor_id,notes,integrity_verified,occurred_at) VALUES (?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), evidenceId, input.action, actor.userId, input.notes ?? null, integrityVerified, now),
+    commandRecord(db, actor.userId, "RECORD_EVIDENCE_CUSTODY_EVENT", key, hash, "AUDIT_EVIDENCE", evidenceId, now),
+    outbox(db, "AUDIT_EVIDENCE", evidenceId, `AuditEvidence${input.action.charAt(0)}${input.action.slice(1).toLowerCase().replaceAll("_", "")}`, evidence.case_taxpayer_id, { evidence_id: evidenceId, action: input.action, integrity_verified: integrityVerified, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, `AUDIT_EVIDENCE_${input.action}`, "AUDIT_EVIDENCE", evidenceId, { action: input.action, integrityVerified, notes: input.notes, correlationId }, now),
+  );
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM audit_evidence WHERE id=?").bind(evidenceId).first<Record<string, unknown>>();
+}
+
+/** Module 4 Phase D GetCaseEvidence. Tenant-scoped exactly like CaseTimeline: national-scope or the case's own taxpayer. */
+export async function getCaseEvidence(caseId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string }>();
+  if (!auditCase) return null;
+  if (!isNationalScope(actor) && actor.taxpayerId !== auditCase.taxpayer_id) throw new AccessDeniedError("The audit case is outside your authorised taxpayer scope.");
+  const evidence = await db.prepare("SELECT * FROM audit_evidence WHERE audit_case_id=? ORDER BY added_at").bind(caseId).all<Record<string, unknown>>();
+  const evidenceIds = evidence.results.map((row) => row.id as string);
+  const custodyEvents = evidenceIds.length
+    ? (await db.prepare(`SELECT * FROM audit_evidence_custody_events WHERE audit_evidence_id IN (${evidenceIds.map(() => "?").join(",")}) ORDER BY occurred_at`).bind(...evidenceIds).all<Record<string, unknown>>()).results
+    : [];
+  return { case: auditCase, evidence: evidence.results, custodyEvents };
+}
+
+/**
+ * Module 4 Phase D AddCaseNote. Notes are only ever INSERTed in this file
+ * — there is no UPDATE path anywhere for audit_case_notes. A correction is
+ * a fresh note carrying supersedes_note_id; the note it corrects remains
+ * exactly as originally written.
+ */
+export async function addCaseNote(caseId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may add a case note.");
+  const input = validateCaseNoteAddition(payload);
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string }>();
+  if (!auditCase) throw new ComplianceResourceError("Audit case was not found.", 404);
+
+  const hash = await sha256Hex(stableStringify({ case_id: caseId, input }));
+  const prior = await replay(db, actor.userId, "ADD_CASE_NOTE", key, hash);
+  if (prior) return db.prepare("SELECT * FROM audit_case_notes WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  if (input.supersedesNoteId) {
+    const supersededNote = await db.prepare("SELECT id FROM audit_case_notes WHERE id=? AND audit_case_id=?").bind(input.supersedesNoteId, caseId).first<{ id: string }>();
+    if (!supersededNote) throw new ComplianceResourceError("The note being corrected was not found on this case.", 404);
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("INSERT INTO audit_case_notes (id,audit_case_id,author_id,body,supersedes_note_id,created_at) VALUES (?,?,?,?,?,?)")
+      .bind(id, caseId, actor.userId, input.body, input.supersedesNoteId ?? null, now),
+    commandRecord(db, actor.userId, "ADD_CASE_NOTE", key, hash, "AUDIT_CASE_NOTE", id, now),
+    outbox(db, "AUDIT_CASE_NOTE", id, "AuditCaseNoteAdded", auditCase.taxpayer_id, { note_id: id, audit_case_id: caseId, supersedes_note_id: input.supersedesNoteId ?? null, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "AUDIT_CASE_NOTE_ADDED", "AUDIT_CASE_NOTE", id, { auditCaseId: caseId, supersedesNoteId: input.supersedesNoteId ?? null, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM audit_case_notes WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 4 Phase D GetCaseNotes. Tenant-scoped exactly like CaseTimeline/GetCaseEvidence. */
+export async function getCaseNotes(caseId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string }>();
+  if (!auditCase) return null;
+  if (!isNationalScope(actor) && actor.taxpayerId !== auditCase.taxpayer_id) throw new AccessDeniedError("The audit case is outside your authorised taxpayer scope.");
+  const notes = await db.prepare("SELECT * FROM audit_case_notes WHERE audit_case_id=? ORDER BY created_at").bind(caseId).all<Record<string, unknown>>();
+  return { case: auditCase, notes: notes.results };
 }
