@@ -113,6 +113,60 @@ export function validateRefundRequest(payload: unknown): RefundRequestSubmission
   return { schema_version: "1.0.0", vat_return_version_id: versionId };
 }
 
+export type ObligationCreation = {
+  schema_version: "1.0.0";
+  taxpayer_id: string;
+  obligation_type: string;
+  period_code: string;
+  due_date: string;
+  amount_cents: number;
+  currency: string;
+};
+
+export type ObligationSatisfaction = {
+  schema_version: "1.0.0";
+  notes: string;
+};
+
+const OBLIGATION_TYPE_PATTERN = /^[A-Z][A-Z0-9_]{1,49}$/;
+const PERIOD_CODE_PATTERN = /^\d{4}-\d{2}$/;
+const DUE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Module 3 Phase D CreateObligation. Statutory obligations are imposed by
+ * NamRA, not self-declared, so taxpayer_id is required (unlike Dispute's
+ * optional taxpayer_id, which taxpayers can self-file) and the repository
+ * layer restricts this to national-scope actors only.
+ */
+export function validateObligationCreation(payload: unknown): ObligationCreation {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const taxpayerId = id(input.taxpayer_id, "/taxpayer_id", messages) ?? "";
+  const obligationType = text(input.obligation_type).toUpperCase();
+  if (!OBLIGATION_TYPE_PATTERN.test(obligationType)) messages.push({ code: "OBLIGATION_TYPE_INVALID", path: "/obligation_type", message: "obligation_type must contain 2 to 50 uppercase letters, numbers or underscores." });
+  const periodCode = text(input.period_code);
+  if (!PERIOD_CODE_PATTERN.test(periodCode)) messages.push({ code: "PERIOD_CODE_INVALID", path: "/period_code", message: "period_code must use YYYY-MM." });
+  const dueDate = text(input.due_date);
+  if (!DUE_DATE_PATTERN.test(dueDate)) messages.push({ code: "DUE_DATE_INVALID", path: "/due_date", message: "due_date must use YYYY-MM-DD." });
+  const amount = Number(input.amount_cents);
+  if (!Number.isSafeInteger(amount) || amount < 0) messages.push({ code: "AMOUNT_INVALID", path: "/amount_cents", message: "amount_cents must be a non-negative safe integer." });
+  const currency = text(input.currency).toUpperCase();
+  if (!CURRENCY_PATTERN.test(currency)) messages.push({ code: "CURRENCY_INVALID", path: "/currency", message: "Currency must be a three-letter ISO 4217 code." });
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", taxpayer_id: taxpayerId, obligation_type: obligationType, period_code: periodCode, due_date: dueDate, amount_cents: amount, currency };
+}
+
+/** Module 3 Phase D MarkSatisfied: { notes }. Restricted to national-scope actors — a taxpayer cannot self-declare their own obligation satisfied. */
+export function validateObligationSatisfaction(payload: unknown): ObligationSatisfaction {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const notes = bounded(input.notes, "/notes", "Notes", 10, 2_000, messages);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", notes };
+}
+
 export function validateRefundReview(payload: unknown): RefundReviewSubmission {
   const input = object(payload);
   const messages: ComplianceValidationMessage[] = [];

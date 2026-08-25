@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ComplianceValidationError, validateCaseOpening, validateDispute, validateRefundRequest, validateRefundReview } from "@/lib/domain/compliance";
+import {
+  ComplianceValidationError,
+  validateCaseOpening,
+  validateDispute,
+  validateObligationCreation,
+  validateObligationSatisfaction,
+  validateRefundRequest,
+  validateRefundReview,
+} from "@/lib/domain/compliance";
 
 describe("compliance command validation", () => {
   it("normalizes an evidence-led case opening", () => {
@@ -24,5 +32,27 @@ describe("compliance command validation", () => {
     const review = validateRefundReview({ schema_version: "1.0.0", stage: "risk", decision: "request_information", findings: "The source evidence requires independent confirmation before supervisor review." });
     expect(review.stage).toBe("RISK");
     expect(review.decision).toBe("REQUEST_INFORMATION");
+  });
+
+  it("normalizes a well-formed obligation creation", () => {
+    const result = validateObligationCreation({ schema_version: "1.0.0", taxpayer_id: "tp-0001", obligation_type: "vat_return", period_code: "2026-09", due_date: "2026-10-25", amount_cents: 500000, currency: "nad" });
+    expect(result).toEqual({ schema_version: "1.0.0", taxpayer_id: "tp-0001", obligation_type: "VAT_RETURN", period_code: "2026-09", due_date: "2026-10-25", amount_cents: 500000, currency: "NAD" });
+  });
+
+  it("rejects a malformed period_code or due_date", () => {
+    expect(() => validateObligationCreation({ schema_version: "1.0.0", taxpayer_id: "tp-0001", obligation_type: "VAT_RETURN", period_code: "Q3-2026", due_date: "2026-10-25", amount_cents: 500000, currency: "NAD" })).toThrowError(ComplianceValidationError);
+    expect(() => validateObligationCreation({ schema_version: "1.0.0", taxpayer_id: "tp-0001", obligation_type: "VAT_RETURN", period_code: "2026-09", due_date: "25/10/2026", amount_cents: 500000, currency: "NAD" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects a missing taxpayer_id", () => {
+    expect(() => validateObligationCreation({ schema_version: "1.0.0", obligation_type: "VAT_RETURN", period_code: "2026-09", due_date: "2026-10-25", amount_cents: 500000, currency: "NAD" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes well-formed satisfaction notes", () => {
+    expect(validateObligationSatisfaction({ schema_version: "1.0.0", notes: "Payment confirmed received via bank reconciliation." }).notes).toBe("Payment confirmed received via bank reconciliation.");
+  });
+
+  it("rejects satisfaction notes outside the 10 to 2000 character bound", () => {
+    expect(() => validateObligationSatisfaction({ schema_version: "1.0.0", notes: "too short" })).toThrowError(ComplianceValidationError);
   });
 });

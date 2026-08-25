@@ -1,7 +1,20 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import { validateCaseOpening, validateDispute, validateRefundRequest, validateRefundReview, type CaseOpeningSubmission, type DisputeSubmission, type RefundRequestSubmission, type RefundReviewSubmission } from "@/lib/domain/compliance";
+import {
+  validateCaseOpening,
+  validateDispute,
+  validateObligationCreation,
+  validateObligationSatisfaction,
+  validateRefundRequest,
+  validateRefundReview,
+  type CaseOpeningSubmission,
+  type DisputeSubmission,
+  type ObligationCreation,
+  type ObligationSatisfaction,
+  type RefundRequestSubmission,
+  type RefundReviewSubmission,
+} from "@/lib/domain/compliance";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
@@ -186,4 +199,60 @@ export async function reviewRefund(claimId: string, payload: RefundReviewSubmiss
     await auditRecord(db, actor, "REFUND_REVIEWED", "REFUND_CLAIM", claim.id, { stage: input.stage, decision: input.decision, status: nextStatus, correlationId }, now),
   ]);
   return db.prepare("SELECT * FROM refund_reviews WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 3 Phase D CreateObligation. tax_obligations previously only ever
+ * held seed data — no application code wrote to it. Statutory obligations
+ * are imposed by NamRA, so this mirrors openAuditCase's national-scope-only
+ * restriction rather than compliance:read's broader taxpayer-visible access.
+ */
+export async function createObligation(payload: ObligationCreation, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may create a tax obligation.");
+  const input = validateObligationCreation(payload);
+  const db = await ensureDatabase();
+  const scope = await resolveTaxpayer(db, actor, input.taxpayer_id);
+  const hash = await sha256Hex(stableStringify(input));
+  const prior = await replay(db, actor.userId, "CREATE_OBLIGATION", key, hash);
+  if (prior) return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id FROM tax_obligations WHERE taxpayer_id=? AND obligation_type=? AND period_code=?")
+    .bind(scope.taxpayer_id, input.obligation_type, input.period_code).first<{ id: string }>();
+  if (existing) throw new RepositoryConflictError(`An obligation for this taxpayer, type and period already exists as ${existing.id}.`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO tax_obligations
+      (id,organisation_id,taxpayer_id,obligation_type,period_code,due_date,amount_cents,currency,status,source_system,source_reference,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'PENDING','VAT_MSA',NULL,?,?)`)
+      .bind(id, scope.organisation_id, scope.taxpayer_id, input.obligation_type, input.period_code, input.due_date, input.amount_cents, input.currency, now, now),
+    db.prepare(`INSERT INTO notifications VALUES (?,NULL,?,'OBLIGATION_CREATED',?,?,'MEDIUM','UNREAD',?, ?,NULL)`)
+      .bind(crypto.randomUUID(), scope.taxpayer_id, `New ${input.obligation_type} obligation for ${input.period_code}`, `Due ${input.due_date}.`, "/compliance", now),
+    commandRecord(db, actor.userId, "CREATE_OBLIGATION", key, hash, "TAX_OBLIGATION", id, now),
+    outbox(db, "TAX_OBLIGATION", id, "ObligationCreated", scope.taxpayer_id, { obligation_id: id, obligation_type: input.obligation_type, period_code: input.period_code, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "OBLIGATION_CREATED", "TAX_OBLIGATION", id, { taxpayerId: scope.taxpayer_id, obligationType: input.obligation_type, periodCode: input.period_code, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 3 Phase D MarkSatisfied. Idempotent on an already-satisfied obligation. */
+export async function markObligationSatisfied(obligationId: string, payload: ObligationSatisfaction, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may mark a tax obligation satisfied.");
+  const input = validateObligationSatisfaction(payload);
+  const db = await ensureDatabase();
+  const obligation = await db.prepare("SELECT id,taxpayer_id,status FROM tax_obligations WHERE id=?").bind(obligationId).first<{ id: string; taxpayer_id: string; status: string }>();
+  if (!obligation) throw new ComplianceResourceError("Tax obligation was not found.", 404);
+  const hash = await sha256Hex(stableStringify({ obligation_id: obligation.id, input }));
+  const prior = await replay(db, actor.userId, "MARK_OBLIGATION_SATISFIED", key, hash);
+  if (prior) return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  if (obligation.status === "SATISFIED") return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(obligation.id).first<Record<string, unknown>>();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE tax_obligations SET status='SATISFIED',updated_at=? WHERE id=?").bind(now, obligation.id),
+    commandRecord(db, actor.userId, "MARK_OBLIGATION_SATISFIED", key, hash, "TAX_OBLIGATION", obligation.id, now),
+    outbox(db, "TAX_OBLIGATION", obligation.id, "ObligationSatisfied", obligation.taxpayer_id, { obligation_id: obligation.id, notes: input.notes, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "OBLIGATION_SATISFIED", "TAX_OBLIGATION", obligation.id, { notes: input.notes, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(obligation.id).first<Record<string, unknown>>();
 }
