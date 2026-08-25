@@ -7,9 +7,11 @@ import {
   normalizeBranchUpdate,
   normalizeCounterpartyVatNumber,
   normalizeIdentityLink,
+  normalizeInvitationClaim,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
+  normalizeUserInvitation,
   type RegistrationSubmission,
 } from "@/lib/domain/identity";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
@@ -343,9 +345,8 @@ export type MembershipAssignmentResult = {
  * Module 1 AssignMembership: an organisation admin (or NamRA) grants an
  * existing, already-provisioned app_users row a taxpayer-side membership in
  * one of their organisations. Deliberately does not provision a brand-new
- * user identity — see MODULE_DEVELOPMENT_PLAYBOOK.md's Module 1 gap notes on
- * self-service provisioning being an open security-policy decision, not an
- * engineering default this command should make unilaterally.
+ * user identity — for someone with no app_users row yet, use inviteUser /
+ * claimInvitation (ProvisionUser) below instead.
  */
 export async function assignMembership(
   actor: UserContext,
@@ -616,4 +617,122 @@ export async function revokeIdentityLink(actor: UserContext, identityLinkId: str
     await appendAudit(db, actor, "SESSION_REVOKED", "IDENTITY_LINK", link.id, { userId: link.user_id }),
   ]);
   return { id: link.id, status: "REVOKED" };
+}
+
+const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type UserInvitationResult = {
+  id: string;
+  organisationId: string;
+  email: string;
+  roleCode: string;
+  status: string;
+  claimToken: string;
+  expiresAt: string;
+  invitationDelivery: string;
+};
+
+/**
+ * Module 1 Identity ProvisionUser, invite half (see
+ * MODULE_DEVELOPMENT_PLAYBOOK.md's Phase C decision: explicit invite-and-
+ * claim, generalizing inviteEmployee's pattern beyond employees). Generates a
+ * single-use claim token; nothing actually delivers it anywhere — this repo
+ * has no outbound email integration, matching inviteEmployee's
+ * DISABLED_LOCAL_STAGING delivery — so it is returned directly to the
+ * inviting admin to relay out of band.
+ */
+export async function inviteUser(
+  actor: UserContext,
+  organisationId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<UserInvitationResult> {
+  const invitation = normalizeUserInvitation(input);
+  const db = await ensureDatabase();
+  const organisation = await requireOrganisationInScope(db, actor, organisationId);
+
+  const existingUser = await db.prepare("SELECT id FROM app_users WHERE lower(email)=lower(?)").bind(invitation.email).first<{ id: string }>();
+  if (existingUser) throw new RepositoryConflictError("A user with this email already exists.");
+  const pending = await db.prepare("SELECT id FROM user_invitations WHERE organisation_id=? AND lower(email)=lower(?) AND status='PENDING'")
+    .bind(organisationId, invitation.email).first<{ id: string }>();
+  if (pending) throw new RepositoryConflictError("A pending invitation already exists for this email in this organisation.");
+
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + INVITATION_TTL_MS).toISOString();
+  const id = crypto.randomUUID();
+  const claimToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll("-", "");
+  await db.batch([
+    db.prepare(`INSERT INTO user_invitations (id,organisation_id,email,role_code,claim_token,status,invited_by,invited_at,expires_at,claimed_at,claimed_by_user_id)
+      VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL)`).bind(id, organisationId, invitation.email, invitation.roleCode, claimToken, "PENDING", actor.userId, now, expiresAt),
+    outboxEvent(db, "IDENTITY", id, "UserInvitationCreated", organisation.taxpayer_id, { invitationId: id, organisationId, email: invitation.email, delivery: "DISABLED_LOCAL_STAGING", correlationId }),
+    await appendAudit(db, actor, "USER_INVITED", "USER_INVITATION", id, { organisationId, email: invitation.email, roleCode: invitation.roleCode }),
+  ]);
+  return { id, organisationId, email: invitation.email, roleCode: invitation.roleCode, status: "PENDING", claimToken, expiresAt, invitationDelivery: "DISABLED_LOCAL_STAGING" };
+}
+
+export type PlatformIdentity = { subject: string; email: string; displayName: string };
+
+export type InvitationClaimResult = { userId: string; organisationId: string; roleCode: string; status: string };
+
+/**
+ * Module 1 Identity ProvisionUser, claim half. The caller has no app_users
+ * row yet, so this cannot go through getCurrentUser()/requirePermission like
+ * every other command in this file — platformIdentity is the raw
+ * platform-asserted identity (see app/chatgpt-auth.ts's getChatGPTUser),
+ * trusted the same way getCurrentUser() trusts it, just before an app_users
+ * row exists to join against. The invitation's email must match the
+ * platform-asserted email: defense in depth if a claim token ever leaked to
+ * the wrong inbox. The audit trail attributes USER_PROVISIONED to the newly
+ * created user itself (a genuine self-service claim), not the inviting
+ * admin, who is already attributed on the earlier USER_INVITED event.
+ */
+export async function claimInvitation(
+  platformIdentity: PlatformIdentity,
+  input: unknown,
+  correlationId: string,
+): Promise<InvitationClaimResult> {
+  const { token } = normalizeInvitationClaim(input);
+  const db = await ensureDatabase();
+  const invitation = await db.prepare("SELECT id,organisation_id,email,role_code,status,expires_at,invited_by FROM user_invitations WHERE claim_token=?")
+    .bind(token).first<{ id: string; organisation_id: string; email: string; role_code: string; status: string; expires_at: string; invited_by: string }>();
+  if (!invitation) throw new IdentityValidationError([{ code: "INVITATION_NOT_FOUND", path: "/token", message: "The invitation token is invalid." }]);
+  if (invitation.status !== "PENDING") throw new IdentityValidationError([{ code: "INVITATION_NOT_PENDING", path: "/token", message: `This invitation is already ${invitation.status}.` }]);
+  if (new Date(invitation.expires_at).getTime() < Date.now()) {
+    await db.prepare("UPDATE user_invitations SET status='EXPIRED' WHERE id=?").bind(invitation.id).run();
+    throw new IdentityValidationError([{ code: "INVITATION_EXPIRED", path: "/token", message: "This invitation has expired." }]);
+  }
+  if (invitation.email.toLowerCase() !== platformIdentity.email.toLowerCase()) {
+    throw new IdentityValidationError([{ code: "EMAIL_MISMATCH", path: "/token", message: "The authenticated email does not match the invited email." }]);
+  }
+
+  const provider = await db.prepare("SELECT id FROM identity_providers WHERE provider_key='SITES_WORKSPACE' AND status='ACTIVE' AND configuration_status='CONFIGURED'")
+    .first<{ id: string }>();
+  if (!provider) throw new IdentityValidationError([{ code: "PROVIDER_NOT_CONFIGURED", path: "/", message: "The platform identity provider is not configured." }]);
+  const existingLink = await db.prepare("SELECT id FROM identity_links WHERE provider_id=? AND subject=?").bind(provider.id, platformIdentity.subject).first<{ id: string }>();
+  if (existingLink) throw new RepositoryConflictError("This platform identity is already linked to an account.");
+
+  const organisation = await db.prepare("SELECT id,taxpayer_id FROM organisations WHERE id=?").bind(invitation.organisation_id).first<{ id: string; taxpayer_id: string }>();
+  if (!organisation) throw new IdentityValidationError([{ code: "ORGANISATION_NOT_FOUND", path: "/", message: "The inviting organisation no longer exists." }]);
+
+  const now = new Date().toISOString();
+  const userId = crypto.randomUUID();
+  const identityLinkId = crypto.randomUUID();
+  const membershipId = crypto.randomUUID();
+  const claimant: UserContext = {
+    userId, email: platformIdentity.email, displayName: platformIdentity.displayName, role: invitation.role_code,
+    taxpayerId: organisation.taxpayer_id, organisationId: invitation.organisation_id,
+    capabilities: [], dynamicPermissions: [], isDevelopmentIdentity: false,
+  };
+  await db.batch([
+    db.prepare(`INSERT INTO app_users (id,external_user_id,email,display_name,role,taxpayer_id,status,created_at)
+      VALUES (?,?,?,?,?,?,?,?)`).bind(userId, platformIdentity.subject, platformIdentity.email, platformIdentity.displayName, invitation.role_code, organisation.taxpayer_id, "ACTIVE", now),
+    db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(identityLinkId, userId, provider.id, platformIdentity.subject, platformIdentity.email, "PLATFORM_AUTHENTICATED", "ACTIVE", now, now),
+    db.prepare(`INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      VALUES (?,?,?,?,NULL,?,?,NULL,?,?)`).bind(membershipId, invitation.organisation_id, userId, invitation.role_code, "ACTIVE", now, invitation.invited_by, now),
+    db.prepare("UPDATE user_invitations SET status='CLAIMED',claimed_at=?,claimed_by_user_id=? WHERE id=?").bind(now, userId, invitation.id),
+    outboxEvent(db, "IDENTITY", userId, "UserProvisioned", organisation.taxpayer_id, { userId, organisationId: invitation.organisation_id, invitationId: invitation.id, correlationId }),
+    await appendAudit(db, claimant, "USER_PROVISIONED", "APP_USER", userId, { organisationId: invitation.organisation_id, roleCode: invitation.role_code, invitationId: invitation.id }),
+  ]);
+  return { userId, organisationId: invitation.organisation_id, roleCode: invitation.role_code, status: "ACTIVE" };
 }

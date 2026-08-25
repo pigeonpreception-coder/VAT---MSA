@@ -45,6 +45,13 @@ const SCHEMA_STATEMENTS = [
     linked_at TEXT NOT NULL, last_authenticated_at TEXT,
     UNIQUE (provider_id, subject)
   )`,
+  `CREATE TABLE IF NOT EXISTS user_invitations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    email TEXT NOT NULL, role_code TEXT NOT NULL REFERENCES access_roles(code),
+    claim_token TEXT NOT NULL UNIQUE, status TEXT NOT NULL,
+    invited_by TEXT NOT NULL REFERENCES app_users(id), invited_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL, claimed_at TEXT, claimed_by_user_id TEXT REFERENCES app_users(id)
+  )`,
   `CREATE TABLE IF NOT EXISTS organisations (
     id TEXT PRIMARY KEY, taxpayer_id TEXT NOT NULL UNIQUE REFERENCES taxpayers(id),
     legal_name TEXT NOT NULL, trading_name TEXT, status TEXT NOT NULL,
@@ -836,6 +843,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_status_submitted ON registration_applications(status, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_identifiers ON registration_applications(vat_number, tin)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_invitations_org_email_status ON user_invitations(organisation_id, email, status)`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,

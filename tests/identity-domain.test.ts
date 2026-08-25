@@ -7,9 +7,11 @@ import {
   normalizeBranchUpdate,
   normalizeCounterpartyVatNumber,
   normalizeIdentityLink,
+  normalizeInvitationClaim,
   normalizeMembershipAssignment,
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
+  normalizeUserInvitation,
 } from "@/lib/domain/identity";
 
 function registration(overrides: Record<string, unknown> = {}) {
@@ -199,5 +201,35 @@ describe("identity link validation (LinkIdentity)", () => {
   it("rejects an empty or oversized subject", () => {
     expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "ITAS", subject: "" })).toThrow(IdentityValidationError);
     expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "ITAS", subject: "x".repeat(201) })).toThrow(IdentityValidationError);
+  });
+});
+
+describe("user invitation validation (ProvisionUser invite half)", () => {
+  it("normalizes a well-formed invitation, lowercasing the email and uppercasing the role", () => {
+    expect(normalizeUserInvitation({ email: "New.Hire@Example.Com", role_code: "taxpayer_staff" })).toEqual({
+      email: "new.hire@example.com",
+      roleCode: "TAXPAYER_STAFF",
+    });
+  });
+
+  it("rejects a malformed email", () => {
+    expect(() => normalizeUserInvitation({ email: "not-an-email", role_code: "TAXPAYER_STAFF" })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects NamRA, platform and portal roles as not invitable via this command", () => {
+    for (const role of ["NAMRA_AUDITOR", "PILOT_ADMIN", "SUPER_ADMIN"]) {
+      expect(() => normalizeUserInvitation({ email: "person@example.com", role_code: role })).toThrow(IdentityValidationError);
+    }
+  });
+});
+
+describe("invitation claim validation (ProvisionUser claim half)", () => {
+  it("accepts a well-formed token", () => {
+    expect(normalizeInvitationClaim({ token: "abc123" })).toEqual({ token: "abc123" });
+  });
+
+  it("rejects a missing or oversized token", () => {
+    expect(() => normalizeInvitationClaim({})).toThrow(IdentityValidationError);
+    expect(() => normalizeInvitationClaim({ token: "x".repeat(101) })).toThrow(IdentityValidationError);
   });
 });

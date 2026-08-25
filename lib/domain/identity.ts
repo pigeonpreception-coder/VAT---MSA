@@ -305,3 +305,44 @@ export function normalizeMembershipAssignment(input: unknown): MembershipAssignm
   const branchId = textValue(source.branch_id) || null;
   return { userId, roleCode: roleCode as AssignableMembershipRole, branchId };
 }
+
+export type UserInvitationInput = { email: string; roleCode: AssignableMembershipRole };
+
+/**
+ * Module 1 Identity ProvisionUser (explicit invite-and-claim, see
+ * MODULE_DEVELOPMENT_PLAYBOOK.md's Phase C decision): an org admin invites a
+ * not-yet-existing person by email. Reuses AssignMembership's role ceiling —
+ * an invitation can never grant more than a taxpayer-side membership role,
+ * for the same privilege-escalation reason ASSIGNABLE_MEMBERSHIP_ROLES exists.
+ */
+export function normalizeUserInvitation(input: unknown): UserInvitationInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "An invitation object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const messages: IdentityValidationMessage[] = [];
+  const email = textValue(source.email).toLowerCase();
+  if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
+    messages.push({ code: "EMAIL_INVALID", path: "/email", message: "A valid email address is required." });
+  }
+  const roleCode = textValue(source.role_code).toUpperCase();
+  if (!(ASSIGNABLE_MEMBERSHIP_ROLES as readonly string[]).includes(roleCode)) {
+    messages.push({ code: "ROLE_NOT_ASSIGNABLE", path: "/role_code", message: `role_code must be one of: ${ASSIGNABLE_MEMBERSHIP_ROLES.join(", ")}.` });
+  }
+  if (messages.length) throw new IdentityValidationError(messages);
+  return { email, roleCode: roleCode as AssignableMembershipRole };
+}
+
+export type InvitationClaim = { token: string };
+
+export function normalizeInvitationClaim(input: unknown): InvitationClaim {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A claim object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const token = textValue(source.token);
+  if (!token || token.length > 100) {
+    throw new IdentityValidationError([{ code: "TOKEN_INVALID", path: "/token", message: "token is required." }]);
+  }
+  return { token };
+}
