@@ -82,7 +82,7 @@ Modules 8–10 have components you can and should start early (platform/security
 
 ### Phase E — Workspace projection & hardening (S)
 - [x] `GetWorkspace` pre-existing; `GetChildren` (`GET /api/v1/navigation/children`, properly traverses nested `parent_folder_id`), `GetActions` (`GET /api/v1/navigation/actions`, explainable single-item access check) and `SavePreference` (`POST /api/v1/navigation/preferences`, upserts) now built. `NavigationPermission`/`navigation_permissions` remains unwired — flagged, not fixed.
-- [ ] Negative-test suite: cross-organisation access, cross-role access, expired session, insufficient assurance level — pure-function-level negative tests now exist across several test files, but **zero route-level/DB-integration tests exist anywhere in the repo** (a pre-existing limitation, not introduced by this work) — still open, and would need test DB/fixture infrastructure this repo doesn't have yet before it can be closed.
+- [x] Negative-test suite: `tests/routes/module-1-access-control.test.ts` — cross-organisation access, cross-role access, expired step-up and insufficient assurance level are now provably rejected through real route handlers, backed by a real SQLite engine (`tests/support/fake-d1.ts`, over Node's built-in `node:sqlite`) via test-only stand-ins for `cloudflare:workers` and `next/headers` (`tests/fakes/`) — both only resolve inside their real runtimes, which is why no route/repository code could be tested end-to-end before this. `vitest.config.ts` aliases the three specifiers to these fakes; pure-domain tests are unaffected since they never import anything that reaches them.
 
 **Watch-outs:**
 - `GetUserAccess` must never be a cached/stale snapshot — every module trusts it live.
