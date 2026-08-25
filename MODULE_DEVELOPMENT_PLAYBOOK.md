@@ -120,14 +120,14 @@ Modules 8–10 have components you can and should start early (platform/security
 - Note: `lib/data/vat-lifecycle-repository.ts` looks related by name but is VAT-*return*-period adjustment logic (a different domain, likely Module 3), not this ledger.
 
 ### Phase E — Hardening (M)
-- [ ] Idempotency relies on a real `UNIQUE(actor_id, idempotency_key)` constraint, which is a legitimate concurrency-safety strategy, but a concurrent-retry race is **not caught and converted into an idempotent "return the prior result"** — it would surface as an unhandled D1 constraint error. Untested either way. Open.
-- [ ] The unidentified-buyer guarantee (this phase's flagged P0) is **correctly implemented** (`repository.ts`: the `INPUT_VAT` ledger insert and customer-side return update only happen inside `if (customer)`) but had **zero test coverage** before this cycle and still has none specifically for that guarantee (Module 2's new route tests cover the VAT rule engine, not this). Open.
+- [x] Idempotency under concurrent retries. The SELECT-then-INSERT check was not itself atomic; a race that lost was previously an unhandled `UNIQUE constraint failed` error surfacing as a raw 500. `submitInvoice` now catches a constraint violation from `db.batch(statements)`, re-checks `idempotency_records` for a matching row, and returns that prior result if the request hash matches (a genuine race on the same submission) — or the existing `RepositoryConflictError` if it doesn't (a different payload reusing the key, or a different document colliding under a different key). `tests/routes/module-2-invoice-hardening.test.ts` fires the identical request twice via `Promise.all` (a real interleaved-async race, not a sequential call) and asserts exactly one invoice row results.
+- [x] The unidentified-buyer guarantee (this phase's flagged P0) was already correctly implemented (`repository.ts`: the `INPUT_VAT` ledger insert and customer-side return update only happen inside `if (customer)`) but had zero test coverage. `tests/routes/module-2-invoice-hardening.test.ts` now asserts directly against `ledger_entries` for both the suppressed case (unresolved buyer → zero `INPUT_VAT` rows) and the posted case (an active BUYER-capable organisation → exactly one).
 
 **Watch-outs:**
 - `ExplainCalculation`'s fail-closed behaviour is load-bearing for the whole system's statutory defensibility — don't let a future refactor quietly add a fallback rate.
 - Correction records and reversal records look similar; keep their semantics (supersede vs. cancel) distinct in the data model, not just in naming.
 
-**Definition of done:** invoice → certified → VAT-calculated → transaction-posted → correction-capable, fully idempotent under concurrency, fully explainable to a specific rule version, with the unidentified-buyer guarantee under test. Phase A now meets this for the VAT-calculation/explainability half; Phases B (numbering integrity, Cancel), D (ledger commands) and E (concurrency, buyer-guarantee test coverage) remain open.
+**Definition of done:** invoice → certified → VAT-calculated → transaction-posted → correction-capable, fully idempotent under concurrency, fully explainable to a specific rule version, with the unidentified-buyer guarantee under test. Phases A and E now meet this; Phases B (numbering integrity, Cancel), C (lineage not in VerifyInvoice's public output) and D (no standalone ledger commands) remain open.
 
 ---
 

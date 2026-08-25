@@ -486,7 +486,34 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
     ));
   }
 
-  await db.batch(statements);
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    // Module 2 Phase E: idempotency under concurrent retries. The SELECT-then-
+    // INSERT check above is not itself atomic — two identical requests in
+    // flight together can both pass it and both reach this batch. Whichever
+    // commits second hits a UNIQUE constraint (idempotency_records, or the
+    // invoices table's duplicate-source-document guard, whichever statement
+    // in the batch executes first) and previously surfaced as a raw,
+    // unhandled 500. Recover it into the same idempotent response the
+    // earlier, non-racing case already returns, rather than letting the
+    // constraint violation leak out as an opaque failure.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/unique constraint failed/i.test(message)) throw error;
+    const race = await db.prepare("SELECT request_hash, response_invoice_id FROM idempotency_records WHERE actor_id = ? AND idempotency_key = ?")
+      .bind(actor.userId, idempotencyKey).first<{ request_hash: string; response_invoice_id: string }>();
+    if (race) {
+      if (race.request_hash !== requestHash) throw new RepositoryConflictError("The idempotency key was already used for a different invoice payload.");
+      const existing = await getInvoiceById(race.response_invoice_id, actor);
+      if (existing) return existing;
+    }
+    // No idempotency record exists for this key, so the collision was on a
+    // different constraint (most likely the invoices table's duplicate-
+    // source-document guard) racing in under a different idempotency key —
+    // the same conflict the earlier, non-racing "duplicate" check above
+    // already reports for the non-concurrent case.
+    throw new RepositoryConflictError("This invoice conflicts with one submitted concurrently for the same source document or invoice number.");
+  }
   const created = await getInvoiceById(invoiceId, actor);
   if (!created) throw new Error("Invoice was committed but could not be reloaded.");
   return created;
