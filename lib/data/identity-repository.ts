@@ -6,6 +6,7 @@ import {
   normalizeBranch,
   normalizeBranchUpdate,
   normalizeCounterpartyVatNumber,
+  normalizeIdentifierCorrection,
   normalizeIdentityLink,
   normalizeInvitationClaim,
   normalizeMembershipAssignment,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/domain/identity";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import type { UserContext } from "@/lib/domain/types";
-import { getItasIdentityPort } from "@/lib/integrations/itas";
+import { getItasIdentityPort, ItasIntegrationUnavailableError } from "@/lib/integrations/itas";
 import { RepositoryConflictError } from "./repository";
 
 async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
@@ -99,8 +100,8 @@ export async function getOrganisation(user: UserContext, organisationId: string)
       WHERE m.organisation_id = ? ORDER BY u.display_name`).bind(organisationId).all<Record<string, string | null>>(),
     db.prepare("SELECT capability, status, effective_from, effective_to FROM organisation_capabilities WHERE organisation_id = ? ORDER BY capability")
       .bind(organisationId).all<Record<string, string | null>>(),
-    db.prepare("SELECT identifier_type, identifier_value, country, status, source, verified_at FROM taxpayer_identifiers WHERE taxpayer_id = ? ORDER BY identifier_type")
-      .bind(organisation.taxpayer_id).all<Record<string, string | null>>(),
+    db.prepare("SELECT id, identifier_type, identifier_value, country, status, source, verified_at, version, effective_from, effective_to FROM taxpayer_identifiers WHERE taxpayer_id = ? ORDER BY identifier_type, version DESC")
+      .bind(organisation.taxpayer_id).all<Record<string, string | number | null>>(),
   ]);
   return { ...organisation, branches: branches.results, memberships: memberships.results, capabilities: capabilities.results, identifiers: identifiers.results };
 }
@@ -735,4 +736,128 @@ export async function claimInvitation(
     await appendAudit(db, claimant, "USER_PROVISIONED", "APP_USER", userId, { organisationId: invitation.organisation_id, roleCode: invitation.role_code, invitationId: invitation.id }),
   ]);
   return { userId, organisationId: invitation.organisation_id, roleCode: invitation.role_code, status: "ACTIVE" };
+}
+
+const CORRECTABLE_IDENTIFIER_TYPES = new Set(["VAT_NUMBER", "TIN"]);
+
+export type IdentifierCorrectionResult = {
+  taxpayerId: string;
+  identifierType: string;
+  previousIdentifierId: string;
+  newIdentifierId: string;
+  identifierValue: string;
+  version: number;
+};
+
+/**
+ * Module 1 Taxpayer IdentifierVersion / correction path. Statutory identity
+ * records are never overwritten in place (see MODULE_DEVELOPMENT_PLAYBOOK.md's
+ * ground rules): correcting a VAT number or TIN supersedes the current
+ * taxpayer_identifiers row (status SUPERSEDED, effective_to set) and inserts
+ * a new versioned row linked back via previous_version_id, rather than
+ * mutating identifier_value in place. Also keeps taxpayers.vat_number/tin in
+ * sync, since those denormalized columns are what actually gets read
+ * elsewhere (ClassifyTransaction, invoice counterparty resolution,
+ * submitRegistrationApplication's duplicate checks) — without this, the
+ * correction would be recorded but have no real effect. Scoped to
+ * VAT_NUMBER/TIN only: those are the only identifier types this codebase
+ * currently issues, and the only ones with a denormalized taxpayers column
+ * to keep in sync.
+ */
+export async function correctTaxpayerIdentifier(
+  actor: UserContext,
+  taxpayerId: string,
+  identifierId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<IdentifierCorrectionResult> {
+  const correction = normalizeIdentifierCorrection(input);
+  const db = await ensureDatabase();
+  const current = await db.prepare("SELECT id,taxpayer_id,identifier_type,identifier_value,country,status,version FROM taxpayer_identifiers WHERE id=? AND taxpayer_id=?")
+    .bind(identifierId, taxpayerId)
+    .first<{ id: string; taxpayer_id: string; identifier_type: string; identifier_value: string; country: string; status: string; version: number }>();
+  if (!current) {
+    throw new IdentityValidationError([{ code: "IDENTIFIER_NOT_FOUND", path: "/identifier_id", message: "The identifier does not exist for this taxpayer." }]);
+  }
+  if (current.status !== "ACTIVE") {
+    throw new IdentityValidationError([{ code: "IDENTIFIER_NOT_ACTIVE", path: "/identifier_id", message: `This identifier is currently ${current.status}; correct the current active version instead.` }]);
+  }
+  if (!CORRECTABLE_IDENTIFIER_TYPES.has(current.identifier_type)) {
+    throw new IdentityValidationError([{ code: "IDENTIFIER_TYPE_NOT_CORRECTABLE", path: "/identifier_id", message: `${current.identifier_type} identifiers cannot be corrected via this command.` }]);
+  }
+  if (current.identifier_value === correction.identifierValue) {
+    throw new IdentityValidationError([{ code: "IDENTIFIER_UNCHANGED", path: "/identifier_value", message: "The corrected value is identical to the current value." }]);
+  }
+  const duplicateIdentifier = await db.prepare("SELECT id FROM taxpayer_identifiers WHERE identifier_type=? AND identifier_value=? AND country=? AND status='ACTIVE'")
+    .bind(current.identifier_type, correction.identifierValue, current.country).first<{ id: string }>();
+  if (duplicateIdentifier) throw new RepositoryConflictError("Another active taxpayer already holds this identifier value.");
+  const taxpayerColumn = current.identifier_type === "VAT_NUMBER" ? "vat_number" : "tin";
+  const duplicateTaxpayer = await db.prepare(`SELECT id FROM taxpayers WHERE ${taxpayerColumn}=? AND id<>?`).bind(correction.identifierValue, taxpayerId).first<{ id: string }>();
+  if (duplicateTaxpayer) throw new RepositoryConflictError("Another taxpayer already uses this identifier value.");
+
+  const now = new Date().toISOString();
+  const newId = crypto.randomUUID();
+  await db.batch([
+    db.prepare("UPDATE taxpayer_identifiers SET status='SUPERSEDED',effective_to=? WHERE id=?").bind(now, current.id),
+    db.prepare(`INSERT INTO taxpayer_identifiers (id,taxpayer_id,identifier_type,identifier_value,country,status,source,verified_at,created_at,version,effective_from,effective_to,previous_version_id)
+      VALUES (?,?,?,?,?,?,?,NULL,?,?,?,NULL,?)`)
+      .bind(newId, taxpayerId, current.identifier_type, correction.identifierValue, current.country, "ACTIVE", "MANUAL_CORRECTION", now, current.version + 1, now, current.id),
+    db.prepare(`UPDATE taxpayers SET ${taxpayerColumn}=? WHERE id=?`).bind(correction.identifierValue, taxpayerId),
+    outboxEvent(db, "TAXPAYER", taxpayerId, "TaxpayerIdentifierCorrected", taxpayerId, {
+      taxpayerId, identifierType: current.identifier_type, previousIdentifierId: current.id, newIdentifierId: newId, correlationId,
+    }),
+    await appendAudit(db, actor, "TAXPAYER_IDENTIFIER_CORRECTED", "TAXPAYER_IDENTIFIER", newId, {
+      taxpayerId, identifierType: current.identifier_type, previousValue: current.identifier_value, newValue: correction.identifierValue,
+      reason: correction.reason, previousIdentifierId: current.id,
+    }),
+  ]);
+  return { taxpayerId, identifierType: current.identifier_type, previousIdentifierId: current.id, newIdentifierId: newId, identifierValue: correction.identifierValue, version: current.version + 1 };
+}
+
+export type IdentifierVerificationResult = {
+  taxpayerId: string;
+  provider: "ITAS";
+  status: "VERIFIED" | "AWAITING_PROVIDER_CONTRACT";
+  checkedAt: string;
+  requestReference: string | null;
+};
+
+/**
+ * Module 1 Taxpayer VerifyIdentifiers, as a standalone command re-triggerable
+ * any time after registration — submitRegistrationApplication already
+ * records one AWAITING_PROVIDER_CONTRACT attempt at intake, but there was
+ * previously no way to retry once ITAS becomes available without
+ * resubmitting an entire new registration. Calls the same ItasIdentityPort
+ * registration already calls (lib/integrations/itas.ts); today that always
+ * fails closed with ItasIntegrationUnavailableError since ITAS is
+ * unconfigured — that failure is caught and reported honestly as
+ * AWAITING_PROVIDER_CONTRACT, never silently swallowed or faked into a
+ * success.
+ */
+export async function verifyTaxpayerIdentifiers(
+  actor: UserContext,
+  taxpayerId: string,
+  correlationId: string,
+): Promise<IdentifierVerificationResult> {
+  const db = await ensureDatabase();
+  const taxpayer = await db.prepare("SELECT id,vat_number,tin FROM taxpayers WHERE id=?").bind(taxpayerId).first<{ id: string; vat_number: string; tin: string }>();
+  if (!taxpayer) throw new IdentityValidationError([{ code: "TAXPAYER_NOT_FOUND", path: "/taxpayer_id", message: "The taxpayer does not exist." }]);
+  requireTaxpayerScope(actor, taxpayer.id);
+
+  const now = new Date().toISOString();
+  const itas = getItasIdentityPort();
+  try {
+    const result = await itas.verifyTaxpayer({ vatNumber: taxpayer.vat_number, tin: taxpayer.tin, correlationId });
+    await db.batch([
+      db.prepare("UPDATE taxpayer_identifiers SET verified_at=? WHERE taxpayer_id=? AND identifier_type IN ('VAT_NUMBER','TIN') AND status='ACTIVE'").bind(result.checkedAt, taxpayerId),
+      outboxEvent(db, "TAXPAYER", taxpayerId, "TaxpayerIdentifiersVerified", taxpayerId, { taxpayerId, provider: "ITAS", requestReference: result.requestReference, correlationId }),
+      await appendAudit(db, actor, "TAXPAYER_IDENTIFIERS_VERIFIED", "TAXPAYER", taxpayerId, { provider: "ITAS", requestReference: result.requestReference }),
+    ]);
+    return { taxpayerId, provider: "ITAS", status: "VERIFIED", checkedAt: result.checkedAt, requestReference: result.requestReference };
+  } catch (error) {
+    if (!(error instanceof ItasIntegrationUnavailableError)) throw error;
+    const auditStatement = await appendAudit(db, actor, "TAXPAYER_IDENTIFIER_VERIFICATION_ATTEMPTED", "TAXPAYER", taxpayerId, { provider: "ITAS", outcome: "AWAITING_PROVIDER_CONTRACT" });
+    await auditStatement.run();
+    return { taxpayerId, provider: "ITAS", status: "AWAITING_PROVIDER_CONTRACT", checkedAt: now, requestReference: null };
+  }
 }

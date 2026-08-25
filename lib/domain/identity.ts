@@ -333,6 +333,27 @@ export function normalizeUserInvitation(input: unknown): UserInvitationInput {
   return { email, roleCode: roleCode as AssignableMembershipRole };
 }
 
+export type IdentifierCorrection = { identifierValue: string; reason: string };
+
+/**
+ * Module 1 Taxpayer IdentifierVersion / correction: a NamRA/pilot-admin
+ * officer correcting a taxpayer's already-recorded VAT number or TIN.
+ * Statutory records are never overwritten in place — see
+ * lib/data/identity-repository.ts's correctTaxpayerIdentifier for how this
+ * supersedes the current taxpayer_identifiers row instead of mutating it.
+ */
+export function normalizeIdentifierCorrection(input: unknown): IdentifierCorrection {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "An identifier correction object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const messages: IdentityValidationMessage[] = [];
+  const identifierValue = identifier(source.identifier_value, "/identifier_value", "Identifier value", messages);
+  const reason = boundedText(source.reason, "/reason", "Correction reason", 5, 240, messages);
+  if (messages.length) throw new IdentityValidationError(messages);
+  return { identifierValue, reason };
+}
+
 export type InvitationClaim = { token: string };
 
 export function normalizeInvitationClaim(input: unknown): InvitationClaim {

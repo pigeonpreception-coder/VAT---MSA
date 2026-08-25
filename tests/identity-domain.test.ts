@@ -6,6 +6,7 @@ import {
   normalizeBranch,
   normalizeBranchUpdate,
   normalizeCounterpartyVatNumber,
+  normalizeIdentifierCorrection,
   normalizeIdentityLink,
   normalizeInvitationClaim,
   normalizeMembershipAssignment,
@@ -220,6 +221,23 @@ describe("user invitation validation (ProvisionUser invite half)", () => {
     for (const role of ["NAMRA_AUDITOR", "PILOT_ADMIN", "SUPER_ADMIN"]) {
       expect(() => normalizeUserInvitation({ email: "person@example.com", role_code: role })).toThrow(IdentityValidationError);
     }
+  });
+});
+
+describe("identifier correction validation (IdentifierVersion)", () => {
+  it("normalizes a well-formed correction, uppercasing the identifier", () => {
+    expect(normalizeIdentifierCorrection({ identifier_value: "vat-new-002", reason: "Corrected a transposed digit reported by the taxpayer." })).toEqual({
+      identifierValue: "VAT-NEW-002",
+      reason: "Corrected a transposed digit reported by the taxpayer.",
+    });
+  });
+
+  it("rejects a malformed identifier value", () => {
+    expect(() => normalizeIdentifierCorrection({ identifier_value: "<script>", reason: "Corrected a transposed digit reported by the taxpayer." })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeIdentifierCorrection({ identifier_value: "VAT-NEW-002", reason: "no" })).toThrow(IdentityValidationError);
   });
 });
 

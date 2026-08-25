@@ -64,8 +64,8 @@ Modules 8–10 have components you can and should start early (platform/security
 
 ### Phase B — Taxpayer & organisation core (M)
 - [x] `SuspendTaxpayer` (`POST /api/v1/taxpayers/:id/suspension`, idempotent, immediately enforced via existing `vat_status='ACTIVE'` filters).
-- [ ] `IdentifierVersion`/effective-dating on `taxpayer_identifiers` — still open; corrections would currently overwrite rows.
-- [ ] `VerifyIdentifiers` standalone (non-ITAS) path — partially covered as a side effect of the registration-decision command below, but no standalone query/command exists outside that one flow.
+- [x] `IdentifierVersion`/effective-dating on `taxpayer_identifiers` (`version`, `effective_from`, `effective_to`, `previous_version_id` columns). `POST /api/v1/taxpayers/:id/identifiers/:identifierId/correction` supersedes the current VAT_NUMBER/TIN row rather than overwriting it, and keeps the denormalized `taxpayers.vat_number`/`tin` columns in sync so the correction actually takes effect on counterparty resolution. `GetOrganisation` now surfaces the full version history per identifier.
+- [x] `VerifyIdentifiers` standalone (`POST /api/v1/taxpayers/:id/identifiers/verification`) — re-triggerable at any time after registration (previously verification only ever happened once, at intake). Calls the same `ItasIdentityPort` registration intake uses; today that always fails closed since ITAS is unconfigured, and the command honestly reports `AWAITING_PROVIDER_CONTRACT` rather than faking success.
 - [x] `ActivateOrganisation`, `EnableCapability` (both via `POST /api/v1/registration-applications/:id/decision`, which also creates the head-office branch and owner membership) — `GetOrganisation` pre-existing, `ListBranches` + branch create/update now standalone (`GET`/`POST /api/v1/organisations/:id/branches`, `PATCH .../branches/:branchId`).
 
 ### Phase C — Users, roles & buyer/seller capability (M)

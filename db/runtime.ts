@@ -12,6 +12,8 @@ const SCHEMA_STATEMENTS = [
     identifier_type TEXT NOT NULL, identifier_value TEXT NOT NULL,
     country TEXT NOT NULL DEFAULT 'NA', status TEXT NOT NULL, source TEXT NOT NULL,
     verified_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version INTEGER NOT NULL DEFAULT 1, effective_from TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    effective_to TEXT, previous_version_id TEXT REFERENCES taxpayer_identifiers(id),
     UNIQUE (identifier_type, identifier_value, country)
   )`,
   `CREATE TABLE IF NOT EXISTS invoices (
