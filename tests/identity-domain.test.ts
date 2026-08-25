@@ -13,6 +13,7 @@ import {
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
   normalizeUserInvitation,
+  normalizeUserSuspension,
 } from "@/lib/domain/identity";
 
 function registration(overrides: Record<string, unknown> = {}) {
@@ -202,6 +203,23 @@ describe("identity link validation (LinkIdentity)", () => {
   it("rejects an empty or oversized subject", () => {
     expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "ITAS", subject: "" })).toThrow(IdentityValidationError);
     expect(() => normalizeIdentityLink({ user_id: "usr-1", provider_key: "ITAS", subject: "x".repeat(201) })).toThrow(IdentityValidationError);
+  });
+});
+
+describe("user suspension validation (SuspendUser)", () => {
+  it("accepts a well-formed suspension reason", () => {
+    expect(normalizeUserSuspension({ reason: "Suspected compromised credentials pending investigation." })).toEqual({
+      reason: "Suspected compromised credentials pending investigation.",
+    });
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeUserSuspension({ reason: "no" })).toThrow(IdentityValidationError);
+    expect(() => normalizeUserSuspension({ reason: "x".repeat(241) })).toThrow(IdentityValidationError);
+  });
+
+  it("rejects a missing body", () => {
+    expect(() => normalizeUserSuspension(null)).toThrow(IdentityValidationError);
   });
 });
 

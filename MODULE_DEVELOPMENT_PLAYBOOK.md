@@ -69,7 +69,7 @@ Modules 8–10 have components you can and should start early (platform/security
 - [x] `ActivateOrganisation`, `EnableCapability` (both via `POST /api/v1/registration-applications/:id/decision`, which also creates the head-office branch and owner membership) — `GetOrganisation` pre-existing, `ListBranches` + branch create/update now standalone (`GET`/`POST /api/v1/organisations/:id/branches`, `PATCH .../branches/:branchId`).
 
 ### Phase C — Users, roles & buyer/seller capability (M)
-- [x] `ProvisionUser` (invite-and-claim, see decision above). `SuspendUser` still open (suspension today happens as a side effect of `terminateEmployee`, not a standalone command).
+- [x] `ProvisionUser` (invite-and-claim, see decision above). `SuspendUser` (`POST /api/v1/users/:id/suspension`) and its reverse (`POST /api/v1/users/:id/reactivation`) are now standalone — a reversible lockout distinct from `terminateEmployee`'s one-way offboarding, which still also suspends `app_users` as one part of a larger irreversible action.
 - [x] `AssignMembership` (`POST /api/v1/organisations/:id/memberships`, restricted to TAXPAYER_* roles — a deliberate privilege-escalation guard).
 - [x] `GetUserAccess` (`GET /api/v1/me/access`) — the full effective RBAC+ABAC predicate set, computed live.
 - [x] `CreateRole`/`AssignPermission` pre-existing; `GrantCapability` now standalone (`GET`/`POST /api/v1/organisations/capabilities`, upserts, requires the org to already hold the capability).

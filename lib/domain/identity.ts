@@ -354,6 +354,27 @@ export function normalizeIdentifierCorrection(input: unknown): IdentifierCorrect
   return { identifierValue, reason };
 }
 
+export type UserSuspension = { reason: string };
+
+/**
+ * Module 1 Identity SuspendUser: standalone, reversible account lockout.
+ * Deliberately distinct from terminateEmployee (lib/data/control-plane-repository.ts),
+ * which is a one-way offboarding that also decrements a licence seat and
+ * terminates the employee record — this is the lighter action for e.g. a
+ * security incident or a suspected-compromised account, where the intent is
+ * "lock them out now, decide later," not "this person no longer works here."
+ */
+export function normalizeUserSuspension(input: unknown): UserSuspension {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new IdentityValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A suspension object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const messages: IdentityValidationMessage[] = [];
+  const reason = boundedText(source.reason, "/reason", "Suspension reason", 5, 240, messages);
+  if (messages.length) throw new IdentityValidationError(messages);
+  return { reason };
+}
+
 export type InvitationClaim = { token: string };
 
 export function normalizeInvitationClaim(input: unknown): InvitationClaim {

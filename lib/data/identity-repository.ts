@@ -1,5 +1,5 @@
 import { ensureDatabase } from "@/db/runtime";
-import { isNationalScope, requireTaxpayerScope } from "@/lib/auth";
+import { AccessDeniedError, isNationalScope, requireTaxpayerScope } from "@/lib/auth";
 import {
   IdentityValidationError,
   normalizeAndValidateRegistration,
@@ -13,6 +13,7 @@ import {
   normalizeRegistrationDecision,
   normalizeTaxpayerSuspension,
   normalizeUserInvitation,
+  normalizeUserSuspension,
   type RegistrationSubmission,
 } from "@/lib/domain/identity";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
@@ -860,4 +861,61 @@ export async function verifyTaxpayerIdentifiers(
     await auditStatement.run();
     return { taxpayerId, provider: "ITAS", status: "AWAITING_PROVIDER_CONTRACT", checkedAt: now, requestReference: null };
   }
+}
+
+type TargetUserRow = { id: string; status: string; taxpayer_id: string | null };
+
+async function requireUserInScope(db: D1Database, actor: UserContext, userId: string): Promise<TargetUserRow> {
+  const targetUser = await db.prepare("SELECT id,status,taxpayer_id FROM app_users WHERE id=?").bind(userId).first<TargetUserRow>();
+  if (!targetUser) throw new IdentityValidationError([{ code: "USER_NOT_FOUND", path: "/user_id", message: "The user does not exist." }]);
+  if (!isNationalScope(actor) && actor.taxpayerId !== targetUser.taxpayer_id) {
+    throw new AccessDeniedError("The requested user is outside your authorised taxpayer scope.");
+  }
+  return targetUser;
+}
+
+export type UserSuspensionResult = { userId: string; status: string };
+
+/**
+ * Module 1 Identity SuspendUser: standalone, reversible account lockout —
+ * see normalizeUserSuspension in lib/domain/identity.ts for how this differs
+ * from terminateEmployee's one-way offboarding. Has a real, immediate
+ * effect: getCurrentUser()'s join requires app_users.status='ACTIVE', so a
+ * suspended user is rejected on their very next request. Self-suspension is
+ * denied for the same lockout reason revokeIdentityLink is admin-only.
+ */
+export async function suspendUser(
+  actor: UserContext,
+  userId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<UserSuspensionResult> {
+  const { reason } = normalizeUserSuspension(input);
+  if (actor.userId === userId) {
+    throw new IdentityValidationError([{ code: "SELF_SUSPENSION_DENIED", path: "/user_id", message: "You cannot suspend your own account." }]);
+  }
+  const db = await ensureDatabase();
+  const targetUser = await requireUserInScope(db, actor, userId);
+  if (targetUser.status === "SUSPENDED") return { userId, status: "SUSPENDED" };
+
+  await db.batch([
+    db.prepare("UPDATE app_users SET status='SUSPENDED' WHERE id=?").bind(userId),
+    outboxEvent(db, "IDENTITY", userId, "UserSuspended", targetUser.taxpayer_id ?? userId, { userId, reason, correlationId }),
+    await appendAudit(db, actor, "USER_SUSPENDED", "APP_USER", userId, { reason, previousStatus: targetUser.status }),
+  ]);
+  return { userId, status: "SUSPENDED" };
+}
+
+/** Module 1 Identity SuspendUser's reverse: restores a suspended account to ACTIVE. Idempotent. */
+export async function reactivateUser(actor: UserContext, userId: string, correlationId: string): Promise<UserSuspensionResult> {
+  const db = await ensureDatabase();
+  const targetUser = await requireUserInScope(db, actor, userId);
+  if (targetUser.status === "ACTIVE") return { userId, status: "ACTIVE" };
+
+  await db.batch([
+    db.prepare("UPDATE app_users SET status='ACTIVE' WHERE id=?").bind(userId),
+    outboxEvent(db, "IDENTITY", userId, "UserReactivated", targetUser.taxpayer_id ?? userId, { userId, correlationId }),
+    await appendAudit(db, actor, "USER_REACTIVATED", "APP_USER", userId, { previousStatus: targetUser.status }),
+  ]);
+  return { userId, status: "ACTIVE" };
 }
