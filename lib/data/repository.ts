@@ -188,21 +188,11 @@ export async function cancelInvoice(
     db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
       crypto.randomUUID(), transactionId, invoice.id, invoice.supplier_taxpayer_id, "OUTPUT_VAT", "DEBIT", invoice.tax_cents, period, now,
     ),
-    db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(taxpayer_id, period) DO UPDATE SET output_tax_cents = output_tax_cents - excluded.output_tax_cents,
-      net_payable_cents = net_payable_cents - excluded.output_tax_cents, last_calculated_at = excluded.last_calculated_at`).bind(
-      crypto.randomUUID(), invoice.supplier_taxpayer_id, period, invoice.tax_cents, 0, invoice.tax_cents, "DRAFT", now,
-    ),
   ];
   if (invoice.customer_taxpayer_id) {
     statements.push(
       db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
         crypto.randomUUID(), transactionId, invoice.id, invoice.customer_taxpayer_id, "INPUT_VAT", "CREDIT", invoice.tax_cents, period, now,
-      ),
-      db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(taxpayer_id, period) DO UPDATE SET input_tax_cents = input_tax_cents - excluded.input_tax_cents,
-        net_payable_cents = net_payable_cents + excluded.input_tax_cents, last_calculated_at = excluded.last_calculated_at`).bind(
-        crypto.randomUUID(), invoice.customer_taxpayer_id, period, 0, invoice.tax_cents, invoice.tax_cents, "DRAFT", now,
       ),
     );
   }
@@ -421,15 +411,6 @@ export async function listExceptions(user: UserContext) {
   const result = isNationalScope(user)
     ? await statement.all<Record<string, string | number | null>>()
     : await statement.bind(user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").all<Record<string, string | number | null>>();
-  return result.results;
-}
-
-export async function listReturns(user: UserContext) {
-  const db = await ensureDatabase();
-  const result = isNationalScope(user)
-    ? await db.prepare(`SELECT r.*, t.legal_name, t.vat_number FROM vat_returns r JOIN taxpayers t ON t.id = r.taxpayer_id ORDER BY r.period DESC, t.legal_name`).all<Record<string, string | number | null>>()
-    : await db.prepare(`SELECT r.*, t.legal_name, t.vat_number FROM vat_returns r JOIN taxpayers t ON t.id = r.taxpayer_id WHERE r.taxpayer_id = ? ORDER BY r.period DESC, t.legal_name`)
-      .bind(user.taxpayerId ?? "__none__").all<Record<string, string | number | null>>();
   return result.results;
 }
 
@@ -658,19 +639,9 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   statements.push(db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
     crypto.randomUUID(), transactionId, invoiceId, supplier.id, "OUTPUT_VAT", reversesVat ? "DEBIT" : "CREDIT", ledgerVatCents, period, now,
   ));
-  statements.push(db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
-    ON CONFLICT(taxpayer_id, period) DO UPDATE SET output_tax_cents = output_tax_cents + excluded.output_tax_cents,
-    net_payable_cents = net_payable_cents + excluded.output_tax_cents, last_calculated_at = excluded.last_calculated_at`).bind(
-      crypto.randomUUID(), supplier.id, period, calculated.taxCents, 0, calculated.taxCents, "DRAFT", now,
-  ));
   if (customer) {
     statements.push(db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
       crypto.randomUUID(), transactionId, invoiceId, customer.id, "INPUT_VAT", reversesVat ? "CREDIT" : "DEBIT", ledgerVatCents, period, now,
-    ));
-    statements.push(db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(taxpayer_id, period) DO UPDATE SET input_tax_cents = input_tax_cents + excluded.input_tax_cents,
-      net_payable_cents = net_payable_cents - excluded.input_tax_cents, last_calculated_at = excluded.last_calculated_at`).bind(
-        crypto.randomUUID(), customer.id, period, 0, calculated.taxCents, -calculated.taxCents, "DRAFT", now,
     ));
   }
 

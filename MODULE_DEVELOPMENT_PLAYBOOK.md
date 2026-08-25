@@ -137,34 +137,35 @@ Modules 8–10 have components you can and should start early (platform/security
 
 **Domains:** Reconciliation, VAT Return, Compliance.
 **Depends on:** Module 2 (invoices/transactions to match), Module 1 (officer identity for assignment). **Unlocks:** Module 9 (refund freezes a submitted return), Module 4 (exceptions can seed audit referrals).
-**Maturity today:** `VERIFIED PILOT` (VAT Return), `CONTROLLED FOUNDATION` (Reconciliation, Compliance).
+**Maturity today:** `VERIFIED PILOT` (VAT Return), `CONTROLLED FOUNDATION` (Reconciliation, Compliance) — a 2026-08-25 code assessment found this roughly accurate for VAT Return (real, solid work: `generateVatReturn`, maker-checker `decideVatApproval`, `submitVatReturn` correctly stopping at the ITAS boundary) but confirmed Reconciliation is much thinner than its data-model anchors suggest — see Phase A/B below.
 
 **Data model anchors:** `Match`, `Exception`, `Resolution` · `VATPeriod` aggregate, `VATReturn`, `ReturnLine`, `Submission` · `ComplianceProfile`, `Obligation`, `Deadline`, `Action`.
 
 ### Phase A — Matching engine (L)
-- [ ] `Match`, `Exception`, `Resolution`; `RunMatch` as a scheduled/event-driven job (invoice ↔ ledger ↔ return); `VATTransactionMatched` / `ExceptionDetected` events.
-- [ ] `Open` / `Assign` / `ResolveException` as a real work-queue with officer assignment and ageing.
-- [ ] `RunMatch` idempotency: a retried match job must not create duplicate `Match`/`Exception` rows.
+- [ ] **Not built.** "Matching" today is `submitInvoice`'s inline risk score setting a MATCHED/EXCEPTION status at submission time (`lib/data/repository.ts`) — not a comparison of an invoice against a counterparty's own filed position. No `RunMatch` job, scheduled or otherwise. The `reconciliation_matches` table exists in schema but is seed-only; no application code ever writes to it. No `Resolution` table/concept exists. Still open.
+- [ ] `Open`/`Assign`/`ResolveException` — none exist. `reconciliation_exceptions` (real, written on submission) has no assignment column at all. Still open.
+- N/A — `RunMatch` idempotency is moot until `RunMatch` exists.
 
 ### Phase B — Work queue (M)
-- [ ] `GetWorkQueue` with the filter/status/office/age predicates already illustrated in the exception-queue concept screen delivered to NamRA — build the query contract first, UI follows.
+- [ ] **Not built.** `listExceptions(user)` takes only the actor for taxpayer scoping — no status/officer/age filter parameters exist in its signature or query, and the reconciliation page has no filter UI. Still open.
 
 ### Phase C — Return assembly (M)
-- [ ] `VATPeriod` aggregate, `VATReturn`, `ReturnLine`, `Submission`; `Open`/`ClosePeriod`, `Generate`/`SubmitReturn`.
-- [ ] `ClosePeriod` is a hard lock — nothing re-opens or re-generates a return afterward without an explicit, audited unlock action.
-- [ ] Submission assembles and locks the return, then stops cleanly at the ITAS boundary with an explicit "blocked pending authority" status — never a silent success or an unhandled failure.
+- [x] `VATPeriod`/`VATReturn`/`ReturnLine`/`Submission` exist and are solid (`lib/data/vat-lifecycle-repository.ts`, routed via `app/api/v1/vat-periods*`, `app/api/v1/vat-returns/*`): `generateVatReturn` computes from real ledger/certificate data with status filtering and approved adjustments, versioned and idempotent; `decideVatApproval` is real maker-checker (self-approval denied); `submitVatReturn` correctly stops at the ITAS boundary with an explicit `BLOCKED_CONFIGURATION` status and reason, never a silent success.
+- [ ] **No explicit `OpenPeriod`/`ClosePeriod` commands exist.** `vat_periods` rows are seed-only; the period only becomes `LOCKED` as an implicit side effect of return approval, not its own command. The schema has `close_requested_by`/`close_requested_at`/`closed_by`/`closed_at` columns that no application code ever writes — dead columns. Still open.
+- [ ] **No audited unlock action exists.** The only way back to `OPEN` from `LOCKED` is *rejecting* the same approval task, not an explicit, audited unlock of an already-approved return. Still open (the stronger property — no silent re-open — does hold).
 
 ### Phase D — Compliance centre (M)
-- [ ] `ComplianceProfile`, `Obligation`, `Deadline`, `Action`; `CreateObligation`, `MarkSatisfied`, `GetComplianceCentre` — feeds the compliance-calendar concept already shown in the taxpayer portal mock-up.
+- [ ] No `ComplianceProfile`/`Obligation`/`Deadline`/`Action` model exists as named; `tax_obligations` is seed-only with no `CreateObligation`/`MarkSatisfied` command. Still open.
+- [x] What *does* exist, real and solid: `openAuditCase`, `fileDispute`, `requestRefund` (correctly requires a negative net position and a `FILED` return version, else blocks with `BLOCKED_RETURN_NOT_FILED`) and `reviewRefund` (self-review denied) — all maker-checker, idempotent, audited. `GET /api/v1/compliance` is a broad read-only workspace aggregate. This is a real audit/dispute/refund centre, just not the Obligation/Deadline calendar the playbook describes — a different, still-valuable shape, not nothing.
 
 ### Phase E — Consistency hardening (S)
-- [ ] One canonical reconciliation-status computation, reused everywhere it's displayed. If you find it computed twice, that's a design defect — unify it before moving on.
+- [x] Closed 2026-08-25. A legacy, parallel VAT-position computation was found and retired: a `vat_returns` table, accumulated inline on every invoice submission/cancellation (`lib/data/repository.ts`'s `submitInvoice`/`cancelInvoice`) with no adjustments or certificate/status filtering — diverging from `generateVatReturn`'s real, controlled computation. Its only reader (`listReturns`) had zero callers anywhere in `app/` — already dead in the UI, but still actively written and drifting on every invoice. Removed the write paths, the dead reader, and the now-fully-unused `vat_returns` table and its demo seed rows entirely (`CREATE TABLE IF NOT EXISTS` removal doesn't drop anything in an already-provisioned database; it just stops recreating a table nothing reads or writes). Confirmed via the full existing 184-test suite passing unmodified — nothing depended on the removed path.
 
 **Watch-outs:**
 - Match/Exception volume can get large fast — design `GetWorkQueue` pagination and indexing up front, don't retrofit it after the first performance complaint.
 - Compliance deadlines must derive from the same rule-version source Module 2 uses — a second, independently-maintained deadline calendar will drift.
 
-**Definition of done:** a return can be generated from reconciled, evidenced data, locked, and taken right up to (but not through) the ITAS submission boundary; every reconciliation exception is queued, assignable, and auditable to resolution.
+**Definition of done:** a return can be generated from reconciled, evidenced data, locked, and taken right up to (but not through) the ITAS submission boundary; every reconciliation exception is queued, assignable, and auditable to resolution. Phase C and E now meet the return-assembly half; Phase A/B (no real matching engine or work queue) and Phase D's obligation/deadline gap remain open — reconciliation exceptions exist and are auditable, but not yet queued or assignable.
 
 ---
 
