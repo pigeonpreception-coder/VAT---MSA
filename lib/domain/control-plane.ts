@@ -236,6 +236,49 @@ export function hasRecentStepUp(input: { assurance: string | null; reauthenticat
   return age >= 0 && age <= (input.maxAgeMs ?? 5 * 60_000);
 }
 
+export type AdministratorAppointmentInput = { userId: string; administratorRoleCode: string; isPrimary: boolean; approvalReference: string };
+
+/**
+ * Organisation Administration AppointAdministrator. The administrator role
+ * code itself is validated against the DB catalogue (organisation_
+ * administrator_roles) in the repository layer, same pattern as
+ * normalizeOrganisationRole's permission-catalogue check — this only
+ * validates shape.
+ */
+export function normalizeAdministratorAppointment(input: unknown): AdministratorAppointmentInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "An administrator appointment object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const userId = String(source.user_id ?? "").trim();
+  if (!userId) throw new ControlPlaneValidationError("USER_ID_REQUIRED", "user_id is required.");
+  const administratorRoleCode = String(source.administrator_role_code ?? "").trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(administratorRoleCode)) {
+    throw new ControlPlaneValidationError("ADMINISTRATOR_ROLE_INVALID", "administrator_role_code must contain 2 to 40 uppercase letters, numbers or underscores.");
+  }
+  const approvalReference = String(source.approval_reference ?? "").trim().replace(/\s+/g, " ");
+  if (approvalReference.length < 5 || approvalReference.length > 240) {
+    throw new ControlPlaneValidationError("APPROVAL_REFERENCE_REQUIRED", "Provide a 5 to 240 character approval_reference.");
+  }
+  return { userId, administratorRoleCode, isPrimary: source.is_primary === true, approvalReference };
+}
+
+export type EmployeeActivationInput = { userId: string };
+
+/** Organisation Administration employee INVITED -> ACTIVE. Links an invited
+ * employee record to an existing, already-active app_users row — does not
+ * itself grant organisation access; that remains AssignMembership's job,
+ * a deliberate separation between the HR record and the access grant. */
+export function normalizeEmployeeActivation(input: unknown): EmployeeActivationInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "An employee activation object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const userId = String(source.user_id ?? "").trim();
+  if (!userId) throw new ControlPlaneValidationError("USER_ID_REQUIRED", "user_id is required.");
+  return { userId };
+}
+
 export type LicenseStateAction = "ACTIVATE" | "SUSPEND" | "RENEW";
 export type LicenseStateChangeInput = { action: LicenseStateAction; reason: string };
 

@@ -5,6 +5,8 @@ import {
   assertWorkflowDecision,
   evaluateEntitlement,
   hasRecentStepUp,
+  normalizeAdministratorAppointment,
+  normalizeEmployeeActivation,
   normalizeLicenseStateChange,
   normalizeLicenseUpgrade,
   normalizeOrganisationRole,
@@ -119,5 +121,42 @@ describe("licence lifecycle (Activate/Suspend/Renew/Upgrade)", () => {
   it("rejects a malformed licence plan code", () => {
     expect(() => normalizeLicenseUpgrade({ license_plan_code: "a" })).toThrowError(ControlPlaneValidationError);
     expect(() => normalizeLicenseUpgrade({ license_plan_code: "" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("administrator appointment (AppointAdministrator)", () => {
+  it("normalizes a well-formed appointment, defaulting is_primary to false", () => {
+    expect(normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "finance", approval_reference: "Board resolution 2026-08-01." })).toEqual({
+      userId: "usr-1",
+      administratorRoleCode: "FINANCE",
+      isPrimary: false,
+      approvalReference: "Board resolution 2026-08-01.",
+    });
+  });
+
+  it("accepts an explicit is_primary flag", () => {
+    expect(normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "PRIMARY", is_primary: true, approval_reference: "Primary admin succession." }).isPrimary).toBe(true);
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeAdministratorAppointment({ administrator_role_code: "FINANCE", approval_reference: "Board resolution 2026-08-01." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a malformed administrator role code", () => {
+    expect(() => normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "finance scope!", approval_reference: "Board resolution 2026-08-01." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects an approval reference outside the 5 to 240 character bound", () => {
+    expect(() => normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "FINANCE", approval_reference: "no" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("employee activation (INVITED -> ACTIVE)", () => {
+  it("normalizes a well-formed activation", () => {
+    expect(normalizeEmployeeActivation({ user_id: "usr-2" })).toEqual({ userId: "usr-2" });
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeEmployeeActivation({})).toThrowError(ControlPlaneValidationError);
   });
 });

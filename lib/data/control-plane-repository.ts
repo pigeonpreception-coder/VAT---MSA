@@ -5,7 +5,9 @@ import {
   evaluateEntitlement,
   assertLicenseStateTransition,
   assertWorkflowDecision,
+  normalizeAdministratorAppointment,
   normalizeEmployee,
+  normalizeEmployeeActivation,
   normalizeLicenseStateChange,
   normalizeLicenseUpgrade,
   normalizeOrganisationRole,
@@ -349,6 +351,77 @@ export async function inviteEmployee(actor: UserContext, input: unknown, request
     await appendAudit(db, actor, "EMPLOYEE_INVITED", "EMPLOYEE", id, { organisationId: organisation.id, email: employee.email, delivery: "DISABLED_LOCAL_STAGING" }),
   ]);
   return { id, ...employee, status: "INVITED", invitationDelivery: "DISABLED_LOCAL_STAGING" };
+}
+
+/**
+ * Organisation Administration employee INVITED -> ACTIVE. Links the invited
+ * employee record to an existing, already-active app_users row and converts
+ * the USER_SEATS licence reservation inviteEmployee made into actual usage
+ * (mirrors terminateEmployee's used_value decrement on the way out).
+ * Idempotent on an already-ACTIVE employee.
+ */
+export async function activateEmployee(actor: UserContext, employeeId: string, input: unknown, requestedOrganisationId?: string | null) {
+  const { userId } = normalizeEmployeeActivation(input);
+  const { organisation, license } = await assertEntitledOperation(actor, "ADMINISTRATION", "ADMIN_WRITE", 0, requestedOrganisationId);
+  const db = await ensureDatabase();
+  const employee = await db.prepare("SELECT id,status,user_id FROM employees WHERE id=? AND organisation_id=?")
+    .bind(employeeId, organisation.id).first<{ id: string; status: string; user_id: string | null }>();
+  if (!employee) throw new ControlPlaneValidationError("EMPLOYEE_NOT_FOUND", "The employee is outside the active organisation scope.");
+  if (employee.status === "ACTIVE") return { id: employee.id, status: "ACTIVE", userId: employee.user_id };
+  if (employee.status !== "INVITED") throw new ControlPlaneValidationError("EMPLOYEE_NOT_INVITED", `Cannot activate an employee currently ${employee.status}.`);
+
+  const targetUser = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(userId).first<{ id: string; status: string }>();
+  if (!targetUser) throw new ControlPlaneValidationError("USER_NOT_FOUND", "The target user does not exist.");
+  if (targetUser.status !== "ACTIVE") throw new ControlPlaneValidationError("USER_NOT_ACTIVE", "The target user is not active.");
+  const alreadyLinked = await db.prepare("SELECT id FROM employees WHERE organisation_id=? AND user_id=? AND status='ACTIVE'")
+    .bind(organisation.id, userId).first<{ id: string }>();
+  if (alreadyLinked) throw new RepositoryConflictError("This user is already linked to an active employee record in this organisation.");
+
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE employees SET user_id=?,status='ACTIVE',activated_at=?,updated_at=? WHERE id=? AND organisation_id=?").bind(userId, now, now, employee.id, organisation.id),
+    db.prepare(`UPDATE license_usage SET used_value=used_value+1,reserved_value=MAX(0,reserved_value-1),version=version+1,updated_at=?
+      WHERE organisation_license_id=? AND metric_key='USER_SEATS'`).bind(now, license.id),
+    await appendAudit(db, actor, "EMPLOYEE_ACTIVATED", "EMPLOYEE", employee.id, { organisationId: organisation.id, userId }),
+  ]);
+  return { id: employee.id, status: "ACTIVE", userId };
+}
+
+/**
+ * Organisation Administration AppointAdministrator. Requires the target to
+ * already be an active employee of this organisation — administrators are
+ * always grounded in a real employee record, matching the seed data
+ * pattern. Appointing a new primary administrator demotes any existing one:
+ * the architecture models exactly one primary Organisation Portal
+ * Administrator per organisation.
+ */
+export async function appointAdministrator(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
+  const appointment = normalizeAdministratorAppointment(input);
+  const { organisation } = await assertEntitledOperation(actor, "ADMINISTRATION", "ADMIN_WRITE", 1, requestedOrganisationId);
+  const db = await ensureDatabase();
+  const role = await db.prepare("SELECT code,name FROM organisation_administrator_roles WHERE code=?").bind(appointment.administratorRoleCode).first<{ code: string; name: string }>();
+  if (!role) throw new ControlPlaneValidationError("ADMINISTRATOR_ROLE_NOT_FOUND", "The administrator role is not in the approved catalogue.");
+  const employee = await db.prepare("SELECT id FROM employees WHERE organisation_id=? AND user_id=? AND status='ACTIVE'")
+    .bind(organisation.id, appointment.userId).first<{ id: string }>();
+  if (!employee) throw new ControlPlaneValidationError("EMPLOYEE_NOT_ACTIVE", "The target user must be an active employee of this organisation before appointment.");
+  const existing = await db.prepare("SELECT id FROM organisation_administrators WHERE organisation_id=? AND user_id=? AND administrator_role_code=? AND status='ACTIVE'")
+    .bind(organisation.id, appointment.userId, appointment.administratorRoleCode).first<{ id: string }>();
+  if (existing) throw new RepositoryConflictError("This user already holds this administrator role.");
+
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const statements: D1PreparedStatement[] = [];
+  if (appointment.isPrimary) {
+    statements.push(db.prepare("UPDATE organisation_administrators SET is_primary=0 WHERE organisation_id=? AND is_primary=1 AND status='ACTIVE'").bind(organisation.id));
+  }
+  statements.push(
+    db.prepare(`INSERT INTO organisation_administrators (id,organisation_id,user_id,employee_id,administrator_role_code,scope,is_primary,status,effective_from,effective_to,appointed_by,approval_reference)
+      VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?)`)
+      .bind(id, organisation.id, appointment.userId, employee.id, appointment.administratorRoleCode, JSON.stringify({ organisation_id: organisation.id }), appointment.isPrimary ? 1 : 0, "ACTIVE", now, actor.userId, appointment.approvalReference),
+    await appendAudit(db, actor, "ADMINISTRATOR_APPOINTED", "ORGANISATION_ADMINISTRATOR", id, { organisationId: organisation.id, userId: appointment.userId, role: appointment.administratorRoleCode, isPrimary: appointment.isPrimary }),
+  );
+  await db.batch(statements);
+  return { id, organisationId: organisation.id, userId: appointment.userId, administratorRoleCode: appointment.administratorRoleCode, isPrimary: appointment.isPrimary, status: "ACTIVE" };
 }
 
 export async function createOrganisationRole(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
