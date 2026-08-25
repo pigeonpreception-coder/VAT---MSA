@@ -10,6 +10,8 @@ import {
   normalizeEmployeeActivation,
   normalizeLicenseStateChange,
   normalizeLicenseUpgrade,
+  normalizeNavigationChildrenQuery,
+  normalizeNavigationPreference,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -174,5 +176,45 @@ describe("capability grant (Organisation Authorization GrantCapability)", () => 
 
   it("rejects a capability outside BUYER/SELLER", () => {
     expect(() => normalizeCapabilityGrant({ user_id: "usr-3", capability: "ADMIN" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("navigation children query (GetChildren)", () => {
+  it("normalizes a well-formed workspace query", () => {
+    expect(normalizeNavigationChildrenQuery("workspace", "ws-1")).toEqual({ parentType: "workspace", parentId: "ws-1" });
+  });
+
+  it("normalizes a well-formed folder query, lowercasing parent_type", () => {
+    expect(normalizeNavigationChildrenQuery("FOLDER", "fld-1")).toEqual({ parentType: "folder", parentId: "fld-1" });
+  });
+
+  it("rejects an unsupported parent_type", () => {
+    expect(() => normalizeNavigationChildrenQuery("item", "itm-1")).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a missing parent_id", () => {
+    expect(() => normalizeNavigationChildrenQuery("workspace", null)).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("navigation preference (SavePreference)", () => {
+  it("normalizes a well-formed preference, serializing the value to JSON", () => {
+    expect(normalizeNavigationPreference({ preference_type: "sidebar_collapsed", value: true })).toEqual({
+      preferenceType: "sidebar_collapsed",
+      value: "true",
+    });
+    expect(normalizeNavigationPreference({ preference_type: "recent_items", value: ["a", "b"] }).value).toBe('["a","b"]');
+  });
+
+  it("rejects a malformed preference_type", () => {
+    expect(() => normalizeNavigationPreference({ preference_type: "Has Spaces", value: 1 })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a missing value", () => {
+    expect(() => normalizeNavigationPreference({ preference_type: "sidebar_collapsed" })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects an oversized value", () => {
+    expect(() => normalizeNavigationPreference({ preference_type: "big", value: "x".repeat(9_000) })).toThrowError(ControlPlaneValidationError);
   });
 });

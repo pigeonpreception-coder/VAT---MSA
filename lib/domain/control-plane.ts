@@ -236,6 +236,49 @@ export function hasRecentStepUp(input: { assurance: string | null; reauthenticat
   return age >= 0 && age <= (input.maxAgeMs ?? 5 * 60_000);
 }
 
+export type NavigationParentType = "workspace" | "folder";
+export type NavigationChildrenQuery = { parentType: NavigationParentType; parentId: string };
+
+/** Workspace & Navigation GetChildren: a scoped drill-down (one workspace's
+ * top-level folders, or one folder's sub-folders + items) rather than
+ * fetching the whole tree — navigation_folders nests via parent_folder_id,
+ * which GetWorkspace's existing flat query doesn't traverse. */
+export function normalizeNavigationChildrenQuery(parentType: unknown, parentId: unknown): NavigationChildrenQuery {
+  const type = String(parentType ?? "").trim().toLowerCase();
+  if (type !== "workspace" && type !== "folder") {
+    throw new ControlPlaneValidationError("PARENT_TYPE_INVALID", "parent_type must be workspace or folder.");
+  }
+  const id = String(parentId ?? "").trim();
+  if (!id) throw new ControlPlaneValidationError("PARENT_ID_REQUIRED", "parent_id is required.");
+  return { parentType: type as NavigationParentType, parentId: id };
+}
+
+export type NavigationPreferenceInput = { preferenceType: string; value: string };
+
+/** Workspace & Navigation SavePreference. Stores value as a JSON string,
+ * matching how other JSON-blob columns in this schema are stored. */
+export function normalizeNavigationPreference(input: unknown): NavigationPreferenceInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A navigation preference object is required.");
+  }
+  const source = input as Record<string, unknown>;
+  const preferenceType = String(source.preference_type ?? "").trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_]{1,59}$/.test(preferenceType)) {
+    throw new ControlPlaneValidationError("PREFERENCE_TYPE_INVALID", "preference_type must contain 2 to 60 lowercase letters, numbers or underscores, starting with a letter.");
+  }
+  if (source.value === undefined) throw new ControlPlaneValidationError("VALUE_REQUIRED", "value is required.");
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(source.value);
+  } catch {
+    throw new ControlPlaneValidationError("VALUE_NOT_SERIALIZABLE", "value must be JSON-serializable.");
+  }
+  if (!serialized || serialized.length > 8_192) {
+    throw new ControlPlaneValidationError("VALUE_TOO_LARGE", "value must serialize to at most 8192 characters.");
+  }
+  return { preferenceType, value: serialized };
+}
+
 export type CapabilityGrantInput = { userId: string; capability: "BUYER" | "SELLER" };
 
 /**

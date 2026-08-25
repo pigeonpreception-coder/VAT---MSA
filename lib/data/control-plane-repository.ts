@@ -11,6 +11,8 @@ import {
   normalizeEmployeeActivation,
   normalizeLicenseStateChange,
   normalizeLicenseUpgrade,
+  normalizeNavigationChildrenQuery,
+  normalizeNavigationPreference,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -222,13 +224,36 @@ export async function upgradeLicense(actor: UserContext, input: unknown, request
   return { licenseId: newLicenseId, planCode: targetPlan.code, planName: targetPlan.name, state: "ACTIVE" };
 }
 
+type NavigationAccessContext = { enabledFeatures: Set<string>; capabilitySet: Set<string> };
+type NavigationGate = { feature_key?: string | null; capability?: string | null; required_permission: string };
+
+async function getNavigationAccessContext(db: D1Database, actor: UserContext, organisation: OrganisationScope, license: LicenseRow): Promise<NavigationAccessContext> {
+  const [entitlements, capabilities] = await Promise.all([
+    getEntitlements(db, license),
+    db.prepare("SELECT capability FROM organisation_capabilities WHERE organisation_id=? AND status='ACTIVE'").bind(organisation.id).all<{ capability: string }>(),
+  ]);
+  return {
+    enabledFeatures: new Set(entitlements.filter((item) => item.enabled === 1).map((item) => item.feature_key)),
+    capabilitySet: new Set([
+      ...capabilities.results.map((item) => item.capability),
+      ...actor.organisationId === organisation.id ? actor.capabilities : [],
+    ]),
+  };
+}
+
+function navigationRowAllowed(actor: UserContext, row: NavigationGate, context: NavigationAccessContext): boolean {
+  if (!hasPermission(actor, row.required_permission)) return false;
+  if (row.feature_key && !context.enabledFeatures.has(row.feature_key)) return false;
+  if (row.capability && !context.capabilitySet.has(row.capability)) return false;
+  return true;
+}
+
 export async function getEffectiveNavigation(actor: UserContext, requestedOrganisationId?: string | null): Promise<{ organisation: OrganisationScope; workspaces: NavigationWorkspace[] }> {
   const db = await ensureDatabase();
   const organisation = await resolveOrganisation(actor, requestedOrganisationId);
   const license = await getLicense(db, organisation.id);
-  const [entitlements, capabilities, rows] = await Promise.all([
-    getEntitlements(db, license),
-    db.prepare("SELECT capability FROM organisation_capabilities WHERE organisation_id=? AND status='ACTIVE'").bind(organisation.id).all<{ capability: string }>(),
+  const [context, rows] = await Promise.all([
+    getNavigationAccessContext(db, actor, organisation, license),
     db.prepare(`SELECT w.id AS workspace_id,w.workspace_key,w.label AS workspace_label,w.description,w.classification AS workspace_classification,
       f.id AS folder_id,f.folder_key,f.label AS folder_label,
       i.id AS item_id,i.item_key,i.label AS item_label,i.href,i.feature_key,i.capability,i.required_permission,i.classification AS item_classification
@@ -236,17 +261,10 @@ export async function getEffectiveNavigation(actor: UserContext, requestedOrgani
       JOIN navigation_items i ON i.folder_id=f.id AND i.status='ACTIVE'
       WHERE w.status='ACTIVE' ORDER BY w.sort_order,f.sort_order,i.sort_order`).all<Record<string, string | null>>(),
   ]);
-  const enabledFeatures = new Set(entitlements.filter((item) => item.enabled === 1).map((item) => item.feature_key));
-  const capabilitySet = new Set([
-    ...capabilities.results.map((item) => item.capability),
-    ...actor.organisationId === organisation.id ? actor.capabilities : [],
-  ]);
   const byWorkspace = new Map<string, NavigationWorkspace>();
   const folderIndex = new Map<string, NavigationFolder>();
   for (const row of rows.results) {
-    if (!hasPermission(actor, String(row.required_permission))) continue;
-    if (row.feature_key && !enabledFeatures.has(row.feature_key)) continue;
-    if (row.capability && !capabilitySet.has(row.capability)) continue;
+    if (!navigationRowAllowed(actor, { feature_key: row.feature_key, capability: row.capability, required_permission: String(row.required_permission) }, context)) continue;
     const workspaceId = String(row.workspace_id);
     let workspace = byWorkspace.get(workspaceId);
     if (!workspace) {
@@ -263,6 +281,101 @@ export async function getEffectiveNavigation(actor: UserContext, requestedOrgani
     folder.items.push({ id: String(row.item_id), key: String(row.item_key), label: String(row.item_label), href: String(row.href), classification: String(row.item_classification) });
   }
   return { organisation, workspaces: [...byWorkspace.values()] };
+}
+
+/**
+ * Workspace & Navigation GetChildren: a scoped drill-down instead of
+ * fetching the whole tree via GetEffectiveNavigation — a workspace's
+ * top-level folders, or one folder's sub-folders and items, properly
+ * respecting navigation_folders.parent_folder_id (which GetEffectiveNavigation's
+ * flat query does not traverse).
+ */
+export async function getNavigationChildren(actor: UserContext, parentType: unknown, parentId: unknown, requestedOrganisationId?: string | null) {
+  const query = normalizeNavigationChildrenQuery(parentType, parentId);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const license = await getLicense(db, organisation.id);
+  const context = await getNavigationAccessContext(db, actor, organisation, license);
+
+  if (query.parentType === "workspace") {
+    const workspace = await db.prepare("SELECT id,workspace_key,label,description,classification FROM navigation_workspaces WHERE id=? AND status='ACTIVE'")
+      .bind(query.parentId).first<{ id: string; workspace_key: string; label: string; description: string; classification: string }>();
+    if (!workspace) throw new ControlPlaneValidationError("WORKSPACE_NOT_FOUND", "The navigation workspace does not exist.");
+    const folders = await db.prepare(`SELECT id,folder_key,label FROM navigation_folders
+      WHERE workspace_id=? AND parent_folder_id IS NULL AND status='ACTIVE' ORDER BY sort_order`).bind(workspace.id)
+      .all<{ id: string; folder_key: string; label: string }>();
+    return {
+      parentType: "workspace" as const,
+      workspace: { id: workspace.id, key: workspace.workspace_key, label: workspace.label, description: workspace.description, classification: workspace.classification },
+      folders: folders.results.map((f) => ({ id: f.id, key: f.folder_key, label: f.label })),
+    };
+  }
+
+  const folder = await db.prepare("SELECT id,workspace_id,folder_key,label FROM navigation_folders WHERE id=? AND status='ACTIVE'")
+    .bind(query.parentId).first<{ id: string; workspace_id: string; folder_key: string; label: string }>();
+  if (!folder) throw new ControlPlaneValidationError("FOLDER_NOT_FOUND", "The navigation folder does not exist.");
+  const [subfolders, items] = await Promise.all([
+    db.prepare("SELECT id,folder_key,label FROM navigation_folders WHERE parent_folder_id=? AND status='ACTIVE' ORDER BY sort_order")
+      .bind(folder.id).all<{ id: string; folder_key: string; label: string }>(),
+    db.prepare(`SELECT id,item_key,label,href,feature_key,capability,required_permission,classification
+      FROM navigation_items WHERE folder_id=? AND status='ACTIVE' ORDER BY sort_order`).bind(folder.id)
+      .all<{ id: string; item_key: string; label: string; href: string; feature_key: string | null; capability: string | null; required_permission: string; classification: string }>(),
+  ]);
+  return {
+    parentType: "folder" as const,
+    folder: { id: folder.id, key: folder.folder_key, label: folder.label },
+    folders: subfolders.results.map((f) => ({ id: f.id, key: f.folder_key, label: f.label })),
+    items: items.results.filter((item) => navigationRowAllowed(actor, item, context))
+      .map((item) => ({ id: item.id, key: item.item_key, label: item.label, href: item.href, classification: item.classification })),
+  };
+}
+
+/**
+ * Workspace & Navigation GetActions: whether the actor can act on one
+ * specific navigation item right now, and why not if not — for a route
+ * guard or a disabled-nav-item tooltip, without walking the whole tree.
+ */
+export async function getNavigationItemActions(actor: UserContext, itemKey: unknown, requestedOrganisationId?: string | null) {
+  const key = String(itemKey ?? "").trim();
+  if (!key) throw new ControlPlaneValidationError("ITEM_KEY_REQUIRED", "item_key is required.");
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const license = await getLicense(db, organisation.id);
+  const context = await getNavigationAccessContext(db, actor, organisation, license);
+  const item = await db.prepare(`SELECT id,item_key,label,href,feature_key,capability,required_permission,classification
+    FROM navigation_items WHERE item_key=? AND status='ACTIVE'`).bind(key)
+    .first<{ id: string; item_key: string; label: string; href: string; feature_key: string | null; capability: string | null; required_permission: string; classification: string }>();
+  if (!item) throw new ControlPlaneValidationError("NAVIGATION_ITEM_NOT_FOUND", "The navigation item does not exist.");
+  const deniedReasons: string[] = [];
+  if (!hasPermission(actor, item.required_permission)) deniedReasons.push(`Requires permission ${item.required_permission}.`);
+  if (item.feature_key && !context.enabledFeatures.has(item.feature_key)) deniedReasons.push(`Requires licensed feature ${item.feature_key}.`);
+  if (item.capability && !context.capabilitySet.has(item.capability)) deniedReasons.push(`Requires ${item.capability} capability.`);
+  const allowed = deniedReasons.length === 0;
+  return {
+    id: item.id, key: item.item_key, label: item.label, href: item.href, classification: item.classification,
+    allowed,
+    actions: allowed ? [{ action: "VIEW", href: item.href }] : [],
+    deniedReasons,
+  };
+}
+
+/**
+ * Workspace & Navigation SavePreference. A low-risk, self-scoped write
+ * (always the caller's own preference) — deliberately skips the audit_events/
+ * outbox_events machinery every other mutating command here uses, since a UI
+ * preference like a collapsed sidebar isn't a privileged or statutory action.
+ * Upserts via the (user_id, organisation_id, preference_type) unique index.
+ */
+export async function saveNavigationPreference(actor: UserContext, input: unknown, requestedOrganisationId?: string | null) {
+  const preference = normalizeNavigationPreference(input);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const now = new Date().toISOString();
+  await db.prepare(`INSERT INTO navigation_preferences (id,user_id,organisation_id,preference_type,value,updated_at)
+    VALUES (?,?,?,?,?,?)
+    ON CONFLICT(user_id,organisation_id,preference_type) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+    .bind(crypto.randomUUID(), actor.userId, organisation.id, preference.preferenceType, preference.value, now).run();
+  return { userId: actor.userId, organisationId: organisation.id, preferenceType: preference.preferenceType, value: JSON.parse(preference.value) as unknown };
 }
 
 export async function getAdministrationSnapshot(actor: UserContext, requestedOrganisationId?: string | null) {
