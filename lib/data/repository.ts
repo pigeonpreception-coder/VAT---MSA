@@ -133,6 +133,62 @@ export async function getInvoiceById(id: string, user: UserContext): Promise<Inv
   };
 }
 
+export type InvoiceVatExplanation = {
+  invoiceId: string;
+  invoiceNumber: string;
+  lines: Array<{
+    lineNumber: number;
+    taxCategory: string;
+    taxableAmountCents: number;
+    taxRateBps: number;
+    taxAmountCents: number;
+    vatRuleId: string | null;
+    vatRuleVersion: number | null;
+    ruleEffectiveFrom: string | null;
+    ruleEffectiveTo: string | null;
+  }>;
+};
+
+/**
+ * Module 2 Phase A ExplainCalculation: for an already-certified invoice,
+ * exactly which approved VATRule version produced each line's tax amount.
+ * vat_rule_id is stored on invoice_lines at submission time (submitInvoice
+ * above) — this just projects it back out, tenant-scoped the same way
+ * getInvoiceById is.
+ */
+export async function explainInvoiceVat(id: string, user: UserContext): Promise<InvoiceVatExplanation | null> {
+  const db = await ensureDatabase();
+  const invoice = isNationalScope(user)
+    ? await db.prepare("SELECT id, invoice_number FROM invoices WHERE id = ?").bind(id).first<{ id: string; invoice_number: string }>()
+    : await db.prepare("SELECT id, invoice_number FROM invoices WHERE id = ? AND (supplier_taxpayer_id = ? OR customer_taxpayer_id = ?)")
+      .bind(id, user.taxpayerId ?? "__none__", user.taxpayerId ?? "__none__").first<{ id: string; invoice_number: string }>();
+  if (!invoice) return null;
+
+  const lines = await db.prepare(`SELECT l.line_number, l.tax_category, l.net_amount_cents, l.tax_rate_bps, l.tax_amount_cents,
+    r.id AS vat_rule_id, r.version AS vat_rule_version, r.effective_from AS rule_effective_from, r.effective_to AS rule_effective_to
+    FROM invoice_lines l LEFT JOIN vat_rules r ON r.id = l.vat_rule_id
+    WHERE l.invoice_id = ? ORDER BY l.line_number`).bind(id).all<{
+      line_number: number; tax_category: string; net_amount_cents: number; tax_rate_bps: number; tax_amount_cents: number;
+      vat_rule_id: string | null; vat_rule_version: number | null; rule_effective_from: string | null; rule_effective_to: string | null;
+    }>();
+
+  return {
+    invoiceId: invoice.id,
+    invoiceNumber: invoice.invoice_number,
+    lines: lines.results.map((line) => ({
+      lineNumber: line.line_number,
+      taxCategory: line.tax_category,
+      taxableAmountCents: line.net_amount_cents,
+      taxRateBps: line.tax_rate_bps,
+      taxAmountCents: line.tax_amount_cents,
+      vatRuleId: line.vat_rule_id,
+      vatRuleVersion: line.vat_rule_version,
+      ruleEffectiveFrom: line.rule_effective_from,
+      ruleEffectiveTo: line.rule_effective_to,
+    })),
+  };
+}
+
 export async function getDashboardSnapshot(user: UserContext) {
   const db = await ensureDatabase();
   const scoped = !isNationalScope(user);
@@ -250,6 +306,27 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
     return existing;
   }
 
+  // Module 2 Phase A: every line's tax rate must resolve to a NamRA-approved
+  // VATRule for its category as of the invoice's issue date — fails closed
+  // (no rule bound) rather than trusting the client-supplied rate, which is
+  // all lib/domain/invoice.ts's calculateAndValidateInvoice checks (internal
+  // arithmetic consistency only, not statutory correctness). Dynamic import
+  // avoids a static circular dependency (vat-rule-repository.ts imports
+  // RepositoryConflictError from this file), matching the pattern already
+  // used in lib/security/request.ts for the same reason.
+  const { getApplicableVatRule } = await import("./vat-rule-repository");
+  const vatRuleIdByLineNumber = new Map<number, string>();
+  for (const line of calculated.lines) {
+    const rule = await getApplicableVatRule(db, line.tax.category, payload.issue_date);
+    if (!rule) {
+      throw new InvoiceValidationError([{ code: "NO_APPROVED_VAT_RULE", path: `/lines/${line.line_number - 1}/tax/category`, message: `No approved VAT rule is bound for ${line.tax.category} on ${payload.issue_date}.` }]);
+    }
+    if (rule.rateBps !== line.taxRateBps) {
+      throw new InvoiceValidationError([{ code: "VAT_RATE_RULE_MISMATCH", path: `/lines/${line.line_number - 1}/tax/rate`, message: `${line.tax.category} must use ${(rule.rateBps / 100).toFixed(2)}% per approved rule version ${rule.version} (received ${(line.taxRateBps / 100).toFixed(2)}%).` }]);
+    }
+    vatRuleIdByLineNumber.set(line.line_number, rule.id);
+  }
+
   const supplierVat = getVatNumber(payload.supplier);
   const customerVat = getVatNumber(payload.customer);
   const supplier = await db.prepare(`SELECT t.id FROM taxpayers t
@@ -337,9 +414,10 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   }
 
   for (const line of calculated.lines) {
-    statements.push(db.prepare(`INSERT INTO invoice_lines VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    statements.push(db.prepare(`INSERT INTO invoice_lines VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
       crypto.randomUUID(), invoiceId, line.line_number, line.description.trim(), line.quantity, line.unit_code,
       line.unitPriceCents, line.netAmountCents, line.taxRateBps, line.tax.category, line.taxAmountCents,
+      vatRuleIdByLineNumber.get(line.line_number) ?? null,
     ));
   }
   statements.push(db.prepare("INSERT INTO certificates VALUES (?,?,?,?,?,?,?,?)").bind(

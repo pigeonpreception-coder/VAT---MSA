@@ -35,8 +35,13 @@ class FakeStatement implements D1PreparedStatement {
   }
 
   async run<T = Record<string, unknown>>(): Promise<D1Result<T>> {
-    this.#db.prepare(this.#sql).run(...(this.#params as never[]));
-    return { results: [], success: true };
+    // .all() rather than .run(): node:sqlite's .run() silently discards any
+    // RETURNING clause, which this codebase relies on (see
+    // lib/security/request.ts's enforceRateLimits). .all() executes the
+    // statement identically and additionally captures RETURNING rows when
+    // present, or an empty array when it isn't — a strict superset of .run().
+    const rows = this.#db.prepare(this.#sql).all(...(this.#params as never[])) as T[];
+    return { results: rows, success: true };
   }
 }
 

@@ -541,7 +541,17 @@ const SCHEMA_STATEMENTS = [
     description TEXT NOT NULL, quantity TEXT NOT NULL, unit_code TEXT NOT NULL,
     unit_price_cents INTEGER NOT NULL, net_amount_cents INTEGER NOT NULL,
     tax_rate_bps INTEGER NOT NULL, tax_category TEXT NOT NULL, tax_amount_cents INTEGER NOT NULL,
+    vat_rule_id TEXT REFERENCES vat_rules(id),
     UNIQUE (invoice_id, line_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_rules (
+    id TEXT PRIMARY KEY, tax_category TEXT NOT NULL, country TEXT NOT NULL DEFAULT 'NA',
+    rate_bps INTEGER NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT,
+    proposed_by TEXT NOT NULL, proposed_at TEXT NOT NULL,
+    approved_by TEXT, approved_at TEXT, approval_reason TEXT, proposal_reason TEXT NOT NULL,
+    superseded_by TEXT REFERENCES vat_rules(id),
+    UNIQUE (tax_category, country, version)
   )`,
   `CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL UNIQUE REFERENCES invoices(id),
@@ -846,6 +856,28 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_identifiers ON registration_applications(vat_number, tin)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_user_invitations_org_email_status ON user_invitations(organisation_id, email, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_rules_lookup ON vat_rules(tax_category, country, status, effective_from)`,
+
+  // Statutory VAT rate catalogue (Module 2 Phase A). Unlike the pilot demo
+  // seed below, this is real reference data — the actual Namibian VAT
+  // rates this system must enforce — so it runs unconditionally in every
+  // environment, not just non-production. 'SYSTEM_BOOTSTRAP' marks these as
+  // pre-approved at deployment rather than through the ProposeVatRule/
+  // ApproveVatRule workflow (matches this codebase's existing pattern for
+  // system-originated rows, e.g. organisation_administrators' 'SYSTEM_LICENSE_ACTIVATION').
+  // OTHER is deliberately left with no approved rule: it is a catch-all with
+  // no real statutory rate, so any invoice line categorized OTHER correctly
+  // fails closed rather than silently falling back to some default.
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-standard-na','STANDARD','NA',1500,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Namibia standard VAT rate.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-zero_rated-na','ZERO_RATED','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Zero-rated supplies.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-exempt-na','EXEMPT','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Exempt supplies.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-outside_scope-na','OUTSIDE_SCOPE','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Outside-scope (non-supply) transactions.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-reverse_charge-na','REVERSE_CHARGE','NA',1500,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Reverse-charge supplies (standard rate, liability shifted to the recipient).',NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_status_date ON quotations(organisation_id, status, issue_date)`,
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
@@ -936,10 +968,10 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO invoices VALUES ('inv-0003','AR-7719','SIMPLIFIED_TAX_INVOICE','POS-ATL-22','POS-7719','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789',NULL,'Walk-in customer',NULL,'2026-08-07','NAD',850000,127500,977500,'CERTIFIED','LOW','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0003','cert-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','2026-08-07T12:04:03Z','2026-08-07T12:04:04Z')`,
   `INSERT OR IGNORE INTO invoices VALUES ('inv-0004','KC-1041','TAX_INVOICE','PORTAL','PORTAL-KC-1041','tp-0004','Kalahari Consulting (Pty) Ltd','VAT1000987','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-06','NAD',120000000,18000000,138000000,'EXCEPTION','CRITICAL','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0004','cert-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','2026-08-06T09:32:10Z','2026-08-06T09:32:11Z')`,
 
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0001','inv-0001',1,'Office equipment and consumables','1','EA',11450000,11450000,1500,'STANDARD',1717500)`,
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0002','inv-0002',1,'Regional freight services','1','EA',5200000,5200000,1500,'STANDARD',780000)`,
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0003','inv-0003',1,'Retail merchandise','1','EA',850000,850000,1500,'STANDARD',127500)`,
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0004','inv-0004',1,'Enterprise transformation advisory','1','EA',120000000,120000000,1500,'STANDARD',18000000)`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0001','inv-0001',1,'Office equipment and consumables','1','EA',11450000,11450000,1500,'STANDARD',1717500,'vrule-standard-na')`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0002','inv-0002',1,'Regional freight services','1','EA',5200000,5200000,1500,'STANDARD',780000,'vrule-standard-na')`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0003','inv-0003',1,'Retail merchandise','1','EA',850000,850000,1500,'STANDARD',127500,'vrule-standard-na')`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0004','inv-0004',1,'Enterprise transformation advisory','1','EA',120000000,120000000,1500,'STANDARD',18000000,'vrule-standard-na')`,
 
   `INSERT OR IGNORE INTO certificates VALUES ('cert-0001','inv-0001','vfy_1a92c57e41f84b89a601d982be634a81','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.13a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-08T08:12:45Z')`,
   `INSERT OR IGNORE INTO certificates VALUES ('cert-0002','inv-0002','vfy_2b13d68f52a94c90b712e093cf745b92','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.23a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-07T14:21:20Z')`,

@@ -97,36 +97,37 @@ Modules 8–10 have components you can and should start early (platform/security
 
 **Domains:** Tax Invoice, VAT (rules/calculation), Transaction (immutable ledger).
 **Depends on:** Module 1 (resolved identity/organisation/branch). **Unlocks:** Module 3 (returns need certified invoices/transactions), Module 5 (quotation conversion), Module 9 (refund freezes invoices/transactions).
-**Maturity today:** `VERIFIED PILOT` — the most mature module in the system; treat remaining work as hardening, not net-new build.
+**Maturity today:** `VERIFIED PILOT` (Tax invoice, VAT) — this line was written before any Module 2 coding happened this cycle and turned out to be aspirational, not a record of reality: a 2026-08-25 code assessment found Phase A entirely unbuilt (the tax rate was 100% client-supplied, only arithmetic-checked) and Phases B-D built as one monolithic `submitInvoice` rather than as the named standalone commands below. Phase A is now genuinely closed (see below). Treat B-D's checkmarks below as the honest state, not the original aspiration.
 
 **Data model anchors:** `TaxInvoice` aggregate, `InvoiceItem`, `Sequence`, `Reservation`, `Certificate` · `VATRule`, `VATCalculation`, `EligibilityDecision` · `VATTransaction` aggregate, `Adjustment`, `Reversal`.
 
 ### Phase A — Rule engine (M)
-- [ ] `VATRule` with effective-dating and an `ApproveRuleVersion` workflow; `VATCalculation`, `EligibilityDecision`.
-- [ ] `EvaluateVAT`, `ExplainCalculation` — every VAT figure traceable to the exact rule version that produced it; fails closed with no output if no approved rule is bound.
+- [x] `VATRule` with effective-dating (`vat_rules` table, `UNIQUE(tax_category,country,version)`, `effective_from`/`effective_to`) and `ProposeVatRule`/`ApproveVatRule` (`POST /api/v1/vat-rules`, `POST /api/v1/vat-rules/:id/approval` — segregation of duties, self-approval denied). Deployment-bootstrapped with Namibia's real statutory rates (15% standard; 0% zero-rated/exempt/outside-scope; reverse-charge at the standard rate); `OTHER` deliberately has no approved rule.
+- [x] `EvaluateVAT` (`GET /api/v1/vat-rules/evaluate?tax_category=&date=`, standalone dry-run) and `ExplainCalculation` (`GET /api/v1/invoices/:id/vat-explanation`, per-line traceability to the exact approved rule version). Fails closed: `submitInvoice` now rejects any line whose category has no approved rule, or whose supplied rate doesn't match the resolved one — previously the client-supplied rate was trusted outright.
+- `VATCalculation`/`EligibilityDecision` as named types were not built separately — the calculation itself still lives in `calculateAndValidateInvoice` (arithmetic) plus the new rule-resolution check (statutory correctness); this is a reasonable simplification, not a gap, since nothing else needs those as standalone records.
 
 ### Phase B — Invoice lifecycle (L)
-- [ ] `TaxInvoice` aggregate, `InvoiceItem`, `Sequence`, `Reservation`, `Certificate`.
-- [ ] `Submit` / `Certify` / `Cancel`; `Get`/`VerifyInvoice` public verification route.
-- [ ] `Sequence`/`Reservation` crash-safety: a crash mid-reservation must never produce a gap ambiguity or a duplicate number — this is the single riskiest concurrency spot in the whole system; test it explicitly.
+- [x] `TaxInvoice` aggregate (`invoices` + `invoice_lines`), `Certificate` (`certificates`). `Submit`/`Certify` exist as one atomic command (`submitInvoice`, `POST /api/v1/invoices`) rather than two separate steps — reasonable, since nothing in this codebase needs a certifiable-but-uncertified invoice state. `Get`/`VerifyInvoice` exist (`GET /api/v1/invoices/:id`, `GET /api/v1/verify/:token`).
+- [ ] **No `Cancel` command exists anywhere.** No `Sequence`/`Reservation` aggregate either: `invoice_number` is taken verbatim from the client payload with **no uniqueness constraint of its own** (only `UNIQUE(supplier_taxpayer_id, source_system, source_document_id)`, a duplicate-submission guard, not a numbering guarantee) — two invoices could theoretically collide on invoice_number today. Still open.
+- [ ] `VerifyInvoice`'s public output doesn't include correction lineage (see Phase C) — still open.
 
 ### Phase C — Correction lineage (M)
-- [ ] `CreateCredit` / `CreateDebit` against a certified invoice, linkage preserved end-to-end into `VerifyInvoice`'s public output.
-- [ ] Original invoice record never mutated by a correction.
+- [x] Credit/debit note handling is real and correctly implemented (inlined in `submitInvoice`'s `isCorrection` branch, not standalone `CreateCredit`/`CreateDebit` commands — a reasonable simplification given how tightly coupled correction validation is to the same submission pipeline). Original-invoice matching, currency/date/customer-identity checks and cumulative-credit-cap validation are real; the original invoice row is never mutated.
+- [ ] Linkage is **not** surfaced in `VerifyInvoice`'s public output (only in the authenticated `GET /api/v1/invoices/:id`) — still open, and blocks this phase's stated goal of lineage "preserved end-to-end into VerifyInvoice's public output."
 
 ### Phase D — Immutable ledger (M)
-- [ ] `VATTransaction` aggregate, `Adjustment`, `Reversal`; `PostTransaction`, `Reverse`, `Adjust` — always producing a new linked record.
-- [ ] `GetTransactionTimeline` reads as a complete audit narrative for one transaction.
+- [ ] **Mostly not done.** No `VATTransaction` aggregate, no `PostTransaction`/`Reverse`/`Adjust` commands, no `GetTransactionTimeline`. `ledger_entries` rows are inserted inline in `submitInvoice`; a credit note "reverses" by flipping DEBIT/CREDIT direction on new rows, which works but isn't a reusable, queryable pattern, and there is no transaction-scoped narrative query (only a per-invoice `ledgerEntries` list). Open.
+- Note: `lib/data/vat-lifecycle-repository.ts` looks related by name but is VAT-*return*-period adjustment logic (a different domain, likely Module 3), not this ledger.
 
 ### Phase E — Hardening (M)
-- [ ] Idempotency under **concurrent** retries (a concurrency test, not just a sequential unit test) — same request in flight twice must never double-post.
-- [ ] Unidentified-buyer guarantee under test: an invoice to an unresolved buyer never produces an input-VAT posting. Treat any regression here as P0 — same severity class as the statutory rate-validation defect already fixed in Phase 0.
+- [ ] Idempotency relies on a real `UNIQUE(actor_id, idempotency_key)` constraint, which is a legitimate concurrency-safety strategy, but a concurrent-retry race is **not caught and converted into an idempotent "return the prior result"** — it would surface as an unhandled D1 constraint error. Untested either way. Open.
+- [ ] The unidentified-buyer guarantee (this phase's flagged P0) is **correctly implemented** (`repository.ts`: the `INPUT_VAT` ledger insert and customer-side return update only happen inside `if (customer)`) but had **zero test coverage** before this cycle and still has none specifically for that guarantee (Module 2's new route tests cover the VAT rule engine, not this). Open.
 
 **Watch-outs:**
 - `ExplainCalculation`'s fail-closed behaviour is load-bearing for the whole system's statutory defensibility — don't let a future refactor quietly add a fallback rate.
 - Correction records and reversal records look similar; keep their semantics (supersede vs. cancel) distinct in the data model, not just in naming.
 
-**Definition of done:** invoice → certified → VAT-calculated → transaction-posted → correction-capable, fully idempotent under concurrency, fully explainable to a specific rule version, with the unidentified-buyer guarantee under test.
+**Definition of done:** invoice → certified → VAT-calculated → transaction-posted → correction-capable, fully idempotent under concurrency, fully explainable to a specific rule version, with the unidentified-buyer guarantee under test. Phase A now meets this for the VAT-calculation/explainability half; Phases B (numbering integrity, Cancel), D (ledger commands) and E (concurrency, buyer-guarantee test coverage) remain open.
 
 ---
 
