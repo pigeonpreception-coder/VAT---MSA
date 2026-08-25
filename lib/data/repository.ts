@@ -3,6 +3,7 @@ import {
   calculateAndValidateInvoice,
   getVatNumber,
   InvoiceValidationError,
+  normalizeInvoiceCancellation,
   scoreInvoice,
   sha256Hex,
   stableStringify,
@@ -131,6 +132,90 @@ export async function getInvoiceById(id: string, user: UserContext): Promise<Inv
       direction: entry.direction, amountCents: entry.amount_cents, period: entry.period,
     })),
   };
+}
+
+export type InvoiceCancellationResult = { invoiceId: string; status: string };
+
+/**
+ * Module 2 Phase B CancelInvoice. Deliberately narrow and officer-only (see
+ * normalizeInvoiceCancellation in lib/domain/invoice.ts): only a
+ * TAX_INVOICE/SIMPLIFIED_TAX_INVOICE/SELF_BILLED_INVOICE with no active
+ * correction against it can be cancelled — an invoice already in a
+ * correction lineage must be resolved through further corrections, not
+ * voided out from under them. Never deletes or mutates the original row;
+ * reverses its ledger/return effect the same way a credit note does (new
+ * flipped-direction rows, never mutating existing ones) and marks
+ * status='CANCELLED', which the public VerifyInvoice endpoint surfaces.
+ * Idempotent on an already-cancelled invoice.
+ */
+export async function cancelInvoice(
+  actor: UserContext,
+  invoiceId: string,
+  input: unknown,
+  correlationId: string,
+): Promise<InvoiceCancellationResult> {
+  const { reason } = normalizeInvoiceCancellation(input);
+  const db = await ensureDatabase();
+  const invoice = await db.prepare(`SELECT id, document_type, status, supplier_taxpayer_id, customer_taxpayer_id,
+    tax_cents, issue_date FROM invoices WHERE id = ?`).bind(invoiceId).first<{
+      id: string; document_type: string; status: string; supplier_taxpayer_id: string; customer_taxpayer_id: string | null;
+      tax_cents: number; issue_date: string;
+    }>();
+  if (!invoice) throw new InvoiceValidationError([{ code: "INVOICE_NOT_FOUND", path: "/invoice_id", message: "The invoice does not exist." }]);
+  requireTaxpayerScope(actor, invoice.supplier_taxpayer_id);
+  if (invoice.status === "CANCELLED") return { invoiceId: invoice.id, status: "CANCELLED" };
+  if (!["TAX_INVOICE", "SIMPLIFIED_TAX_INVOICE", "SELF_BILLED_INVOICE"].includes(invoice.document_type)) {
+    throw new InvoiceValidationError([{ code: "NOT_CANCELLABLE_DOCUMENT_TYPE", path: "/document_type", message: "Only an original tax invoice can be cancelled; a credit or debit note cannot." }]);
+  }
+  const activeCorrection = await db.prepare("SELECT id FROM invoice_corrections WHERE original_invoice_id=? AND status='ACTIVE' LIMIT 1")
+    .bind(invoice.id).first<{ id: string }>();
+  if (activeCorrection) {
+    throw new RepositoryConflictError("This invoice already has an active credit or debit note against it; resolve the correction lineage instead of cancelling.");
+  }
+
+  const now = new Date().toISOString();
+  const transactionId = crypto.randomUUID();
+  const period = invoice.issue_date.slice(0, 7);
+  const statements: D1PreparedStatement[] = [
+    db.prepare("UPDATE invoices SET status='CANCELLED' WHERE id=?").bind(invoice.id),
+    db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
+      crypto.randomUUID(), transactionId, invoice.id, invoice.supplier_taxpayer_id, "OUTPUT_VAT", "DEBIT", invoice.tax_cents, period, now,
+    ),
+    db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(taxpayer_id, period) DO UPDATE SET output_tax_cents = output_tax_cents - excluded.output_tax_cents,
+      net_payable_cents = net_payable_cents - excluded.output_tax_cents, last_calculated_at = excluded.last_calculated_at`).bind(
+      crypto.randomUUID(), invoice.supplier_taxpayer_id, period, invoice.tax_cents, 0, invoice.tax_cents, "DRAFT", now,
+    ),
+  ];
+  if (invoice.customer_taxpayer_id) {
+    statements.push(
+      db.prepare("INSERT INTO ledger_entries VALUES (?,?,?,?,?,?,?,?,?)").bind(
+        crypto.randomUUID(), transactionId, invoice.id, invoice.customer_taxpayer_id, "INPUT_VAT", "CREDIT", invoice.tax_cents, period, now,
+      ),
+      db.prepare(`INSERT INTO vat_returns VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(taxpayer_id, period) DO UPDATE SET input_tax_cents = input_tax_cents - excluded.input_tax_cents,
+        net_payable_cents = net_payable_cents + excluded.input_tax_cents, last_calculated_at = excluded.last_calculated_at`).bind(
+        crypto.randomUUID(), invoice.customer_taxpayer_id, period, 0, invoice.tax_cents, invoice.tax_cents, "DRAFT", now,
+      ),
+    );
+  }
+  const priorAudit = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
+  const auditId = crypto.randomUUID();
+  const auditDetails = JSON.stringify({ invoiceId: invoice.id, reason, correlationId });
+  const auditHash = await sha256Hex(`${priorAudit?.event_hash ?? "GENESIS"}|${auditId}|${actor.userId}|${auditDetails}|${now}`);
+  statements.push(
+    db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(
+      auditId, actor.userId, actor.role, "INVOICE_CANCELLED", "INVOICE", invoice.id, "SUCCESS",
+      auditDetails, priorAudit?.event_hash ?? null, auditHash, now,
+    ),
+    db.prepare("INSERT INTO outbox_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(
+      crypto.randomUUID(), "INVOICE", invoice.id, "InvoiceCancelled", 1, invoice.supplier_taxpayer_id,
+      JSON.stringify({ invoice_id: invoice.id, reason, correlation_id: correlationId }),
+      "PENDING", 0, now, now, null, null,
+    ),
+  );
+  await db.batch(statements);
+  return { invoiceId: invoice.id, status: "CANCELLED" };
 }
 
 export type InvoiceVatExplanation = {
@@ -280,14 +365,58 @@ export async function getSecurityOperationsSnapshot() {
   return { eventCounts: eventCounts.results, incidents: incidents.results, recentEvents: recentEvents.results, outbox: outbox.results, database };
 }
 
+/**
+ * Module 2 Phase C/B: the public VerifyInvoice output now includes
+ * correction lineage — previously only the authenticated GET /invoices/:id
+ * showed whether an invoice had been credited/debited or was itself a
+ * correction, which meant a paper/QR verification of a since-corrected
+ * invoice looked identical to an unaffected one. Deliberately excludes
+ * correction reason text (kept authenticated-only in getInvoiceById) since
+ * this is an unauthenticated, public-posture endpoint.
+ */
 export async function getPublicVerification(token: string) {
   const db = await ensureDatabase();
-  return db.prepare(`SELECT c.status AS certificate_status, c.issued_at, c.invoice_hash, c.signature_profile,
-    i.supplier_name, i.invoice_number, i.total_cents, i.currency
+  const invoice = await db.prepare(`SELECT c.status AS certificate_status, c.issued_at, c.invoice_hash, c.signature_profile,
+    i.id AS invoice_id, i.status, i.document_type, i.supplier_name, i.invoice_number, i.total_cents, i.currency
     FROM certificates c JOIN invoices i ON i.id = c.invoice_id WHERE c.verification_token = ?`).bind(token).first<{
       certificate_status: string; issued_at: string; invoice_hash: string; signature_profile: string;
-      supplier_name: string; invoice_number: string; total_cents: number; currency: string;
+      invoice_id: string; status: string; document_type: string; supplier_name: string; invoice_number: string; total_cents: number; currency: string;
     }>();
+  if (!invoice) return null;
+
+  const [asOriginal, asCorrection] = await Promise.all([
+    db.prepare(`SELECT c.correction_type, c.status, i.invoice_number, i.total_cents, c.created_at
+      FROM invoice_corrections c JOIN invoices i ON i.id = c.correction_invoice_id
+      WHERE c.original_invoice_id = ? ORDER BY c.created_at`).bind(invoice.invoice_id).all<{
+        correction_type: string; status: string; invoice_number: string; total_cents: number; created_at: string;
+      }>(),
+    db.prepare(`SELECT c.correction_type, i.invoice_number FROM invoice_corrections c
+      JOIN invoices i ON i.id = c.original_invoice_id WHERE c.correction_invoice_id = ?`).bind(invoice.invoice_id).first<{
+        correction_type: string; invoice_number: string;
+      }>(),
+  ]);
+
+  return {
+    certificate_status: invoice.certificate_status,
+    issued_at: invoice.issued_at,
+    invoice_hash: invoice.invoice_hash,
+    signature_profile: invoice.signature_profile,
+    status: invoice.status,
+    supplier_name: invoice.supplier_name,
+    invoice_number: invoice.invoice_number,
+    total_cents: invoice.total_cents,
+    currency: invoice.currency,
+    is_correction: Boolean(asCorrection),
+    corrects_invoice_number: asCorrection?.invoice_number ?? null,
+    correction_type: asCorrection?.correction_type ?? null,
+    corrections: asOriginal.results.map((row) => ({
+      correction_type: row.correction_type,
+      status: row.status,
+      invoice_number: row.invoice_number,
+      total_cents: row.total_cents,
+      created_at: row.created_at,
+    })),
+  };
 }
 
 export async function submitInvoice(payload: InvoiceSubmission, actor: UserContext, idempotencyKey: string, context: RequestContext): Promise<InvoiceDetail> {
@@ -387,6 +516,13 @@ export async function submitInvoice(payload: InvoiceSubmission, actor: UserConte
   const duplicate = await db.prepare("SELECT id FROM invoices WHERE supplier_taxpayer_id = ? AND source_system = ? AND source_document_id = ?")
     .bind(supplier.id, payload.source.system_id, payload.source.document_id).first<{ id: string }>();
   if (duplicate) throw new RepositoryConflictError(`Source document already exists as invoice ${duplicate.id}.`);
+  // Module 2 Phase B: invoice_number must be unique per supplier — the
+  // invoices table now enforces this (UNIQUE(supplier_taxpayer_id,
+  // invoice_number)) as the backstop; this explicit check gives a clearer
+  // error than the raw constraint violation for the common, non-racing case.
+  const numberCollision = await db.prepare("SELECT id FROM invoices WHERE supplier_taxpayer_id = ? AND invoice_number = ?")
+    .bind(supplier.id, payload.invoice_number.trim()).first<{ id: string }>();
+  if (numberCollision) throw new RepositoryConflictError(`Invoice number ${payload.invoice_number.trim()} has already been used by this supplier.`);
 
   const now = new Date().toISOString();
   const invoiceId = crypto.randomUUID();

@@ -254,3 +254,26 @@ export async function sha256Hex(value: string): Promise<string> {
 export function getVatNumber(party: InvoiceSubmission["supplier"]): string | null {
   return vatIdentifier(party);
 }
+
+export type InvoiceCancellation = { reason: string };
+
+/**
+ * Module 2 Phase B CancelInvoice. Deliberately officer-only (see
+ * lib/data/repository.ts's cancelInvoice) and narrow: an invoice that
+ * already has an active credit/debit note against it cannot be cancelled —
+ * that lineage must be resolved through further corrections, not voided.
+ * Distinct from a correction: a correction supersedes a real transaction's
+ * value; a cancellation says the transaction never should have been
+ * certified at all.
+ */
+export function normalizeInvoiceCancellation(input: unknown): InvoiceCancellation {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new InvoiceValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "A cancellation object is required." }]);
+  }
+  const source = input as Record<string, unknown>;
+  const reason = typeof source.reason === "string" ? source.reason.trim().replaceAll(/\s+/g, " ") : "";
+  if (reason.length < 10 || reason.length > 240) {
+    throw new InvoiceValidationError([{ code: "REASON_INVALID", path: "/reason", message: "Provide a 10 to 240 character cancellation reason." }]);
+  }
+  return { reason };
+}

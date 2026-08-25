@@ -26,7 +26,8 @@ const SCHEMA_STATEMENTS = [
     total_cents INTEGER NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL,
     payload_hash TEXT NOT NULL, transaction_id TEXT NOT NULL, certificate_id TEXT NOT NULL UNIQUE,
     verification_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, certified_at TEXT NOT NULL,
-    UNIQUE (supplier_taxpayer_id, source_system, source_document_id)
+    UNIQUE (supplier_taxpayer_id, source_system, source_document_id),
+    UNIQUE (supplier_taxpayer_id, invoice_number)
   )`,
   `CREATE TABLE IF NOT EXISTS app_users (
     id TEXT PRIMARY KEY, external_user_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE,
