@@ -11,6 +11,8 @@ import {
   validateObligationSatisfaction,
   validateRefundRequest,
   validateRefundReview,
+  validateRiskActionApproval,
+  validateRiskReviewAssignment,
   type AuditCaseStatus,
   type CaseOpeningSubmission,
   type DisputeSubmission,
@@ -388,4 +390,91 @@ export async function getCaseTimeline(caseId: string, actor: UserContext) {
   const transitions = await db.prepare("SELECT action,from_status,to_status,actor_id,reason,occurred_at FROM audit_case_transitions WHERE audit_case_id=? ORDER BY occurred_at")
     .bind(caseId).all<Record<string, unknown>>();
   return { case: auditCase, transitions: transitions.results };
+}
+
+type RiskIndicatorRow = { id: string; organisation_id: string; taxpayer_id: string; severity: string; status: string };
+
+/**
+ * Module 4 Phase B AssignReview: the first half of the human-authorisation
+ * gate between a risk indicator and an audit case. A risk indicator must be
+ * explicitly assigned to an active officer before any decision can be
+ * recorded against it — there is no path that skips straight from OPEN to
+ * a decision.
+ */
+export async function assignRiskReview(indicatorId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national risk role may assign a risk indicator for review.");
+  const input = validateRiskReviewAssignment(payload);
+  const db = await ensureDatabase();
+  const indicator = await db.prepare("SELECT id,organisation_id,taxpayer_id,severity,status FROM risk_indicators WHERE id=?").bind(indicatorId).first<RiskIndicatorRow>();
+  if (!indicator) throw new ComplianceResourceError("Risk indicator was not found.", 404);
+  const hash = await sha256Hex(stableStringify({ indicator_id: indicatorId, input }));
+  const prior = await replay(db, actor.userId, "ASSIGN_RISK_REVIEW", key, hash);
+  if (prior) return db.prepare("SELECT * FROM risk_indicators WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  if (indicator.status !== "OPEN") throw new RepositoryConflictError(`A review can only be assigned while the indicator is OPEN (currently ${indicator.status}).`);
+  const officer = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(input.officerId).first<{ id: string; status: string }>();
+  if (!officer) throw new ComplianceResourceError("The assigned officer does not exist.", 404);
+  if (officer.status !== "ACTIVE") throw new ComplianceResourceError("The assigned officer is not active.", 409);
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE risk_indicators SET status='UNDER_REVIEW', assigned_officer_id=? WHERE id=?").bind(input.officerId, indicatorId),
+    commandRecord(db, actor.userId, "ASSIGN_RISK_REVIEW", key, hash, "RISK_INDICATOR", indicatorId, now),
+    outbox(db, "RISK_INDICATOR", indicatorId, "RiskReviewAssigned", indicator.taxpayer_id, { indicator_id: indicatorId, officer_id: input.officerId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "RISK_REVIEW_ASSIGNED", "RISK_INDICATOR", indicatorId, { officerId: input.officerId, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM risk_indicators WHERE id=?").bind(indicatorId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 4 Phase B ApproveAction: the second half of the gate, and the ONLY
+ * path in this codebase that may turn a risk signal into an AuditCase. The
+ * new audit_cases row is written directly here (rather than delegating to
+ * openAuditCase) so the case creation and the indicator's own status update
+ * commit in one atomic batch — a risk indicator can never end up pointing
+ * at a case that didn't actually get created, or vice versa. The case's
+ * risk_tier is taken from the indicator's own severity, and opening_reason
+ * from this decision's rationale — never independently supplied — so every
+ * escalated case stays traceable to the exact evidence and human judgement
+ * that raised it.
+ */
+export async function approveRiskAction(indicatorId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national risk role may record a risk action decision.");
+  const input = validateRiskActionApproval(payload);
+  const db = await ensureDatabase();
+  const indicator = await db.prepare("SELECT id,organisation_id,taxpayer_id,severity,status FROM risk_indicators WHERE id=?").bind(indicatorId).first<RiskIndicatorRow>();
+  if (!indicator) throw new ComplianceResourceError("Risk indicator was not found.", 404);
+  const hash = await sha256Hex(stableStringify({ indicator_id: indicatorId, input }));
+  const prior = await replay(db, actor.userId, "APPROVE_RISK_ACTION", key, hash);
+  if (prior) return db.prepare("SELECT * FROM risk_indicators WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  if (indicator.status !== "UNDER_REVIEW") throw new RepositoryConflictError(`A decision can only be recorded once a review has been assigned (currently ${indicator.status}).`);
+  const now = new Date().toISOString();
+
+  if (input.decision === "DISMISS") {
+    await db.batch([
+      db.prepare("UPDATE risk_indicators SET status='DISMISSED', reviewed_by=?, reviewed_at=? WHERE id=?").bind(actor.userId, now, indicatorId),
+      commandRecord(db, actor.userId, "APPROVE_RISK_ACTION", key, hash, "RISK_INDICATOR", indicatorId, now),
+      outbox(db, "RISK_INDICATOR", indicatorId, "RiskActionDismissed", indicator.taxpayer_id, { indicator_id: indicatorId, correlation_id: correlationId }, now),
+      await auditRecord(db, actor, "RISK_ACTION_DISMISSED", "RISK_INDICATOR", indicatorId, { rationale: input.rationale, correlationId }, now),
+    ]);
+    return db.prepare("SELECT * FROM risk_indicators WHERE id=?").bind(indicatorId).first<Record<string, unknown>>();
+  }
+
+  const caseId = crypto.randomUUID();
+  const caseNumber = `CASE-${new Date().getUTCFullYear()}-${caseId.slice(0, 8).toUpperCase()}`;
+  await db.batch([
+    db.prepare(`INSERT INTO audit_cases
+      (id,case_number,organisation_id,taxpayer_id,case_type,title,opening_reason,risk_tier,status,assigned_officer_id,opened_by,opened_at,updated_at,closed_at)
+      VALUES (?,?,?,?,?,?,?,?,'PROPOSED',NULL,?,?,?,NULL)`)
+      .bind(caseId, caseNumber, indicator.organisation_id, indicator.taxpayer_id, input.caseType, input.caseTitle, input.rationale, indicator.severity, actor.userId, now, now),
+    db.prepare("UPDATE risk_indicators SET status='ESCALATED_TO_CASE', escalated_case_id=?, reviewed_by=?, reviewed_at=? WHERE id=?").bind(caseId, actor.userId, now, indicatorId),
+    db.prepare(`INSERT INTO notifications
+      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
+      VALUES (?,NULL,?,'AUDIT_CASE_OPENED',?,?,'HIGH','UNREAD',?, ?,NULL)`)
+      .bind(crypto.randomUUID(), indicator.taxpayer_id, `Audit case ${caseNumber} opened`, input.caseTitle, `/cases/${caseId}`, now),
+    commandRecord(db, actor.userId, "APPROVE_RISK_ACTION", key, hash, "RISK_INDICATOR", indicatorId, now),
+    outbox(db, "RISK_INDICATOR", indicatorId, "RiskEscalatedToCase", indicator.taxpayer_id, { indicator_id: indicatorId, case_id: caseId, case_number: caseNumber, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "RISK_ACTION_ESCALATED", "RISK_INDICATOR", indicatorId, { rationale: input.rationale, caseId, caseNumber, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM risk_indicators WHERE id=?").bind(indicatorId).first<Record<string, unknown>>();
 }

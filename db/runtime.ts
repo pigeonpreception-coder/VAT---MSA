@@ -428,6 +428,7 @@ const SCHEMA_STATEMENTS = [
     severity TEXT NOT NULL, rationale TEXT NOT NULL, rule_version TEXT NOT NULL,
     decision_effect TEXT NOT NULL, status TEXT NOT NULL, detected_at TEXT NOT NULL,
     reviewed_by TEXT REFERENCES app_users(id), reviewed_at TEXT,
+    assigned_officer_id TEXT REFERENCES app_users(id), escalated_case_id TEXT REFERENCES audit_cases(id),
     UNIQUE (subject_type, subject_id, indicator_code, rule_version)
   )`,
   `CREATE TABLE IF NOT EXISTS refund_claims (
@@ -1342,7 +1343,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
     VALUES ('dispute-0001','DSP-2026-0001','org-0004','tp-0004','case-0001','AUDIT_FINDING','finding-0001','The taxpayer requests clarification of the evidence scope before responding to the preliminary finding.',18000000,'NAD','FILED','usr-local-admin',NULL,'2026-08-10T07:20:00Z',NULL,NULL)`,
   `INSERT OR IGNORE INTO risk_indicators
     (id,organisation_id,taxpayer_id,subject_type,subject_id,indicator_code,score_bps,severity,rationale,rule_version,decision_effect,status,detected_at,reviewed_by,reviewed_at)
-    VALUES ('risk-0001','org-0004','tp-0004','INVOICE','inv-0004','HIGH_VALUE_TRANSACTION',9200,'CRITICAL','Gross value exceeds the controlled pilot threshold; the indicator cannot impose an adverse decision.','RISK-PILOT-2026.1','ADVISORY_ONLY','UNDER_HUMAN_REVIEW','2026-08-06T09:32:11Z','usr-local-admin','2026-08-10T07:00:00Z')`,
+    VALUES ('risk-0001','org-0004','tp-0004','INVOICE','inv-0004','HIGH_VALUE_TRANSACTION',9200,'CRITICAL','Gross value exceeds the controlled pilot threshold; the indicator cannot impose an adverse decision.','RISK-PILOT-2026.1','ADVISORY_ONLY','OPEN','2026-08-06T09:32:11Z',NULL,NULL)`,
   `INSERT OR IGNORE INTO refund_claims
     (id,claim_number,organisation_id,taxpayer_id,vat_return_version_id,amount_cents,currency,status,evidence_status,risk_tier,requested_by,requested_at,approved_by,approved_at,payment_instruction_id)
     VALUES ('refund-0001','RFD-2026-0001','org-0003','tp-0003','returnv-0003',1590000,'NAD','BLOCKED_RETURN_NOT_FILED','AWAITING_ITAS_ACKNOWLEDGEMENT','HIGH','usr-local-admin','2026-08-10T07:30:00Z',NULL,NULL,NULL)`,

@@ -10,6 +10,8 @@ import {
   validateObligationSatisfaction,
   validateRefundRequest,
   validateRefundReview,
+  validateRiskActionApproval,
+  validateRiskReviewAssignment,
 } from "@/lib/domain/compliance";
 
 describe("compliance command validation", () => {
@@ -143,5 +145,47 @@ describe("finding issuance validation", () => {
   it("rejects a title or description outside their character bounds", () => {
     expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Bad", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 1000, currency: "NAD" })).toThrowError(ComplianceValidationError);
     expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "too short", amount_cents: 1000, currency: "NAD" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("risk review assignment validation", () => {
+  it("normalizes a well-formed review assignment", () => {
+    expect(validateRiskReviewAssignment({ schema_version: "1.0.0", officer_id: "usr-0002" }).officerId).toBe("usr-0002");
+  });
+
+  it("rejects a missing officer_id", () => {
+    expect(() => validateRiskReviewAssignment({ schema_version: "1.0.0" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("risk action approval validation", () => {
+  it("normalizes a DISMISS decision without requiring case fields", () => {
+    const result = validateRiskActionApproval({ schema_version: "1.0.0", decision: "dismiss", rationale: "The indicator was independently verified as a false positive against known evidence." });
+    expect(result.decision).toBe("DISMISS");
+  });
+
+  it("normalizes an ESCALATE_TO_CASE decision, uppercasing case_type", () => {
+    const result = validateRiskActionApproval({ schema_version: "1.0.0", decision: "escalate_to_case", rationale: "The reviewing officer independently confirmed the transaction pattern warrants a formal audit.", case_type: "vat_audit", case_title: "High-value transaction pattern review" });
+    expect(result.decision).toBe("ESCALATE_TO_CASE");
+    if (result.decision === "ESCALATE_TO_CASE") {
+      expect(result.caseType).toBe("VAT_AUDIT");
+      expect(result.caseTitle).toBe("High-value transaction pattern review");
+    }
+  });
+
+  it("requires case_type and case_title when escalating to a case", () => {
+    expect(() => validateRiskActionApproval({ schema_version: "1.0.0", decision: "ESCALATE_TO_CASE", rationale: "The reviewing officer independently confirmed the transaction pattern warrants a formal audit." })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects an unsupported case_type when escalating", () => {
+    expect(() => validateRiskActionApproval({ schema_version: "1.0.0", decision: "ESCALATE_TO_CASE", rationale: "The reviewing officer independently confirmed the transaction pattern warrants a formal audit.", case_type: "NOT_A_TYPE", case_title: "High-value transaction pattern review" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects an unrecognised decision", () => {
+    expect(() => validateRiskActionApproval({ schema_version: "1.0.0", decision: "IGNORE", rationale: "The reviewing officer independently confirmed the transaction pattern warrants a formal audit." })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects a rationale outside the 20 to 2000 character bound", () => {
+    expect(() => validateRiskActionApproval({ schema_version: "1.0.0", decision: "DISMISS", rationale: "too short" })).toThrowError(ComplianceValidationError);
   });
 });

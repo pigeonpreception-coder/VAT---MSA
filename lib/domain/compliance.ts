@@ -44,6 +44,7 @@ export type RefundReviewSubmission = {
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$/;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
+const CASE_TYPES = new Set(["DESK_REVIEW", "VAT_AUDIT", "REFUND_VERIFICATION", "INVESTIGATION"]);
 
 function object(payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new ComplianceValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
@@ -77,7 +78,7 @@ export function validateCaseOpening(payload: unknown): CaseOpeningSubmission {
   schema(input, messages);
   const taxpayerId = id(input.taxpayer_id, "/taxpayer_id", messages) ?? "";
   const caseType = text(input.case_type).toUpperCase() as CaseOpeningSubmission["case_type"];
-  if (!new Set(["DESK_REVIEW", "VAT_AUDIT", "REFUND_VERIFICATION", "INVESTIGATION"]).has(caseType)) messages.push({ code: "CASE_TYPE_INVALID", path: "/case_type", message: "Select a supported case type." });
+  if (!CASE_TYPES.has(caseType)) messages.push({ code: "CASE_TYPE_INVALID", path: "/case_type", message: "Select a supported case type." });
   const title = bounded(input.title, "/title", "Title", 5, 200, messages);
   const openingReason = bounded(input.opening_reason, "/opening_reason", "Opening reason", 20, 2_000, messages);
   const riskTier = text(input.risk_tier).toUpperCase() as CaseOpeningSubmission["risk_tier"];
@@ -286,4 +287,58 @@ export function validateRefundReview(payload: unknown): RefundReviewSubmission {
   const findings = bounded(input.findings, "/findings", "Findings", 10, 2_000, messages);
   if (messages.length) throw new ComplianceValidationError(messages);
   return { schema_version: "1.0.0", stage, decision, findings };
+}
+
+/**
+ * Module 4 Phase B: the human-authorisation gate between a risk indicator
+ * and an audit case. risk_indicators already existed in the schema (a
+ * Phase A data-model anchor), but no application code had ever written to
+ * it — EvaluateRisk, the rule engine that would raise new indicators, is
+ * still Module 4 Phase A and deliberately out of scope here. This phase
+ * builds only the two commands the playbook names for the gate itself:
+ * AssignReview and ApproveAction. ApproveAction is the ONLY path in this
+ * codebase that may turn a risk signal into an AuditCase — nothing here
+ * or anywhere else auto-creates one as a side effect of evaluation.
+ */
+export type RiskIndicatorStatus = "OPEN" | "UNDER_REVIEW" | "ESCALATED_TO_CASE" | "DISMISSED";
+
+export type RiskReviewAssignment = { schema_version: "1.0.0"; officerId: string };
+
+export function validateRiskReviewAssignment(payload: unknown): RiskReviewAssignment {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const officerId = id(input.officer_id, "/officer_id", messages) ?? "";
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", officerId };
+}
+
+export type RiskActionApproval =
+  | { schema_version: "1.0.0"; decision: "DISMISS"; rationale: string }
+  | { schema_version: "1.0.0"; decision: "ESCALATE_TO_CASE"; rationale: string; caseType: CaseOpeningSubmission["case_type"]; caseTitle: string };
+
+/**
+ * ApproveAction. DISMISS only needs a recorded rationale. ESCALATE_TO_CASE
+ * additionally needs case_type/case_title — the resulting case's risk_tier
+ * and opening_reason are deliberately NOT taken from this payload: the
+ * repository derives risk_tier from the indicator's own severity and
+ * opening_reason from this decision's rationale, so every escalated case
+ * stays traceable to the exact evidence and human judgement that raised it.
+ */
+export function validateRiskActionApproval(payload: unknown): RiskActionApproval {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const decision = text(input.decision).toUpperCase();
+  if (!new Set(["ESCALATE_TO_CASE", "DISMISS"]).has(decision)) messages.push({ code: "DECISION_INVALID", path: "/decision", message: "decision must be ESCALATE_TO_CASE or DISMISS." });
+  const rationale = bounded(input.rationale, "/rationale", "Rationale", 20, 2_000, messages);
+  if (decision === "ESCALATE_TO_CASE") {
+    const caseType = text(input.case_type).toUpperCase() as CaseOpeningSubmission["case_type"];
+    if (!CASE_TYPES.has(caseType)) messages.push({ code: "CASE_TYPE_INVALID", path: "/case_type", message: "Select a supported case type." });
+    const caseTitle = bounded(input.case_title, "/case_title", "Case title", 5, 200, messages);
+    if (messages.length) throw new ComplianceValidationError(messages);
+    return { schema_version: "1.0.0", decision: "ESCALATE_TO_CASE", rationale, caseType, caseTitle };
+  }
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", decision: "DISMISS", rationale };
 }

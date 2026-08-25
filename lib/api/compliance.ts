@@ -1,5 +1,7 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
 import {
+  approveRiskAction,
+  assignRiskReview,
   ComplianceResourceError,
   createObligation,
   fileDispute,
@@ -18,7 +20,8 @@ import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSe
 
 export type ComplianceCommand =
   | "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "REVIEW_REFUND"
-  | "CREATE_OBLIGATION" | "MARK_OBLIGATION_SATISFIED" | "TRANSITION_CASE" | "ISSUE_FINDING";
+  | "CREATE_OBLIGATION" | "MARK_OBLIGATION_SATISFIED" | "TRANSITION_CASE" | "ISSUE_FINDING"
+  | "ASSIGN_RISK_REVIEW" | "APPROVE_RISK_ACTION";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId, ...(errors ? { errors } : {}) }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store", ...(retryAfter ? { "retry-after": String(retryAfter) } : {}) } });
@@ -80,13 +83,19 @@ export async function handleComplianceCommand(request: Request, permission: stri
     } else if (command === "TRANSITION_CASE") {
       if (!resourceId) throw new ComplianceResourceError("Audit case id is required.", 400);
       result = await transitionCase(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
-    } else {
+    } else if (command === "ISSUE_FINDING") {
       if (!resourceId) throw new ComplianceResourceError("Audit case id is required.", 400);
       result = await issueFinding(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else if (command === "ASSIGN_RISK_REVIEW") {
+      if (!resourceId) throw new ComplianceResourceError("Risk indicator id is required.", 400);
+      result = await assignRiskReview(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else {
+      if (!resourceId) throw new ComplianceResourceError("Risk indicator id is required.", 400);
+      result = await approveRiskAction(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
     }
     if (!result) throw new RepositoryConflictError("The idempotent compliance resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" ? 200 : 201;
+    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" || command === "ASSIGN_RISK_REVIEW" || command === "APPROVE_RISK_ACTION" ? 200 : 201;
     return Response.json({ resource: result }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
