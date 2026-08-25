@@ -2,12 +2,16 @@ import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
+  assertCaseTransition,
   validateCaseOpening,
+  validateCaseTransition,
   validateDispute,
+  validateFindingIssuance,
   validateObligationCreation,
   validateObligationSatisfaction,
   validateRefundRequest,
   validateRefundReview,
+  type AuditCaseStatus,
   type CaseOpeningSubmission,
   type DisputeSubmission,
   type ObligationCreation,
@@ -90,6 +94,16 @@ export async function getComplianceSnapshot(actor: UserContext) {
   return { obligations: obligations.results, cases: cases.results, findings: findings.results, disputes: disputes.results, risks: risks.results, refunds: refunds.results, reviews: reviews.results, communications: communicationsResult.results, notifications: notificationsResult.results, consents: consents.results, delegations: delegationsResult.results };
 }
 
+/**
+ * Module 4 Phase C: opening a case now creates it in PROPOSED — the first
+ * state of the real lifecycle in lib/domain/compliance.ts's CASE_TRANSITIONS
+ * — rather than a permanent, un-transitionable 'OPEN'. It also no longer
+ * auto-assigns the opener as assigned_officer_id: assignment is now
+ * transitionCase's ASSIGN action's job, a deliberate separation between
+ * "who opened this" and "who owns it," matching the assessment's earlier
+ * finding that self-auto-assignment was a design smell with no real Assign
+ * command to correct it.
+ */
 export async function openAuditCase(payload: CaseOpeningSubmission, actor: UserContext, key: string, correlationId: string) {
   validateKey(key);
   if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may open an audit case.");
@@ -105,7 +119,7 @@ export async function openAuditCase(payload: CaseOpeningSubmission, actor: UserC
   await db.batch([
     db.prepare(`INSERT INTO audit_cases
       (id,case_number,organisation_id,taxpayer_id,case_type,title,opening_reason,risk_tier,status,assigned_officer_id,opened_by,opened_at,updated_at,closed_at)
-      VALUES (?,?,?,?,?,?,?,?,'OPEN',?,?,?, ?,NULL)`).bind(id, caseNumber, scope.organisation_id, scope.taxpayer_id, input.case_type, input.title, input.opening_reason, input.risk_tier, actor.userId, actor.userId, now, now),
+      VALUES (?,?,?,?,?,?,?,?,'PROPOSED',NULL,?,?,?,NULL)`).bind(id, caseNumber, scope.organisation_id, scope.taxpayer_id, input.case_type, input.title, input.opening_reason, input.risk_tier, actor.userId, now, now),
     db.prepare(`INSERT INTO notifications
       (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
       VALUES (?,NULL,?,'AUDIT_CASE_OPENED',?,?,'HIGH','UNREAD',?, ?,NULL)`).bind(crypto.randomUUID(), scope.taxpayer_id, `Audit case ${caseNumber} opened`, input.title, `/cases/${id}`, now),
@@ -255,4 +269,123 @@ export async function markObligationSatisfied(obligationId: string, payload: Obl
     await auditRecord(db, actor, "OBLIGATION_SATISFIED", "TAX_OBLIGATION", obligation.id, { notes: input.notes, correlationId }, now),
   ]);
   return db.prepare("SELECT * FROM tax_obligations WHERE id=?").bind(obligation.id).first<Record<string, unknown>>();
+}
+
+type AuditCaseRow = { id: string; taxpayer_id: string; status: AuditCaseStatus; suspended_from_status: AuditCaseStatus | null };
+
+/**
+ * Module 4 Phase C: the single code path that can ever change an audit
+ * case's status. Every action (AUTHORIZE/ASSIGN/ADVANCE/SUSPEND/RESUME/
+ * CANCEL/REOPEN/CLOSE/LINK_APPEAL) flows through here — see
+ * lib/domain/compliance.ts's CASE_TRANSITIONS for why this is one shared
+ * function rather than eight bespoke ones. Every transition writes a row to
+ * audit_case_transitions (actor, reason, prior/new state, time — exactly
+ * what CaseTimeline reads back), never just flips the status column in
+ * place.
+ */
+export async function transitionCase(caseId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may transition an audit case.");
+  const input = validateCaseTransition(payload);
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id,status,suspended_from_status FROM audit_cases WHERE id=?").bind(caseId).first<AuditCaseRow>();
+  if (!auditCase) throw new ComplianceResourceError("Audit case was not found.", 404);
+  const hash = await sha256Hex(stableStringify({ case_id: caseId, input }));
+  const prior = await replay(db, actor.userId, "TRANSITION_CASE", key, hash);
+  if (prior) return db.prepare("SELECT * FROM audit_cases WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  const staticTarget = assertCaseTransition(input.action, auditCase.status);
+  let targetStatus: AuditCaseStatus;
+  if (input.action === "RESUME") {
+    if (!auditCase.suspended_from_status) throw new ComplianceResourceError("This case has no recorded state to resume into.", 409);
+    targetStatus = auditCase.suspended_from_status;
+  } else {
+    targetStatus = staticTarget as AuditCaseStatus;
+  }
+  const nextSuspendedFrom = input.action === "SUSPEND" ? auditCase.status : null;
+
+  if (input.action === "ASSIGN") {
+    const officer = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(input.officerId).first<{ id: string; status: string }>();
+    if (!officer) throw new ComplianceResourceError("The assigned officer does not exist.", 404);
+    if (officer.status !== "ACTIVE") throw new ComplianceResourceError("The assigned officer is not active.", 409);
+  }
+  if (input.action === "CLOSE") {
+    const findingCount = await db.prepare("SELECT COUNT(*) AS n FROM audit_findings WHERE audit_case_id=?").bind(caseId).first<{ n: number }>();
+    if (!findingCount?.n) throw new RepositoryConflictError("A case cannot be closed with no findings on record.");
+  }
+
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`UPDATE audit_cases SET
+        status=?, updated_at=?, suspended_from_status=?,
+        assigned_officer_id=COALESCE(?, assigned_officer_id),
+        closed_at=COALESCE(?, closed_at),
+        appeal_reference=COALESCE(?, appeal_reference),
+        appeal_linked_at=COALESCE(?, appeal_linked_at)
+      WHERE id=?`).bind(
+      targetStatus, now, nextSuspendedFrom,
+      input.action === "ASSIGN" ? input.officerId : null,
+      input.action === "CLOSE" ? now : null,
+      input.action === "LINK_APPEAL" ? input.appealReference : null,
+      input.action === "LINK_APPEAL" ? now : null,
+      caseId,
+    ),
+    db.prepare(`INSERT INTO audit_case_transitions (id,audit_case_id,action,from_status,to_status,actor_id,reason,occurred_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), caseId, input.action, auditCase.status, targetStatus, actor.userId, input.reason, now),
+    commandRecord(db, actor.userId, "TRANSITION_CASE", key, hash, "AUDIT_CASE", caseId, now),
+    outbox(db, "AUDIT_CASE", caseId, `AuditCase${input.action.charAt(0)}${input.action.slice(1).toLowerCase().replaceAll("_", "")}`, auditCase.taxpayer_id, {
+      case_id: caseId, action: input.action, from_status: auditCase.status, to_status: targetStatus, correlation_id: correlationId,
+    }, now),
+    await auditRecord(db, actor, `AUDIT_CASE_${input.action}`, "AUDIT_CASE", caseId, { action: input.action, fromStatus: auditCase.status, toStatus: targetStatus, reason: input.reason, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM audit_cases WHERE id=?").bind(caseId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 4 Phase C IssueFinding. Restricted to the case's analytical/
+ * reporting stages (ANALYSIS, TAXPAYER_RESPONSE, FINDINGS_REVIEW) — findings
+ * can't be issued before the case has real work underway, nor after it's
+ * moved to DECISION/CLOSED/SUSPENDED/CANCELLED.
+ */
+export async function issueFinding(caseId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may issue an audit finding.");
+  const input = validateFindingIssuance(payload);
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id,status FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string; status: AuditCaseStatus }>();
+  if (!auditCase) throw new ComplianceResourceError("Audit case was not found.", 404);
+  if (!["ANALYSIS", "TAXPAYER_RESPONSE", "FINDINGS_REVIEW"].includes(auditCase.status)) {
+    throw new RepositoryConflictError(`Findings cannot be issued while the case is ${auditCase.status}.`);
+  }
+  const hash = await sha256Hex(stableStringify({ case_id: caseId, input }));
+  const prior = await replay(db, actor.userId, "ISSUE_FINDING", key, hash);
+  if (prior) return db.prepare("SELECT * FROM audit_findings WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id FROM audit_findings WHERE audit_case_id=? AND finding_code=?").bind(caseId, input.finding_code).first<{ id: string }>();
+  if (existing) throw new RepositoryConflictError(`A finding with this code already exists as ${existing.id}.`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO audit_findings (id,audit_case_id,finding_code,title,description,legal_reference,amount_cents,currency,status,author_id,created_at,resolved_at)
+      VALUES (?,?,?,?,?,?,?,?,'PRELIMINARY',?,?,NULL)`).bind(id, caseId, input.finding_code, input.title, input.description, input.legal_reference ?? null, input.amount_cents, input.currency, actor.userId, now),
+    commandRecord(db, actor.userId, "ISSUE_FINDING", key, hash, "AUDIT_FINDING", id, now),
+    outbox(db, "AUDIT_FINDING", id, "AuditFindingIssued", auditCase.taxpayer_id, { finding_id: id, audit_case_id: caseId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "AUDIT_FINDING_ISSUED", "AUDIT_FINDING", id, { auditCaseId: caseId, findingCode: input.finding_code, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM audit_findings WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 4 Phase C CaseTimeline: the complete, chronological transition
+ * history for one case — exactly what audit_case_transitions exists to
+ * answer. Tenant-scoped: a taxpayer may read their own case's timeline
+ * (transparency), but only national-scope actors can read any case.
+ */
+export async function getCaseTimeline(caseId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  const auditCase = await db.prepare("SELECT id,taxpayer_id,case_number,status FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string; case_number: string; status: string }>();
+  if (!auditCase) return null;
+  if (!isNationalScope(actor) && actor.taxpayerId !== auditCase.taxpayer_id) throw new AccessDeniedError("The audit case is outside your authorised taxpayer scope.");
+  const transitions = await db.prepare("SELECT action,from_status,to_status,actor_id,reason,occurred_at FROM audit_case_transitions WHERE audit_case_id=? ORDER BY occurred_at")
+    .bind(caseId).all<Record<string, unknown>>();
+  return { case: auditCase, transitions: transitions.results };
 }

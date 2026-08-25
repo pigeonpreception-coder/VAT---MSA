@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertCaseTransition,
   ComplianceValidationError,
   validateCaseOpening,
+  validateCaseTransition,
   validateDispute,
+  validateFindingIssuance,
   validateObligationCreation,
   validateObligationSatisfaction,
   validateRefundRequest,
@@ -54,5 +57,91 @@ describe("compliance command validation", () => {
 
   it("rejects satisfaction notes outside the 10 to 2000 character bound", () => {
     expect(() => validateObligationSatisfaction({ schema_version: "1.0.0", notes: "too short" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("audit case lifecycle state machine", () => {
+  it("walks the full happy-path lifecycle", () => {
+    expect(assertCaseTransition("AUTHORIZE", "PROPOSED")).toBe("AUTHORIZED");
+    expect(assertCaseTransition("ASSIGN", "AUTHORIZED")).toBe("ASSIGNED");
+    expect(assertCaseTransition("ADVANCE", "ASSIGNED")).toBe("PLANNING");
+    expect(assertCaseTransition("ADVANCE", "PLANNING")).toBe("EVIDENCE_COLLECTION");
+    expect(assertCaseTransition("ADVANCE", "EVIDENCE_COLLECTION")).toBe("ANALYSIS");
+    expect(assertCaseTransition("ADVANCE", "ANALYSIS")).toBe("TAXPAYER_RESPONSE");
+    expect(assertCaseTransition("ADVANCE", "TAXPAYER_RESPONSE")).toBe("FINDINGS_REVIEW");
+    expect(assertCaseTransition("ADVANCE", "FINDINGS_REVIEW")).toBe("DECISION");
+    expect(assertCaseTransition("CLOSE", "DECISION")).toBe("CLOSED");
+  });
+
+  it("allows cancellation only from PROPOSED or AUTHORIZED", () => {
+    expect(assertCaseTransition("CANCEL", "PROPOSED")).toBe("CANCELLED");
+    expect(assertCaseTransition("CANCEL", "AUTHORIZED")).toBe("CANCELLED");
+    expect(() => assertCaseTransition("CANCEL", "ASSIGNED")).toThrowError(ComplianceValidationError);
+  });
+
+  it("allows suspend from any working state and resume back with a null static target", () => {
+    expect(assertCaseTransition("SUSPEND", "ANALYSIS")).toBe("SUSPENDED");
+    expect(assertCaseTransition("RESUME", "SUSPENDED")).toBeNull();
+    expect(() => assertCaseTransition("SUSPEND", "CLOSED")).toThrowError(ComplianceValidationError);
+  });
+
+  it("allows reopen and appeal-linking only from CLOSED", () => {
+    expect(assertCaseTransition("REOPEN", "CLOSED")).toBe("FINDINGS_REVIEW");
+    expect(assertCaseTransition("LINK_APPEAL", "CLOSED")).toBe("CLOSED");
+    expect(() => assertCaseTransition("REOPEN", "DECISION")).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects any transition from a terminal CANCELLED case", () => {
+    expect(() => assertCaseTransition("ADVANCE", "CANCELLED")).toThrowError(ComplianceValidationError);
+    expect(() => assertCaseTransition("AUTHORIZE", "CANCELLED")).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes a case transition command, uppercasing the action", () => {
+    const result = validateCaseTransition({ schema_version: "1.0.0", action: "advance", reason: "Evidence collection is complete and the file is ready for analysis." });
+    expect(result.action).toBe("ADVANCE");
+    expect(result.officerId).toBeUndefined();
+  });
+
+  it("requires an officer_id for an ASSIGN action", () => {
+    expect(() => validateCaseTransition({ schema_version: "1.0.0", action: "ASSIGN", reason: "Handing this case to the officer with subject-matter expertise." })).toThrowError(ComplianceValidationError);
+    const result = validateCaseTransition({ schema_version: "1.0.0", action: "ASSIGN", reason: "Handing this case to the officer with subject-matter expertise.", officer_id: "user-0002" });
+    expect(result.officerId).toBe("user-0002");
+  });
+
+  it("requires an appeal_reference for a LINK_APPEAL action", () => {
+    expect(() => validateCaseTransition({ schema_version: "1.0.0", action: "LINK_APPEAL", reason: "The taxpayer has lodged a formal appeal against this decision." })).toThrowError(ComplianceValidationError);
+    const result = validateCaseTransition({ schema_version: "1.0.0", action: "LINK_APPEAL", reason: "The taxpayer has lodged a formal appeal against this decision.", appeal_reference: "APPEAL-2026-0042" });
+    expect(result.appealReference).toBe("APPEAL-2026-0042");
+  });
+
+  it("rejects an unrecognised action", () => {
+    expect(() => validateCaseTransition({ schema_version: "1.0.0", action: "TELEPORT", reason: "Not a real action for this state machine." })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects a reason outside the 10 to 2000 character bound", () => {
+    expect(() => validateCaseTransition({ schema_version: "1.0.0", action: "ADVANCE", reason: "short" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("finding issuance validation", () => {
+  it("normalizes a well-formed finding", () => {
+    const result = validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-underdeclared-output-vat", title: "Underdeclared output VAT for the period", description: "Sampled invoices show output VAT amounts below the rate applicable to the declared supply category.", legal_reference: "VAT Act s. 21", amount_cents: 250000, currency: "nad" });
+    expect(result.currency).toBe("NAD");
+    expect(result.amount_cents).toBe(250000);
+    expect(result.legal_reference).toBe("VAT Act s. 21");
+  });
+
+  it("rejects a negative or non-integer amount", () => {
+    expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: -100, currency: "NAD" })).toThrowError(ComplianceValidationError);
+    expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 10.5, currency: "NAD" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects an invalid currency code", () => {
+    expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 1000, currency: "N" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects a title or description outside their character bounds", () => {
+    expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Bad", description: "Sampled invoices show output VAT amounts below the applicable declared rate.", amount_cents: 1000, currency: "NAD" })).toThrowError(ComplianceValidationError);
+    expect(() => validateFindingIssuance({ schema_version: "1.0.0", finding_code: "finding-0001", title: "Underdeclared output VAT for the period", description: "too short", amount_cents: 1000, currency: "NAD" })).toThrowError(ComplianceValidationError);
   });
 });

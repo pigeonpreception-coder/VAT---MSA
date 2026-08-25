@@ -86,6 +86,114 @@ export function validateCaseOpening(payload: unknown): CaseOpeningSubmission {
   return { schema_version: "1.0.0", taxpayer_id: taxpayerId, case_type: caseType, title, opening_reason: openingReason, risk_tier: riskTier };
 }
 
+/**
+ * Module 4 Phase C: the audit case lifecycle state machine. A 2026-08-25
+ * code assessment found audit_cases.status was a bare string that was never
+ * updated after creation — every case was permanently stuck at 'OPEN', with
+ * no Assign/IssueFinding/CloseCase command anywhere. This is a real
+ * adjacency-list state machine (mirrors the LICENSE_STATE_TRANSITIONS
+ * pattern already used for licence lifecycle in lib/domain/control-plane.ts),
+ * not scattered status-string checks: every legal (status, action) pair is
+ * enumerated once, here, and lib/data/compliance-repository.ts's
+ * transitionCase is the single code path that can ever change a case's
+ * status.
+ *
+ * The playbook names Create/Assign/IssueFinding/CloseCase plus
+ * Suspended/Reopened/AppealLinked/Cancelled as "controlled side-transitions"
+ * — rather than building eight nearly-identical bespoke commands, all state
+ * changes go through this one shared transition table and one shared
+ * transitionCase function, which is arguably a more genuine state machine
+ * than eight separate ones would be. IssueFinding and CaseTimeline remain
+ * their own distinct operations (issuing a finding doesn't change the
+ * case's own status; reading the timeline changes nothing at all).
+ *
+ * Deliberately NOT included here: any segregation-of-duties check (can the
+ * same actor who opened/referred a case also close it or issue its
+ * finding). That is Module 4 Phase E, a distinct, separately-scoped piece
+ * of work with its own "logged exceptional-oversight override path"
+ * requirement — adding a partial version of it here would preempt that.
+ */
+export type AuditCaseStatus =
+  | "PROPOSED" | "AUTHORIZED" | "ASSIGNED" | "PLANNING" | "EVIDENCE_COLLECTION"
+  | "ANALYSIS" | "TAXPAYER_RESPONSE" | "FINDINGS_REVIEW" | "DECISION" | "CLOSED"
+  | "SUSPENDED" | "CANCELLED";
+
+export type AuditCaseAction = "AUTHORIZE" | "ASSIGN" | "ADVANCE" | "SUSPEND" | "RESUME" | "CANCEL" | "REOPEN" | "CLOSE" | "LINK_APPEAL";
+
+const CASE_ACTIONS: readonly AuditCaseAction[] = ["AUTHORIZE", "ASSIGN", "ADVANCE", "SUSPEND", "RESUME", "CANCEL", "REOPEN", "CLOSE", "LINK_APPEAL"];
+
+/**
+ * `to: null` marks RESUME as dynamic — its real target is whatever status
+ * the case was suspended *from*, which only the repository layer (reading
+ * the case row) can resolve. Every other action has one fixed, statically
+ * known target.
+ */
+const CASE_TRANSITIONS: Record<AuditCaseStatus, Partial<Record<AuditCaseAction, AuditCaseStatus | null>>> = {
+  PROPOSED: { AUTHORIZE: "AUTHORIZED", CANCEL: "CANCELLED" },
+  AUTHORIZED: { ASSIGN: "ASSIGNED", CANCEL: "CANCELLED" },
+  ASSIGNED: { ADVANCE: "PLANNING", SUSPEND: "SUSPENDED" },
+  PLANNING: { ADVANCE: "EVIDENCE_COLLECTION", SUSPEND: "SUSPENDED" },
+  EVIDENCE_COLLECTION: { ADVANCE: "ANALYSIS", SUSPEND: "SUSPENDED" },
+  ANALYSIS: { ADVANCE: "TAXPAYER_RESPONSE", SUSPEND: "SUSPENDED" },
+  TAXPAYER_RESPONSE: { ADVANCE: "FINDINGS_REVIEW", SUSPEND: "SUSPENDED" },
+  FINDINGS_REVIEW: { ADVANCE: "DECISION", SUSPEND: "SUSPENDED" },
+  DECISION: { CLOSE: "CLOSED", SUSPEND: "SUSPENDED" },
+  SUSPENDED: { RESUME: null },
+  CLOSED: { REOPEN: "FINDINGS_REVIEW", LINK_APPEAL: "CLOSED" },
+  CANCELLED: {},
+};
+
+/** Validates the (status, action) pair is legal and returns the static target status, or null if the target is dynamic (RESUME only — see CASE_TRANSITIONS). */
+export function assertCaseTransition(action: AuditCaseAction, currentStatus: AuditCaseStatus): AuditCaseStatus | null {
+  const rule = CASE_TRANSITIONS[currentStatus];
+  if (!rule || !(action in rule)) {
+    throw new ComplianceValidationError([{ code: "CASE_TRANSITION_INVALID", path: "/action", message: `Cannot ${action.replaceAll("_", " ").toLowerCase()} a case currently ${currentStatus}.` }]);
+  }
+  return rule[action] ?? null;
+}
+
+export type CaseTransitionInput = { schema_version: "1.0.0"; action: AuditCaseAction; reason: string; officerId?: string; appealReference?: string };
+
+export function validateCaseTransition(payload: unknown): CaseTransitionInput {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const action = text(input.action).toUpperCase() as AuditCaseAction;
+  if (!CASE_ACTIONS.includes(action)) messages.push({ code: "ACTION_INVALID", path: "/action", message: `action must be one of: ${CASE_ACTIONS.join(", ")}.` });
+  const reason = bounded(input.reason, "/reason", "Reason", 10, 2_000, messages);
+  const officerId = action === "ASSIGN" ? id(input.officer_id, "/officer_id", messages) : undefined;
+  const appealReference = action === "LINK_APPEAL" ? bounded(input.appeal_reference, "/appeal_reference", "Appeal reference", 3, 100, messages) : undefined;
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", action, reason, ...(officerId ? { officerId } : {}), ...(appealReference ? { appealReference } : {}) };
+}
+
+export type FindingIssuance = {
+  schema_version: "1.0.0";
+  finding_code: string;
+  title: string;
+  description: string;
+  legal_reference?: string;
+  amount_cents: number;
+  currency: string;
+};
+
+/** Module 4 Phase C IssueFinding — a sub-resource creation, not a case-status transition, so it's validated and committed separately from validateCaseTransition above. */
+export function validateFindingIssuance(payload: unknown): FindingIssuance {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const findingCode = id(input.finding_code, "/finding_code", messages) ?? "";
+  const title = bounded(input.title, "/title", "Title", 5, 200, messages);
+  const description = bounded(input.description, "/description", "Description", 20, 4_000, messages);
+  const legalReference = text(input.legal_reference) || undefined;
+  const amount = Number(input.amount_cents);
+  if (!Number.isSafeInteger(amount) || amount < 0) messages.push({ code: "AMOUNT_INVALID", path: "/amount_cents", message: "amount_cents must be a non-negative safe integer." });
+  const currency = text(input.currency).toUpperCase();
+  if (!CURRENCY_PATTERN.test(currency)) messages.push({ code: "CURRENCY_INVALID", path: "/currency", message: "Currency must be a three-letter ISO 4217 code." });
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", finding_code: findingCode, title, description, ...(legalReference ? { legal_reference: legalReference } : {}), amount_cents: amount, currency };
+}
+
 export function validateDispute(payload: unknown): DisputeSubmission {
   const input = object(payload);
   const messages: ComplianceValidationMessage[] = [];

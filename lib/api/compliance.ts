@@ -3,17 +3,22 @@ import {
   ComplianceResourceError,
   createObligation,
   fileDispute,
+  getCaseTimeline,
   getComplianceSnapshot,
+  issueFinding,
   markObligationSatisfied,
   openAuditCase,
   requestRefund,
   reviewRefund,
+  transitionCase,
 } from "@/lib/data/compliance-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { ComplianceValidationError } from "@/lib/domain/compliance";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
-export type ComplianceCommand = "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "REVIEW_REFUND" | "CREATE_OBLIGATION" | "MARK_OBLIGATION_SATISFIED";
+export type ComplianceCommand =
+  | "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "REVIEW_REFUND"
+  | "CREATE_OBLIGATION" | "MARK_OBLIGATION_SATISFIED" | "TRANSITION_CASE" | "ISSUE_FINDING";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId, ...(errors ? { errors } : {}) }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store", ...(retryAfter ? { "retry-after": String(retryAfter) } : {}) } });
@@ -28,6 +33,21 @@ export async function handleComplianceList(request: Request) {
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
     return problem(500, "INTERNAL_ERROR", "Internal error", "The compliance workspace is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 4 Phase C CaseTimeline. Readable by a taxpayer-scoped actor for their own case (see getCaseTimeline's tenant check) as well as any national-scope actor. */
+export async function handleCaseTimeline(request: Request, resourceId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "compliance:read");
+    const timeline = await getCaseTimeline(resourceId, user);
+    if (!timeline) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
+    return Response.json(timeline, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The case timeline is temporarily unavailable.", context.correlationId);
   }
 }
 
@@ -54,13 +74,19 @@ export async function handleComplianceCommand(request: Request, permission: stri
       if (!resourceId) throw new ComplianceResourceError("Refund claim id is required.", 400);
       result = await reviewRefund(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
     } else if (command === "CREATE_OBLIGATION") result = await createObligation(payload, user, key, context.correlationId) as Record<string, unknown> | null;
-    else {
+    else if (command === "MARK_OBLIGATION_SATISFIED") {
       if (!resourceId) throw new ComplianceResourceError("Tax obligation id is required.", 400);
       result = await markObligationSatisfied(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else if (command === "TRANSITION_CASE") {
+      if (!resourceId) throw new ComplianceResourceError("Audit case id is required.", 400);
+      result = await transitionCase(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else {
+      if (!resourceId) throw new ComplianceResourceError("Audit case id is required.", 400);
+      result = await issueFinding(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
     }
     if (!result) throw new RepositoryConflictError("The idempotent compliance resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" ? 200 : 201;
+    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" ? 200 : 201;
     return Response.json({ resource: result }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });

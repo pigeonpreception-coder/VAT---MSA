@@ -388,7 +388,13 @@ const SCHEMA_STATEMENTS = [
     case_type TEXT NOT NULL, title TEXT NOT NULL, opening_reason TEXT NOT NULL,
     risk_tier TEXT NOT NULL, status TEXT NOT NULL,
     assigned_officer_id TEXT REFERENCES app_users(id), opened_by TEXT NOT NULL REFERENCES app_users(id),
-    opened_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT
+    opened_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT,
+    suspended_from_status TEXT, appeal_reference TEXT, appeal_linked_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_case_transitions (
+    id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
+    action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES app_users(id), reason TEXT NOT NULL, occurred_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS audit_evidence (
     id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
@@ -862,6 +868,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_vat_transactions_invoice ON vat_transactions(invoice_id)`,
   `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_queue ON reconciliation_exceptions(status, severity, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_officer ON reconciliation_exceptions(assigned_officer_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_case_transitions_case ON audit_case_transitions(audit_case_id, occurred_at)`,
 
   // Statutory VAT rate catalogue (Module 2 Phase A). Unlike the pilot demo
   // seed below, this is real reference data — the actual Namibian VAT
@@ -1323,7 +1330,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
     VALUES ('notification-0001',NULL,'tp-0004','CASE_UPDATE','Compliance review opened','A high-value transaction is under controlled human review.','HIGH','UNREAD','/cases','2026-08-10T07:05:00Z',NULL)`,
   `INSERT OR IGNORE INTO audit_cases
     (id,case_number,organisation_id,taxpayer_id,case_type,title,opening_reason,risk_tier,status,assigned_officer_id,opened_by,opened_at,updated_at,closed_at)
-    VALUES ('case-0001','CASE-2026-0001','org-0004','tp-0004','DESK_REVIEW','High-value advisory transaction review','Invoice KC-1041 exceeds the controlled high-value pilot threshold and requires evidence-led officer review.','CRITICAL','OPEN','usr-local-admin','usr-local-admin','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z',NULL)`,
+    VALUES ('case-0001','CASE-2026-0001','org-0004','tp-0004','DESK_REVIEW','High-value advisory transaction review','Invoice KC-1041 exceeds the controlled high-value pilot threshold and requires evidence-led officer review.','CRITICAL','PROPOSED','usr-local-admin','usr-local-admin','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z',NULL)`,
   `INSERT OR IGNORE INTO audit_evidence
     (id,audit_case_id,evidence_type,source_resource_type,source_resource_id,document_id,checksum_sha256,description,status,added_by,added_at)
     VALUES ('case-evidence-0001','case-0001','CERTIFIED_RECORD','INVOICE','inv-0004',NULL,'43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','Canonical invoice, certificate and VAT ledger references.','PRESERVED','usr-local-admin','2026-08-10T07:00:00Z')`,
