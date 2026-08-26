@@ -722,10 +722,22 @@ const SCHEMA_STATEMENTS = [
     source_token TEXT NOT NULL, correlation_id TEXT NOT NULL, action TEXT NOT NULL,
     outcome TEXT NOT NULL, details TEXT NOT NULL, occurred_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS security_detection_rules (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+    event_type TEXT NOT NULL, group_by TEXT NOT NULL, threshold_count INTEGER NOT NULL,
+    window_minutes INTEGER NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS security_incidents (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL,
     source_event_id TEXT REFERENCES security_events(id), automated_action TEXT,
-    owner TEXT, opened_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    owner TEXT, detection_rule_id TEXT REFERENCES security_detection_rules(id), group_key TEXT,
+    subject_user_id TEXT REFERENCES app_users(id), opened_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    closed_at TEXT, closed_by TEXT REFERENCES app_users(id), resolution_notes TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS security_playbook_actions (
+    id TEXT PRIMARY KEY, incident_id TEXT NOT NULL REFERENCES security_incidents(id),
+    action_type TEXT NOT NULL, actor_id TEXT REFERENCES app_users(id), automated INTEGER NOT NULL DEFAULT 0,
+    details TEXT NOT NULL, performed_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS outbox_events (
     id TEXT PRIMARY KEY, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL,
@@ -1054,6 +1066,11 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_anomaly_candidates_snapshot ON analytics_anomaly_candidates(data_product_snapshot_id)`,
   `CREATE INDEX IF NOT EXISTS idx_change_requests_status ON change_requests(status, requested_at)`,
   `CREATE INDEX IF NOT EXISTS idx_change_requests_target ON change_requests(target_type, target_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_events_type_actor_occurred ON security_events(event_type, actor_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_events_type_source_occurred ON security_events(event_type, source_token, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_incidents_status_severity ON security_incidents(status, severity)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_incidents_rule_group ON security_incidents(detection_rule_id, group_key, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_playbook_actions_incident ON security_playbook_actions(incident_id, performed_at)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
@@ -1148,7 +1165,15 @@ const SECURITY_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO security_events VALUES ('sec-0001','API_RATE_ANOMALY','MEDIUM','usr-local-admin','src:pilot','a1000000-0000-4000-8000-000000000001','INVOICE_SUBMISSION','THROTTLED','{"bucket":"actor","threshold":120}','2026-08-09T06:45:00Z')`,
   `INSERT OR IGNORE INTO security_events VALUES ('sec-0002','AUTHORISATION_DENIED','HIGH','unknown','src:external','a1000000-0000-4000-8000-000000000002','INVOICE_READ','DENIED','{"reason":"taxpayer_scope_mismatch"}','2026-08-09T07:10:00Z')`,
   `INSERT OR IGNORE INTO security_events VALUES ('sec-0003','PAYLOAD_REJECTED','LOW','usr-local-admin','src:pilot','a1000000-0000-4000-8000-000000000003','INVOICE_SUBMISSION','REJECTED','{"reason":"payload_limit"}','2026-08-09T07:18:00Z')`,
-  `INSERT OR IGNORE INTO security_incidents VALUES ('inc-0001','Repeated cross-taxpayer access attempts','HIGH','INVESTIGATING','sec-0002','SESSION_CHALLENGE','SOC Tier 2','2026-08-09T07:11:00Z','2026-08-09T07:20:00Z')`,
+  `INSERT OR IGNORE INTO security_detection_rules
+    (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
+    VALUES ('secrule-repeated-denials','REPEATED_AUTHORISATION_DENIALS','Repeated authorisation denials','Opens an incident when the same actor accumulates repeated access-denied events in a short window.','AUTHORISATION_DENIED','actor_id',5,15,'HIGH','ACTIVE','2026-08-09T08:00:00Z')`,
+  `INSERT OR IGNORE INTO security_detection_rules
+    (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
+    VALUES ('secrule-rate-limit-abuse','RATE_LIMIT_ABUSE','Rate limit abuse','Opens an incident when the same source repeatedly trips a rate limit in a short window.','RATE_LIMIT_EXCEEDED','source_token',10,10,'MEDIUM','ACTIVE','2026-08-09T08:00:00Z')`,
+  `INSERT OR IGNORE INTO security_incidents
+    (id,title,severity,status,source_event_id,automated_action,owner,detection_rule_id,group_key,subject_user_id,opened_at,updated_at,closed_at,closed_by,resolution_notes)
+    VALUES ('inc-0001','Repeated cross-taxpayer access attempts','HIGH','CONTAINED','sec-0002','SESSION_CHALLENGE','SOC Tier 2',NULL,NULL,NULL,'2026-08-09T07:11:00Z','2026-08-09T07:20:00Z',NULL,NULL,NULL)`,
   `INSERT OR IGNORE INTO outbox_events VALUES ('out-0001','INVOICE','inv-0001','InvoiceCertified',1,'tp-0001','{"invoice_id":"inv-0001","transaction_id":"txn-0001"}','PUBLISHED',1,'2026-08-08T08:12:45Z','2026-08-08T08:12:45Z','2026-08-08T08:12:46Z',NULL)`,
   `INSERT OR IGNORE INTO seed_state VALUES ('security-v1','2026-08-09T08:00:00Z')`,
 ];
