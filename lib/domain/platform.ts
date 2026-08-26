@@ -81,3 +81,28 @@ export function validateDocumentScanResult(payload: unknown): DocumentScanResult
   if (messages.length) throw new PlatformValidationError(messages);
   return { schema_version: "1.0.0", outcome, ...(notes ? { notes } : {}) };
 }
+
+export type DocumentHoldSubmission = { schema_version: "1.0.0"; action: "APPLY" | "RELEASE"; notes: string; retained_until?: string };
+
+const HOLD_ACTIONS = new Set(["APPLY", "RELEASE"]);
+const HOLD_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Module 6 Phase B ApplyRetentionHold/ReleaseRetentionHold payload. Mirrors Module 4's SET_LEGAL_HOLD/RELEASE_LEGAL_HOLD notes bound (10-2000 chars). */
+export function validateDocumentHold(payload: unknown): DocumentHoldSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const action = text(input.action).toUpperCase() as DocumentHoldSubmission["action"];
+  if (!HOLD_ACTIONS.has(action)) messages.push({ code: "ACTION_INVALID", path: "/action", message: "action must be APPLY or RELEASE." });
+  const notes = text(input.notes);
+  if (notes.length < 10 || notes.length > 2_000) messages.push({ code: "NOTES_INVALID", path: "/notes", message: "notes must contain 10 to 2000 characters." });
+  const retainedUntilRaw = text(input.retained_until);
+  const retainedUntil = retainedUntilRaw || undefined;
+  if (retainedUntil && (!HOLD_DATE_PATTERN.test(retainedUntil) || Number.isNaN(Date.parse(`${retainedUntil}T00:00:00Z`)))) {
+    messages.push({ code: "DATE_INVALID", path: "/retained_until", message: "retained_until must be a valid ISO date." });
+  }
+  if (action === "RELEASE" && retainedUntil) messages.push({ code: "RETAINED_UNTIL_NOT_ALLOWED", path: "/retained_until", message: "retained_until cannot be set when releasing a hold." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", action, notes, ...(retainedUntil ? { retained_until: retainedUntil } : {}) };
+}

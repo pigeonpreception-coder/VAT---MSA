@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import { safeFileName, validateDocumentScanResult, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
+import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
@@ -263,6 +263,78 @@ export async function getDocumentVersionHistory(documentId: string, actor: UserC
     cursor = next;
   }
   return { document_id: documentId, versions: chain };
+}
+
+/**
+ * Module 6 Phase B ApplyRetentionHold/ReleaseRetentionHold: until now the
+ * only way to toggle document_metadata.legal_hold was indirectly, via
+ * Module 4's SET_LEGAL_HOLD/RELEASE_LEGAL_HOLD evidence-custody action, and
+ * only once a document had already been cited as audit evidence. A
+ * document a compliance officer wants preserved before — or without —
+ * ever being cited as evidence had no hold path at all. This is that
+ * direct path, and cascades the other way from Module 4's own cascade: if
+ * this document is already cited by one or more audit_evidence rows, their
+ * legal_hold flag is kept in sync too, so the two hold paths can never
+ * disagree about the same underlying document.
+ *
+ * The playbook's stronger claim — "ApplyHold checked by every
+ * deletion/retention job repo-wide" — is not built: a full-repo audit
+ * before this phase confirmed no deletion or retention/purge job exists
+ * anywhere in this codebase to wire it into. There is nothing to enforce
+ * against yet, so nothing is stubbed against it.
+ */
+export async function setDocumentRetentionHold(documentId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string) {
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national platform role may set a document retention hold.");
+  validateIdempotencyKey(idempotencyKey);
+  const input = validateDocumentHold(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ document_id: documentId, input }));
+  const prior = await priorCommand(db, actor.userId, "SET_DOCUMENT_RETENTION_HOLD", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM document_metadata WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const document = await db.prepare(`SELECT d.id,d.organisation_id,o.taxpayer_id FROM document_metadata d
+    JOIN organisations o ON o.id=d.organisation_id WHERE d.id=?`).bind(documentId).first<{ id: string; organisation_id: string; taxpayer_id: string }>();
+  if (!document) throw new PlatformResourceError("Document was not found.", 404);
+  const now = new Date().toISOString();
+  const holdValue = input.action === "APPLY" ? 1 : 0;
+  await db.batch([
+    input.action === "APPLY"
+      ? db.prepare("UPDATE document_metadata SET legal_hold=1,retained_until=COALESCE(?,retained_until) WHERE id=?").bind(input.retained_until ?? null, documentId)
+      : db.prepare("UPDATE document_metadata SET legal_hold=0 WHERE id=?").bind(documentId),
+    db.prepare("UPDATE audit_evidence SET legal_hold=? WHERE document_id=?").bind(holdValue, documentId),
+    commandRecord(db, actor.userId, "SET_DOCUMENT_RETENTION_HOLD", idempotencyKey, requestHash, "DOCUMENT", documentId, now),
+    outbox(db, "DOCUMENT", documentId, input.action === "APPLY" ? "DocumentRetentionHoldApplied" : "DocumentRetentionHoldReleased", document.taxpayer_id, { document_id: documentId, action: input.action, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, `DOCUMENT_RETENTION_HOLD_${input.action}`, "DOCUMENT", documentId, { organisationId: document.organisation_id, action: input.action, notes: input.notes, retainedUntil: input.retained_until, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM document_metadata WHERE id=?").bind(documentId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 6 Phase B AuthorizedDownload: until now there was no way to
+ * retrieve an uploaded document at all — app/api/v1/documents/route.ts
+ * only ever exported POST. Refuses anything not currently ACTIVE or
+ * SUPERSEDED (both passed a clean scan at some point; QUARANTINED hasn't
+ * been scanned yet and REJECTED is permanently blocked) — the "no download
+ * before clean scan" principle this module's matrix row already claimed
+ * before this route genuinely existed to enforce it. Access is logged via
+ * the same audit-events hash chain as every other command in this file,
+ * not a bespoke access-log table — "access logging" is the requirement,
+ * not a new entity.
+ */
+export async function downloadDocument(documentId: string, actor: UserContext, correlationId: string) {
+  const db = await ensureDatabase();
+  const document = await db.prepare(`SELECT d.*,o.taxpayer_id FROM document_metadata d
+    JOIN organisations o ON o.id=d.organisation_id WHERE d.id=?`).bind(documentId)
+    .first<{ organisation_id: string; object_key: string; content_type: string; file_name: string; status: string; taxpayer_id: string }>();
+  if (!document) throw new PlatformResourceError("Document was not found.", 404);
+  await resolveOrganisation(db, actor, document.organisation_id);
+  if (document.status !== "ACTIVE" && document.status !== "SUPERSEDED") throw new RepositoryConflictError("The document is not available for download in its current state.");
+  const object = await env.DOCUMENTS.get(document.object_key);
+  if (!object) throw new PlatformResourceError("The document object could not be located in storage.", 404);
+  const bytes = await object.arrayBuffer();
+  const now = new Date().toISOString();
+  const stmt = await auditRecord(db, actor, "DOCUMENT_DOWNLOADED", "DOCUMENT", documentId, { organisationId: document.organisation_id, correlationId }, now);
+  await stmt.run();
+  return { bytes, contentType: document.content_type, fileName: document.file_name };
 }
 
 export async function receiveOfflineBatch(payload: OfflineBatchSubmission, actor: UserContext, correlationId: string) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PlatformValidationError, safeFileName, validateDocumentScanResult, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
+import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
 
 describe("platform edge validation", () => {
   it("accepts an ordered offline batch envelope", () => {
@@ -32,5 +32,23 @@ describe("platform edge validation", () => {
   it("rejects an unsupported scan outcome or oversized notes", () => {
     expect(() => validateDocumentScanResult({ schema_version: "1.0.0", outcome: "SUSPICIOUS" })).toThrowError(PlatformValidationError);
     expect(() => validateDocumentScanResult({ schema_version: "1.0.0", outcome: "CLEAN", notes: "x".repeat(1_001) })).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a document retention hold application with a retention date", () => {
+    expect(validateDocumentHold({ schema_version: "1.0.0", action: "apply", notes: "Subject to an ongoing legal request.", retained_until: "2031-01-01" })).toEqual({
+      schema_version: "1.0.0", action: "APPLY", notes: "Subject to an ongoing legal request.", retained_until: "2031-01-01",
+    });
+  });
+
+  it("normalizes a document retention hold release without a retention date", () => {
+    expect(validateDocumentHold({ schema_version: "1.0.0", action: "release", notes: "Legal request concluded." })).toEqual({
+      schema_version: "1.0.0", action: "RELEASE", notes: "Legal request concluded.",
+    });
+  });
+
+  it("rejects a hold with too-short notes, an invalid date, or a release that sets retained_until", () => {
+    expect(() => validateDocumentHold({ schema_version: "1.0.0", action: "APPLY", notes: "short" })).toThrowError(PlatformValidationError);
+    expect(() => validateDocumentHold({ schema_version: "1.0.0", action: "APPLY", notes: "Valid enough reason text.", retained_until: "not-a-date" })).toThrowError(PlatformValidationError);
+    expect(() => validateDocumentHold({ schema_version: "1.0.0", action: "RELEASE", notes: "Valid enough reason text.", retained_until: "2031-01-01" })).toThrowError(PlatformValidationError);
   });
 });

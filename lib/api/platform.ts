@@ -1,5 +1,5 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
-import { completeDocumentScan, getDocumentVersionHistory, getPlatformSnapshot, PlatformResourceError, receiveOfflineBatch, runInlineReport, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
+import { completeDocumentScan, downloadDocument, getDocumentVersionHistory, getPlatformSnapshot, PlatformResourceError, receiveOfflineBatch, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -123,5 +123,46 @@ export async function handleDocumentVersionHistory(request: Request, documentId:
     requirePermission(user, "documents:read");
     const result = await getDocumentVersionHistory(documentId, user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 6 Phase B ApplyRetentionHold/ReleaseRetentionHold, a direct hold on a document independent of Module 4's evidence-citation path. */
+export async function handleDocumentRetentionHold(request: Request, documentId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "documents:manage");
+    await enforceRateLimits([{ key: `documents-hold:actor:${user.userId}`, limit: 60, windowSeconds: 60 }, { key: "documents-hold:global", limit: 1_000, windowSeconds: 60 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await setDocumentRetentionHold(documentId, payload, user, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "SET_DOCUMENT_RETENTION_HOLD", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ document: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "SET_DOCUMENT_RETENTION_HOLD", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 6 Phase B AuthorizedDownload: streams the document's actual bytes back, refusing anything not currently ACTIVE or SUPERSEDED. */
+export async function handleDocumentDownload(request: Request, documentId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "documents:read");
+    await enforceRateLimits([{ key: `documents-download:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: `documents-download:scope:${user.taxpayerId ?? user.role}`, limit: 200, windowSeconds: 300 }]);
+    const result = await downloadDocument(documentId, user, context.correlationId);
+    return new Response(result.bytes, {
+      status: 200,
+      headers: {
+        "content-type": result.contentType,
+        "content-disposition": `attachment; filename="${result.fileName.replaceAll('"', "")}"`,
+        "x-correlation-id": context.correlationId,
+        "cache-control": "no-store",
+      },
+    });
   } catch (error) { return failure(error, context.correlationId); }
 }
