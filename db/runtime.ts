@@ -889,7 +889,8 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     delegator_user_id TEXT NOT NULL REFERENCES app_users(id), delegate_user_id TEXT NOT NULL REFERENCES app_users(id),
     workflow_id TEXT REFERENCES workflows(id), scope TEXT NOT NULL, status TEXT NOT NULL,
-    effective_from TEXT NOT NULL, effective_to TEXT NOT NULL, approved_by TEXT NOT NULL REFERENCES app_users(id)
+    effective_from TEXT NOT NULL, effective_to TEXT NOT NULL, approved_by TEXT NOT NULL REFERENCES app_users(id),
+    reason TEXT NOT NULL DEFAULT '', revoked_reason TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS access_requests (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),

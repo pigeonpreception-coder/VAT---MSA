@@ -175,7 +175,29 @@ export type WorkflowNodeInput = { id: string; type: "START" | "APPROVAL" | "END"
 export type WorkflowTransitionInput = { from: string; to: string; condition?: { field: "amount_cents" | "branch_id" | "department_id"; operator: "LTE" | "GT" | "EQ"; value: string | number } };
 export type WorkflowDefinitionInput = { name: string; domainAction: string; nodes: WorkflowNodeInput[]; transitions: WorkflowTransitionInput[] };
 
-const WORKFLOW_DOMAIN_ACTIONS = new Set(["PURCHASE_REQUEST", "EXPENSE", "JOURNAL", "VAT_RETURN", "ROLE_CHANGE", "PRIMARY_ADMIN_CHANGE", "API_CREDENTIAL"]);
+/**
+ * Module 8 Phase C: REFUND added so a future Module 9 phase can register a
+ * refund-approval workflow against this engine — Refund's own existing
+ * maker-checker (lib/data/compliance-repository.ts's reviewRefund) is
+ * deliberately NOT migrated onto it this phase. That is cross-module
+ * surgery on already-shipped, tested code, out of scope for a phase that
+ * stays inside Module 8's own files.
+ */
+const WORKFLOW_DOMAIN_ACTIONS = new Set(["PURCHASE_REQUEST", "EXPENSE", "JOURNAL", "VAT_RETURN", "ROLE_CHANGE", "PRIMARY_ADMIN_CHANGE", "API_CREDENTIAL", "REFUND"]);
+const WORKFLOW_CONTEXT_FIELDS = new Set(["amount_cents", "branch_id", "department_id"]);
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+function normalizeWorkflowContext(contextRaw: unknown): Record<string, number | string> {
+  if (contextRaw === undefined || contextRaw === null) return {};
+  if (typeof contextRaw !== "object" || Array.isArray(contextRaw)) throw new ControlPlaneValidationError("CONTEXT_INVALID", "context must be an object.");
+  const context: Record<string, number | string> = {};
+  for (const [key, value] of Object.entries(contextRaw as Record<string, unknown>)) {
+    if (!WORKFLOW_CONTEXT_FIELDS.has(key)) throw new ControlPlaneValidationError("CONTEXT_FIELD_UNSUPPORTED", `context.${key} is not a supported routing field.`);
+    if (typeof value !== "number" && typeof value !== "string") throw new ControlPlaneValidationError("CONTEXT_VALUE_INVALID", `context.${key} must be a number or string.`);
+    context[key] = value;
+  }
+  return context;
+}
 
 export function normalizeWorkflowDefinition(input: unknown): WorkflowDefinitionInput {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A workflow definition is required.");
@@ -225,6 +247,74 @@ export function assertWorkflowDecision(input: { actorId: string; initiatedBy: st
   if (input.actorId === input.initiatedBy) throw new ControlPlaneValidationError("SELF_APPROVAL_DENIED", "The initiator cannot approve or reject their own protected transaction.");
   if (input.assignedUserId && input.assignedUserId !== input.actorId) throw new ControlPlaneValidationError("TASK_NOT_ASSIGNED", "The workflow task is assigned to another user.");
   if (!["APPROVE", "REJECT"].includes(input.decision.toUpperCase())) throw new ControlPlaneValidationError("DECISION_INVALID", "The workflow decision must be APPROVE or REJECT.");
+}
+
+export type WorkflowAssignmentInput = { domainAction: string; resourceType: string; resourceId: string; context: Record<string, number | string> };
+
+/**
+ * Module 8 Phase C Assign: the previously entirely-missing command — a
+ * 2026-08-26 audit found zero `INSERT INTO workflow_instances`/
+ * `workflow_assignments` anywhere in this codebase outside their own
+ * `CREATE TABLE` statements, meaning the whole Create/Publish/Decide
+ * pipeline already built here was unreachable end-to-end on a fresh
+ * database. `context` is deliberately restricted to the same typed field
+ * vocabulary `normalizeWorkflowDefinition`'s transition conditions already
+ * use (`amount_cents`/`branch_id`/`department_id`) — the routing context a
+ * workflow's own conditions can reference, not an arbitrary payload.
+ */
+export function normalizeWorkflowAssignment(input: unknown): WorkflowAssignmentInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A workflow assignment object is required.");
+  const source = input as Record<string, unknown>;
+  const domainAction = String(source.domain_action ?? "").trim().toUpperCase();
+  if (!WORKFLOW_DOMAIN_ACTIONS.has(domainAction)) throw new ControlPlaneValidationError("WORKFLOW_DOMAIN_UNSUPPORTED", "The workflow domain action is not configurable.");
+  const resourceType = String(source.resource_type ?? "").trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(resourceType)) throw new ControlPlaneValidationError("RESOURCE_TYPE_INVALID", "resource_type must contain 2 to 40 uppercase letters, numbers or underscores.");
+  const resourceId = String(source.resource_id ?? "").trim();
+  if (!resourceId || resourceId.length > 100) throw new ControlPlaneValidationError("RESOURCE_ID_INVALID", "resource_id is required.");
+  return { domainAction, resourceType, resourceId, context: normalizeWorkflowContext(source.context) };
+}
+
+/** Module 8 Phase C Test: a dry-run path resolution, no side effects — validates a workflow's routing before publish. */
+export function normalizeWorkflowTestContext(input: unknown): Record<string, number | string> {
+  if (input === undefined || input === null) return {};
+  if (typeof input !== "object" || Array.isArray(input)) throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A test request object is required.");
+  return normalizeWorkflowContext((input as Record<string, unknown>).context);
+}
+
+/** Module 8 Phase C: shared by Assign/Decide's path resolution and Test's dry run — the one place a transition condition is actually evaluated. */
+export function evaluateWorkflowCondition(condition: { field: string; operator: string; comparison_value: string }, context: Record<string, unknown>): boolean {
+  const raw = context[condition.field];
+  const numeric = typeof raw === "number" ? raw : Number(raw);
+  const comparison = Number(condition.comparison_value);
+  if (Number.isFinite(numeric) && Number.isFinite(comparison)) {
+    if (condition.operator === "LTE") return numeric <= comparison;
+    if (condition.operator === "GT") return numeric > comparison;
+    if (condition.operator === "EQ") return numeric === comparison;
+  }
+  if (condition.operator === "EQ") return String(raw ?? "") === condition.comparison_value;
+  return false;
+}
+
+export type DelegationInput = { delegatorUserId: string; delegateUserId: string; workflowId: string | null; scope: "ALL" | "WORKFLOW"; effectiveFrom: string; effectiveTo: string; reason: string };
+
+/** Module 8 Phase C Delegate: workflow_delegations previously had a real table and zero read or write code anywhere. */
+export function normalizeDelegation(input: unknown): DelegationInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ControlPlaneValidationError("PAYLOAD_INVALID", "A delegation object is required.");
+  const source = input as Record<string, unknown>;
+  const delegatorUserId = String(source.delegator_user_id ?? "").trim();
+  if (!delegatorUserId) throw new ControlPlaneValidationError("DELEGATOR_REQUIRED", "delegator_user_id is required.");
+  const delegateUserId = String(source.delegate_user_id ?? "").trim();
+  if (!delegateUserId) throw new ControlPlaneValidationError("DELEGATE_REQUIRED", "delegate_user_id is required.");
+  if (delegatorUserId === delegateUserId) throw new ControlPlaneValidationError("DELEGATION_SELF", "A user cannot delegate to themselves.");
+  const workflowId = typeof source.workflow_id === "string" && source.workflow_id.trim() ? source.workflow_id.trim() : null;
+  const scope: DelegationInput["scope"] = workflowId ? "WORKFLOW" : "ALL";
+  const effectiveFrom = String(source.effective_from ?? "").trim();
+  const effectiveTo = String(source.effective_to ?? "").trim();
+  if (!ISO_TIMESTAMP_PATTERN.test(effectiveFrom) || !ISO_TIMESTAMP_PATTERN.test(effectiveTo)) throw new ControlPlaneValidationError("EFFECTIVE_RANGE_INVALID", "effective_from/effective_to must be ISO UTC timestamps.");
+  if (Date.parse(effectiveTo) <= Date.parse(effectiveFrom)) throw new ControlPlaneValidationError("EFFECTIVE_RANGE_INVALID", "effective_to must be after effective_from.");
+  const reason = String(source.reason ?? "").trim().replace(/\s+/g, " ");
+  if (reason.length < 5 || reason.length > 240) throw new ControlPlaneValidationError("REASON_REQUIRED", "Provide a 5 to 240 character delegation reason.");
+  return { delegatorUserId, delegateUserId, workflowId, scope, effectiveFrom, effectiveTo, reason };
 }
 
 export function hasRecentStepUp(input: { assurance: string | null; reauthenticatedAt: string | null; now?: number; maxAgeMs?: number }): boolean {
