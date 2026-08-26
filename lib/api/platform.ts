@@ -1,8 +1,13 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
-import { completeDocumentScan, downloadDocument, getDocumentVersionHistory, getPlatformSnapshot, PlatformResourceError, receiveOfflineBatch, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
+import { approveReportExport, cancelReportExport, completeDocumentScan, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformSnapshot, getReportExport, PlatformResourceError, receiveOfflineBatch, requestReportExport, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
+import { requireStepUp } from "@/lib/security/step-up";
+
+function hasFreshStepUp(request: Request, user: Parameters<typeof requireStepUp>[1]): boolean {
+  try { requireStepUp(request, user); return true; } catch { return false; }
+}
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown) {
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId, ...(errors ? { errors } : {}) }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store" } });
@@ -155,6 +160,100 @@ export async function handleDocumentDownload(request: Request, documentId: strin
     requirePermission(user, "documents:read");
     await enforceRateLimits([{ key: `documents-download:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: `documents-download:scope:${user.taxpayerId ?? user.role}`, limit: 200, windowSeconds: 300 }]);
     const result = await downloadDocument(documentId, user, context.correlationId);
+    return new Response(result.bytes, {
+      status: 200,
+      headers: {
+        "content-type": result.contentType,
+        "content-disposition": `attachment; filename="${result.fileName.replaceAll('"', "")}"`,
+        "x-correlation-id": context.correlationId,
+        "cache-control": "no-store",
+      },
+    });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 7 Phase B RequestExport: generates a report run's downloadable export, auto-approved unless the report's classification is sensitive. */
+export async function handleReportExportRequest(request: Request, reportRunId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "reports:run");
+    await enforceRateLimits([{ key: `reports-export:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "reports-export:global", limit: 500, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await requestReportExport(reportRunId, payload, user, idempotencyKey, context.correlationId, hasFreshStepUp(request, user));
+    emitStructuredSecurityLog({ level: "INFO", event: "REQUEST_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ report_export: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "REQUEST_REPORT_EXPORT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 7 Phase B ApproveExport: maker-checker approval of a sensitive export. */
+export async function handleReportExportApproval(request: Request, exportId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "reports:run");
+    await enforceRateLimits([{ key: `reports-export-approve:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-approve:global", limit: 1_000, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await approveReportExport(exportId, payload, user, idempotencyKey, context.correlationId, hasFreshStepUp(request, user));
+    emitStructuredSecurityLog({ level: "INFO", event: "APPROVE_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ report_export: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "APPROVE_REPORT_EXPORT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 7 Phase B CancelReport (export withdrawal). */
+export async function handleReportExportCancellation(request: Request, exportId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "reports:run");
+    await enforceRateLimits([{ key: `reports-export-cancel:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-cancel:global", limit: 1_000, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await cancelReportExport(exportId, payload, user, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "CANCEL_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ report_export: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "CANCEL_REPORT_EXPORT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 7 Phase B: status lookup for a report export. */
+export async function handleReportExportStatus(request: Request, exportId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "reports:read");
+    const result = await getReportExport(exportId, user);
+    return Response.json({ report_export: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 7 Phase B AuthorizedDownload for exports: refuses anything not currently APPROVED and unexpired. */
+export async function handleReportExportDownload(request: Request, exportId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "reports:read");
+    await enforceRateLimits([{ key: `reports-export-download:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-download:global", limit: 1_000, windowSeconds: 300 }]);
+    const result = await downloadReportExport(exportId, user, context.correlationId);
     return new Response(result.bytes, {
       status: 200,
       headers: {

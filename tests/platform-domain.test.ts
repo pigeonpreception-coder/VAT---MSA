@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
+import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
 
 describe("platform edge validation", () => {
   it("accepts an ordered offline batch envelope", () => {
@@ -50,5 +50,25 @@ describe("platform edge validation", () => {
     expect(() => validateDocumentHold({ schema_version: "1.0.0", action: "APPLY", notes: "short" })).toThrowError(PlatformValidationError);
     expect(() => validateDocumentHold({ schema_version: "1.0.0", action: "APPLY", notes: "Valid enough reason text.", retained_until: "not-a-date" })).toThrowError(PlatformValidationError);
     expect(() => validateDocumentHold({ schema_version: "1.0.0", action: "RELEASE", notes: "Valid enough reason text.", retained_until: "2031-01-01" })).toThrowError(PlatformValidationError);
+  });
+
+  it("accepts a versioned, field-free export command", () => {
+    expect(validateExportCommand({ schema_version: "1.0.0" })).toEqual({ schema_version: "1.0.0" });
+  });
+
+  it("rejects an export command with an unsupported schema version", () => {
+    expect(() => validateExportCommand({ schema_version: "2.0.0" })).toThrowError(PlatformValidationError);
+    expect(() => validateExportCommand(null)).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes an export cancellation with a valid reason", () => {
+    expect(validateExportCancellation({ schema_version: "1.0.0", reason: "No longer needed for the audit." })).toEqual({
+      schema_version: "1.0.0", reason: "No longer needed for the audit.",
+    });
+  });
+
+  it("rejects an export cancellation with a missing or oversized reason", () => {
+    expect(() => validateExportCancellation({ schema_version: "1.0.0", reason: "hi" })).toThrowError(PlatformValidationError);
+    expect(() => validateExportCancellation({ schema_version: "1.0.0", reason: "x".repeat(501) })).toThrowError(PlatformValidationError);
   });
 });

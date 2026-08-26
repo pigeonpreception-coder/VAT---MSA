@@ -106,3 +106,29 @@ export function validateDocumentHold(payload: unknown): DocumentHoldSubmission {
   if (messages.length) throw new PlatformValidationError(messages);
   return { schema_version: "1.0.0", action, notes, ...(retainedUntil ? { retained_until: retainedUntil } : {}) };
 }
+
+/** Module 7 Phase B RequestExport/ApproveExport: both take an empty-but-versioned body, matching the no-fields-needed commands elsewhere in this codebase (e.g. ACCEPT_QUOTATION). */
+export type ExportCommandSubmission = { schema_version: "1.0.0" };
+
+export function validateExportCommand(payload: unknown): ExportCommandSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0" };
+}
+
+export type ExportCancellationSubmission = { schema_version: "1.0.0"; reason: string };
+
+/** Module 7 Phase B CancelReport (cancels a still-pending export request). */
+export function validateExportCancellation(payload: unknown): ExportCancellationSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const reason = text(input.reason);
+  if (reason.length < 5 || reason.length > 500) messages.push({ code: "REASON_INVALID", path: "/reason", message: "reason must contain 5 to 500 characters." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
+import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
@@ -485,4 +485,178 @@ export async function runInlineReport(code: string, parametersInput: unknown, ac
     (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code)
     VALUES (?,?,?,?,?,'COMPLETED_INLINE',?,?,NULL,?,?,?,?,NULL)`).bind(id, definition.id, organisationIdForRun, taxpayerIdForRun, JSON.stringify(parameters), Object.keys(resultSummary).length, JSON.stringify(resultSummary), actor.userId, now, now, new Date(Date.now() + 86_400_000).toISOString()).run();
   return { id, report_code: definition.code, status: "COMPLETED_INLINE", audience: definition.audience, freshness_tier: definition.freshness_tier, guardrail: definition.guardrail, result_summary: resultSummary, requested_at: now };
+}
+
+const SENSITIVE_CLASSIFICATIONS = new Set(["TAX_CONFIDENTIAL", "RESTRICTED"]);
+const EXPORT_SIZE_LIMIT_BYTES = 200 * 1_024;
+const EXPORT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1_000;
+
+type ReportRunForExport = { id: string; status: string; organisation_id: string | null; taxpayer_id: string | null; result_summary: string; requested_by: string; requested_at: string; code: string; name: string; audience: string; freshness_tier: string; classification: string };
+
+function buildExportContent(run: ReportRunForExport, watermark: string): Uint8Array {
+  const summary = JSON.parse(run.result_summary) as Record<string, unknown>;
+  const lines = [
+    `# code:${run.code}`,
+    `# name:${run.name}`,
+    `# audience:${run.audience}`,
+    `# freshness_tier:${run.freshness_tier}`,
+    `# as_of:${run.requested_at ?? ""}`,
+    `# watermark:${watermark}`,
+    "field,value",
+    ...Object.entries(summary).map(([key, value]) => `${key},${String(value)}`),
+  ];
+  return new TextEncoder().encode(`${lines.join("\n")}\n`);
+}
+
+async function loadReportRunForExport(db: D1Database, reportRunId: string) {
+  const run = await db.prepare(`SELECT r.id,r.status,r.organisation_id,r.taxpayer_id,r.result_summary,r.requested_by,r.requested_at,
+      d.code,d.name,d.audience,d.freshness_tier,d.classification
+      FROM report_runs r JOIN report_definitions d ON d.id=r.report_definition_id WHERE r.id=?`).bind(reportRunId)
+    .first<ReportRunForExport>();
+  if (!run) throw new PlatformResourceError("Report run was not found.", 404);
+  return run;
+}
+
+/**
+ * Module 7 Phase B RequestExport: generates the export file inline (this
+ * codebase has no queue/cron infrastructure to defer it onto — verified
+ * empty `queues`/`triggers` in wrangler.json before this phase started) and
+ * stores it as a document_metadata row, reusing Module 6's
+ * QUARANTINED/ACTIVE/REJECTED lifecycle as the approval gate: a sensitive
+ * report's export starts QUARANTINED (not downloadable) until
+ * ApproveExport; a non-sensitive report's export is created directly ACTIVE
+ * (auto-approved, no human gate needed). Expiry lives only on
+ * report_exports.expires_at — document_metadata.retained_until means "keep
+ * at least until," the opposite of an export's "available until," so it is
+ * deliberately left NULL here.
+ */
+export async function requestReportExport(reportRunId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, hasFreshStepUp: boolean) {
+  validateIdempotencyKey(idempotencyKey);
+  validateExportCommand(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ report_run_id: reportRunId }));
+  const prior = await priorCommand(db, actor.userId, "REQUEST_REPORT_EXPORT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const run = await loadReportRunForExport(db, reportRunId);
+  if (!isNationalScope(actor) && run.requested_by !== actor.userId) throw new AccessDeniedError("You may only export a report run you requested.");
+  if (run.status !== "COMPLETED_INLINE") throw new RepositoryConflictError("Only a completed report run can be exported.");
+  const scope = await resolveOrganisation(db, actor, run.organisation_id ?? undefined);
+  const sensitive = SENSITIVE_CLASSIFICATIONS.has(run.classification);
+  if (sensitive && !hasFreshStepUp) throw new AccessDeniedError("Exporting a report of this classification requires a fresh step-up authentication.");
+  const now = new Date().toISOString();
+  const watermark = `issued_to:${actor.userId} at:${now} correlation:${correlationId}`;
+  const bytes = buildExportContent(run, watermark);
+  if (bytes.byteLength > EXPORT_SIZE_LIMIT_BYTES) throw new PlatformResourceError("The generated export exceeds the maximum allowed size.", 413);
+  const fileName = safeFileName(`${run.code}-${run.id}.csv`);
+  const documentId = crypto.randomUUID();
+  const objectKey = `exports/${scope.organisation_id}/${documentId}/${fileName}`;
+  const documentStatus = sensitive ? "QUARANTINED" : "ACTIVE";
+  const checksum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  await env.DOCUMENTS.put(objectKey, bytes, { httpMetadata: { contentType: "text/csv", contentDisposition: `attachment; filename="${fileName}"` }, customMetadata: { organisationId: scope.organisation_id, documentId, reportRunId: run.id } });
+  const exportId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + EXPORT_EXPIRY_MS).toISOString();
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO document_metadata
+        (id,organisation_id,owner_domain,owner_resource_id,object_key,file_name,content_type,size_bytes,checksum_sha256,classification,scan_status,status,uploaded_by,uploaded_at,retained_until,legal_hold)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,0)`).bind(documentId, scope.organisation_id, "REPORT_EXPORT", run.id, objectKey, fileName, "text/csv", bytes.byteLength, checksum, run.classification, "CLEAN", documentStatus, actor.userId, now),
+      db.prepare(`INSERT INTO report_exports
+        (id,report_run_id,document_id,status,requires_step_up,watermark,requested_by,requested_at,approved_by,approved_at,cancelled_by,cancelled_at,cancellation_reason,expires_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?)`).bind(exportId, run.id, documentId, sensitive ? "PENDING_APPROVAL" : "APPROVED", sensitive ? 1 : 0, watermark, actor.userId, now, sensitive ? null : actor.userId, sensitive ? null : now, expiresAt),
+      commandRecord(db, actor.userId, "REQUEST_REPORT_EXPORT", idempotencyKey, requestHash, "REPORT_EXPORT", exportId, now),
+      outbox(db, "REPORT_EXPORT", exportId, sensitive ? "ReportExportPendingApproval" : "ReportExportApproved", scope.taxpayer_id, { export_id: exportId, report_run_id: run.id, sensitive, correlation_id: correlationId }, now),
+      await auditRecord(db, actor, "REPORT_EXPORT_REQUESTED", "REPORT_EXPORT", exportId, { reportRunId: run.id, classification: run.classification, sensitive, correlationId }, now),
+    ]);
+  } catch (error) {
+    await env.DOCUMENTS.delete(objectKey).catch(() => undefined);
+    throw error;
+  }
+  return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(exportId).first<Record<string, unknown>>();
+}
+
+/** Module 7 Phase B ApproveExport: maker-checker gate on a sensitive export. Restricted to national platform roles (the same posture as CompleteDocumentScan/SetDocumentRetentionHold) and refuses the requester's own request. */
+export async function approveReportExport(exportId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, hasFreshStepUp: boolean) {
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national platform role may approve a report export.");
+  validateIdempotencyKey(idempotencyKey);
+  validateExportCommand(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ export_id: exportId }));
+  const prior = await priorCommand(db, actor.userId, "APPROVE_REPORT_EXPORT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const row = await db.prepare("SELECT * FROM report_exports WHERE id=?").bind(exportId).first<{ id: string; document_id: string; status: string; requires_step_up: number; requested_by: string }>();
+  if (!row) throw new PlatformResourceError("Report export was not found.", 404);
+  if (row.status !== "PENDING_APPROVAL") throw new RepositoryConflictError("Only a pending report export can be approved.");
+  if (row.requested_by === actor.userId) throw new AccessDeniedError("You may not approve a report export you requested yourself.");
+  if (row.requires_step_up && !hasFreshStepUp) throw new AccessDeniedError("Approving this report export requires a fresh step-up authentication.");
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE report_exports SET status='APPROVED',approved_by=?,approved_at=? WHERE id=? AND status='PENDING_APPROVAL'").bind(actor.userId, now, exportId),
+    db.prepare("UPDATE document_metadata SET status='ACTIVE' WHERE id=? AND status='QUARANTINED'").bind(row.document_id),
+    commandRecord(db, actor.userId, "APPROVE_REPORT_EXPORT", idempotencyKey, requestHash, "REPORT_EXPORT", exportId, now),
+    outbox(db, "REPORT_EXPORT", exportId, "ReportExportApproved", exportId, { export_id: exportId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "REPORT_EXPORT_APPROVED", "REPORT_EXPORT", exportId, { correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(exportId).first<Record<string, unknown>>();
+}
+
+/** Module 7 Phase B CancelReport: withdraws a still-pending export, either by the original requester or an authorised national role. */
+export async function cancelReportExport(exportId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = validateExportCancellation(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ export_id: exportId, input }));
+  const prior = await priorCommand(db, actor.userId, "CANCEL_REPORT_EXPORT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const row = await db.prepare("SELECT * FROM report_exports WHERE id=?").bind(exportId).first<{ id: string; document_id: string; status: string; requested_by: string }>();
+  if (!row) throw new PlatformResourceError("Report export was not found.", 404);
+  if (!isNationalScope(actor) && row.requested_by !== actor.userId) throw new AccessDeniedError("You may only cancel a report export you requested.");
+  if (row.status !== "PENDING_APPROVAL") throw new RepositoryConflictError("Only a pending report export can be cancelled.");
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE report_exports SET status='CANCELLED',cancelled_by=?,cancelled_at=?,cancellation_reason=? WHERE id=? AND status='PENDING_APPROVAL'").bind(actor.userId, now, input.reason, exportId),
+    db.prepare("UPDATE document_metadata SET status='REJECTED' WHERE id=? AND status='QUARANTINED'").bind(row.document_id),
+    commandRecord(db, actor.userId, "CANCEL_REPORT_EXPORT", idempotencyKey, requestHash, "REPORT_EXPORT", exportId, now),
+    outbox(db, "REPORT_EXPORT", exportId, "ReportExportCancelled", exportId, { export_id: exportId, reason: input.reason, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "REPORT_EXPORT_CANCELLED", "REPORT_EXPORT", exportId, { reason: input.reason, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(exportId).first<Record<string, unknown>>();
+}
+
+async function loadReportExportForActor(db: D1Database, exportId: string, actor: UserContext) {
+  const row = await db.prepare(`SELECT x.*,r.taxpayer_id AS run_taxpayer_id FROM report_exports x
+      JOIN report_runs r ON r.id=x.report_run_id WHERE x.id=?`).bind(exportId)
+    .first<Record<string, unknown> & { requested_by: string; run_taxpayer_id: string | null }>();
+  if (!row) throw new PlatformResourceError("Report export was not found.", 404);
+  if (!isNationalScope(actor) && row.requested_by !== actor.userId) throw new AccessDeniedError("You may only access a report export you requested.");
+  return row;
+}
+
+/** Module 7 Phase B: status lookup for a report export (does not return file bytes). */
+export async function getReportExport(exportId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  return loadReportExportForActor(db, exportId, actor);
+}
+
+/**
+ * Module 7 Phase B AuthorizedDownload for exports: deliberately its own
+ * function rather than a reuse of Module 6's downloadDocument, since a
+ * report export additionally gates on report_exports.status='APPROVED' and
+ * report_exports.expires_at, neither of which downloadDocument knows
+ * about.
+ */
+export async function downloadReportExport(exportId: string, actor: UserContext, correlationId: string) {
+  const db = await ensureDatabase();
+  const row = await loadReportExportForActor(db, exportId, actor);
+  if (row.status !== "APPROVED") throw new RepositoryConflictError("The report export is not approved for download.");
+  if (new Date(row.expires_at as string).getTime() <= Date.now()) throw new PlatformResourceError("The report export has expired.", 410);
+  const document = await db.prepare("SELECT object_key,content_type,file_name,status FROM document_metadata WHERE id=?").bind(row.document_id as string)
+    .first<{ object_key: string; content_type: string; file_name: string; status: string }>();
+  if (!document || document.status !== "ACTIVE") throw new PlatformResourceError("The report export document is not available for download.", 404);
+  const object = await env.DOCUMENTS.get(document.object_key);
+  if (!object) throw new PlatformResourceError("The report export object could not be located in storage.", 404);
+  const bytes = await object.arrayBuffer();
+  const now = new Date().toISOString();
+  const stmt = await auditRecord(db, actor, "REPORT_EXPORT_DOWNLOADED", "REPORT_EXPORT", exportId, { documentId: row.document_id, correlationId }, now);
+  await stmt.run();
+  return { bytes, contentType: document.content_type, fileName: document.file_name };
 }

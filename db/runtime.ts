@@ -587,6 +587,15 @@ const SCHEMA_STATEMENTS = [
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
     completed_at TEXT, expires_at TEXT, error_code TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS report_exports (
+    id TEXT PRIMARY KEY, report_run_id TEXT NOT NULL REFERENCES report_runs(id),
+    document_id TEXT NOT NULL REFERENCES document_metadata(id),
+    status TEXT NOT NULL, requires_step_up INTEGER NOT NULL, watermark TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT,
+    cancelled_by TEXT REFERENCES app_users(id), cancelled_at TEXT, cancellation_reason TEXT,
+    expires_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS service_components (
     id TEXT PRIMARY KEY, component_key TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
     component_type TEXT NOT NULL, criticality TEXT NOT NULL,
@@ -982,6 +991,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_bank_import_status_created ON bank_imports(organisation_id, status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_report_runs_status_requested ON report_runs(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_report_exports_run_status ON report_exports(report_run_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
