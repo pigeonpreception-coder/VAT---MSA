@@ -708,6 +708,11 @@ const SCHEMA_STATEMENTS = [
     resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, outcome TEXT NOT NULL,
     details TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, occurred_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS audit_chain_verifications (
+    id TEXT PRIMARY KEY, requested_by TEXT NOT NULL REFERENCES app_users(id), status TEXT NOT NULL,
+    verified_count INTEGER NOT NULL, first_break_id TEXT, first_break_reason TEXT,
+    started_at TEXT NOT NULL, completed_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS idempotency_records (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
     request_hash TEXT NOT NULL, response_invoice_id TEXT NOT NULL REFERENCES invoices(id),
@@ -1071,6 +1076,9 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_security_incidents_status_severity ON security_incidents(status, severity)`,
   `CREATE INDEX IF NOT EXISTS idx_security_incidents_rule_group ON security_incidents(detection_rule_id, group_key, status)`,
   `CREATE INDEX IF NOT EXISTS idx_security_playbook_actions_incident ON security_playbook_actions(incident_id, performed_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_events_resource ON audit_events(resource_type, resource_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_chain_verifications_started ON audit_chain_verifications(started_at)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
@@ -1171,6 +1179,9 @@ const SECURITY_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO security_detection_rules
     (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
     VALUES ('secrule-rate-limit-abuse','RATE_LIMIT_ABUSE','Rate limit abuse','Opens an incident when the same source repeatedly trips a rate limit in a short window.','RATE_LIMIT_EXCEEDED','source_token',10,10,'MEDIUM','ACTIVE','2026-08-09T08:00:00Z')`,
+  `INSERT OR IGNORE INTO security_detection_rules
+    (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
+    VALUES ('secrule-audit-chain-breach','AUDIT_CHAIN_INTEGRITY_BREACH','Audit chain integrity breach','Opens a CRITICAL incident the moment a chain-verification run finds a broken or tampered audit_events hash chain.','AUDIT_CHAIN_BREAK','actor_id',1,1440,'CRITICAL','ACTIVE','2026-08-09T08:00:00Z')`,
   `INSERT OR IGNORE INTO security_incidents
     (id,title,severity,status,source_event_id,automated_action,owner,detection_rule_id,group_key,subject_user_id,opened_at,updated_at,closed_at,closed_by,resolution_notes)
     VALUES ('inc-0001','Repeated cross-taxpayer access attempts','HIGH','CONTAINED','sec-0002','SESSION_CHALLENGE','SOC Tier 2',NULL,NULL,NULL,'2026-08-09T07:11:00Z','2026-08-09T07:20:00Z',NULL,NULL,NULL)`,

@@ -1,5 +1,6 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope, requireTaxpayerScope } from "@/lib/auth";
+import { appendAuditEvent } from "@/lib/data/audit-repository";
 import {
   IdentityValidationError,
   normalizeAndValidateRegistration,
@@ -21,13 +22,9 @@ import type { UserContext } from "@/lib/domain/types";
 import { getItasIdentityPort, ItasIntegrationUnavailableError } from "@/lib/integrations/itas";
 import { RepositoryConflictError } from "./repository";
 
+/** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
-  const now = new Date().toISOString();
-  const id = crypto.randomUUID();
-  const prior = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
-  const body = stableStringify(details);
-  const hash = await sha256Hex(`${prior?.event_hash ?? "GENESIS"}|${id}|${actor.userId}|${body}|${now}`);
-  return db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id, actor.userId, actor.role, action, resourceType, resourceId, "SUCCESS", body, prior?.event_hash ?? null, hash, now);
+  return appendAuditEvent(db, actor, action, resourceType, resourceId, details, new Date().toISOString());
 }
 
 function outboxEvent(db: D1Database, aggregateType: string, aggregateId: string, eventType: string, partitionKey: string, payload: Record<string, unknown>) {
@@ -179,10 +176,6 @@ export async function submitRegistrationApplication(
   const verificationId = crypto.randomUUID();
   const verificationReference = `itas-contract-pending:${id}`;
   const outboxId = crypto.randomUUID();
-  const auditId = crypto.randomUUID();
-  const priorAudit = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
-  const auditDetails = JSON.stringify({ registrationId: id, vatNumber: registration.vat_number, correlationId, verificationState: "AWAITING_PROVIDER_CONTRACT" });
-  const auditHash = await sha256Hex(`${priorAudit?.event_hash ?? "GENESIS"}|${auditId}|${actor.userId}|${auditDetails}|${now}`);
 
   await db.batch([
     db.prepare(`INSERT INTO registration_applications
@@ -203,10 +196,7 @@ export async function submitRegistrationApplication(
         JSON.stringify({ registration_id: id, status: "PENDING_VERIFICATION", correlation_id: correlationId }),
         "PENDING", 0, now, now, null, null,
       ),
-    db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(
-      auditId, actor.userId, actor.role, "TAXPAYER_REGISTRATION_SUBMITTED", "REGISTRATION", id,
-      "SUCCESS", auditDetails, priorAudit?.event_hash ?? null, auditHash, now,
-    ),
+    await appendAuditEvent(db, actor, "TAXPAYER_REGISTRATION_SUBMITTED", "REGISTRATION", id, { registrationId: id, vatNumber: registration.vat_number, correlationId, verificationState: "AWAITING_PROVIDER_CONTRACT" }, now),
   ]);
 
   return {

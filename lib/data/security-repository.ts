@@ -1,4 +1,5 @@
 import { ensureDatabase } from "@/db/runtime";
+import { appendAuditEvent } from "@/lib/data/audit-repository";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import { validateIncidentAction, validateIncidentClosure, validateIncidentCreate } from "@/lib/domain/security";
 import type { UserContext } from "@/lib/domain/types";
@@ -29,12 +30,9 @@ function commandRecord(db: D1Database, actorId: string, type: string, key: strin
     VALUES (?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), actorId, type, key, hash, resourceType, resourceId, now);
 }
 
+/** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function auditRecord(db: D1Database, actor: UserContext, action: string, type: string, id: string, details: Record<string, unknown>, now: string) {
-  const eventId = crypto.randomUUID();
-  const prior = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
-  const body = JSON.stringify(details);
-  const hash = await sha256Hex(`${prior?.event_hash ?? "GENESIS"}|${eventId}|${actor.userId}|${body}|${now}`);
-  return db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(eventId, actor.userId, actor.role, action, type, id, "SUCCESS", body, prior?.event_hash ?? null, hash, now);
+  return appendAuditEvent(db, actor, action, type, id, details, now);
 }
 
 function outbox(db: D1Database, type: string, id: string, event: string, partition: string, payload: Record<string, unknown>, now: string) {

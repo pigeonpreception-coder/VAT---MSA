@@ -1,5 +1,5 @@
 import { ensureDatabase } from "@/db/runtime";
-import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
+import { appendAuditEvent } from "@/lib/data/audit-repository";
 import type { TaxCategory, UserContext } from "@/lib/domain/types";
 import {
   normalizeVatRuleApproval,
@@ -11,13 +11,9 @@ import { RepositoryConflictError } from "./repository";
 
 const COUNTRY = "NA";
 
+/** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
-  const now = new Date().toISOString();
-  const id = crypto.randomUUID();
-  const prior = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
-  const body = stableStringify(details);
-  const hash = await sha256Hex(`${prior?.event_hash ?? "GENESIS"}|${id}|${actor.userId}|${body}|${now}`);
-  return db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id, actor.userId, actor.role, action, resourceType, resourceId, "SUCCESS", body, prior?.event_hash ?? null, hash, now);
+  return appendAuditEvent(db, actor, action, resourceType, resourceId, details, new Date().toISOString());
 }
 
 function outboxEvent(db: D1Database, aggregateType: string, aggregateId: string, eventType: string, partitionKey: string, payload: Record<string, unknown>) {

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
+import { appendAuditEvent } from "@/lib/data/audit-repository";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePlatformChangeDecision, validatePlatformChangeRequest, validateProvisionStaff, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand, type OfflineBatchSubmission } from "@/lib/domain/platform";
 import type { UserContext } from "@/lib/domain/types";
@@ -46,12 +47,9 @@ async function resolveOrganisation(db: D1Database, actor: UserContext, requested
   return row;
 }
 
+/** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function auditRecord(db: D1Database, actor: UserContext, action: string, type: string, id: string, details: Record<string, unknown>, now: string) {
-  const eventId = crypto.randomUUID();
-  const prior = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
-  const body = JSON.stringify(details);
-  const hash = await sha256Hex(`${prior?.event_hash ?? "GENESIS"}|${eventId}|${actor.userId}|${body}|${now}`);
-  return db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(eventId, actor.userId, actor.role, action, type, id, "SUCCESS", body, prior?.event_hash ?? null, hash, now);
+  return appendAuditEvent(db, actor, action, type, id, details, now);
 }
 
 function outbox(db: D1Database, type: string, id: string, event: string, partition: string, payload: Record<string, unknown>, now: string) {
