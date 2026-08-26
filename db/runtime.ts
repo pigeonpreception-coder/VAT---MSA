@@ -408,7 +408,17 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, user_id TEXT REFERENCES app_users(id), taxpayer_id TEXT REFERENCES taxpayers(id),
     notification_type TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL,
     severity TEXT NOT NULL, status TEXT NOT NULL, action_url TEXT,
-    created_at TEXT NOT NULL, read_at TEXT
+    created_at TEXT NOT NULL, read_at TEXT,
+    cancelled_by TEXT REFERENCES app_users(id), cancelled_at TEXT, cancellation_reason TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id TEXT PRIMARY KEY, notification_id TEXT NOT NULL REFERENCES notifications(id),
+    channel TEXT NOT NULL, status TEXT NOT NULL, attempted_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS notification_preferences (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_users(id),
+    channel TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (user_id, channel)
   )`,
   `CREATE TABLE IF NOT EXISTS audit_cases (
     id TEXT PRIMARY KEY, case_number TEXT NOT NULL UNIQUE,
@@ -1364,6 +1374,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('risk:review','RISK','REVIEW','Review advisory risk indicators without automated adverse action','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('communications:manage','COMMUNICATION','MANAGE','Record controlled taxpayer communications','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('communications:respond','COMMUNICATION','RESPOND','Respond within an existing NamRA correspondence thread','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('notifications:manage','NOTIFICATION','MANAGE','Queue a notification directly','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('consents:manage','CONSENT','MANAGE','Manage taxpayer consents and delegations','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
 
   `INSERT OR IGNORE INTO tax_obligations

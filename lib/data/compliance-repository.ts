@@ -4,6 +4,7 @@ import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   assertCaseTransition,
   normalizeInboxQuery,
+  normalizeNotificationQuery,
   normalizeRiskIndicatorQuery,
   validateCaseNoteAddition,
   validateCaseOpening,
@@ -15,6 +16,9 @@ import {
   validateEvidenceCustodyEvent,
   validateFindingIssuance,
   validateNotice,
+  validateNotificationCancellation,
+  validateNotificationPreference,
+  validateNotificationQueue,
   validateObligationCreation,
   validateObligationSatisfaction,
   validateRefundRequest,
@@ -77,6 +81,36 @@ function outbox(db: D1Database, aggregateType: string, aggregateId: string, even
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), aggregateType, aggregateId, eventType, 1, taxpayerId, JSON.stringify(payload), "PENDING", 0, now, now, null, null);
 }
 
+/**
+ * Module 6 Phase D: the shared notification-creation path. A 2026-08-26
+ * code audit found five separate call sites (openAuditCase, fileDispute,
+ * createObligation, approveRiskAction's case escalation, and this phase's
+ * own Phase C sendNotice/respondToConversation) each hand-rolling a nearly
+ * identical INSERT INTO notifications — two of them as bare positional
+ * VALUES with no column list at all, which is exactly the kind of
+ * statement a later column addition silently breaks (this phase added
+ * three: cancelled_by/cancelled_at/cancellation_reason). All five now
+ * route through this one function instead — the "consolidating the
+ * scattered notification-creation side effects" the playbook asks for.
+ * Always writes one IN_APP notification_deliveries row alongside the
+ * notification itself: the in-app notification centre is not a channel a
+ * preference can disable, since the notifications table row *is* that
+ * channel's delivery. Additional channels (EMAIL/SMS/PORTAL) are only ever
+ * attempted by the standalone queueNotification command below, which can
+ * check notification_preferences first — these five call sites all target
+ * a taxpayer broadly (user_id is always NULL), not a specific user, so
+ * there is no single user's preference to check here.
+ */
+function notificationRecord(db: D1Database, input: { userId?: string | null; taxpayerId: string; notificationType: string; title: string; message: string; severity: string; actionUrl?: string | null }, now: string): D1PreparedStatement[] {
+  const id = crypto.randomUUID();
+  return [
+    db.prepare(`INSERT INTO notifications
+      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at,cancelled_by,cancelled_at,cancellation_reason)
+      VALUES (?,?,?,?,?,?,?,'UNREAD',?,?,NULL,NULL,NULL,NULL)`).bind(id, input.userId ?? null, input.taxpayerId, input.notificationType, input.title, input.message, input.severity, input.actionUrl ?? null, now),
+    db.prepare("INSERT INTO notification_deliveries (id,notification_id,channel,status,attempted_at) VALUES (?,?,'IN_APP','QUEUED',?)").bind(crypto.randomUUID(), id, now),
+  ];
+}
+
 async function resolveTaxpayer(db: D1Database, actor: UserContext, requestedTaxpayerId?: string) {
   const taxpayerId = isNationalScope(actor) ? requestedTaxpayerId : actor.taxpayerId ?? undefined;
   if (!taxpayerId) throw new ComplianceResourceError("A taxpayer id is required for this command.");
@@ -133,9 +167,7 @@ export async function openAuditCase(payload: CaseOpeningSubmission, actor: UserC
     db.prepare(`INSERT INTO audit_cases
       (id,case_number,organisation_id,taxpayer_id,case_type,title,opening_reason,risk_tier,status,assigned_officer_id,opened_by,opened_at,updated_at,closed_at)
       VALUES (?,?,?,?,?,?,?,?,'PROPOSED',NULL,?,?,?,NULL)`).bind(id, caseNumber, scope.organisation_id, scope.taxpayer_id, input.case_type, input.title, input.opening_reason, input.risk_tier, actor.userId, now, now),
-    db.prepare(`INSERT INTO notifications
-      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
-      VALUES (?,NULL,?,'AUDIT_CASE_OPENED',?,?,'HIGH','UNREAD',?, ?,NULL)`).bind(crypto.randomUUID(), scope.taxpayer_id, `Audit case ${caseNumber} opened`, input.title, `/cases/${id}`, now),
+    ...notificationRecord(db, { taxpayerId: scope.taxpayer_id, notificationType: "AUDIT_CASE_OPENED", title: `Audit case ${caseNumber} opened`, message: input.title, severity: "HIGH", actionUrl: `/cases/${id}` }, now),
     commandRecord(db, actor.userId, "OPEN_AUDIT_CASE", key, hash, "AUDIT_CASE", id, now),
     outbox(db, "AUDIT_CASE", id, "AuditCaseOpened", scope.taxpayer_id, { case_id: id, case_number: caseNumber, correlation_id: correlationId }, now),
     await auditRecord(db, actor, "AUDIT_CASE_OPENED", "AUDIT_CASE", id, { caseNumber, taxpayerId: scope.taxpayer_id, correlationId }, now),
@@ -162,7 +194,7 @@ export async function fileDispute(payload: DisputeSubmission, actor: UserContext
     db.prepare(`INSERT INTO disputes
       (id,dispute_number,organisation_id,taxpayer_id,audit_case_id,disputed_resource_type,disputed_resource_id,grounds,disputed_amount_cents,currency,status,filed_by,assigned_officer_id,filed_at,decided_at,decision_summary)
       VALUES (?,?,?,?,?,?,?,?,?,?,'FILED',?,NULL,?,NULL,NULL)`).bind(id, disputeNumber, scope.organisation_id, scope.taxpayer_id, input.audit_case_id ?? null, input.disputed_resource_type, input.disputed_resource_id, input.grounds, input.disputed_amount_cents, input.currency, actor.userId, now),
-    db.prepare(`INSERT INTO notifications VALUES (?,NULL,?,'DISPUTE_FILED',?,?,'MEDIUM','UNREAD',?, ?,NULL)`).bind(crypto.randomUUID(), scope.taxpayer_id, `Dispute ${disputeNumber} filed`, "The dispute is awaiting independent assignment and review.", "/compliance", now),
+    ...notificationRecord(db, { taxpayerId: scope.taxpayer_id, notificationType: "DISPUTE_FILED", title: `Dispute ${disputeNumber} filed`, message: "The dispute is awaiting independent assignment and review.", severity: "MEDIUM", actionUrl: "/compliance" }, now),
     commandRecord(db, actor.userId, "FILE_DISPUTE", key, hash, "DISPUTE", id, now),
     outbox(db, "DISPUTE", id, "DisputeFiled", scope.taxpayer_id, { dispute_id: id, dispute_number: disputeNumber, correlation_id: correlationId }, now),
     await auditRecord(db, actor, "DISPUTE_FILED", "DISPUTE", id, { disputeNumber, taxpayerId: scope.taxpayer_id, correlationId }, now),
@@ -253,8 +285,7 @@ export async function createObligation(payload: ObligationCreation, actor: UserC
       (id,organisation_id,taxpayer_id,obligation_type,period_code,due_date,amount_cents,currency,status,source_system,source_reference,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,'PENDING','VAT_MSA',NULL,?,?)`)
       .bind(id, scope.organisation_id, scope.taxpayer_id, input.obligation_type, input.period_code, input.due_date, input.amount_cents, input.currency, now, now),
-    db.prepare(`INSERT INTO notifications VALUES (?,NULL,?,'OBLIGATION_CREATED',?,?,'MEDIUM','UNREAD',?, ?,NULL)`)
-      .bind(crypto.randomUUID(), scope.taxpayer_id, `New ${input.obligation_type} obligation for ${input.period_code}`, `Due ${input.due_date}.`, "/compliance", now),
+    ...notificationRecord(db, { taxpayerId: scope.taxpayer_id, notificationType: "OBLIGATION_CREATED", title: `New ${input.obligation_type} obligation for ${input.period_code}`, message: `Due ${input.due_date}.`, severity: "MEDIUM", actionUrl: "/compliance" }, now),
     commandRecord(db, actor.userId, "CREATE_OBLIGATION", key, hash, "TAX_OBLIGATION", id, now),
     outbox(db, "TAX_OBLIGATION", id, "ObligationCreated", scope.taxpayer_id, { obligation_id: id, obligation_type: input.obligation_type, period_code: input.period_code, correlation_id: correlationId }, now),
     await auditRecord(db, actor, "OBLIGATION_CREATED", "TAX_OBLIGATION", id, { taxpayerId: scope.taxpayer_id, obligationType: input.obligation_type, periodCode: input.period_code, correlationId }, now),
@@ -515,10 +546,7 @@ export async function approveRiskAction(indicatorId: string, payload: unknown, a
       VALUES (?,?,?,?,?,?,?,?,'PROPOSED',NULL,?,?,?,NULL)`)
       .bind(caseId, caseNumber, indicator.organisation_id, indicator.taxpayer_id, input.caseType, input.caseTitle, input.rationale, indicator.severity, actor.userId, now, now),
     db.prepare("UPDATE risk_indicators SET status='ESCALATED_TO_CASE', escalated_case_id=?, reviewed_by=?, reviewed_at=? WHERE id=?").bind(caseId, actor.userId, now, indicatorId),
-    db.prepare(`INSERT INTO notifications
-      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
-      VALUES (?,NULL,?,'AUDIT_CASE_OPENED',?,?,'HIGH','UNREAD',?, ?,NULL)`)
-      .bind(crypto.randomUUID(), indicator.taxpayer_id, `Audit case ${caseNumber} opened`, input.caseTitle, `/cases/${caseId}`, now),
+    ...notificationRecord(db, { taxpayerId: indicator.taxpayer_id, notificationType: "AUDIT_CASE_OPENED", title: `Audit case ${caseNumber} opened`, message: input.caseTitle, severity: "HIGH", actionUrl: `/cases/${caseId}` }, now),
     commandRecord(db, actor.userId, "APPROVE_RISK_ACTION", key, hash, "RISK_INDICATOR", indicatorId, now),
     outbox(db, "RISK_INDICATOR", indicatorId, "RiskEscalatedToCase", indicator.taxpayer_id, { indicator_id: indicatorId, case_id: caseId, case_number: caseNumber, correlation_id: correlationId }, now),
     await auditRecord(db, actor, "RISK_ACTION_ESCALATED", "RISK_INDICATOR", indicatorId, { rationale: input.rationale, caseId, caseNumber, correlationId }, now),
@@ -991,9 +1019,7 @@ export async function sendNotice(payload: unknown, actor: UserContext, key: stri
     db.prepare(`INSERT INTO communications
       (id,organisation_id,taxpayer_id,thread_id,channel,direction,subject,content_summary,classification,related_resource_type,related_resource_id,external_reference,status,actor_id,occurred_at)
       VALUES (?,?,?,?,?,'OUTBOUND',?,?,?,?,?,NULL,'DELIVERED',?,?)`).bind(messageId, reference.organisation_id, reference.taxpayer_id, threadId, input.channel, input.subject, input.content_summary, input.classification, input.related_resource_type, input.related_resource_id, actor.userId, now),
-    db.prepare(`INSERT INTO notifications
-      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
-      VALUES (?,NULL,?,'NOTICE_RECEIVED',?,?,'MEDIUM','UNREAD',?,?,NULL)`).bind(crypto.randomUUID(), reference.taxpayer_id, input.subject, input.content_summary, `/communications/${threadId}`, now),
+    ...notificationRecord(db, { taxpayerId: reference.taxpayer_id, notificationType: "NOTICE_RECEIVED", title: input.subject, message: input.content_summary, severity: "MEDIUM", actionUrl: `/communications/${threadId}` }, now),
     commandRecord(db, actor.userId, "SEND_NOTICE", key, hash, "COMMUNICATION_THREAD", threadId, now),
     outbox(db, "COMMUNICATION_THREAD", threadId, "NoticeSent", reference.taxpayer_id, { thread_id: threadId, message_id: messageId, related_resource_type: input.related_resource_type, related_resource_id: input.related_resource_id, correlation_id: correlationId }, now),
     await auditRecord(db, actor, "NOTICE_SENT", "COMMUNICATION_THREAD", threadId, { taxpayerId: reference.taxpayer_id, relatedResourceType: input.related_resource_type, relatedResourceId: input.related_resource_id, correlationId }, now),
@@ -1040,9 +1066,7 @@ export async function respondToConversation(threadId: string, payload: unknown, 
     await auditRecord(db, actor, "CONVERSATION_RESPONDED", "COMMUNICATION_THREAD", threadId, { taxpayerId: thread.taxpayer_id, direction, correlationId }, now),
   ];
   if (direction === "OUTBOUND") {
-    statements.push(db.prepare(`INSERT INTO notifications
-      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
-      VALUES (?,NULL,?,'NOTICE_RECEIVED',?,?,'MEDIUM','UNREAD',?,?,NULL)`).bind(crypto.randomUUID(), thread.taxpayer_id, `Reply on: ${thread.subject}`, input.content_summary, `/communications/${threadId}`, now));
+    statements.push(...notificationRecord(db, { taxpayerId: thread.taxpayer_id, notificationType: "NOTICE_RECEIVED", title: `Reply on: ${thread.subject}`, message: input.content_summary, severity: "MEDIUM", actionUrl: `/communications/${threadId}` }, now));
   }
   await db.batch(statements);
   return db.prepare("SELECT * FROM communications WHERE id=?").bind(messageId).first<Record<string, unknown>>();
@@ -1124,4 +1148,166 @@ export async function getConversation(threadId: string, actor: UserContext) {
   if (!isNationalScope(actor) && actor.taxpayerId !== thread.taxpayer_id) throw new AccessDeniedError("The correspondence thread is outside your authorised taxpayer scope.");
   const messages = await db.prepare("SELECT * FROM communications WHERE thread_id=? ORDER BY occurred_at").bind(threadId).all<Record<string, unknown>>();
   return { thread, messages: messages.results };
+}
+
+/**
+ * Module 6 Phase D Queue: the standalone command a caller can reach
+ * directly, distinct from the five existing commands that queue a
+ * notification only as their own side effect (via notificationRecord,
+ * above). Officer-only, matching every existing trigger of a notification
+ * in this codebase today. Only meaningfully personalizable when addressed
+ * to a specific user_id: notification_preferences is keyed by user, so a
+ * taxpayer-wide notification (no user_id) has no single user's preference
+ * to check and always attempts every requested channel. IN_APP is never
+ * filtered by preference, for the same reason notificationRecord's own
+ * comment gives: the notifications row itself *is* that channel.
+ */
+export async function queueNotification(payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may queue a notification directly.");
+  const input = validateNotificationQueue(payload);
+  const db = await ensureDatabase();
+  if (input.user_id) {
+    const user = await db.prepare("SELECT id FROM app_users WHERE id=? AND status='ACTIVE'").bind(input.user_id).first<{ id: string }>();
+    if (!user) throw new ComplianceResourceError("The target user was not found or is not active.", 404);
+  }
+  if (input.taxpayer_id) {
+    const taxpayer = await db.prepare("SELECT id FROM taxpayers WHERE id=?").bind(input.taxpayer_id).first<{ id: string }>();
+    if (!taxpayer) throw new ComplianceResourceError("The target taxpayer was not found.", 404);
+  }
+  const hash = await sha256Hex(stableStringify(input));
+  const prior = await replay(db, actor.userId, "QUEUE_NOTIFICATION", key, hash);
+  if (prior) return db.prepare("SELECT * FROM notifications WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  let channelsToAttempt = input.channels;
+  if (input.user_id) {
+    const disabled = await db.prepare("SELECT channel FROM notification_preferences WHERE user_id=? AND enabled=0").bind(input.user_id).all<{ channel: string }>();
+    const disabledSet = new Set(disabled.results.map((row) => row.channel));
+    channelsToAttempt = input.channels.filter((channel) => channel === "IN_APP" || !disabledSet.has(channel));
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO notifications
+      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at,cancelled_by,cancelled_at,cancellation_reason)
+      VALUES (?,?,?,?,?,?,?,'UNREAD',?,?,NULL,NULL,NULL,NULL)`).bind(id, input.user_id ?? null, input.taxpayer_id ?? null, input.notification_type, input.title, input.message, input.severity, input.action_url ?? null, now),
+  ];
+  for (const channel of channelsToAttempt) {
+    statements.push(db.prepare("INSERT INTO notification_deliveries (id,notification_id,channel,status,attempted_at) VALUES (?,?,?,'QUEUED',?)").bind(crypto.randomUUID(), id, channel, now));
+  }
+  statements.push(
+    commandRecord(db, actor.userId, "QUEUE_NOTIFICATION", key, hash, "NOTIFICATION", id, now),
+    outbox(db, "NOTIFICATION", id, "NotificationQueued", input.taxpayer_id ?? "SYSTEM", { notification_id: id, channels: channelsToAttempt, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "NOTIFICATION_QUEUED", "NOTIFICATION", id, { userId: input.user_id, taxpayerId: input.taxpayer_id, channels: channelsToAttempt, correlationId }, now),
+  );
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM notifications WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+type NotificationRow = { id: string; user_id: string | null; taxpayer_id: string | null; status: string };
+
+function requireNotificationScope(actor: UserContext, notification: NotificationRow) {
+  if (isNationalScope(actor)) return;
+  if (actor.userId === notification.user_id) return;
+  if (notification.taxpayer_id && actor.taxpayerId === notification.taxpayer_id) return;
+  throw new AccessDeniedError("The notification is outside your authorised scope.");
+}
+
+/** Module 6 Phase D CancelNotification: withdraws a still-UNREAD notification. Reachable by the actor who could see it in the first place — see requireNotificationScope. */
+export async function cancelNotification(notificationId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  const input = validateNotificationCancellation(payload);
+  const db = await ensureDatabase();
+  const notification = await db.prepare("SELECT * FROM notifications WHERE id=?").bind(notificationId).first<NotificationRow>();
+  if (!notification) throw new ComplianceResourceError("Notification was not found.", 404);
+  requireNotificationScope(actor, notification);
+
+  const hash = await sha256Hex(stableStringify({ notification_id: notificationId, input }));
+  const prior = await replay(db, actor.userId, "CANCEL_NOTIFICATION", key, hash);
+  if (prior) return db.prepare("SELECT * FROM notifications WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  if (notification.status !== "UNREAD") throw new RepositoryConflictError("Only an unread notification can be cancelled.");
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE notifications SET status='CANCELLED',cancelled_by=?,cancelled_at=?,cancellation_reason=? WHERE id=? AND status='UNREAD'").bind(actor.userId, now, input.reason, notificationId),
+    commandRecord(db, actor.userId, "CANCEL_NOTIFICATION", key, hash, "NOTIFICATION", notificationId, now),
+    outbox(db, "NOTIFICATION", notificationId, "NotificationCancelled", notification.taxpayer_id ?? "SYSTEM", { notification_id: notificationId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "NOTIFICATION_CANCELLED", "NOTIFICATION", notificationId, { reason: input.reason, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM notifications WHERE id=?").bind(notificationId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 6 Phase D: marks a notification read. Same tenant-visibility rule
+ * as CancelNotification. read_at was previously never written by anything
+ * anywhere in this codebase. Re-marking an already-read notification is a
+ * harmless no-op rather than a conflict — the same "idempotent under a
+ * fresh key too" posture Module 3's MarkSatisfied already established for
+ * an already-satisfied obligation.
+ */
+export async function markNotificationRead(notificationId: string, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  const db = await ensureDatabase();
+  const notification = await db.prepare("SELECT * FROM notifications WHERE id=?").bind(notificationId).first<NotificationRow>();
+  if (!notification) throw new ComplianceResourceError("Notification was not found.", 404);
+  requireNotificationScope(actor, notification);
+
+  const hash = await sha256Hex(stableStringify({ notification_id: notificationId }));
+  const prior = await replay(db, actor.userId, "MARK_NOTIFICATION_READ", key, hash);
+  if (prior) return db.prepare("SELECT * FROM notifications WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  if (notification.status === "CANCELLED") throw new RepositoryConflictError("A cancelled notification cannot be marked read.");
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE notifications SET status='READ',read_at=COALESCE(read_at,?) WHERE id=? AND status='UNREAD'").bind(now, notificationId),
+    commandRecord(db, actor.userId, "MARK_NOTIFICATION_READ", key, hash, "NOTIFICATION", notificationId, now),
+    await auditRecord(db, actor, "NOTIFICATION_READ", "NOTIFICATION", notificationId, { correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM notifications WHERE id=?").bind(notificationId).first<Record<string, unknown>>();
+}
+
+/** Module 6 Phase D UpdatePreference: upserts a user's own channel preference. Self-service — every actor manages only their own row (keyed by actor.userId, never a caller-supplied user id). */
+export async function updateNotificationPreference(payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  const input = validateNotificationPreference(payload);
+  const db = await ensureDatabase();
+  const hash = await sha256Hex(stableStringify({ user_id: actor.userId, input }));
+  const prior = await replay(db, actor.userId, "UPDATE_NOTIFICATION_PREFERENCE", key, hash);
+  if (prior) return db.prepare("SELECT * FROM notification_preferences WHERE user_id=? AND channel=?").bind(actor.userId, input.channel).first<Record<string, unknown>>();
+
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO notification_preferences (id,user_id,channel,enabled,updated_at) VALUES (?,?,?,?,?)
+      ON CONFLICT(user_id,channel) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at`).bind(crypto.randomUUID(), actor.userId, input.channel, input.enabled ? 1 : 0, now),
+    commandRecord(db, actor.userId, "UPDATE_NOTIFICATION_PREFERENCE", key, hash, "NOTIFICATION_PREFERENCE", actor.userId, now),
+    await auditRecord(db, actor, "NOTIFICATION_PREFERENCE_UPDATED", "NOTIFICATION_PREFERENCE", actor.userId, { channel: input.channel, enabled: input.enabled, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM notification_preferences WHERE user_id=? AND channel=?").bind(actor.userId, input.channel).first<Record<string, unknown>>();
+}
+
+/** Module 6 Phase D GetNotifications: a dedicated, filterable, paginated read — previously only bundled inside getComplianceSnapshot's own fixed, unfiltered 100-row projection. */
+export async function getNotifications(actor: UserContext, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const query = normalizeNotificationQuery(params);
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  if (!isNationalScope(actor)) {
+    conditions.push("(user_id = ? OR taxpayer_id = ?)");
+    values.push(actor.userId, actor.taxpayerId ?? "__none__");
+  }
+  if (query.status) {
+    conditions.push("status = ?");
+    values.push(query.status);
+  }
+  if (query.severity) {
+    conditions.push("severity = ?");
+    values.push(query.severity);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const [notifications, count] = await Promise.all([
+    db.prepare(`SELECT * FROM notifications ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, unknown>>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM notifications ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+  return { notifications: notifications.results, total_count: count?.n ?? 0, limit: query.limit, offset: query.offset };
 }

@@ -3,6 +3,7 @@ import {
   assertCaseTransition,
   ComplianceValidationError,
   normalizeInboxQuery,
+  normalizeNotificationQuery,
   normalizeRiskIndicatorQuery,
   validateCaseNoteAddition,
   validateCaseOpening,
@@ -14,6 +15,9 @@ import {
   validateEvidenceCustodyEvent,
   validateFindingIssuance,
   validateNotice,
+  validateNotificationCancellation,
+  validateNotificationPreference,
+  validateNotificationQueue,
   validateObligationCreation,
   validateObligationSatisfaction,
   validateRefundRequest,
@@ -374,5 +378,60 @@ describe("case correspondence validation", () => {
     expect(() => normalizeInboxQuery(new URLSearchParams({ limit: "0" }))).toThrowError(ComplianceValidationError);
     expect(() => normalizeInboxQuery(new URLSearchParams({ limit: "500" }))).toThrowError(ComplianceValidationError);
     expect(() => normalizeInboxQuery(new URLSearchParams({ offset: "-5" }))).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("notification validation", () => {
+  it("normalizes a well-formed notification queue submission", () => {
+    const result = validateNotificationQueue({
+      schema_version: "1.0.0", taxpayer_id: "tp-0001", notification_type: "manual_reminder",
+      title: "VAT return due soon", message: "Your VAT return for this period is due in five days.",
+      severity: "medium", channels: ["in_app", "email", "in_app"],
+    });
+    expect(result).toEqual({
+      schema_version: "1.0.0", taxpayer_id: "tp-0001", notification_type: "MANUAL_REMINDER",
+      title: "VAT return due soon", message: "Your VAT return for this period is due in five days.",
+      severity: "MEDIUM", channels: ["IN_APP", "EMAIL"],
+    });
+  });
+
+  it("rejects a notification queue submission with neither user_id nor taxpayer_id", () => {
+    expect(() => validateNotificationQueue({ schema_version: "1.0.0", notification_type: "MANUAL_REMINDER", title: "Title here", message: "A sufficiently long message body.", severity: "LOW", channels: ["IN_APP"] })).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects an invalid notification_type, severity, or channel", () => {
+    expect(() => validateNotificationQueue({ schema_version: "1.0.0", taxpayer_id: "tp-0001", notification_type: "1_bad", title: "Title here", message: "A sufficiently long message body.", severity: "LOW", channels: ["IN_APP"] })).toThrowError(ComplianceValidationError);
+    expect(() => validateNotificationQueue({ schema_version: "1.0.0", taxpayer_id: "tp-0001", notification_type: "MANUAL_REMINDER", title: "Title here", message: "A sufficiently long message body.", severity: "URGENT", channels: ["IN_APP"] })).toThrowError(ComplianceValidationError);
+    expect(() => validateNotificationQueue({ schema_version: "1.0.0", taxpayer_id: "tp-0001", notification_type: "MANUAL_REMINDER", title: "Title here", message: "A sufficiently long message body.", severity: "LOW", channels: ["FAX"] })).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes a notification cancellation reason", () => {
+    expect(validateNotificationCancellation({ schema_version: "1.0.0", reason: "Superseded by a later notice." }).reason).toBe("Superseded by a later notice.");
+  });
+
+  it("rejects a notification cancellation reason that is too short", () => {
+    expect(() => validateNotificationCancellation({ schema_version: "1.0.0", reason: "No" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes a notification preference update", () => {
+    expect(validateNotificationPreference({ schema_version: "1.0.0", channel: "email", enabled: false })).toEqual({ schema_version: "1.0.0", channel: "EMAIL", enabled: false });
+  });
+
+  it("rejects a notification preference with an invalid channel or a non-boolean enabled", () => {
+    expect(() => validateNotificationPreference({ schema_version: "1.0.0", channel: "FAX", enabled: true })).toThrowError(ComplianceValidationError);
+    expect(() => validateNotificationPreference({ schema_version: "1.0.0", channel: "EMAIL", enabled: "yes" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("defaults an empty notification query", () => {
+    expect(normalizeNotificationQuery(new URLSearchParams())).toEqual({ status: null, severity: null, limit: 50, offset: 0 });
+  });
+
+  it("normalizes notification status and severity filters", () => {
+    expect(normalizeNotificationQuery(new URLSearchParams({ status: "unread", severity: "high" }))).toEqual({ status: "UNREAD", severity: "HIGH", limit: 50, offset: 0 });
+  });
+
+  it("rejects an unsupported notification status or severity", () => {
+    expect(() => normalizeNotificationQuery(new URLSearchParams({ status: "ARCHIVED" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeNotificationQuery(new URLSearchParams({ severity: "URGENT" }))).toThrowError(ComplianceValidationError);
   });
 });

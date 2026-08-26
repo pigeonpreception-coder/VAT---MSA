@@ -671,3 +671,129 @@ export function normalizeInboxQuery(params: URLSearchParams): InboxQuery {
   if (messages.length) throw new ComplianceValidationError(messages);
   return { status, relatedResourceType, taxpayerId, limit, offset };
 }
+
+/**
+ * Module 6 Phase D: Notification. A 2026-08-26 code audit found the
+ * `notifications` table was already real (five call sites already wrote to
+ * it, consolidated in this phase into one shared `notificationRecord`
+ * helper in the repository), but there was no standalone `Queue` command a
+ * caller could reach directly, no `CancelNotification`, no
+ * `notification_preferences` for `UpdatePreference` to act on, and
+ * `read_at` was never written by anything anywhere. `TemplateVersion` is
+ * deliberately not built: no template concept exists anywhere else in this
+ * schema to version, and every existing notification's title/message is
+ * composed inline by the command that triggers it — inventing a versioned
+ * template entity now, with zero other evidence for one, would be exactly
+ * the kind of scope creep this module's "resist just one more entity"
+ * watch-out warns against.
+ */
+export type NotificationChannel = "IN_APP" | "EMAIL" | "SMS" | "PORTAL";
+
+const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = ["IN_APP", "EMAIL", "SMS", "PORTAL"];
+const NOTIFICATION_SEVERITIES = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+const NOTIFICATION_TYPE_PATTERN = /^[A-Z][A-Z0-9_]{2,59}$/;
+
+export type NotificationQueueSubmission = {
+  schema_version: "1.0.0";
+  user_id?: string;
+  taxpayer_id?: string;
+  notification_type: string;
+  title: string;
+  message: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  action_url?: string;
+  channels: NotificationChannel[];
+};
+
+/** Module 6 Phase D Queue: at least one of user_id/taxpayer_id is required — a notification with neither has no one to reach. */
+export function validateNotificationQueue(payload: unknown): NotificationQueueSubmission {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const userId = id(input.user_id, "/user_id", messages, true);
+  const taxpayerId = id(input.taxpayer_id, "/taxpayer_id", messages, true);
+  if (!userId && !taxpayerId) messages.push({ code: "RECIPIENT_REQUIRED", path: "/user_id", message: "At least one of user_id or taxpayer_id is required." });
+  const notificationType = text(input.notification_type).toUpperCase();
+  if (!NOTIFICATION_TYPE_PATTERN.test(notificationType)) messages.push({ code: "NOTIFICATION_TYPE_INVALID", path: "/notification_type", message: "notification_type must be 3 to 60 uppercase letters, digits or underscores, starting with a letter." });
+  const title = bounded(input.title, "/title", "Title", 3, 200, messages);
+  const message = bounded(input.message, "/message", "Message", 3, 2_000, messages);
+  const severity = text(input.severity).toUpperCase() as NotificationQueueSubmission["severity"];
+  if (!NOTIFICATION_SEVERITIES.has(severity)) messages.push({ code: "SEVERITY_INVALID", path: "/severity", message: "Select a supported severity." });
+  const actionUrl = optionalBounded(input.action_url, "/action_url", "Action URL", 1, 500, messages);
+  const rawChannels = Array.isArray(input.channels) ? input.channels : [];
+  const channels = [...new Set(rawChannels.map((value) => text(value).toUpperCase()))] as NotificationChannel[];
+  if (channels.length < 1 || channels.length > NOTIFICATION_CHANNELS.length) messages.push({ code: "CHANNELS_INVALID", path: "/channels", message: `channels must contain 1 to ${NOTIFICATION_CHANNELS.length} entries.` });
+  for (const channel of channels) {
+    if (!NOTIFICATION_CHANNELS.includes(channel)) messages.push({ code: "CHANNEL_INVALID", path: "/channels", message: `${channel || "Empty channel"} is not a supported channel.` });
+  }
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", ...(userId ? { user_id: userId } : {}), ...(taxpayerId ? { taxpayer_id: taxpayerId } : {}), notification_type: notificationType, title, message, severity, ...(actionUrl ? { action_url: actionUrl } : {}), channels };
+}
+
+export type NotificationCancellationSubmission = { schema_version: "1.0.0"; reason: string };
+
+export function validateNotificationCancellation(payload: unknown): NotificationCancellationSubmission {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const reason = bounded(input.reason, "/reason", "Cancellation reason", 5, 500, messages);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}
+
+export type NotificationPreferenceSubmission = { schema_version: "1.0.0"; channel: NotificationChannel; enabled: boolean };
+
+/** Module 6 Phase D UpdatePreference. IN_APP is accepted but has no enforcement point — see notificationRecord's own comment on why the in-app row can't be preference-gated. */
+export function validateNotificationPreference(payload: unknown): NotificationPreferenceSubmission {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const channel = text(input.channel).toUpperCase() as NotificationChannel;
+  if (!NOTIFICATION_CHANNELS.includes(channel)) messages.push({ code: "CHANNEL_INVALID", path: "/channel", message: "Select a supported channel." });
+  if (typeof input.enabled !== "boolean") messages.push({ code: "ENABLED_INVALID", path: "/enabled", message: "enabled must be a boolean." });
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", channel, enabled: Boolean(input.enabled) };
+}
+
+const NOTIFICATION_STATUSES = new Set(["UNREAD", "READ", "CANCELLED"]);
+const MAX_NOTIFICATION_QUERY_LIMIT = 200;
+const DEFAULT_NOTIFICATION_QUERY_LIMIT = 50;
+
+export type NotificationQuery = {
+  status: "UNREAD" | "READ" | "CANCELLED" | null;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
+  limit: number;
+  offset: number;
+};
+
+/** Module 6 Phase D GetNotifications: the same bounded/paginated shape normalizeInboxQuery already established. */
+export function normalizeNotificationQuery(params: URLSearchParams): NotificationQuery {
+  const messages: ComplianceValidationMessage[] = [];
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as NotificationQuery["status"]) : null;
+  if (status && !NOTIFICATION_STATUSES.has(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: "status must be UNREAD, READ or CANCELLED." });
+
+  const severityRaw = params.get("severity");
+  const severity = severityRaw ? (severityRaw.trim().toUpperCase() as NotificationQuery["severity"]) : null;
+  if (severity && !NOTIFICATION_SEVERITIES.has(severity)) messages.push({ code: "SEVERITY_INVALID", path: "/severity", message: "Select a supported severity." });
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_NOTIFICATION_QUERY_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_NOTIFICATION_QUERY_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_NOTIFICATION_QUERY_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { status, severity, limit, offset };
+}
