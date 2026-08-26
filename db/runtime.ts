@@ -279,7 +279,9 @@ const SCHEMA_STATEMENTS = [
     file_name TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
     checksum_sha256 TEXT NOT NULL, classification TEXT NOT NULL, scan_status TEXT NOT NULL,
     status TEXT NOT NULL, uploaded_by TEXT NOT NULL REFERENCES app_users(id), uploaded_at TEXT NOT NULL,
-    retained_until TEXT, legal_hold INTEGER NOT NULL DEFAULT 0
+    retained_until TEXT, legal_hold INTEGER NOT NULL DEFAULT 0,
+    scanned_by TEXT REFERENCES app_users(id), scanned_at TEXT,
+    supersedes_document_id TEXT REFERENCES document_metadata(id)
   )`,
   `CREATE TABLE IF NOT EXISTS command_idempotency (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES app_users(id),

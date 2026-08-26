@@ -1,5 +1,5 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
-import { getPlatformSnapshot, PlatformResourceError, receiveOfflineBatch, runInlineReport, uploadDocument } from "@/lib/data/platform-repository";
+import { completeDocumentScan, getDocumentVersionHistory, getPlatformSnapshot, PlatformResourceError, receiveOfflineBatch, runInlineReport, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -71,5 +71,57 @@ export async function handleDocumentUpload(request: Request) {
     if (!(file instanceof File)) throw new PlatformResourceError("Multipart field 'file' is required.");
     const result = await uploadDocument({ file, ownerDomain: String(form.get("owner_domain") ?? ""), ownerResourceId: String(form.get("owner_resource_id") ?? ""), classification: String(form.get("classification") ?? "TAX_CONFIDENTIAL"), organisationId: String(form.get("organisation_id") ?? "") || null }, user, context.correlationId);
     return Response.json({ document: result, next_action: "External malware scanning must mark the object clean before it can become available." }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 6 Phase A CompleteDocumentScan: records an external scanner's verdict on a quarantined document. */
+export async function handleDocumentScanResult(request: Request, documentId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "documents:manage");
+    await enforceRateLimits([{ key: `documents-scan:actor:${user.userId}`, limit: 60, windowSeconds: 60 }, { key: "documents-scan:global", limit: 1_000, windowSeconds: 60 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await completeDocumentScan(documentId, payload, user, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "COMPLETE_DOCUMENT_SCAN", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ document: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "COMPLETE_DOCUMENT_SCAN", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 6 Phase A SupersedeDocument: uploads a replacement for an already-clean document, linking the two as one version chain. */
+export async function handleDocumentSupersession(request: Request, documentId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "documents:upload");
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) throw new PlatformResourceError("Content-Type must be multipart/form-data.", 415);
+    const length = Number(request.headers.get("content-length") ?? "0");
+    if (!Number.isSafeInteger(length) || length < 1) throw new PlatformResourceError("A bounded Content-Length header is required.", 411);
+    if (length > 11_010_048) throw new PlatformResourceError("Multipart evidence request exceeds 10.5 MiB.", 413);
+    await enforceRateLimits([{ key: `documents:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: `documents:scope:${user.taxpayerId ?? user.role}`, limit: 100, windowSeconds: 300 }]);
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) throw new PlatformResourceError("Multipart field 'file' is required.");
+    const result = await supersedeDocument(documentId, { file, organisationId: String(form.get("organisation_id") ?? "") || null }, user, context.correlationId);
+    return Response.json({ document: result, next_action: "External malware scanning must mark the object clean before it can become available." }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 6 Phase A GetDocumentVersionHistory. */
+export async function handleDocumentVersionHistory(request: Request, documentId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "documents:read");
+    const result = await getDocumentVersionHistory(documentId, user);
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context.correlationId); }
 }

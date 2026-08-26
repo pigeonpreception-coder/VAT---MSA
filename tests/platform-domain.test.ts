@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PlatformValidationError, safeFileName, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
+import { PlatformValidationError, safeFileName, validateDocumentScanResult, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
 
 describe("platform edge validation", () => {
   it("accepts an ordered offline batch envelope", () => {
@@ -22,5 +22,15 @@ describe("platform edge validation", () => {
   it("bounds report parameter payloads", () => {
     expect(validateReportParameters({ period: "2026-08" })).toEqual({ period: "2026-08" });
     expect(() => validateReportParameters({ value: "x".repeat(20_000) })).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a document scan result", () => {
+    expect(validateDocumentScanResult({ schema_version: "1.0.0", outcome: "clean" })).toEqual({ schema_version: "1.0.0", outcome: "CLEAN" });
+    expect(validateDocumentScanResult({ schema_version: "1.0.0", outcome: "infected", notes: "Trojan.Generic detected" })).toEqual({ schema_version: "1.0.0", outcome: "INFECTED", notes: "Trojan.Generic detected" });
+  });
+
+  it("rejects an unsupported scan outcome or oversized notes", () => {
+    expect(() => validateDocumentScanResult({ schema_version: "1.0.0", outcome: "SUSPICIOUS" })).toThrowError(PlatformValidationError);
+    expect(() => validateDocumentScanResult({ schema_version: "1.0.0", outcome: "CLEAN", notes: "x".repeat(1_001) })).toThrowError(PlatformValidationError);
   });
 });

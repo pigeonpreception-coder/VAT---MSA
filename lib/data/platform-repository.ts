@@ -2,15 +2,34 @@ import { env } from "cloudflare:workers";
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import { safeFileName, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
+import { safeFileName, validateDocumentScanResult, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
 type OrgScope = { organisation_id: string; taxpayer_id: string; legal_name: string };
+type IdempotencyRow = { request_hash: string; resource_id: string };
 
 export class PlatformResourceError extends Error {
   readonly status: number;
   constructor(message: string, status = 422) { super(message); this.name = "PlatformResourceError"; this.status = status; }
+}
+
+function validateIdempotencyKey(key: string) {
+  if (key.length < 16 || key.length > 128) throw new PlatformResourceError("Idempotency-Key must contain 16 to 128 characters.");
+}
+
+async function priorCommand(db: D1Database, actorId: string, type: string, key: string, hash: string): Promise<string | null> {
+  const prior = await db.prepare(`SELECT request_hash,resource_id FROM command_idempotency
+    WHERE actor_id=? AND command_type=? AND idempotency_key=?`).bind(actorId, type, key).first<IdempotencyRow>();
+  if (!prior) return null;
+  if (prior.request_hash !== hash) throw new RepositoryConflictError("The idempotency key was already used for a different command payload.");
+  return prior.resource_id;
+}
+
+function commandRecord(db: D1Database, actorId: string, type: string, key: string, hash: string, resourceType: string, resourceId: string, now: string) {
+  return db.prepare(`INSERT INTO command_idempotency
+    (id,actor_id,command_type,idempotency_key,request_hash,resource_type,resource_id,created_at)
+    VALUES (?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), actorId, type, key, hash, resourceType, resourceId, now);
 }
 
 async function resolveOrganisation(db: D1Database, actor: UserContext, requested?: string | null) {
@@ -105,22 +124,27 @@ export async function getDeveloperPortalSnapshot(actor: UserContext) {
   return { clients: clients.results, webhooks: webhooks.results, provisioning: "ORGANISED_SCOPE" };
 }
 
+const ALLOWED_DOCUMENT_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
+
+async function validateAndHashFile(file: File) {
+  if (!ALLOWED_DOCUMENT_TYPES.has(file.type)) throw new PlatformResourceError("File type is not allowed for governed evidence.", 415);
+  if (file.size < 1 || file.size > 10_485_760) throw new PlatformResourceError("Evidence files must contain 1 byte to 10 MiB.", 413);
+  const bytes = await file.arrayBuffer();
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const checksum = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return { bytes, checksum, fileName: safeFileName(file.name) };
+}
+
 export async function uploadDocument(input: { file: File; ownerDomain: string; ownerResourceId: string; classification: string; organisationId?: string | null }, actor: UserContext, correlationId: string) {
   const db = await ensureDatabase();
   const scope = await resolveOrganisation(db, actor, input.organisationId);
-  const allowedTypes = new Set(["application/pdf", "image/png", "image/jpeg", "text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
-  if (!allowedTypes.has(input.file.type)) throw new PlatformResourceError("File type is not allowed for governed evidence.", 415);
-  if (input.file.size < 1 || input.file.size > 10_485_760) throw new PlatformResourceError("Evidence files must contain 1 byte to 10 MiB.", 413);
   const ownerDomain = input.ownerDomain.trim().toUpperCase();
   if (!new Set(["EXPENSE", "IMPORT", "AUDIT_CASE", "VAT_ADJUSTMENT", "REFUND", "BANK_IMPORT"]).has(ownerDomain)) throw new PlatformResourceError("Owner domain is not supported.");
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$/.test(input.ownerResourceId)) throw new PlatformResourceError("Owner resource id is invalid.");
   const classification = input.classification.trim().toUpperCase();
   if (!new Set(["INTERNAL", "CONFIDENTIAL", "TAX_CONFIDENTIAL", "RESTRICTED"]).has(classification)) throw new PlatformResourceError("Document classification is invalid.");
-  const bytes = await input.file.arrayBuffer();
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  const checksum = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const { bytes, checksum, fileName } = await validateAndHashFile(input.file);
   const id = crypto.randomUUID();
-  const fileName = safeFileName(input.file.name);
   const objectKey = `quarantine/${scope.organisation_id}/${id}/${fileName}`;
   const now = new Date().toISOString();
   await env.DOCUMENTS.put(objectKey, bytes, { httpMetadata: { contentType: input.file.type, contentDisposition: `attachment; filename="${fileName.replaceAll('"', "")}"` }, customMetadata: { organisationId: scope.organisation_id, documentId: id, checksumSha256: checksum, scanStatus: "PENDING_EXTERNAL_SCANNER" } });
@@ -137,6 +161,108 @@ export async function uploadDocument(input: { file: File; ownerDomain: string; o
     throw error;
   }
   return { id, organisation_id: scope.organisation_id, owner_domain: ownerDomain, owner_resource_id: input.ownerResourceId, file_name: fileName, content_type: input.file.type, size_bytes: input.file.size, checksum_sha256: checksum, classification, scan_status: "PENDING_EXTERNAL_SCANNER", status: "QUARANTINED", uploaded_at: now };
+}
+
+/**
+ * Module 6 Phase A CompleteDocumentScan: the missing scan-completion path.
+ * Every uploaded document previously stayed status='QUARANTINED',
+ * scan_status='PENDING_EXTERNAL_SCANNER' forever — nothing in the repo ever
+ * wrote past that (verified via a full-repo grep before starting this
+ * phase). This records an external scanner's verdict: CLEAN -> ACTIVE
+ * (available), INFECTED -> REJECTED (permanently blocked; the object is
+ * never deleted, so a rejected upload remains its own evidence). Restricted
+ * to documents:manage (national/platform-admin roles only) since this
+ * represents an external system's callback, not a taxpayer self-service
+ * action — the same "officer-only, not the submitting party" posture
+ * Module 2's CancelInvoice already established for invoices:cancel.
+ */
+export async function completeDocumentScan(documentId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string) {
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national platform role may record a document scan result.");
+  validateIdempotencyKey(idempotencyKey);
+  const input = validateDocumentScanResult(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ document_id: documentId, input }));
+  const prior = await priorCommand(db, actor.userId, "COMPLETE_DOCUMENT_SCAN", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM document_metadata WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const document = await db.prepare(`SELECT d.id,d.organisation_id,d.status,o.taxpayer_id FROM document_metadata d
+    JOIN organisations o ON o.id=d.organisation_id WHERE d.id=?`).bind(documentId).first<{ id: string; organisation_id: string; status: string; taxpayer_id: string }>();
+  if (!document) throw new PlatformResourceError("Document was not found.", 404);
+  if (document.status !== "QUARANTINED") throw new RepositoryConflictError("Document has already been scanned.");
+  const now = new Date().toISOString();
+  const newStatus = input.outcome === "CLEAN" ? "ACTIVE" : "REJECTED";
+  await db.batch([
+    db.prepare("UPDATE document_metadata SET status=?,scan_status=?,scanned_by=?,scanned_at=? WHERE id=? AND status='QUARANTINED'").bind(newStatus, input.outcome, actor.userId, now, documentId),
+    commandRecord(db, actor.userId, "COMPLETE_DOCUMENT_SCAN", idempotencyKey, requestHash, "DOCUMENT", documentId, now),
+    outbox(db, "DOCUMENT", documentId, input.outcome === "CLEAN" ? "DocumentScanClean" : "DocumentScanInfected", document.taxpayer_id, { document_id: documentId, outcome: input.outcome, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, `DOCUMENT_SCAN_${input.outcome}`, "DOCUMENT", documentId, { organisationId: document.organisation_id, outcome: input.outcome, notes: input.notes, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM document_metadata WHERE id=?").bind(documentId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 6 Phase A SupersedeDocument: the Version concept the playbook
+ * names. document_metadata rows are themselves the version chain (the same
+ * pattern audit_evidence.previous_version_id and
+ * vat_return_versions.parent_version_id already use in this schema) rather
+ * than a separate Version table. Only a CLEAN, ACTIVE document can be
+ * superseded — you correct a live document, not one still awaiting scan or
+ * already rejected/superseded (that status check also makes the chain a
+ * strict linked list: a given document can only ever be superseded once,
+ * since the second attempt finds status no longer ACTIVE). The superseded
+ * row and its R2 object are never deleted, only flipped to
+ * status='SUPERSEDED' — the same "never destroy, always append" posture
+ * used everywhere else this codebase models a correction.
+ */
+export async function supersedeDocument(documentId: string, input: { file: File; organisationId?: string | null }, actor: UserContext, correlationId: string) {
+  const db = await ensureDatabase();
+  const original = await db.prepare("SELECT id,organisation_id,owner_domain,owner_resource_id,classification,status FROM document_metadata WHERE id=?")
+    .bind(documentId).first<{ id: string; organisation_id: string; owner_domain: string; owner_resource_id: string; classification: string; status: string }>();
+  if (!original) throw new PlatformResourceError("Document was not found.", 404);
+  const scope = await resolveOrganisation(db, actor, input.organisationId ?? original.organisation_id);
+  if (original.status !== "ACTIVE") throw new RepositoryConflictError("Only a clean, active document can be superseded.");
+  const { bytes, checksum, fileName } = await validateAndHashFile(input.file);
+  const id = crypto.randomUUID();
+  const objectKey = `quarantine/${scope.organisation_id}/${id}/${fileName}`;
+  const now = new Date().toISOString();
+  await env.DOCUMENTS.put(objectKey, bytes, { httpMetadata: { contentType: input.file.type, contentDisposition: `attachment; filename="${fileName.replaceAll('"', "")}"` }, customMetadata: { organisationId: scope.organisation_id, documentId: id, checksumSha256: checksum, scanStatus: "PENDING_EXTERNAL_SCANNER" } });
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO document_metadata
+        (id,organisation_id,owner_domain,owner_resource_id,object_key,file_name,content_type,size_bytes,checksum_sha256,classification,scan_status,status,uploaded_by,uploaded_at,retained_until,legal_hold,supersedes_document_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,'QUARANTINED',?,?,NULL,0,?)`).bind(id, scope.organisation_id, original.owner_domain, original.owner_resource_id, objectKey, fileName, input.file.type, input.file.size, checksum, original.classification, "PENDING_EXTERNAL_SCANNER", actor.userId, now, documentId),
+      db.prepare("UPDATE document_metadata SET status='SUPERSEDED' WHERE id=? AND status='ACTIVE'").bind(documentId),
+      outbox(db, "DOCUMENT", id, "DocumentSuperseded", scope.taxpayer_id, { document_id: id, supersedes_document_id: documentId, correlation_id: correlationId }, now),
+      await auditRecord(db, actor, "DOCUMENT_SUPERSEDED", "DOCUMENT", id, { organisationId: scope.organisation_id, supersedesDocumentId: documentId, checksum, correlationId }, now),
+    ]);
+  } catch (error) {
+    await env.DOCUMENTS.delete(objectKey).catch(() => undefined);
+    throw error;
+  }
+  return { id, organisation_id: scope.organisation_id, owner_domain: original.owner_domain, owner_resource_id: original.owner_resource_id, file_name: fileName, content_type: input.file.type, size_bytes: input.file.size, checksum_sha256: checksum, classification: original.classification, scan_status: "PENDING_EXTERNAL_SCANNER", status: "QUARANTINED", uploaded_at: now, supersedes_document_id: documentId };
+}
+
+/** Module 6 Phase A GetDocumentVersionHistory: walks the supersedes_document_id chain in both directions so calling it on any version returns the complete history, oldest first. */
+export async function getDocumentVersionHistory(documentId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  const anchor = await db.prepare("SELECT * FROM document_metadata WHERE id=?").bind(documentId).first<Record<string, unknown>>();
+  if (!anchor) throw new PlatformResourceError("Document was not found.", 404);
+  await resolveOrganisation(db, actor, anchor.organisation_id as string);
+  const chain: Array<Record<string, unknown>> = [anchor];
+  let cursor = anchor;
+  while (cursor.supersedes_document_id) {
+    const prev = await db.prepare("SELECT * FROM document_metadata WHERE id=?").bind(cursor.supersedes_document_id as string).first<Record<string, unknown>>();
+    if (!prev) break;
+    chain.unshift(prev);
+    cursor = prev;
+  }
+  cursor = anchor;
+  for (;;) {
+    const next = await db.prepare("SELECT * FROM document_metadata WHERE supersedes_document_id=?").bind(cursor.id as string).first<Record<string, unknown>>();
+    if (!next) break;
+    chain.push(next);
+    cursor = next;
+  }
+  return { document_id: documentId, versions: chain };
 }
 
 export async function receiveOfflineBatch(payload: OfflineBatchSubmission, actor: UserContext, correlationId: string) {

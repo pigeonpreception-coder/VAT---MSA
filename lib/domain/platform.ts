@@ -62,3 +62,22 @@ export function safeFileName(value: string) {
   const safe = leaf.replaceAll(/[^A-Za-z0-9._ -]/g, "_").slice(0, 180);
   return safe || "evidence";
 }
+
+export type DocumentScanResultSubmission = { schema_version: "1.0.0"; outcome: "CLEAN" | "INFECTED"; notes?: string };
+
+const SCAN_OUTCOMES = new Set(["CLEAN", "INFECTED"]);
+
+/** Module 6 Phase A CompleteDocumentScan payload: the external scanner's verdict. */
+export function validateDocumentScanResult(payload: unknown): DocumentScanResultSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const outcome = text(input.outcome).toUpperCase() as DocumentScanResultSubmission["outcome"];
+  if (!SCAN_OUTCOMES.has(outcome)) messages.push({ code: "OUTCOME_INVALID", path: "/outcome", message: "outcome must be CLEAN or INFECTED." });
+  const notesRaw = text(input.notes);
+  if (notesRaw.length > 1_000) messages.push({ code: "NOTES_TOO_LONG", path: "/notes", message: "notes must not exceed 1000 characters." });
+  const notes = notesRaw || undefined;
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", outcome, ...(notes ? { notes } : {}) };
+}
