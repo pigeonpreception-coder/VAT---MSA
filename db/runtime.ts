@@ -576,7 +576,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS report_definitions (
     id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, audience TEXT NOT NULL,
     description TEXT NOT NULL, classification TEXT NOT NULL, query_version TEXT NOT NULL,
-    status TEXT NOT NULL, created_at TEXT NOT NULL
+    status TEXT NOT NULL, created_at TEXT NOT NULL,
+    freshness_tier TEXT NOT NULL DEFAULT 'DAILY', guardrail TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE TABLE IF NOT EXISTS report_runs (
     id TEXT PRIMARY KEY, report_definition_id TEXT NOT NULL REFERENCES report_definitions(id),
@@ -1375,6 +1376,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('communications:manage','COMMUNICATION','MANAGE','Record controlled taxpayer communications','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('communications:respond','COMMUNICATION','RESPOND','Respond within an existing NamRA correspondence thread','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('notifications:manage','NOTIFICATION','MANAGE','Queue a notification directly','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('reports:executive','REPORT','EXECUTIVE','Run executive-tier aggregate reports','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('consents:manage','CONSENT','MANAGE','Manage taxpayer consents and delegations','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
 
   `INSERT OR IGNORE INTO tax_obligations
@@ -1461,9 +1463,27 @@ const PLATFORM_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO offline_number_ranges
     (id,offline_device_id,document_type,prefix,range_start,range_end,next_number,status,valid_from,valid_to)
     VALUES ('offline-range-0001','offline-device-0001','TAX_INVOICE','WHK26',1,1000,1,'HELD_PENDING_ENROLMENT','2026-08-10T00:00:00Z','2026-12-31T23:59:59Z')`,
-  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-vat','VAT_POSITION','VAT position summary','BOTH','Latest controlled VAT positions and net aggregate.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
-  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-cases','COMPLIANCE_CASELOAD','Compliance caseload','NAMRA','Open and total compliance case counts.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
-  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-sales','SALES_VAT_SUMMARY','Sales and VAT summary','BOTH','Invoice count, gross value and VAT aggregate.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-vat','VAT_POSITION','VAT position summary','TAXPAYER','Latest controlled VAT positions and net aggregate.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z','NEAR_REAL_TIME','own organisation; delegated scope only')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-cases','COMPLIANCE_CASELOAD','Compliance caseload','NAMRA_OPERATIONS','Open and total compliance case counts.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z','MINUTES_TO_DAILY','office/purpose policy; sensitive field masking')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-sales','SALES_VAT_SUMMARY','Sales and VAT summary','TAXPAYER','Invoice count, gross value and VAT aggregate.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z','NEAR_REAL_TIME','own organisation; delegated scope only')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-portfolio','PORTFOLIO_EXCEPTIONS','Portfolio exceptions and deadlines','PRACTITIONER','Reconciliation exceptions across every taxpayer the requesting practitioner is actively delegated for.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-26T08:30:00Z','MINUTES','consent/mandate and client-level isolation')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-executive','REVENUE_COMPLIANCE_TRENDS','Revenue and compliance trends','EXECUTIVE','National aggregate invoice revenue and case-load trend, no taxpayer-level breakdown.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-26T08:30:00Z','DAILY','aggregation, disclosure controls')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-evidence','CASE_EVIDENCE_SUMMARY','Case evidence summary','AUDITOR_LEGAL','Point-in-time evidence and custody-event counts for one audit case.','RESTRICTED','1.0.0','ACTIVE','2026-08-26T08:30:00Z','POINT_IN_TIME','case authority, custody and watermark')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-opendata','NATIONAL_VAT_AGGREGATE','National VAT aggregate','OPEN_DATA','Approved national invoice-count and value aggregate, minimum-cell suppressed.','INTERNAL','1.0.0','ACTIVE','2026-08-26T08:30:00Z','SCHEDULED','privacy review, minimum-cell suppression, no re-identification')`,
   `INSERT OR IGNORE INTO report_runs
     (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code)
     VALUES ('report-run-0001','report-def-vat','org-0001','tp-0001','{}','COMPLETED_INLINE',2,'{"periods":2,"net_cents":937500}',NULL,'usr-local-admin','2026-08-10T08:40:00Z','2026-08-10T08:40:00Z','2026-08-11T08:40:00Z',NULL)`,
