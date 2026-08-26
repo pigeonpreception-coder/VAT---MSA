@@ -1,5 +1,5 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
-import { approveReportExport, cancelReportExport, completeDocumentScan, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformSnapshot, getReportExport, PlatformResourceError, publishReportRun, receiveOfflineBatch, requestReportExport, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
+import { approveReportExport, cancelReportExport, completeDocumentScan, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformSnapshot, getReportExport, listAnomalyCandidates, listDataProducts, PlatformResourceError, publishDataProduct, publishReportRun, queryApprovedMetrics, receiveOfflineBatch, requestReportExport, runAnalyticsModel, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -284,5 +284,82 @@ export async function handleReportExportDownload(request: Request, exportId: str
         "cache-control": "no-store",
       },
     });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 7 Phase D: DataProduct list, with lineage, certified metrics and the latest published snapshot. */
+export async function handleAnalyticsDataProducts(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "reports:read");
+    const result = await listDataProducts();
+    return Response.json({ data_products: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 7 Phase D RunModel: computes a ModelRun from an already-published, reconciled report run. */
+export async function handleAnalyticsModelRun(request: Request, dataProductId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "reports:run");
+    await enforceRateLimits([{ key: `analytics-model-run:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "analytics-model-run:global", limit: 500, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await runAnalyticsModel(dataProductId, payload, user, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "RUN_ANALYTICS_MODEL", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ model_run: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "RUN_ANALYTICS_MODEL", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 7 Phase D PublishDataProduct: promotes a completed ModelRun to the data product's current snapshot and checks certified metrics for anomalies. */
+export async function handleAnalyticsDataProductPublication(request: Request, dataProductId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "reports:run");
+    await enforceRateLimits([{ key: `analytics-publish:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "analytics-publish:global", limit: 500, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await publishDataProduct(dataProductId, payload, user, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "PUBLISH_DATA_PRODUCT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ snapshot: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "PUBLISH_DATA_PRODUCT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 7 Phase D QueryApprovedMetrics: certified metrics only, each with its current value from the latest published snapshot. */
+export async function handleAnalyticsMetrics(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "reports:read");
+    const params = new URL(request.url).searchParams;
+    const result = await queryApprovedMetrics({ dataProductId: params.get("data_product_id")?.trim() || undefined, code: params.get("code")?.trim() || undefined });
+    return Response.json({ metrics: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 7 Phase D: queryable AnomalyCandidate list, not just a fire-and-forget outbox event. */
+export async function handleAnalyticsAnomalies(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "reports:read");
+    const params = new URL(request.url).searchParams;
+    const result = await listAnomalyCandidates({ dataProductId: params.get("data_product_id")?.trim() || undefined });
+    return Response.json({ anomalies: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context.correlationId); }
 }

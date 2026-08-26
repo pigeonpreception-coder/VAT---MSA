@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validateReportParameters } from "@/lib/domain/platform";
+import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand } from "@/lib/domain/platform";
 
 describe("platform edge validation", () => {
   it("accepts an ordered offline batch envelope", () => {
@@ -70,5 +70,25 @@ describe("platform edge validation", () => {
   it("rejects an export cancellation with a missing or oversized reason", () => {
     expect(() => validateExportCancellation({ schema_version: "1.0.0", reason: "hi" })).toThrowError(PlatformValidationError);
     expect(() => validateExportCancellation({ schema_version: "1.0.0", reason: "x".repeat(501) })).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a RunModel command with a valid report_run_id", () => {
+    const reportRunId = "72a56891-51af-4a62-b83f-594e147245db";
+    expect(validateRunModelCommand({ schema_version: "1.0.0", report_run_id: reportRunId })).toEqual({ schema_version: "1.0.0", report_run_id: reportRunId });
+  });
+
+  it("rejects a RunModel command with a missing or invalid report_run_id", () => {
+    expect(() => validateRunModelCommand({ schema_version: "1.0.0", report_run_id: "not valid!" })).toThrowError(PlatformValidationError);
+    expect(() => validateRunModelCommand({ schema_version: "1.0.0" })).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a PublishDataProduct command with a valid model_run_id", () => {
+    const modelRunId = "72a56891-51af-4a62-b83f-594e147245db";
+    expect(validatePublishDataProductCommand({ schema_version: "1.0.0", model_run_id: modelRunId })).toEqual({ schema_version: "1.0.0", model_run_id: modelRunId });
+  });
+
+  it("rejects a PublishDataProduct command with a missing or invalid model_run_id", () => {
+    expect(() => validatePublishDataProductCommand({ schema_version: "1.0.0", model_run_id: "not valid!" })).toThrowError(PlatformValidationError);
+    expect(() => validatePublishDataProductCommand(null)).toThrowError(PlatformValidationError);
   });
 });

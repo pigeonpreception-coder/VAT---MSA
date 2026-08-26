@@ -597,6 +597,38 @@ const SCHEMA_STATEMENTS = [
     cancelled_by TEXT REFERENCES app_users(id), cancelled_at TEXT, cancellation_reason TEXT,
     expires_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS data_products (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+    source_report_definition_id TEXT NOT NULL REFERENCES report_definitions(id),
+    status TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS data_product_lineage (
+    id TEXT PRIMARY KEY, data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    source_type TEXT NOT NULL, source_id TEXT NOT NULL, source_label TEXT NOT NULL, recorded_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS metrics (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    field TEXT NOT NULL, unit TEXT NOT NULL, status TEXT NOT NULL,
+    anomaly_threshold_pct REAL NOT NULL DEFAULT 25, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS analytics_model_runs (
+    id TEXT PRIMARY KEY, data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    report_run_id TEXT NOT NULL REFERENCES report_runs(id),
+    status TEXT NOT NULL, model_output TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS data_product_snapshots (
+    id TEXT PRIMARY KEY, data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    model_run_id TEXT NOT NULL REFERENCES analytics_model_runs(id),
+    snapshot TEXT NOT NULL, previous_snapshot_id TEXT REFERENCES data_product_snapshots(id),
+    published_by TEXT NOT NULL REFERENCES app_users(id), published_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS analytics_anomaly_candidates (
+    id TEXT PRIMARY KEY, data_product_snapshot_id TEXT NOT NULL REFERENCES data_product_snapshots(id),
+    metric_code TEXT NOT NULL, previous_value REAL NOT NULL, current_value REAL NOT NULL,
+    pct_change REAL NOT NULL, threshold_pct REAL NOT NULL, detected_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS service_components (
     id TEXT PRIMARY KEY, component_key TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
     component_type TEXT NOT NULL, criticality TEXT NOT NULL,
@@ -993,6 +1025,10 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_report_runs_status_requested ON report_runs(status, requested_at)`,
   `CREATE INDEX IF NOT EXISTS idx_report_exports_run_status ON report_exports(report_run_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_analytics_model_runs_product ON analytics_model_runs(data_product_id, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_data_product_snapshots_product_published ON data_product_snapshots(data_product_id, published_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_metrics_product ON metrics(data_product_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_anomaly_candidates_snapshot ON analytics_anomaly_candidates(data_product_snapshot_id)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
@@ -1498,6 +1534,21 @@ const PLATFORM_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO report_runs
     (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code)
     VALUES ('report-run-0001','report-def-vat','org-0001','tp-0001','{}','COMPLETED_INLINE',2,'{"periods":2,"net_cents":937500}',NULL,'usr-local-admin','2026-08-10T08:40:00Z','2026-08-10T08:40:00Z','2026-08-11T08:40:00Z',NULL)`,
+  `INSERT OR IGNORE INTO report_runs
+    (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code,scope_snapshot,published_by,published_at)
+    VALUES ('report-run-0002','report-def-executive',NULL,NULL,'{}','PUBLISHED',4,'{"invoices":4,"total_cents":137630000,"cases":1,"open_cases":1}',NULL,'usr-local-admin','2026-08-26T09:00:00Z','2026-08-26T09:00:00Z',NULL,NULL,'{"organisationId":null,"taxpayerId":null}','usr-local-admin','2026-08-26T09:05:00Z')`,
+  `INSERT OR IGNORE INTO data_products
+    (id,code,name,description,source_report_definition_id,status,created_at)
+    VALUES ('dp-vat-trends','VAT_COMPLIANCE_TRENDS','VAT and compliance trends','Governed enterprise KPI data product for national revenue and compliance caseload trends, published only from an already-reconciled report run.','report-def-executive','ACTIVE','2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO data_product_lineage
+    (id,data_product_id,source_type,source_id,source_label,recorded_at)
+    VALUES ('lineage-vat-trends-0001','dp-vat-trends','REPORT_DEFINITION','report-def-executive','REVENUE_COMPLIANCE_TRENDS','2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO metrics
+    (id,code,name,data_product_id,field,unit,status,anomaly_threshold_pct,created_at)
+    VALUES ('metric-national-revenue','NATIONAL_REVENUE_CENTS','National invoice revenue','dp-vat-trends','total_cents','CENTS','CERTIFIED',25,'2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO metrics
+    (id,code,name,data_product_id,field,unit,status,anomaly_threshold_pct,created_at)
+    VALUES ('metric-open-cases','OPEN_COMPLIANCE_CASES','Open compliance cases','dp-vat-trends','open_cases','COUNT','CERTIFIED',25,'2026-08-26T09:00:00Z')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-web','WEB_APP','VAT-MSA web application','APPLICATION','HIGH','CONFIGURED','OPERATIONAL','Cloudflare Worker/Vinext runtime','2026-08-10T08:45:00Z','Release gate and readiness checks passed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-d1','D1','Structured transactional state','DATABASE','CRITICAL','CONFIGURED','OPERATIONAL','Cloudflare D1 binding DB','2026-08-10T08:45:00Z','Schema initialisation and prepared-query probe passed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-r2','R2_DOCUMENTS','Private document quarantine','OBJECT_STORAGE','HIGH','CONFIGURED','QUARANTINE_ONLY','Cloudflare R2 binding DOCUMENTS','2026-08-10T08:45:00Z','Uploads remain quarantined pending an external malware scanner.')`,

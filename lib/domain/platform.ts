@@ -132,3 +132,31 @@ export function validateExportCancellation(payload: unknown): ExportCancellation
   if (messages.length) throw new PlatformValidationError(messages);
   return { schema_version: "1.0.0", reason };
 }
+
+export type RunModelSubmission = { schema_version: "1.0.0"; report_run_id: string };
+
+/** Module 7 Phase D RunModel: computes a data product's ModelRun from an already-published, reconciled report run — the governed boundary standing in for a separate read replica this deployment doesn't have. */
+export function validateRunModelCommand(payload: unknown): RunModelSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const reportRunId = text(input.report_run_id);
+  if (!ID_PATTERN.test(reportRunId)) messages.push({ code: "REPORT_RUN_ID_INVALID", path: "/report_run_id", message: "report_run_id is invalid." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", report_run_id: reportRunId };
+}
+
+export type PublishDataProductSubmission = { schema_version: "1.0.0"; model_run_id: string };
+
+/** Module 7 Phase D PublishDataProduct: promotes a completed ModelRun to be the data product's current, consumable snapshot. */
+export function validatePublishDataProductCommand(payload: unknown): PublishDataProductSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const modelRunId = text(input.model_run_id);
+  if (!ID_PATTERN.test(modelRunId)) messages.push({ code: "MODEL_RUN_ID_INVALID", path: "/model_run_id", message: "model_run_id is invalid." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", model_run_id: modelRunId };
+}

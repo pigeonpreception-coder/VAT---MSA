@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validateReportParameters, type OfflineBatchSubmission } from "@/lib/domain/platform";
+import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand, type OfflineBatchSubmission } from "@/lib/domain/platform";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
@@ -749,4 +749,180 @@ export async function downloadReportExport(exportId: string, actor: UserContext,
   const stmt = await auditRecord(db, actor, "REPORT_EXPORT_DOWNLOADED", "REPORT_EXPORT", exportId, { documentId: row.document_id, correlationId }, now);
   await stmt.run();
   return { bytes, contentType: document.content_type, fileName: document.file_name };
+}
+
+/**
+ * Module 7 Phase D: Analytics is greenfield in this codebase — a 2026-08-26
+ * audit confirmed nothing beyond the "ARCHITECTURE ONLY" label existed. This
+ * deployment has no separate governed read replica/warehouse (the same
+ * Cloudflare D1 binding backs both the live fiscal write path and every
+ * read), so "PublishDataProduct against a governed read replica only, never
+ * the live fiscal write store" is built as the strongest real analog
+ * available: a DataProduct's `RunModel` step may only be fed by an
+ * already-`PUBLISHED`, already-reconciled report run (Phase C's
+ * `publishReportRun`) — never a live query against invoices/vat_return_
+ * versions/audit_cases/etc. The only tables `runAnalyticsModel` and
+ * `publishDataProduct` ever read are `report_runs`/`report_definitions`/
+ * `data_products`/`metrics`/`analytics_model_runs`/`data_product_snapshots`
+ * — never a fiscal source table directly. `DataProduct`/`Metric`/`Lineage`
+ * definitions are deliberately seed-only, the same posture Module 7 Phase A
+ * already established for `ReportDefinition`: defining a new governed
+ * metric is a governance/config action out of scope for this pilot, not
+ * something this phase invents a maker-checker workflow for.
+ */
+const SUPPRESSED_RESULT_MESSAGE = "The source report run is minimum-cell suppressed and cannot feed a certified analytics model.";
+
+export async function listDataProducts() {
+  const db = await ensureDatabase();
+  const products = await db.prepare(`SELECT dp.id,dp.code,dp.name,dp.description,dp.status,rd.code AS source_report_code,rd.name AS source_report_name
+    FROM data_products dp JOIN report_definitions rd ON rd.id=dp.source_report_definition_id
+    WHERE dp.status='ACTIVE' ORDER BY dp.code`).all<{ id: string; code: string; name: string; description: string; status: string; source_report_code: string; source_report_name: string }>();
+  return Promise.all(products.results.map(async (product) => {
+    const [lineage, metrics, latestSnapshot] = await Promise.all([
+      db.prepare("SELECT source_type,source_id,source_label FROM data_product_lineage WHERE data_product_id=? ORDER BY recorded_at").bind(product.id).all<{ source_type: string; source_id: string; source_label: string }>(),
+      db.prepare("SELECT code,name,field,unit,status FROM metrics WHERE data_product_id=? ORDER BY code").bind(product.id).all<{ code: string; name: string; field: string; unit: string; status: string }>(),
+      db.prepare("SELECT id,snapshot,published_by,published_at FROM data_product_snapshots WHERE data_product_id=? ORDER BY published_at DESC LIMIT 1").bind(product.id).first<{ id: string; snapshot: string; published_by: string; published_at: string }>(),
+    ]);
+    return {
+      id: product.id, code: product.code, name: product.name, description: product.description,
+      source: { report_code: product.source_report_code, report_name: product.source_report_name },
+      lineage: lineage.results,
+      certified_metrics: metrics.results.filter((metric) => metric.status === "CERTIFIED"),
+      latest_snapshot: latestSnapshot ? { id: latestSnapshot.id, snapshot: JSON.parse(latestSnapshot.snapshot), published_by: latestSnapshot.published_by, published_at: latestSnapshot.published_at } : null,
+    };
+  }));
+}
+
+/** Module 7 Phase D RunModel. */
+export async function runAnalyticsModel(dataProductId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string) {
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national platform role may run an analytics model.");
+  validateIdempotencyKey(idempotencyKey);
+  const input = validateRunModelCommand(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ data_product_id: dataProductId, input }));
+  const prior = await priorCommand(db, actor.userId, "RUN_ANALYTICS_MODEL", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM analytics_model_runs WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const dataProduct = await db.prepare("SELECT id,source_report_definition_id FROM data_products WHERE id=? AND status='ACTIVE'").bind(dataProductId).first<{ id: string; source_report_definition_id: string }>();
+  if (!dataProduct) throw new PlatformResourceError("Data product was not found.", 404);
+  const reportRun = await db.prepare("SELECT id,report_definition_id,status,result_summary FROM report_runs WHERE id=?").bind(input.report_run_id)
+    .first<{ id: string; report_definition_id: string; status: string; result_summary: string }>();
+  if (!reportRun) throw new PlatformResourceError("Report run was not found.", 404);
+  if (reportRun.report_definition_id !== dataProduct.source_report_definition_id) throw new PlatformResourceError("The report run does not match this data product's governed source report definition.");
+  if (reportRun.status !== "PUBLISHED") throw new RepositoryConflictError("Only a published, reconciled report run may feed an analytics model.");
+  const sourceResult = JSON.parse(reportRun.result_summary) as Record<string, unknown>;
+  if (sourceResult.suppressed === true) throw new RepositoryConflictError(SUPPRESSED_RESULT_MESSAGE);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO analytics_model_runs
+      (id,data_product_id,report_run_id,status,model_output,requested_by,requested_at)
+      VALUES (?,?,?,'COMPLETED',?,?,?)`).bind(id, dataProductId, input.report_run_id, JSON.stringify(sourceResult), actor.userId, now),
+    commandRecord(db, actor.userId, "RUN_ANALYTICS_MODEL", idempotencyKey, requestHash, "ANALYTICS_MODEL_RUN", id, now),
+    await auditRecord(db, actor, "ANALYTICS_MODEL_RUN", "ANALYTICS_MODEL_RUN", id, { dataProductId, reportRunId: input.report_run_id, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM analytics_model_runs WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 7 Phase D PublishDataProduct: promotes a completed ModelRun to be
+ * the data product's current snapshot, then checks every CERTIFIED metric
+ * on this data product against the previous snapshot's value. A percentage
+ * change at or beyond the metric's own `anomaly_threshold_pct` raises a
+ * genuine, explainable `AnomalyCandidate` — persisted as a queryable row
+ * (`analytics_anomaly_candidates`), not just a fire-and-forget event,
+ * matching Module 4's "always return the explainable factor" precedent for
+ * risk indicators. The first-ever publish for a data product has nothing to
+ * compare against, so it never raises an anomaly.
+ */
+export async function publishDataProduct(dataProductId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string) {
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national platform role may publish a data product.");
+  validateIdempotencyKey(idempotencyKey);
+  const input = validatePublishDataProductCommand(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ data_product_id: dataProductId, input }));
+  const prior = await priorCommand(db, actor.userId, "PUBLISH_DATA_PRODUCT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM data_product_snapshots WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const dataProduct = await db.prepare("SELECT id FROM data_products WHERE id=? AND status='ACTIVE'").bind(dataProductId).first<{ id: string }>();
+  if (!dataProduct) throw new PlatformResourceError("Data product was not found.", 404);
+  const modelRun = await db.prepare("SELECT id,model_output,status FROM analytics_model_runs WHERE id=? AND data_product_id=?").bind(input.model_run_id, dataProductId)
+    .first<{ id: string; model_output: string; status: string }>();
+  if (!modelRun) throw new PlatformResourceError("Model run was not found for this data product.", 404);
+  if (modelRun.status !== "COMPLETED") throw new RepositoryConflictError("Only a completed model run can be published.");
+  const alreadyPublished = await db.prepare("SELECT id FROM data_product_snapshots WHERE model_run_id=?").bind(input.model_run_id).first<{ id: string }>();
+  if (alreadyPublished) throw new RepositoryConflictError("This model run has already been published.");
+  const previous = await db.prepare("SELECT id,snapshot FROM data_product_snapshots WHERE data_product_id=? ORDER BY published_at DESC LIMIT 1").bind(dataProductId)
+    .first<{ id: string; snapshot: string }>();
+  const now = new Date().toISOString();
+  const snapshotId = crypto.randomUUID();
+  const modelOutput = JSON.parse(modelRun.model_output) as Record<string, unknown>;
+  const previousOutput = previous ? (JSON.parse(previous.snapshot) as Record<string, unknown>) : null;
+
+  const certifiedMetrics = await db.prepare("SELECT code,field,anomaly_threshold_pct FROM metrics WHERE data_product_id=? AND status='CERTIFIED'").bind(dataProductId)
+    .all<{ code: string; field: string; anomaly_threshold_pct: number }>();
+  const anomalyStatements: D1PreparedStatement[] = [];
+  const anomalyOutboxStatements: D1PreparedStatement[] = [];
+  const anomalyCount = { value: 0 };
+  for (const metric of certifiedMetrics.results) {
+    const currentValue = Number(modelOutput[metric.field]);
+    const previousValue = previousOutput ? Number(previousOutput[metric.field]) : null;
+    if (previousValue === null || !Number.isFinite(previousValue) || previousValue === 0 || !Number.isFinite(currentValue)) continue;
+    const pctChange = ((currentValue - previousValue) / Math.abs(previousValue)) * 100;
+    if (Math.abs(pctChange) < metric.anomaly_threshold_pct) continue;
+    anomalyCount.value += 1;
+    const anomalyId = crypto.randomUUID();
+    anomalyStatements.push(db.prepare(`INSERT INTO analytics_anomaly_candidates
+      (id,data_product_snapshot_id,metric_code,previous_value,current_value,pct_change,threshold_pct,detected_at)
+      VALUES (?,?,?,?,?,?,?,?)`).bind(anomalyId, snapshotId, metric.code, previousValue, currentValue, pctChange, metric.anomaly_threshold_pct, now));
+    anomalyOutboxStatements.push(outbox(db, "DATA_PRODUCT", dataProductId, "AnomalyCandidate", dataProductId, {
+      data_product_id: dataProductId, snapshot_id: snapshotId, metric_code: metric.code,
+      previous_value: previousValue, current_value: currentValue, pct_change: pctChange, threshold_pct: metric.anomaly_threshold_pct, correlation_id: correlationId,
+    }, now));
+  }
+
+  await db.batch([
+    db.prepare(`INSERT INTO data_product_snapshots
+      (id,data_product_id,model_run_id,snapshot,previous_snapshot_id,published_by,published_at)
+      VALUES (?,?,?,?,?,?,?)`).bind(snapshotId, dataProductId, input.model_run_id, JSON.stringify(modelOutput), previous?.id ?? null, actor.userId, now),
+    ...anomalyStatements,
+    commandRecord(db, actor.userId, "PUBLISH_DATA_PRODUCT", idempotencyKey, requestHash, "DATA_PRODUCT_SNAPSHOT", snapshotId, now),
+    outbox(db, "DATA_PRODUCT", dataProductId, "AnalyticsRefreshed", dataProductId, { data_product_id: dataProductId, snapshot_id: snapshotId, correlation_id: correlationId }, now),
+    ...anomalyOutboxStatements,
+    await auditRecord(db, actor, "DATA_PRODUCT_PUBLISHED", "DATA_PRODUCT_SNAPSHOT", snapshotId, { dataProductId, modelRunId: input.model_run_id, anomalies: anomalyCount.value, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM data_product_snapshots WHERE id=?").bind(snapshotId).first<Record<string, unknown>>();
+}
+
+/** Module 7 Phase D QueryApprovedMetrics: reads only `metrics`/`data_product_snapshots`, never a live fiscal table. */
+export async function queryApprovedMetrics(filter: { dataProductId?: string; code?: string }) {
+  const db = await ensureDatabase();
+  const conditions = ["m.status='CERTIFIED'"];
+  const params: string[] = [];
+  if (filter.dataProductId) { conditions.push("m.data_product_id=?"); params.push(filter.dataProductId); }
+  if (filter.code) { conditions.push("m.code=?"); params.push(filter.code.toUpperCase()); }
+  const metrics = await db.prepare(`SELECT m.code,m.name,m.unit,m.field,m.data_product_id,dp.code AS data_product_code,dp.name AS data_product_name
+    FROM metrics m JOIN data_products dp ON dp.id=m.data_product_id
+    WHERE ${conditions.join(" AND ")} ORDER BY m.code`).bind(...params)
+    .all<{ code: string; name: string; unit: string; field: string; data_product_id: string; data_product_code: string; data_product_name: string }>();
+  return Promise.all(metrics.results.map(async (metric) => {
+    const snapshot = await db.prepare("SELECT snapshot,published_at FROM data_product_snapshots WHERE data_product_id=? ORDER BY published_at DESC LIMIT 1").bind(metric.data_product_id)
+      .first<{ snapshot: string; published_at: string }>();
+    const value = snapshot ? ((JSON.parse(snapshot.snapshot) as Record<string, unknown>)[metric.field] ?? null) : null;
+    return {
+      code: metric.code, name: metric.name, unit: metric.unit,
+      data_product_code: metric.data_product_code, data_product_name: metric.data_product_name,
+      value, as_of: snapshot?.published_at ?? null, status: snapshot ? "AVAILABLE" : "NO_DATA",
+    };
+  }));
+}
+
+export async function listAnomalyCandidates(filter: { dataProductId?: string }) {
+  const db = await ensureDatabase();
+  const rows = filter.dataProductId
+    ? await db.prepare(`SELECT a.id,a.metric_code,a.previous_value,a.current_value,a.pct_change,a.threshold_pct,a.detected_at,s.data_product_id
+        FROM analytics_anomaly_candidates a JOIN data_product_snapshots s ON s.id=a.data_product_snapshot_id
+        WHERE s.data_product_id=? ORDER BY a.detected_at DESC LIMIT 200`).bind(filter.dataProductId).all<Record<string, unknown>>()
+    : await db.prepare(`SELECT a.id,a.metric_code,a.previous_value,a.current_value,a.pct_change,a.threshold_pct,a.detected_at,s.data_product_id
+        FROM analytics_anomaly_candidates a JOIN data_product_snapshots s ON s.id=a.data_product_snapshot_id
+        ORDER BY a.detected_at DESC LIMIT 200`).all<Record<string, unknown>>();
+  return rows.results;
 }
