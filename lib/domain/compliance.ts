@@ -543,3 +543,131 @@ export function validateCaseNoteAddition(payload: unknown): CaseNoteAddition {
   if (messages.length) throw new ComplianceValidationError(messages);
   return { schema_version: "1.0.0", body, ...(supersedesNoteId ? { supersedesNoteId } : {}) };
 }
+
+/**
+ * Module 6 Phase C: case correspondence. The `communications` table already
+ * existed (read-only until now — a full-repo grep found zero `INSERT INTO
+ * communications` anywhere) with `related_resource_type`/`related_resource_id`
+ * columns already generic enough to be the playbook's `CaseReference` —
+ * this reuses that shape rather than inventing a new one. Its own `status`
+ * column already meant something else (delivery status — the one seed row
+ * carries `'DELIVERED'`), so it can't double as a thread's open/closed
+ * state; a `Conversation` is a genuinely new concept this schema couldn't
+ * represent, so `communication_threads` is a real new table, with
+ * `communications` gaining a `thread_id` column. Each `CaseReference` gets
+ * at most one thread — `communication_threads` carries
+ * `UNIQUE(related_resource_type, related_resource_id)` — so "the
+ * conversation about case X" is unambiguous.
+ */
+export type CaseReferenceType = "AUDIT_CASE" | "REFUND_CLAIM" | "RECONCILIATION_EXCEPTION";
+
+export const CASE_REFERENCE_TYPES: readonly CaseReferenceType[] = ["AUDIT_CASE", "REFUND_CLAIM", "RECONCILIATION_EXCEPTION"];
+const COMMUNICATION_CHANNELS = new Set(["PORTAL", "EMAIL", "SMS", "LETTER"]);
+const COMMUNICATION_CLASSIFICATIONS = new Set(["INTERNAL", "CONFIDENTIAL", "TAX_CONFIDENTIAL", "RESTRICTED"]);
+
+export type NoticeSubmission = {
+  schema_version: "1.0.0";
+  related_resource_type: CaseReferenceType;
+  related_resource_id: string;
+  channel: "PORTAL" | "EMAIL" | "SMS" | "LETTER";
+  subject: string;
+  content_summary: string;
+  classification: "INTERNAL" | "CONFIDENTIAL" | "TAX_CONFIDENTIAL" | "RESTRICTED";
+};
+
+/**
+ * Module 6 Phase C SendNotice: opens a new correspondence thread for a case
+ * reference. Officer-only — see requireNationalScope in the repository.
+ * Deliberately takes no taxpayer_id: the repository derives it from the
+ * referenced case/claim/exception's own taxpayer_id column, so a caller
+ * can never send a notice to a taxpayer that doesn't match the case it's
+ * actually about.
+ */
+export function validateNotice(payload: unknown): NoticeSubmission {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const relatedResourceType = text(input.related_resource_type).toUpperCase() as CaseReferenceType;
+  if (!CASE_REFERENCE_TYPES.includes(relatedResourceType)) messages.push({ code: "CASE_REFERENCE_TYPE_INVALID", path: "/related_resource_type", message: `related_resource_type must be one of: ${CASE_REFERENCE_TYPES.join(", ")}.` });
+  const relatedResourceId = id(input.related_resource_id, "/related_resource_id", messages) ?? "";
+  const channel = text(input.channel).toUpperCase() as NoticeSubmission["channel"];
+  if (!COMMUNICATION_CHANNELS.has(channel)) messages.push({ code: "CHANNEL_INVALID", path: "/channel", message: "Select a supported channel." });
+  const subject = bounded(input.subject, "/subject", "Subject", 5, 200, messages);
+  const contentSummary = bounded(input.content_summary, "/content_summary", "Content summary", 10, 4_000, messages);
+  const classification = text(input.classification).toUpperCase() as NoticeSubmission["classification"];
+  if (!COMMUNICATION_CLASSIFICATIONS.has(classification)) messages.push({ code: "CLASSIFICATION_INVALID", path: "/classification", message: "Select a supported classification." });
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", related_resource_type: relatedResourceType, related_resource_id: relatedResourceId, channel, subject, content_summary: contentSummary, classification };
+}
+
+export type ConversationResponseSubmission = { schema_version: "1.0.0"; channel: "PORTAL" | "EMAIL" | "SMS" | "LETTER"; content_summary: string };
+
+/** Module 6 Phase C Respond: a reply within an existing thread. Inherits the thread's own subject and classification rather than re-declaring them per message. */
+export function validateConversationResponse(payload: unknown): ConversationResponseSubmission {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const channel = text(input.channel).toUpperCase() as ConversationResponseSubmission["channel"];
+  if (!COMMUNICATION_CHANNELS.has(channel)) messages.push({ code: "CHANNEL_INVALID", path: "/channel", message: "Select a supported channel." });
+  const contentSummary = bounded(input.content_summary, "/content_summary", "Content summary", 10, 4_000, messages);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", channel, content_summary: contentSummary };
+}
+
+export type ConversationClosureSubmission = { schema_version: "1.0.0"; reason: string };
+
+/** Module 6 Phase C CloseConversation. Officer-only — see requireNationalScope in the repository. */
+export function validateConversationClosure(payload: unknown): ConversationClosureSubmission {
+  const input = object(payload);
+  const messages: ComplianceValidationMessage[] = [];
+  schema(input, messages);
+  const reason = bounded(input.reason, "/reason", "Closure reason", 10, 2_000, messages);
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}
+
+const CONVERSATION_STATUSES = new Set(["OPEN", "CLOSED"]);
+const MAX_INBOX_QUERY_LIMIT = 200;
+const DEFAULT_INBOX_QUERY_LIMIT = 50;
+
+export type InboxQuery = {
+  status: "OPEN" | "CLOSED" | null;
+  relatedResourceType: CaseReferenceType | null;
+  taxpayerId: string | null;
+  limit: number;
+  offset: number;
+};
+
+/** Module 6 Phase C GetInbox: the same bounded/paginated, real-total_count shape normalizeRiskIndicatorQuery already established. */
+export function normalizeInboxQuery(params: URLSearchParams): InboxQuery {
+  const messages: ComplianceValidationMessage[] = [];
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as InboxQuery["status"]) : null;
+  if (status && !CONVERSATION_STATUSES.has(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: "status must be OPEN or CLOSED." });
+
+  const relatedResourceTypeRaw = params.get("related_resource_type");
+  const relatedResourceType = relatedResourceTypeRaw ? (relatedResourceTypeRaw.trim().toUpperCase() as CaseReferenceType) : null;
+  if (relatedResourceType && !CASE_REFERENCE_TYPES.includes(relatedResourceType)) messages.push({ code: "CASE_REFERENCE_TYPE_INVALID", path: "/related_resource_type", message: `related_resource_type must be one of: ${CASE_REFERENCE_TYPES.join(", ")}.` });
+
+  const taxpayerId = params.get("taxpayer_id")?.trim() || null;
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_INBOX_QUERY_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_INBOX_QUERY_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_INBOX_QUERY_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new ComplianceValidationError(messages);
+  return { status, relatedResourceType, taxpayerId, limit, offset };
+}

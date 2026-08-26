@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   assertCaseTransition,
   ComplianceValidationError,
+  normalizeInboxQuery,
   normalizeRiskIndicatorQuery,
   validateCaseNoteAddition,
   validateCaseOpening,
   validateCaseTransition,
+  validateConversationClosure,
+  validateConversationResponse,
   validateDispute,
   validateEvidenceAddition,
   validateEvidenceCustodyEvent,
   validateFindingIssuance,
+  validateNotice,
   validateObligationCreation,
   validateObligationSatisfaction,
   validateRefundRequest,
@@ -314,5 +318,61 @@ describe("case note addition validation", () => {
 
   it("rejects a note body outside the 5 to 4000 character bound", () => {
     expect(() => validateCaseNoteAddition({ schema_version: "1.0.0", body: "Hi" })).toThrowError(ComplianceValidationError);
+  });
+});
+
+describe("case correspondence validation", () => {
+  it("normalizes a well-formed notice", () => {
+    const result = validateNotice({
+      schema_version: "1.0.0", related_resource_type: "audit_case", related_resource_id: "case-0001",
+      channel: "portal", subject: "Audit case update required", content_summary: "Please provide supporting evidence for the input VAT claim by the stated date.", classification: "tax_confidential",
+    });
+    expect(result).toEqual({
+      schema_version: "1.0.0", related_resource_type: "AUDIT_CASE", related_resource_id: "case-0001",
+      channel: "PORTAL", subject: "Audit case update required", content_summary: "Please provide supporting evidence for the input VAT claim by the stated date.", classification: "TAX_CONFIDENTIAL",
+    });
+  });
+
+  it("rejects an unsupported case reference type or channel", () => {
+    expect(() => validateNotice({ schema_version: "1.0.0", related_resource_type: "INVOICE", related_resource_id: "inv-0001", channel: "PORTAL", subject: "Subject line", content_summary: "A sufficiently long content summary for validation.", classification: "TAX_CONFIDENTIAL" })).toThrowError(ComplianceValidationError);
+    expect(() => validateNotice({ schema_version: "1.0.0", related_resource_type: "AUDIT_CASE", related_resource_id: "case-0001", channel: "FAX", subject: "Subject line", content_summary: "A sufficiently long content summary for validation.", classification: "TAX_CONFIDENTIAL" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes a well-formed conversation response", () => {
+    expect(validateConversationResponse({ schema_version: "1.0.0", channel: "email", content_summary: "The requested evidence has been attached to this reply." })).toEqual({
+      schema_version: "1.0.0", channel: "EMAIL", content_summary: "The requested evidence has been attached to this reply.",
+    });
+  });
+
+  it("rejects a conversation response with too-short content", () => {
+    expect(() => validateConversationResponse({ schema_version: "1.0.0", channel: "EMAIL", content_summary: "Ok" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("normalizes a conversation closure with a substantive reason", () => {
+    expect(validateConversationClosure({ schema_version: "1.0.0", reason: "The taxpayer provided sufficient evidence and the matter is resolved." }).reason).toBe("The taxpayer provided sufficient evidence and the matter is resolved.");
+  });
+
+  it("rejects a conversation closure reason that is too short", () => {
+    expect(() => validateConversationClosure({ schema_version: "1.0.0", reason: "Done" })).toThrowError(ComplianceValidationError);
+  });
+
+  it("defaults an empty inbox query", () => {
+    expect(normalizeInboxQuery(new URLSearchParams())).toEqual({ status: null, relatedResourceType: null, taxpayerId: null, limit: 50, offset: 0 });
+  });
+
+  it("normalizes inbox status and case reference type filters", () => {
+    const result = normalizeInboxQuery(new URLSearchParams({ status: "open", related_resource_type: "refund_claim" }));
+    expect(result).toEqual({ status: "OPEN", relatedResourceType: "REFUND_CLAIM", taxpayerId: null, limit: 50, offset: 0 });
+  });
+
+  it("rejects an unsupported inbox status or case reference type", () => {
+    expect(() => normalizeInboxQuery(new URLSearchParams({ status: "ARCHIVED" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeInboxQuery(new URLSearchParams({ related_resource_type: "INVOICE" }))).toThrowError(ComplianceValidationError);
+  });
+
+  it("rejects an inbox limit outside 1 to 200 and a negative offset", () => {
+    expect(() => normalizeInboxQuery(new URLSearchParams({ limit: "0" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeInboxQuery(new URLSearchParams({ limit: "500" }))).toThrowError(ComplianceValidationError);
+    expect(() => normalizeInboxQuery(new URLSearchParams({ offset: "-5" }))).toThrowError(ComplianceValidationError);
   });
 });

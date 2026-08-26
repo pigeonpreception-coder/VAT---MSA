@@ -3,14 +3,18 @@ import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   assertCaseTransition,
+  normalizeInboxQuery,
   normalizeRiskIndicatorQuery,
   validateCaseNoteAddition,
   validateCaseOpening,
   validateCaseTransition,
+  validateConversationClosure,
+  validateConversationResponse,
   validateDispute,
   validateEvidenceAddition,
   validateEvidenceCustodyEvent,
   validateFindingIssuance,
+  validateNotice,
   validateObligationCreation,
   validateObligationSatisfaction,
   validateRefundRequest,
@@ -20,6 +24,7 @@ import {
   validateRiskReviewAssignment,
   type AuditCaseStatus,
   type CaseOpeningSubmission,
+  type CaseReferenceType,
   type DisputeSubmission,
   type EvidenceSourceType,
   type ObligationCreation,
@@ -929,4 +934,194 @@ export async function getCaseNotes(caseId: string, actor: UserContext) {
   if (!isNationalScope(actor) && actor.taxpayerId !== auditCase.taxpayer_id) throw new AccessDeniedError("The audit case is outside your authorised taxpayer scope.");
   const notes = await db.prepare("SELECT * FROM audit_case_notes WHERE audit_case_id=? ORDER BY created_at").bind(caseId).all<Record<string, unknown>>();
   return { case: auditCase, notes: notes.results };
+}
+
+type CommunicationThreadRow = {
+  id: string; organisation_id: string | null; taxpayer_id: string;
+  related_resource_type: string; related_resource_id: string;
+  subject: string; classification: string; status: string;
+  opened_by: string; opened_at: string; closed_by: string | null; closed_at: string | null; closure_reason: string | null;
+};
+
+async function resolveCaseReference(db: D1Database, type: CaseReferenceType, resourceId: string): Promise<{ taxpayer_id: string; organisation_id: string | null }> {
+  const query = type === "AUDIT_CASE"
+    ? "SELECT taxpayer_id,organisation_id FROM audit_cases WHERE id=?"
+    : type === "REFUND_CLAIM"
+    ? "SELECT taxpayer_id,organisation_id FROM refund_claims WHERE id=?"
+    : "SELECT taxpayer_id,NULL AS organisation_id FROM reconciliation_exceptions WHERE id=?";
+  const row = await db.prepare(query).bind(resourceId).first<{ taxpayer_id: string | null; organisation_id: string | null }>();
+  if (!row || !row.taxpayer_id) throw new ComplianceResourceError(`The referenced ${type.replaceAll("_", " ").toLowerCase()} was not found.`, 404);
+  return { taxpayer_id: row.taxpayer_id, organisation_id: row.organisation_id };
+}
+
+/**
+ * Module 6 Phase C SendNotice: opens a new correspondence thread for a
+ * case reference. Officer-only, mirroring openAuditCase's own
+ * restriction. The taxpayer_id and organisation_id are derived from the
+ * case reference itself (audit_cases/refund_claims/reconciliation_exceptions
+ * each already carry their own taxpayer_id), never caller-supplied, so a
+ * notice can never be misdirected to a taxpayer that doesn't match the
+ * case it's actually about. Refuses to open a second thread for a
+ * reference that already has one — communication_threads' own
+ * UNIQUE(related_resource_type, related_resource_id) makes "the
+ * conversation about case X" unambiguous; a follow-up message belongs in
+ * Respond, not a second thread.
+ */
+export async function sendNotice(payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may send a notice.");
+  const input = validateNotice(payload);
+  const db = await ensureDatabase();
+  const reference = await resolveCaseReference(db, input.related_resource_type, input.related_resource_id);
+  const hash = await sha256Hex(stableStringify(input));
+  const prior = await replay(db, actor.userId, "SEND_NOTICE", key, hash);
+  if (prior) return db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  const existingThread = await db.prepare("SELECT id FROM communication_threads WHERE related_resource_type=? AND related_resource_id=?")
+    .bind(input.related_resource_type, input.related_resource_id).first<{ id: string }>();
+  if (existingThread) throw new RepositoryConflictError("A correspondence thread already exists for this case reference; use Respond instead.");
+
+  const threadId = crypto.randomUUID();
+  const messageId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO communication_threads
+      (id,organisation_id,taxpayer_id,related_resource_type,related_resource_id,subject,classification,status,opened_by,opened_at,closed_by,closed_at,closure_reason)
+      VALUES (?,?,?,?,?,?,?,'OPEN',?,?,NULL,NULL,NULL)`).bind(threadId, reference.organisation_id, reference.taxpayer_id, input.related_resource_type, input.related_resource_id, input.subject, input.classification, actor.userId, now),
+    db.prepare(`INSERT INTO communications
+      (id,organisation_id,taxpayer_id,thread_id,channel,direction,subject,content_summary,classification,related_resource_type,related_resource_id,external_reference,status,actor_id,occurred_at)
+      VALUES (?,?,?,?,?,'OUTBOUND',?,?,?,?,?,NULL,'DELIVERED',?,?)`).bind(messageId, reference.organisation_id, reference.taxpayer_id, threadId, input.channel, input.subject, input.content_summary, input.classification, input.related_resource_type, input.related_resource_id, actor.userId, now),
+    db.prepare(`INSERT INTO notifications
+      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
+      VALUES (?,NULL,?,'NOTICE_RECEIVED',?,?,'MEDIUM','UNREAD',?,?,NULL)`).bind(crypto.randomUUID(), reference.taxpayer_id, input.subject, input.content_summary, `/communications/${threadId}`, now),
+    commandRecord(db, actor.userId, "SEND_NOTICE", key, hash, "COMMUNICATION_THREAD", threadId, now),
+    outbox(db, "COMMUNICATION_THREAD", threadId, "NoticeSent", reference.taxpayer_id, { thread_id: threadId, message_id: messageId, related_resource_type: input.related_resource_type, related_resource_id: input.related_resource_id, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "NOTICE_SENT", "COMMUNICATION_THREAD", threadId, { taxpayerId: reference.taxpayer_id, relatedResourceType: input.related_resource_type, relatedResourceId: input.related_resource_id, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(threadId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 6 Phase C Respond: a reply within an existing thread. Reachable by
+ * either the NamRA side (communications:manage) or the taxpayer side
+ * (communications:respond, scoped to their own taxpayer) — the route-level
+ * gate is deliberately broad (compliance:read) with the real rule enforced
+ * here, the same layered-permission pattern already used throughout this
+ * file (e.g. RECORD_EVIDENCE_CUSTODY_EVENT's route gate is cases:manage,
+ * but recordEvidenceCustodyEvent itself does the finer isNationalScope
+ * check). Direction is derived from the actor, never caller-supplied.
+ */
+export async function respondToConversation(threadId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!hasPermission(actor, "communications:manage") && !hasPermission(actor, "communications:respond")) {
+    throw new AccessDeniedError("You do not have permission to respond to this correspondence.");
+  }
+  const input = validateConversationResponse(payload);
+  const db = await ensureDatabase();
+  const thread = await db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(threadId).first<CommunicationThreadRow>();
+  if (!thread) throw new ComplianceResourceError("Correspondence thread was not found.", 404);
+  if (!isNationalScope(actor) && actor.taxpayerId !== thread.taxpayer_id) throw new AccessDeniedError("The correspondence thread is outside your authorised taxpayer scope.");
+
+  const hash = await sha256Hex(stableStringify({ thread_id: threadId, input }));
+  const prior = await replay(db, actor.userId, "RESPOND_TO_CONVERSATION", key, hash);
+  if (prior) return db.prepare("SELECT * FROM communications WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  if (thread.status !== "OPEN") throw new RepositoryConflictError("This correspondence thread is closed and cannot accept a new reply.");
+
+  const direction = isNationalScope(actor) ? "OUTBOUND" : "INBOUND";
+  const messageId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO communications
+      (id,organisation_id,taxpayer_id,thread_id,channel,direction,subject,content_summary,classification,related_resource_type,related_resource_id,external_reference,status,actor_id,occurred_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,'DELIVERED',?,?)`).bind(messageId, thread.organisation_id, thread.taxpayer_id, threadId, input.channel, direction, thread.subject, input.content_summary, thread.classification, thread.related_resource_type, thread.related_resource_id, actor.userId, now),
+    commandRecord(db, actor.userId, "RESPOND_TO_CONVERSATION", key, hash, "COMMUNICATION", messageId, now),
+    outbox(db, "COMMUNICATION_THREAD", threadId, "ConversationResponded", thread.taxpayer_id, { thread_id: threadId, message_id: messageId, direction, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "CONVERSATION_RESPONDED", "COMMUNICATION_THREAD", threadId, { taxpayerId: thread.taxpayer_id, direction, correlationId }, now),
+  ];
+  if (direction === "OUTBOUND") {
+    statements.push(db.prepare(`INSERT INTO notifications
+      (id,user_id,taxpayer_id,notification_type,title,message,severity,status,action_url,created_at,read_at)
+      VALUES (?,NULL,?,'NOTICE_RECEIVED',?,?,'MEDIUM','UNREAD',?,?,NULL)`).bind(crypto.randomUUID(), thread.taxpayer_id, `Reply on: ${thread.subject}`, input.content_summary, `/communications/${threadId}`, now));
+  }
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM communications WHERE id=?").bind(messageId).first<Record<string, unknown>>();
+}
+
+/** Module 6 Phase C CloseConversation. Officer-only, mirroring SendNotice's own restriction. */
+export async function closeConversation(threadId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national compliance role may close a correspondence thread.");
+  const input = validateConversationClosure(payload);
+  const db = await ensureDatabase();
+  const thread = await db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(threadId).first<CommunicationThreadRow>();
+  if (!thread) throw new ComplianceResourceError("Correspondence thread was not found.", 404);
+
+  const hash = await sha256Hex(stableStringify({ thread_id: threadId, input }));
+  const prior = await replay(db, actor.userId, "CLOSE_CONVERSATION", key, hash);
+  if (prior) return db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  if (thread.status !== "OPEN") throw new RepositoryConflictError("This correspondence thread is already closed.");
+
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE communication_threads SET status='CLOSED',closed_by=?,closed_at=?,closure_reason=? WHERE id=? AND status='OPEN'").bind(actor.userId, now, input.reason, threadId),
+    commandRecord(db, actor.userId, "CLOSE_CONVERSATION", key, hash, "COMMUNICATION_THREAD", threadId, now),
+    outbox(db, "COMMUNICATION_THREAD", threadId, "ConversationClosed", thread.taxpayer_id, { thread_id: threadId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "CONVERSATION_CLOSED", "COMMUNICATION_THREAD", threadId, { taxpayerId: thread.taxpayer_id, reason: input.reason, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(threadId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 6 Phase C GetInbox: lists correspondence threads — not raw
+ * messages — each with its latest message preview and message count. A
+ * real, filterable, paginated search with a genuine total_count,
+ * distinct from getComplianceSnapshot's own flat, unfiltered
+ * "communications" projection (still used as-is by existing dashboard
+ * reads).
+ */
+export async function getInbox(actor: UserContext, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const query = normalizeInboxQuery(params);
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  if (!isNationalScope(actor)) {
+    conditions.push("t.taxpayer_id = ?");
+    values.push(actor.taxpayerId ?? "__none__");
+  } else if (query.taxpayerId) {
+    conditions.push("t.taxpayer_id = ?");
+    values.push(query.taxpayerId);
+  }
+  if (query.status) {
+    conditions.push("t.status = ?");
+    values.push(query.status);
+  }
+  if (query.relatedResourceType) {
+    conditions.push("t.related_resource_type = ?");
+    values.push(query.relatedResourceType);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const [threads, count] = await Promise.all([
+    db.prepare(`SELECT t.*,
+      (SELECT content_summary FROM communications c WHERE c.thread_id=t.id ORDER BY c.occurred_at DESC LIMIT 1) AS latest_message,
+      (SELECT occurred_at FROM communications c WHERE c.thread_id=t.id ORDER BY c.occurred_at DESC LIMIT 1) AS latest_message_at,
+      (SELECT COUNT(*) FROM communications c WHERE c.thread_id=t.id) AS message_count
+      FROM communication_threads t ${whereClause}
+      ORDER BY latest_message_at DESC
+      LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, string | number | null>>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM communication_threads t ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+  return { threads: threads.results, total_count: count?.n ?? 0, limit: query.limit, offset: query.offset };
+}
+
+/** Module 6 Phase C: reads one full correspondence thread, oldest message first. Same tenant-visibility rule as CaseTimeline. */
+export async function getConversation(threadId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  const thread = await db.prepare("SELECT * FROM communication_threads WHERE id=?").bind(threadId).first<CommunicationThreadRow>();
+  if (!thread) return null;
+  if (!isNationalScope(actor) && actor.taxpayerId !== thread.taxpayer_id) throw new AccessDeniedError("The correspondence thread is outside your authorised taxpayer scope.");
+  const messages = await db.prepare("SELECT * FROM communications WHERE thread_id=? ORDER BY occurred_at").bind(threadId).all<Record<string, unknown>>();
+  return { thread, messages: messages.results };
 }

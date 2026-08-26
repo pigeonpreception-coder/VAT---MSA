@@ -387,9 +387,19 @@ const SCHEMA_STATEMENTS = [
     source_reference TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (taxpayer_id, obligation_type, period_code)
   )`,
+  `CREATE TABLE IF NOT EXISTS communication_threads (
+    id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    related_resource_type TEXT NOT NULL, related_resource_id TEXT NOT NULL,
+    subject TEXT NOT NULL, classification TEXT NOT NULL, status TEXT NOT NULL,
+    opened_by TEXT NOT NULL REFERENCES app_users(id), opened_at TEXT NOT NULL,
+    closed_by TEXT REFERENCES app_users(id), closed_at TEXT, closure_reason TEXT,
+    UNIQUE (related_resource_type, related_resource_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS communications (
     id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id),
-    taxpayer_id TEXT REFERENCES taxpayers(id), channel TEXT NOT NULL, direction TEXT NOT NULL,
+    taxpayer_id TEXT REFERENCES taxpayers(id), thread_id TEXT REFERENCES communication_threads(id),
+    channel TEXT NOT NULL, direction TEXT NOT NULL,
     subject TEXT NOT NULL, content_summary TEXT NOT NULL, classification TEXT NOT NULL,
     related_resource_type TEXT, related_resource_id TEXT, external_reference TEXT,
     status TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES app_users(id), occurred_at TEXT NOT NULL
@@ -950,6 +960,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_consent_taxpayer_status ON consent_grants(taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_delegations_delegate_status ON delegations(delegate_user_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_communications_taxpayer_time ON communications(taxpayer_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_communications_thread ON communications(thread_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_communication_threads_taxpayer_status ON communication_threads(taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(user_id, taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_cases_status_risk ON audit_cases(status, risk_tier, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_disputes_status_filed ON disputes(status, filed_at)`,
@@ -1351,6 +1363,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('risk:read','RISK','READ','Read explainable advisory risk indicators','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('risk:review','RISK','REVIEW','Review advisory risk indicators without automated adverse action','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('communications:manage','COMMUNICATION','MANAGE','Record controlled taxpayer communications','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('communications:respond','COMMUNICATION','RESPOND','Respond within an existing NamRA correspondence thread','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('consents:manage','CONSENT','MANAGE','Manage taxpayer consents and delegations','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
 
   `INSERT OR IGNORE INTO tax_obligations
