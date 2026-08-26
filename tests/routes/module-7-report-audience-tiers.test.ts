@@ -118,15 +118,19 @@ describe("Module 7 report audience tiers and guardrails (Phase A)", () => {
     const response = await runReport("SALES_VAT_SUMMARY", TAXPAYER_OWNER);
     expect(response.status).toBe(201);
     const body = await response.json();
-    expect(body.report_run.audience).toBe("TAXPAYER");
-    expect(body.report_run.freshness_tier).toBe("NEAR_REAL_TIME");
-    expect(body.report_run.guardrail).toBe("own organisation; delegated scope only");
+    expect(body.report_run.envelope.audience).toBe("TAXPAYER");
+    expect(body.report_run.envelope.freshness_tier).toBe("NEAR_REAL_TIME");
+    expect(body.report_run.envelope.guardrail).toBe("own organisation; delegated scope only");
+    expect(body.report_run.envelope.currency_basis).toBe("NAD");
+    expect(body.report_run.envelope.rule_version).toBe("1.0.0");
+    expect(body.report_run.envelope.filters).toEqual({ schema_version: "1.0.0" });
+    expect(body.report_run.envelope.as_of).toBe(body.report_run.requested_at);
   });
 
   it("restricts a NAMRA_OPERATIONS-tier report to national-scope actors", async () => {
     const officerResponse = await runReport("COMPLIANCE_CASELOAD", NAMRA_OFFICER);
     expect(officerResponse.status).toBe(201);
-    expect((await officerResponse.json()).report_run.audience).toBe("NAMRA_OPERATIONS");
+    expect((await officerResponse.json()).report_run.envelope.audience).toBe("NAMRA_OPERATIONS");
 
     const taxpayerResponse = await runReport("COMPLIANCE_CASELOAD", TAXPAYER_OWNER);
     expect(taxpayerResponse.status).toBe(403);
@@ -136,7 +140,7 @@ describe("Module 7 report audience tiers and guardrails (Phase A)", () => {
     const execResponse = await runReport("REVENUE_COMPLIANCE_TRENDS", EXECUTIVE_USER);
     expect(execResponse.status).toBe(201);
     const execBody = await execResponse.json();
-    expect(execBody.report_run.audience).toBe("EXECUTIVE");
+    expect(execBody.report_run.envelope.audience).toBe("EXECUTIVE");
     expect(execBody.report_run.result_summary.cases).toBeGreaterThanOrEqual(1);
 
     const officerResponse = await runReport("REVENUE_COMPLIANCE_TRENDS", NAMRA_OFFICER);

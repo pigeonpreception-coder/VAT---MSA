@@ -585,7 +585,8 @@ const SCHEMA_STATEMENTS = [
     parameters TEXT NOT NULL, status TEXT NOT NULL, row_count INTEGER, result_summary TEXT,
     output_document_id TEXT REFERENCES document_metadata(id),
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
-    completed_at TEXT, expires_at TEXT, error_code TEXT
+    completed_at TEXT, expires_at TEXT, error_code TEXT,
+    scope_snapshot TEXT, published_by TEXT REFERENCES app_users(id), published_at TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS report_exports (
     id TEXT PRIMARY KEY, report_run_id TEXT NOT NULL REFERENCES report_runs(id),

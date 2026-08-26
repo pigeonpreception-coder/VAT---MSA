@@ -1,5 +1,5 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
-import { approveReportExport, cancelReportExport, completeDocumentScan, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformSnapshot, getReportExport, PlatformResourceError, receiveOfflineBatch, requestReportExport, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
+import { approveReportExport, cancelReportExport, completeDocumentScan, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformSnapshot, getReportExport, PlatformResourceError, publishReportRun, receiveOfflineBatch, requestReportExport, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -170,6 +170,27 @@ export async function handleDocumentDownload(request: Request, documentId: strin
       },
     });
   } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 7 Phase C PublishReport: reconciles the run's stored result against a fresh recomputation of the same source data before marking it the official, published figure. */
+export async function handleReportRunPublication(request: Request, reportRunId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "reports:run");
+    await enforceRateLimits([{ key: `reports-publish:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "reports-publish:global", limit: 500, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await publishReportRun(reportRunId, payload, user, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "PUBLISH_REPORT_RUN", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ report_run: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "PUBLISH_REPORT_RUN", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
 }
 
 /** Module 7 Phase B RequestExport: generates a report run's downloadable export, auto-approved unless the report's classification is sensitive. */

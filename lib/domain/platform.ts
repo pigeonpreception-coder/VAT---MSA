@@ -107,7 +107,7 @@ export function validateDocumentHold(payload: unknown): DocumentHoldSubmission {
   return { schema_version: "1.0.0", action, notes, ...(retainedUntil ? { retained_until: retainedUntil } : {}) };
 }
 
-/** Module 7 Phase B RequestExport/ApproveExport: both take an empty-but-versioned body, matching the no-fields-needed commands elsewhere in this codebase (e.g. ACCEPT_QUOTATION). */
+/** Module 7 Phase B RequestExport/ApproveExport (and Phase C's PublishReport): all take an empty-but-versioned body, matching the no-fields-needed commands elsewhere in this codebase (e.g. ACCEPT_QUOTATION). */
 export type ExportCommandSubmission = { schema_version: "1.0.0" };
 
 export function validateExportCommand(payload: unknown): ExportCommandSubmission {

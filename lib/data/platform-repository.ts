@@ -407,6 +407,85 @@ async function requireAudienceAccess(db: D1Database, definition: { audience: str
   }
 }
 
+type ReportScope = { organisationId: string | null; taxpayerId: string | null; delegatedTaxpayerIds?: string[]; caseId?: string };
+
+/**
+ * Module 7 Phase C: the per-code query logic, extracted out of
+ * runInlineReport so the same deterministic computation can be re-run at
+ * publish time (see publishReportRun below) as the "reconciles to source
+ * control totals" gate — a genuinely fresh recomputation against live
+ * source data, not a second copy-pasted query that could drift from the
+ * first. Auth (requireAudienceAccess, the CASE_EVIDENCE_SUMMARY case-lookup
+ * check) stays the run step's job, not this function's — reconciliation
+ * re-derives data, it does not re-authorise a different actor.
+ */
+async function computeReportResult(db: D1Database, code: string, scope: ReportScope): Promise<Record<string, number | boolean>> {
+  if (code === "VAT_POSITION") {
+    const row = scope.organisationId
+      ? await db.prepare("SELECT COUNT(*) AS periods,COALESCE(SUM(net_payable_cents),0) AS net_cents FROM vat_return_versions WHERE organisation_id=? AND status<>'SUPERSEDED'").bind(scope.organisationId).first<{ periods: number; net_cents: number }>()
+      : await db.prepare("SELECT COUNT(*) AS periods,COALESCE(SUM(net_payable_cents),0) AS net_cents FROM vat_return_versions WHERE status<>'SUPERSEDED'").first<{ periods: number; net_cents: number }>();
+    return { periods: Number(row?.periods ?? 0), net_cents: Number(row?.net_cents ?? 0) };
+  }
+  if (code === "COMPLIANCE_CASELOAD") {
+    const row = scope.organisationId ? await db.prepare("SELECT COUNT(*) AS cases,SUM(CASE WHEN status<>'CLOSED' THEN 1 ELSE 0 END) AS open_cases FROM audit_cases WHERE organisation_id=?").bind(scope.organisationId).first<{ cases: number; open_cases: number }>() : await db.prepare("SELECT COUNT(*) AS cases,SUM(CASE WHEN status<>'CLOSED' THEN 1 ELSE 0 END) AS open_cases FROM audit_cases").first<{ cases: number; open_cases: number }>();
+    return { cases: Number(row?.cases ?? 0), open_cases: Number(row?.open_cases ?? 0) };
+  }
+  if (code === "SALES_VAT_SUMMARY") {
+    const row = scope.taxpayerId ? await db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents,COALESCE(SUM(tax_cents),0) AS tax_cents FROM invoices WHERE supplier_taxpayer_id=?").bind(scope.taxpayerId).first<{ invoices: number; total_cents: number; tax_cents: number }>() : await db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents,COALESCE(SUM(tax_cents),0) AS tax_cents FROM invoices").first<{ invoices: number; total_cents: number; tax_cents: number }>();
+    return { invoices: Number(row?.invoices ?? 0), total_cents: Number(row?.total_cents ?? 0), tax_cents: Number(row?.tax_cents ?? 0) };
+  }
+  if (code === "PORTFOLIO_EXCEPTIONS") {
+    const taxpayerIds = scope.delegatedTaxpayerIds ?? [];
+    const placeholders = taxpayerIds.map(() => "?").join(",");
+    const row = taxpayerIds.length
+      ? await db.prepare(`SELECT COUNT(*) AS exceptions,SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open_exceptions FROM reconciliation_exceptions WHERE taxpayer_id IN (${placeholders})`).bind(...taxpayerIds).first<{ exceptions: number; open_exceptions: number }>()
+      : { exceptions: 0, open_exceptions: 0 };
+    return { exceptions: Number(row?.exceptions ?? 0), open_exceptions: Number(row?.open_exceptions ?? 0) };
+  }
+  if (code === "REVENUE_COMPLIANCE_TRENDS") {
+    const [invoiceRow, caseRow] = await Promise.all([
+      db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents FROM invoices").first<{ invoices: number; total_cents: number }>(),
+      db.prepare("SELECT COUNT(*) AS cases,SUM(CASE WHEN status<>'CLOSED' THEN 1 ELSE 0 END) AS open_cases FROM audit_cases").first<{ cases: number; open_cases: number }>(),
+    ]);
+    return { invoices: Number(invoiceRow?.invoices ?? 0), total_cents: Number(invoiceRow?.total_cents ?? 0), cases: Number(caseRow?.cases ?? 0), open_cases: Number(caseRow?.open_cases ?? 0) };
+  }
+  if (code === "CASE_EVIDENCE_SUMMARY") {
+    const caseId = scope.caseId ?? "";
+    const [evidenceRow, custodyRow] = await Promise.all([
+      db.prepare("SELECT COUNT(*) AS evidence_items,SUM(CASE WHEN status='PRESERVED' THEN 1 ELSE 0 END) AS preserved_items FROM audit_evidence WHERE audit_case_id=?").bind(caseId).first<{ evidence_items: number; preserved_items: number }>(),
+      db.prepare("SELECT COUNT(*) AS custody_events FROM audit_evidence_custody_events cce JOIN audit_evidence ae ON ae.id=cce.audit_evidence_id WHERE ae.audit_case_id=?").bind(caseId).first<{ custody_events: number }>(),
+    ]);
+    return { evidence_items: Number(evidenceRow?.evidence_items ?? 0), preserved_items: Number(evidenceRow?.preserved_items ?? 0), custody_events: Number(custodyRow?.custody_events ?? 0) };
+  }
+  if (code === "NATIONAL_VAT_AGGREGATE") {
+    const row = await db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents FROM invoices").first<{ invoices: number; total_cents: number }>();
+    const invoiceCount = Number(row?.invoices ?? 0);
+    const suppressed = invoiceCount < MIN_CELL_SUPPRESSION_THRESHOLD;
+    return suppressed ? { invoices: 0, total_cents: 0, suppressed: true } : { invoices: invoiceCount, total_cents: Number(row?.total_cents ?? 0), suppressed: false };
+  }
+  throw new PlatformResourceError("This report definition has no runnable implementation.", 501);
+}
+
+const CURRENCY_BASIS = "NAD";
+
+/**
+ * Module 7 Phase C: the shared as-of-time / source-freshness / filters /
+ * currency-basis / rule-version envelope, wrapping every report response
+ * rather than left as a per-report convention. `currency_basis` is a real
+ * constant, not a stub — every monetary figure in this schema (invoices,
+ * accounting, expenses, obligations, refunds) is denominated in NAD only;
+ * this is a genuinely single-currency pilot today, not a shortcut around
+ * multi-currency support that exists elsewhere. `rule_version` reuses
+ * `report_definitions.query_version` — the version of this report's own
+ * computation logic — rather than Module 2's VAT rule version, since most
+ * of these reports (case evidence, exceptions, caseload) have no VAT rule
+ * dependency to version at all; a report that genuinely needs the VAT rule
+ * in effect for its period can find it via its own invoice/return rows.
+ */
+function buildReportEnvelope(definition: { audience: string; freshness_tier: string; guardrail: string; query_version: string }, filters: Record<string, unknown>, asOf: string) {
+  return { as_of: asOf, audience: definition.audience, freshness_tier: definition.freshness_tier, guardrail: definition.guardrail, filters, currency_basis: CURRENCY_BASIS, rule_version: definition.query_version };
+}
+
 /**
  * Module 7 Phase A: previously any report code other than VAT_POSITION or
  * COMPLIANCE_CASELOAD — including the already-seeded SALES_VAT_SUMMARY —
@@ -419,72 +498,83 @@ export async function runInlineReport(code: string, parametersInput: unknown, ac
   const parameters = validateReportParameters(parametersInput);
   const db = await ensureDatabase();
   const definition = await db.prepare("SELECT * FROM report_definitions WHERE code=? AND status='ACTIVE'").bind(code.toUpperCase())
-    .first<{ id: string; code: string; audience: string; freshness_tier: string; guardrail: string }>();
+    .first<{ id: string; code: string; audience: string; freshness_tier: string; guardrail: string; query_version: string }>();
   if (!definition) throw new PlatformResourceError("Report definition was not found.", 404);
   const guardrailContext = await requireAudienceAccess(db, definition, actor);
-  const scope = isNationalScope(actor) ? null : await resolveOrganisation(db, actor);
-  let resultSummary: Record<string, number | boolean>;
-  let taxpayerIdForRun = scope?.taxpayer_id ?? null;
-  let organisationIdForRun = scope?.organisation_id ?? null;
+  const orgScope = isNationalScope(actor) ? null : await resolveOrganisation(db, actor);
+  let taxpayerIdForRun = orgScope?.taxpayer_id ?? null;
+  let organisationIdForRun = orgScope?.organisation_id ?? null;
+  let caseId: string | undefined;
 
-  if (definition.code === "VAT_POSITION") {
-    const row = scope
-      ? await db.prepare("SELECT COUNT(*) AS periods,COALESCE(SUM(net_payable_cents),0) AS net_cents FROM vat_return_versions WHERE organisation_id=? AND status<>'SUPERSEDED'").bind(scope.organisation_id).first<{ periods: number; net_cents: number }>()
-      : await db.prepare("SELECT COUNT(*) AS periods,COALESCE(SUM(net_payable_cents),0) AS net_cents FROM vat_return_versions WHERE status<>'SUPERSEDED'").first<{ periods: number; net_cents: number }>();
-    resultSummary = { periods: Number(row?.periods ?? 0), net_cents: Number(row?.net_cents ?? 0) };
-  } else if (definition.code === "COMPLIANCE_CASELOAD") {
-    const row = scope ? await db.prepare("SELECT COUNT(*) AS cases,SUM(CASE WHEN status<>'CLOSED' THEN 1 ELSE 0 END) AS open_cases FROM audit_cases WHERE organisation_id=?").bind(scope.organisation_id).first<{ cases: number; open_cases: number }>() : await db.prepare("SELECT COUNT(*) AS cases,SUM(CASE WHEN status<>'CLOSED' THEN 1 ELSE 0 END) AS open_cases FROM audit_cases").first<{ cases: number; open_cases: number }>();
-    resultSummary = { cases: Number(row?.cases ?? 0), open_cases: Number(row?.open_cases ?? 0) };
-  } else if (definition.code === "SALES_VAT_SUMMARY") {
-    const row = scope ? await db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents,COALESCE(SUM(tax_cents),0) AS tax_cents FROM invoices WHERE supplier_taxpayer_id=?").bind(scope.taxpayer_id).first<{ invoices: number; total_cents: number; tax_cents: number }>() : await db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents,COALESCE(SUM(tax_cents),0) AS tax_cents FROM invoices").first<{ invoices: number; total_cents: number; tax_cents: number }>();
-    resultSummary = { invoices: Number(row?.invoices ?? 0), total_cents: Number(row?.total_cents ?? 0), tax_cents: Number(row?.tax_cents ?? 0) };
-  } else if (definition.code === "PORTFOLIO_EXCEPTIONS") {
-    const taxpayerIds = guardrailContext.delegatedTaxpayerIds ?? [];
-    const placeholders = taxpayerIds.map(() => "?").join(",");
-    const row = taxpayerIds.length
-      ? await db.prepare(`SELECT COUNT(*) AS exceptions,SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open_exceptions FROM reconciliation_exceptions WHERE taxpayer_id IN (${placeholders})`).bind(...taxpayerIds).first<{ exceptions: number; open_exceptions: number }>()
-      : { exceptions: 0, open_exceptions: 0 };
-    resultSummary = { exceptions: Number(row?.exceptions ?? 0), open_exceptions: Number(row?.open_exceptions ?? 0) };
-    taxpayerIdForRun = null;
-    organisationIdForRun = null;
-  } else if (definition.code === "REVENUE_COMPLIANCE_TRENDS") {
-    const [invoiceRow, caseRow] = await Promise.all([
-      db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents FROM invoices").first<{ invoices: number; total_cents: number }>(),
-      db.prepare("SELECT COUNT(*) AS cases,SUM(CASE WHEN status<>'CLOSED' THEN 1 ELSE 0 END) AS open_cases FROM audit_cases").first<{ cases: number; open_cases: number }>(),
-    ]);
-    resultSummary = { invoices: Number(invoiceRow?.invoices ?? 0), total_cents: Number(invoiceRow?.total_cents ?? 0), cases: Number(caseRow?.cases ?? 0), open_cases: Number(caseRow?.open_cases ?? 0) };
+  if (definition.code === "PORTFOLIO_EXCEPTIONS" || definition.code === "REVENUE_COMPLIANCE_TRENDS" || definition.code === "NATIONAL_VAT_AGGREGATE") {
     taxpayerIdForRun = null;
     organisationIdForRun = null;
   } else if (definition.code === "CASE_EVIDENCE_SUMMARY") {
-    const caseId = typeof parameters.case_id === "string" ? parameters.case_id.trim() : "";
+    caseId = typeof parameters.case_id === "string" ? parameters.case_id.trim() : "";
     if (!caseId) throw new PlatformResourceError("case_id is required for this report.");
     const auditCase = await db.prepare("SELECT id,taxpayer_id,organisation_id FROM audit_cases WHERE id=?").bind(caseId).first<{ id: string; taxpayer_id: string; organisation_id: string }>();
     if (!auditCase) throw new PlatformResourceError("Audit case was not found.", 404);
     if (!isNationalScope(actor) && actor.taxpayerId !== auditCase.taxpayer_id) throw new AccessDeniedError("The audit case is outside your authorised taxpayer scope.");
-    const [evidenceRow, custodyRow] = await Promise.all([
-      db.prepare("SELECT COUNT(*) AS evidence_items,SUM(CASE WHEN status='PRESERVED' THEN 1 ELSE 0 END) AS preserved_items FROM audit_evidence WHERE audit_case_id=?").bind(caseId).first<{ evidence_items: number; preserved_items: number }>(),
-      db.prepare("SELECT COUNT(*) AS custody_events FROM audit_evidence_custody_events cce JOIN audit_evidence ae ON ae.id=cce.audit_evidence_id WHERE ae.audit_case_id=?").bind(caseId).first<{ custody_events: number }>(),
-    ]);
-    resultSummary = { evidence_items: Number(evidenceRow?.evidence_items ?? 0), preserved_items: Number(evidenceRow?.preserved_items ?? 0), custody_events: Number(custodyRow?.custody_events ?? 0) };
     taxpayerIdForRun = auditCase.taxpayer_id;
     organisationIdForRun = auditCase.organisation_id;
-  } else if (definition.code === "NATIONAL_VAT_AGGREGATE") {
-    const row = await db.prepare("SELECT COUNT(*) AS invoices,COALESCE(SUM(total_cents),0) AS total_cents FROM invoices").first<{ invoices: number; total_cents: number }>();
-    const invoiceCount = Number(row?.invoices ?? 0);
-    const suppressed = invoiceCount < MIN_CELL_SUPPRESSION_THRESHOLD;
-    resultSummary = suppressed ? { invoices: 0, total_cents: 0, suppressed: true } : { invoices: invoiceCount, total_cents: Number(row?.total_cents ?? 0), suppressed: false };
-    taxpayerIdForRun = null;
-    organisationIdForRun = null;
-  } else {
-    throw new PlatformResourceError("This report definition has no runnable implementation.", 501);
   }
+
+  const reportScope: ReportScope = { organisationId: organisationIdForRun, taxpayerId: taxpayerIdForRun, delegatedTaxpayerIds: guardrailContext.delegatedTaxpayerIds, caseId };
+  const resultSummary = await computeReportResult(db, definition.code, reportScope);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await db.prepare(`INSERT INTO report_runs
-    (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code)
-    VALUES (?,?,?,?,?,'COMPLETED_INLINE',?,?,NULL,?,?,?,?,NULL)`).bind(id, definition.id, organisationIdForRun, taxpayerIdForRun, JSON.stringify(parameters), Object.keys(resultSummary).length, JSON.stringify(resultSummary), actor.userId, now, now, new Date(Date.now() + 86_400_000).toISOString()).run();
-  return { id, report_code: definition.code, status: "COMPLETED_INLINE", audience: definition.audience, freshness_tier: definition.freshness_tier, guardrail: definition.guardrail, result_summary: resultSummary, requested_at: now };
+    (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code,scope_snapshot,published_by,published_at)
+    VALUES (?,?,?,?,?,'COMPLETED_INLINE',?,?,NULL,?,?,?,?,NULL,?,NULL,NULL)`).bind(id, definition.id, organisationIdForRun, taxpayerIdForRun, JSON.stringify(parameters), Object.keys(resultSummary).length, JSON.stringify(resultSummary), actor.userId, now, now, new Date(Date.now() + 86_400_000).toISOString(), JSON.stringify(reportScope)).run();
+  return { id, report_code: definition.code, status: "COMPLETED_INLINE", envelope: buildReportEnvelope(definition, parameters, now), result_summary: resultSummary, requested_at: now };
+}
+
+/**
+ * Module 7 Phase C: `PublishReport` — the "reconciliation-to-source-control-
+ * totals as a hard publication gate" the playbook names. This system has no
+ * separate warehouse/control-totals ledger yet (that is Phase D's governed
+ * read-replica work), so "reconciles to source control totals" is built as
+ * a genuine live re-derivation: computeReportResult is re-run against the
+ * exact same scope the original run used (persisted in `scope_snapshot`,
+ * since e.g. a PRACTITIONER-tier report's delegated-taxpayer set is
+ * resolved once at run time and cannot be safely re-derived from whoever
+ * happens to call PublishReport) and compared to the stored
+ * `result_summary`. If the underlying source rows have changed since the
+ * run completed — a new invoice certified, a VAT return superseded, a case
+ * closed — the two diverge and publication is refused (409), forcing a
+ * fresh run before the figure can become official. A run can only be
+ * published once; publishing is idempotent-guarded the same way every other
+ * command in this file is.
+ */
+export async function publishReportRun(reportRunId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string) {
+  validateIdempotencyKey(idempotencyKey);
+  validateExportCommand(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ report_run_id: reportRunId }));
+  const prior = await priorCommand(db, actor.userId, "PUBLISH_REPORT_RUN", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM report_runs WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const run = await db.prepare(`SELECT r.*,d.code,d.audience,d.freshness_tier,d.guardrail,d.query_version
+      FROM report_runs r JOIN report_definitions d ON d.id=r.report_definition_id WHERE r.id=?`).bind(reportRunId)
+    .first<{ id: string; status: string; organisation_id: string | null; taxpayer_id: string | null; parameters: string; result_summary: string; scope_snapshot: string | null; requested_by: string; requested_at: string; code: string; audience: string; freshness_tier: string; guardrail: string; query_version: string }>();
+  if (!run) throw new PlatformResourceError("Report run was not found.", 404);
+  if (!isNationalScope(actor) && run.requested_by !== actor.userId) throw new AccessDeniedError("You may only publish a report run you requested.");
+  if (run.status !== "COMPLETED_INLINE") throw new RepositoryConflictError(run.status === "PUBLISHED" ? "This report run has already been published." : "Only a completed report run can be published.");
+  const scope: ReportScope = run.scope_snapshot ? JSON.parse(run.scope_snapshot) : { organisationId: run.organisation_id, taxpayerId: run.taxpayer_id };
+  const parameters = JSON.parse(run.parameters) as Record<string, unknown>;
+  const liveResult = await computeReportResult(db, run.code, scope);
+  const storedResult = JSON.parse(run.result_summary) as Record<string, unknown>;
+  if (JSON.stringify(liveResult) !== JSON.stringify(storedResult)) {
+    throw new RepositoryConflictError("The underlying data has changed since this report run completed; run the report again before publishing.");
+  }
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE report_runs SET status='PUBLISHED',published_by=?,published_at=? WHERE id=? AND status='COMPLETED_INLINE'").bind(actor.userId, now, reportRunId),
+    commandRecord(db, actor.userId, "PUBLISH_REPORT_RUN", idempotencyKey, requestHash, "REPORT_RUN", reportRunId, now),
+    outbox(db, "REPORT_RUN", reportRunId, "ReportRunPublished", run.taxpayer_id ?? reportRunId, { report_run_id: reportRunId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "REPORT_RUN_PUBLISHED", "REPORT_RUN", reportRunId, { code: run.code, correlationId }, now),
+  ]);
+  return { id: reportRunId, report_code: run.code, status: "PUBLISHED", envelope: buildReportEnvelope(run, parameters, now), result_summary: storedResult, requested_at: run.requested_at, published_at: now };
 }
 
 const SENSITIVE_CLASSIFICATIONS = new Set(["TAX_CONFIDENTIAL", "RESTRICTED"]);
@@ -539,7 +629,7 @@ export async function requestReportExport(reportRunId: string, payload: unknown,
   if (prior) return db.prepare("SELECT * FROM report_exports WHERE id=?").bind(prior).first<Record<string, unknown>>();
   const run = await loadReportRunForExport(db, reportRunId);
   if (!isNationalScope(actor) && run.requested_by !== actor.userId) throw new AccessDeniedError("You may only export a report run you requested.");
-  if (run.status !== "COMPLETED_INLINE") throw new RepositoryConflictError("Only a completed report run can be exported.");
+  if (run.status !== "COMPLETED_INLINE" && run.status !== "PUBLISHED") throw new RepositoryConflictError("Only a completed report run can be exported.");
   const scope = await resolveOrganisation(db, actor, run.organisation_id ?? undefined);
   const sensitive = SENSITIVE_CLASSIFICATIONS.has(run.classification);
   if (sensitive && !hasFreshStepUp) throw new AccessDeniedError("Exporting a report of this classification requires a fresh step-up authentication.");
