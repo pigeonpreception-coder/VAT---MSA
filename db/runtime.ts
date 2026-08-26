@@ -629,6 +629,28 @@ const SCHEMA_STATEMENTS = [
     metric_code TEXT NOT NULL, previous_value REAL NOT NULL, current_value REAL NOT NULL,
     pct_change REAL NOT NULL, threshold_pct REAL NOT NULL, detected_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS feature_flags (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+    rollout_scope TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+    updated_by TEXT REFERENCES app_users(id), updated_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS platform_config (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, category TEXT NOT NULL, description TEXT NOT NULL,
+    value TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, updated_by TEXT REFERENCES app_users(id), updated_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_policies (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, policy_type TEXT NOT NULL,
+    description TEXT NOT NULL, parameters TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, updated_by TEXT REFERENCES app_users(id), updated_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS change_requests (
+    id TEXT PRIMARY KEY, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+    previous_value TEXT NOT NULL, proposed_value TEXT NOT NULL, reason TEXT NOT NULL,
+    status TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    decided_by TEXT REFERENCES app_users(id), decided_at TEXT, decision_notes TEXT
+  )`,
   `CREATE TABLE IF NOT EXISTS service_components (
     id TEXT PRIMARY KEY, component_key TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
     component_type TEXT NOT NULL, criticality TEXT NOT NULL,
@@ -1029,6 +1051,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_data_product_snapshots_product_published ON data_product_snapshots(data_product_id, published_at)`,
   `CREATE INDEX IF NOT EXISTS idx_metrics_product ON metrics(data_product_id)`,
   `CREATE INDEX IF NOT EXISTS idx_anomaly_candidates_snapshot ON analytics_anomaly_candidates(data_product_snapshot_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_change_requests_status ON change_requests(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_change_requests_target ON change_requests(target_type, target_id)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_license_effective ON organisation_licenses(organisation_id, state, effective_from)`,
   `CREATE INDEX IF NOT EXISTS idx_license_events_org_time ON license_events(organisation_id, occurred_at)`,
@@ -1549,6 +1573,30 @@ const PLATFORM_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO metrics
     (id,code,name,data_product_id,field,unit,status,anomaly_threshold_pct,created_at)
     VALUES ('metric-open-cases','OPEN_COMPLIANCE_CASES','Open compliance cases','dp-vat-trends','open_cases','COUNT','CERTIFIED',25,'2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO feature_flags
+    (id,key,name,description,rollout_scope,enabled,status,version,created_at)
+    VALUES ('flag-itas-integration','ITAS_INTEGRATION','ITAS statutory integration','Enables the ITAS anti-corruption layer for statutory filing and taxpayer verification.','NATIONAL_ONLY',0,'ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO feature_flags
+    (id,key,name,description,rollout_scope,enabled,status,version,created_at)
+    VALUES ('flag-open-data-reports','OPEN_DATA_PUBLIC_ACCESS','Open data public access','Serves OPEN_DATA-tier reports through an unauthenticated public route, rather than the standard authenticated reports:run path.','NATIONAL_ONLY',0,'ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO feature_flags
+    (id,key,name,description,rollout_scope,enabled,status,version,created_at)
+    VALUES ('flag-offline-sync','OFFLINE_SYNC','Offline device sync','Allows offline invoice batches to be enrolled and accepted.','ALL',1,'ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO platform_config
+    (id,key,category,description,value,status,version,created_at)
+    VALUES ('cfg-step-up-window','STEP_UP_WINDOW_MINUTES','SECURITY','Maximum age of a fresh MFA step-up before a privileged change requires re-authentication.','5','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO platform_config
+    (id,key,category,description,value,status,version,created_at)
+    VALUES ('cfg-export-size-limit','EXPORT_SIZE_LIMIT_KB','REPORTING','Maximum size of a generated report export before it is refused.','200','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO platform_config
+    (id,key,category,description,value,status,version,created_at)
+    VALUES ('cfg-min-cell-suppression','MIN_CELL_SUPPRESSION_THRESHOLD','REPORTING','Minimum row count below which an OPEN_DATA aggregate is suppressed rather than published.','10','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_policies
+    (id,code,name,policy_type,description,parameters,status,version,created_at)
+    VALUES ('policy-mfa-step-up','MFA_STEP_UP_POLICY','MFA step-up policy','MFA','Freshness window and assurance level required for a privileged change.','{"max_age_minutes":5,"required_assurance":"MFA_STEP_UP"}','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_policies
+    (id,code,name,policy_type,description,parameters,status,version,created_at)
+    VALUES ('policy-default-rate-limit','DEFAULT_RATE_LIMIT_POLICY','Default rate limit policy','RATE_LIMIT','Default per-actor request budget applied where a route does not declare its own.','{"window_seconds":60,"limit":120}','ACTIVE',1,'2026-08-26T09:30:00Z')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-web','WEB_APP','VAT-MSA web application','APPLICATION','HIGH','CONFIGURED','OPERATIONAL','Cloudflare Worker/Vinext runtime','2026-08-10T08:45:00Z','Release gate and readiness checks passed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-d1','D1','Structured transactional state','DATABASE','CRITICAL','CONFIGURED','OPERATIONAL','Cloudflare D1 binding DB','2026-08-10T08:45:00Z','Schema initialisation and prepared-query probe passed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-r2','R2_DOCUMENTS','Private document quarantine','OBJECT_STORAGE','HIGH','CONFIGURED','QUARANTINE_ONLY','Cloudflare R2 binding DOCUMENTS','2026-08-10T08:45:00Z','Uploads remain quarantined pending an external malware scanner.')`,

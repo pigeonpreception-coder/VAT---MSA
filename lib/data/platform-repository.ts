@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, hasPermission, isNationalScope } from "@/lib/auth";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
-import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand, type OfflineBatchSubmission } from "@/lib/domain/platform";
+import { safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePlatformChangeDecision, validatePlatformChangeRequest, validateProvisionStaff, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand, type OfflineBatchSubmission } from "@/lib/domain/platform";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
@@ -925,4 +925,178 @@ export async function listAnomalyCandidates(filter: { dataProductId?: string }) 
         FROM analytics_anomaly_candidates a JOIN data_product_snapshots s ON s.id=a.data_product_snapshot_id
         ORDER BY a.detected_at DESC LIMIT 200`).all<Record<string, unknown>>();
   return rows.results;
+}
+
+/**
+ * Module 8 Phase A: FeatureFlag/PlatformConfig/AccessPolicy/ChangeRequest —
+ * a 2026-08-26 audit found zero code anywhere for any of these, despite the
+ * architecture matrix's "VERIFIED FOUNDATION" label on this domain row.
+ * Definitions (which flags/config keys/policies exist) are seed-only, the
+ * same posture already established for ReportDefinition (Module 7 Phase A)
+ * and DataProduct/Metric (Module 7 Phase D) — deciding a new governed knob
+ * should exist at all is a deploy-time/governance action, out of scope for
+ * a runtime command. Only the VALUE of an existing definition is
+ * runtime-changeable, and only through a real maker-checker gate:
+ * RequestPlatformChange stages a proposed value as a PENDING change_requests
+ * row (capturing a snapshot of the previous value so the diff is always
+ * reconstructable); DecidePlatformChange applies or rejects it, refusing
+ * self-decision the same way every other maker-checker command in this
+ * codebase does. These seeded config values (step-up window, export size
+ * cap, minimum-cell suppression threshold, rate-limit defaults) are
+ * illustrative/documentary today — they mirror the real hardcoded constants
+ * those other modules already enforce, but changing a row here does not yet
+ * feed back into those modules' own hardcoded values. Wiring every consumer
+ * to read live from platform_config is a larger, cross-module change
+ * deliberately left for when a second consumer actually needs it.
+ */
+type PlatformChangeTargetType = "FEATURE_FLAG" | "PLATFORM_CONFIG" | "ACCESS_POLICY";
+
+async function loadPlatformChangeTarget(db: D1Database, targetType: PlatformChangeTargetType, targetId: string): Promise<Record<string, unknown>> {
+  if (targetType === "FEATURE_FLAG") {
+    const row = await db.prepare("SELECT enabled FROM feature_flags WHERE id=? AND status='ACTIVE'").bind(targetId).first<{ enabled: number }>();
+    if (!row) throw new PlatformResourceError("Feature flag was not found.", 404);
+    return { enabled: row.enabled === 1 };
+  }
+  if (targetType === "PLATFORM_CONFIG") {
+    const row = await db.prepare("SELECT value FROM platform_config WHERE id=? AND status='ACTIVE'").bind(targetId).first<{ value: string }>();
+    if (!row) throw new PlatformResourceError("Platform config entry was not found.", 404);
+    return { value: row.value };
+  }
+  const row = await db.prepare("SELECT parameters FROM access_policies WHERE id=? AND status='ACTIVE'").bind(targetId).first<{ parameters: string }>();
+  if (!row) throw new PlatformResourceError("Access policy was not found.", 404);
+  return { parameters: JSON.parse(row.parameters) as Record<string, unknown> };
+}
+
+function validatePlatformChangeShape(targetType: PlatformChangeTargetType, proposedValue: Record<string, unknown>): Record<string, unknown> {
+  if (targetType === "FEATURE_FLAG") {
+    if (typeof proposedValue.enabled !== "boolean") throw new PlatformResourceError("proposed_value.enabled must be a boolean for a feature flag change.");
+    return { enabled: proposedValue.enabled };
+  }
+  if (targetType === "PLATFORM_CONFIG") {
+    if (proposedValue.value === undefined) throw new PlatformResourceError("proposed_value.value is required for a platform config change.");
+    return { value: proposedValue.value };
+  }
+  if (!proposedValue.parameters || typeof proposedValue.parameters !== "object" || Array.isArray(proposedValue.parameters)) {
+    throw new PlatformResourceError("proposed_value.parameters must be an object for an access policy change.");
+  }
+  return { parameters: proposedValue.parameters };
+}
+
+/** Module 8 Phase A RequestPlatformChange (ChangeFeature/ChangePolicy/ChangeConfig unified). */
+export async function requestPlatformChange(actor: UserContext, payload: unknown, idempotencyKey: string, correlationId: string) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = validatePlatformChangeRequest(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ input }));
+  const prior = await priorCommand(db, actor.userId, "REQUEST_PLATFORM_CHANGE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM change_requests WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const previousValue = await loadPlatformChangeTarget(db, input.target_type, input.target_id);
+  const proposedValue = validatePlatformChangeShape(input.target_type, input.proposed_value);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO change_requests
+      (id,target_type,target_id,previous_value,proposed_value,reason,status,requested_by,requested_at,decided_by,decided_at,decision_notes)
+      VALUES (?,?,?,?,?,?,'PENDING',?,?,NULL,NULL,NULL)`).bind(id, input.target_type, input.target_id, JSON.stringify(previousValue), JSON.stringify(proposedValue), input.reason, actor.userId, now),
+    commandRecord(db, actor.userId, "REQUEST_PLATFORM_CHANGE", idempotencyKey, requestHash, "CHANGE_REQUEST", id, now),
+    outbox(db, "CHANGE_REQUEST", id, "PlatformChangeRequested", id, { change_request_id: id, target_type: input.target_type, target_id: input.target_id, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "PLATFORM_CHANGE_REQUESTED", "CHANGE_REQUEST", id, { targetType: input.target_type, targetId: input.target_id, reason: input.reason, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM change_requests WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 8 Phase A DecidePlatformChange: maker-checker on a pending change request, refusing the requester's own decision. */
+export async function decidePlatformChange(changeRequestId: string, actor: UserContext, payload: unknown, idempotencyKey: string, correlationId: string) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = validatePlatformChangeDecision(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ change_request_id: changeRequestId, input }));
+  const prior = await priorCommand(db, actor.userId, "DECIDE_PLATFORM_CHANGE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM change_requests WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const row = await db.prepare("SELECT id,target_type,target_id,proposed_value,status,requested_by FROM change_requests WHERE id=?").bind(changeRequestId)
+    .first<{ id: string; target_type: PlatformChangeTargetType; target_id: string; proposed_value: string; status: string; requested_by: string }>();
+  if (!row) throw new PlatformResourceError("Change request was not found.", 404);
+  if (row.status !== "PENDING") throw new RepositoryConflictError("Only a pending change request can be decided.");
+  if (row.requested_by === actor.userId) throw new AccessDeniedError("You may not decide a platform change request you submitted yourself.");
+  const now = new Date().toISOString();
+  const applyStatements: D1PreparedStatement[] = [];
+  if (input.decision === "APPROVE") {
+    const proposed = JSON.parse(row.proposed_value) as Record<string, unknown>;
+    if (row.target_type === "FEATURE_FLAG") {
+      applyStatements.push(db.prepare("UPDATE feature_flags SET enabled=?,version=version+1,updated_by=?,updated_at=? WHERE id=? AND status='ACTIVE'").bind(proposed.enabled ? 1 : 0, actor.userId, now, row.target_id));
+    } else if (row.target_type === "PLATFORM_CONFIG") {
+      applyStatements.push(db.prepare("UPDATE platform_config SET value=?,version=version+1,updated_by=?,updated_at=? WHERE id=? AND status='ACTIVE'").bind(String(proposed.value), actor.userId, now, row.target_id));
+    } else {
+      applyStatements.push(db.prepare("UPDATE access_policies SET parameters=?,version=version+1,updated_by=?,updated_at=? WHERE id=? AND status='ACTIVE'").bind(JSON.stringify(proposed.parameters), actor.userId, now, row.target_id));
+    }
+  }
+  const newStatus = input.decision === "APPROVE" ? "APPLIED" : "REJECTED";
+  await db.batch([
+    db.prepare("UPDATE change_requests SET status=?,decided_by=?,decided_at=?,decision_notes=? WHERE id=? AND status='PENDING'").bind(newStatus, actor.userId, now, input.notes, changeRequestId),
+    ...applyStatements,
+    commandRecord(db, actor.userId, "DECIDE_PLATFORM_CHANGE", idempotencyKey, requestHash, "CHANGE_REQUEST", changeRequestId, now),
+    outbox(db, "CHANGE_REQUEST", changeRequestId, input.decision === "APPROVE" ? "PlatformChangeApplied" : "PlatformChangeRejected", changeRequestId, { change_request_id: changeRequestId, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, `PLATFORM_CHANGE_${newStatus}`, "CHANGE_REQUEST", changeRequestId, { targetType: row.target_type, targetId: row.target_id, notes: input.notes, correlationId }, now),
+  ]);
+  return db.prepare("SELECT * FROM change_requests WHERE id=?").bind(changeRequestId).first<Record<string, unknown>>();
+}
+
+export async function listPlatformChangeRequests(filter: { status?: string }) {
+  const db = await ensureDatabase();
+  const rows = filter.status
+    ? await db.prepare("SELECT * FROM change_requests WHERE status=? ORDER BY requested_at DESC LIMIT 200").bind(filter.status).all<Record<string, unknown>>()
+    : await db.prepare("SELECT * FROM change_requests ORDER BY requested_at DESC LIMIT 200").all<Record<string, unknown>>();
+  return rows.results;
+}
+
+type FeatureFlagRow = { id: string; key: string; name: string; description: string; rollout_scope: string; enabled: number; version: number; updated_at: string | null };
+type PlatformConfigRow = { id: string; key: string; category: string; description: string; value: string; version: number; updated_at: string | null };
+type AccessPolicyRow = { id: string; code: string; name: string; policy_type: string; description: string; parameters: string; version: number; updated_at: string | null };
+
+/** Module 8 Phase A GetConfig. */
+export async function getPlatformConfig() {
+  const db = await ensureDatabase();
+  const [flags, config, policies] = await Promise.all([
+    db.prepare("SELECT id,key,name,description,rollout_scope,enabled,version,updated_at FROM feature_flags WHERE status='ACTIVE' ORDER BY key").all<FeatureFlagRow>(),
+    db.prepare("SELECT id,key,category,description,value,version,updated_at FROM platform_config WHERE status='ACTIVE' ORDER BY category,key").all<PlatformConfigRow>(),
+    db.prepare("SELECT id,code,name,policy_type,description,parameters,version,updated_at FROM access_policies WHERE status='ACTIVE' ORDER BY policy_type,code").all<AccessPolicyRow>(),
+  ]);
+  return {
+    feature_flags: flags.results.map((row) => ({ id: row.id, key: row.key, name: row.name, description: row.description, rollout_scope: row.rollout_scope, enabled: row.enabled === 1, version: row.version, updated_at: row.updated_at })),
+    platform_config: config.results.map((row) => ({ id: row.id, key: row.key, category: row.category, description: row.description, value: row.value, version: row.version, updated_at: row.updated_at })),
+    access_policies: policies.results.map((row) => ({ id: row.id, code: row.code, name: row.name, policy_type: row.policy_type, description: row.description, parameters: JSON.parse(row.parameters) as Record<string, unknown>, version: row.version, updated_at: row.updated_at })),
+  };
+}
+
+/**
+ * Module 8 Phase A ProvisionStaff: creates a platform/NamRA staff account —
+ * no organisation, a national-scope role from PLATFORM_STAFF_ROLES. The
+ * only prior way one of these accounts came into existence was a hardcoded
+ * db/runtime.ts seed row; this is a genuinely new capability, not a
+ * relabelling of Organisation Administration's inviteEmployee (Module 1),
+ * which onboards TAXPAYER-side staff into one organisation.
+ */
+export async function provisionPlatformStaff(actor: UserContext, payload: unknown, idempotencyKey: string, correlationId: string) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = validateProvisionStaff(payload);
+  const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ input }));
+  const prior = await priorCommand(db, actor.userId, "PROVISION_PLATFORM_STAFF", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT id,external_user_id,email,display_name,role,status,created_at FROM app_users WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  const duplicate = await db.prepare("SELECT id FROM app_users WHERE external_user_id=? OR lower(email)=lower(?)").bind(input.external_user_id, input.email).first<{ id: string }>();
+  if (duplicate) throw new RepositoryConflictError("A platform staff account with this identity or email already exists.");
+  const provider = await db.prepare("SELECT id FROM identity_providers WHERE provider_key='SITES_WORKSPACE' AND status='ACTIVE' AND configuration_status='CONFIGURED'").first<{ id: string }>();
+  if (!provider) throw new PlatformResourceError("The platform identity provider is not configured.", 500);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare("INSERT INTO app_users (id,external_user_id,email,display_name,role,taxpayer_id,status,created_at) VALUES (?,?,?,?,?,NULL,'ACTIVE',?)")
+      .bind(id, input.external_user_id, input.email, input.display_name, input.role, now),
+    db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
+      VALUES (?,?,?,?,?,?,?,?,NULL)`).bind(crypto.randomUUID(), id, provider.id, input.external_user_id, input.email, "PLATFORM_AUTHENTICATED", "ACTIVE", now),
+    commandRecord(db, actor.userId, "PROVISION_PLATFORM_STAFF", idempotencyKey, requestHash, "APP_USER", id, now),
+    outbox(db, "APP_USER", id, "PlatformStaffProvisioned", id, { user_id: id, role: input.role, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "PLATFORM_STAFF_PROVISIONED", "APP_USER", id, { role: input.role, email: input.email, correlationId }, now),
+  ]);
+  return { id, external_user_id: input.external_user_id, email: input.email, display_name: input.display_name, role: input.role, status: "ACTIVE", created_at: now };
 }

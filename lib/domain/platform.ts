@@ -160,3 +160,93 @@ export function validatePublishDataProductCommand(payload: unknown): PublishData
   if (messages.length) throw new PlatformValidationError(messages);
   return { schema_version: "1.0.0", model_run_id: modelRunId };
 }
+
+const CHANGE_TARGET_TYPES = new Set(["FEATURE_FLAG", "PLATFORM_CONFIG", "ACCESS_POLICY"]);
+
+export type PlatformChangeRequestSubmission = { schema_version: "1.0.0"; target_type: "FEATURE_FLAG" | "PLATFORM_CONFIG" | "ACCESS_POLICY"; target_id: string; proposed_value: Record<string, unknown>; reason: string };
+
+/**
+ * Module 8 Phase A RequestPlatformChange: one generic command family behind
+ * ChangeFeature/ChangePolicy/ChangeConfig, not three near-identical
+ * copy-pasted commands — FeatureFlag/PlatformConfig/AccessPolicy are all the
+ * same shape of governed change (propose a new value against an existing
+ * definition, get it approved by someone else, apply it). Only validates
+ * generic shape here; the proposed_value's per-target-type contents are
+ * checked in lib/data/platform-repository.ts, which already needs the
+ * target's current row to build the diff.
+ */
+export function validatePlatformChangeRequest(payload: unknown): PlatformChangeRequestSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const targetType = text(input.target_type).toUpperCase();
+  if (!CHANGE_TARGET_TYPES.has(targetType)) messages.push({ code: "TARGET_TYPE_INVALID", path: "/target_type", message: "target_type must be FEATURE_FLAG, PLATFORM_CONFIG or ACCESS_POLICY." });
+  const targetId = text(input.target_id);
+  if (!ID_PATTERN.test(targetId)) messages.push({ code: "TARGET_ID_INVALID", path: "/target_id", message: "target_id is invalid." });
+  if (!input.proposed_value || typeof input.proposed_value !== "object" || Array.isArray(input.proposed_value)) {
+    messages.push({ code: "PROPOSED_VALUE_INVALID", path: "/proposed_value", message: "proposed_value must be an object." });
+  } else {
+    try {
+      const serialized = JSON.stringify(input.proposed_value);
+      if (serialized.length > 4_096) messages.push({ code: "PROPOSED_VALUE_TOO_LARGE", path: "/proposed_value", message: "proposed_value must serialize to at most 4096 characters." });
+    } catch {
+      messages.push({ code: "PROPOSED_VALUE_INVALID", path: "/proposed_value", message: "proposed_value must be JSON-serializable." });
+    }
+  }
+  const reason = text(input.reason);
+  if (reason.length < 5 || reason.length > 500) messages.push({ code: "REASON_INVALID", path: "/reason", message: "reason must contain 5 to 500 characters." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", target_type: targetType as PlatformChangeRequestSubmission["target_type"], target_id: targetId, proposed_value: input.proposed_value as Record<string, unknown>, reason };
+}
+
+export type PlatformChangeDecisionSubmission = { schema_version: "1.0.0"; decision: "APPROVE" | "REJECT"; notes: string };
+
+/** Module 8 Phase A DecidePlatformChange: maker-checker on a pending change request — a decision, either way, always needs a recorded rationale. */
+export function validatePlatformChangeDecision(payload: unknown): PlatformChangeDecisionSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const decision = text(input.decision).toUpperCase();
+  if (decision !== "APPROVE" && decision !== "REJECT") messages.push({ code: "DECISION_INVALID", path: "/decision", message: "decision must be APPROVE or REJECT." });
+  const notes = text(input.notes);
+  if (notes.length < 5 || notes.length > 500) messages.push({ code: "NOTES_INVALID", path: "/notes", message: "notes must contain 5 to 500 characters." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", decision: decision as PlatformChangeDecisionSubmission["decision"], notes };
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Module 8 Phase A ProvisionStaff: platform/NamRA technical staff — accounts
+ * with no taxpayer_id, holding a national-scope role — previously had no
+ * provisioning command at all; the only way one of these accounts came into
+ * existence was a hardcoded db/runtime.ts seed row. Deliberately a distinct,
+ * narrower set of roles than Organisation Administration's inviteEmployee
+ * (Module 1), which onboards TAXPAYER-side staff into one organisation —
+ * these are the platform's own internal accounts.
+ */
+export const PLATFORM_STAFF_ROLES = new Set([
+  "SUPER_ADMIN", "INFRASTRUCTURE_ADMIN", "SECURITY_ANALYST", "INTERNAL_AUDITOR", "PILOT_ADMIN",
+  "NAMRA_SYSTEM_ADMIN", "NAMRA_SUPERVISOR", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "NAMRA_REFUND_OFFICER",
+]);
+
+export type ProvisionStaffSubmission = { schema_version: "1.0.0"; external_user_id: string; email: string; display_name: string; role: string };
+
+export function validateProvisionStaff(payload: unknown): ProvisionStaffSubmission {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PlatformValidationError([{ code: "DOCUMENT_INVALID", path: "/", message: "The request body must be an object." }]);
+  const input = payload as Record<string, unknown>;
+  const messages: Array<{ code: string; path: string; message: string }> = [];
+  if (input.schema_version !== "1.0.0") messages.push({ code: "SCHEMA_VERSION_UNSUPPORTED", path: "/schema_version", message: "schema_version must be 1.0.0." });
+  const externalUserId = text(input.external_user_id);
+  if (!ID_PATTERN.test(externalUserId)) messages.push({ code: "EXTERNAL_USER_ID_INVALID", path: "/external_user_id", message: "external_user_id is invalid." });
+  const email = text(input.email).toLowerCase();
+  if (!EMAIL_PATTERN.test(email)) messages.push({ code: "EMAIL_INVALID", path: "/email", message: "A valid email is required." });
+  const displayName = text(input.display_name);
+  if (displayName.length < 2 || displayName.length > 120) messages.push({ code: "DISPLAY_NAME_INVALID", path: "/display_name", message: "display_name must contain 2 to 120 characters." });
+  const role = text(input.role).toUpperCase();
+  if (!PLATFORM_STAFF_ROLES.has(role)) messages.push({ code: "ROLE_INVALID", path: "/role", message: "role is not a provisionable platform staff role." });
+  if (messages.length) throw new PlatformValidationError(messages);
+  return { schema_version: "1.0.0", external_user_id: externalUserId, email, display_name: displayName, role };
+}

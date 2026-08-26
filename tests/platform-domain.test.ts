@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand } from "@/lib/domain/platform";
+import { PlatformValidationError, safeFileName, validateDocumentHold, validateDocumentScanResult, validateExportCancellation, validateExportCommand, validateOfflineBatch, validatePlatformChangeDecision, validatePlatformChangeRequest, validateProvisionStaff, validatePublishDataProductCommand, validateReportParameters, validateRunModelCommand } from "@/lib/domain/platform";
 
 describe("platform edge validation", () => {
   it("accepts an ordered offline batch envelope", () => {
@@ -90,5 +90,39 @@ describe("platform edge validation", () => {
   it("rejects a PublishDataProduct command with a missing or invalid model_run_id", () => {
     expect(() => validatePublishDataProductCommand({ schema_version: "1.0.0", model_run_id: "not valid!" })).toThrowError(PlatformValidationError);
     expect(() => validatePublishDataProductCommand(null)).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a RequestPlatformChange command for each target type", () => {
+    expect(validatePlatformChangeRequest({ schema_version: "1.0.0", target_type: "feature_flag", target_id: "flag-itas-integration", proposed_value: { enabled: true }, reason: "Enable ITAS for the pilot cohort." })).toEqual({
+      schema_version: "1.0.0", target_type: "FEATURE_FLAG", target_id: "flag-itas-integration", proposed_value: { enabled: true }, reason: "Enable ITAS for the pilot cohort.",
+    });
+  });
+
+  it("rejects a RequestPlatformChange command with an invalid target_type, an oversized proposed_value, or a short reason", () => {
+    expect(() => validatePlatformChangeRequest({ schema_version: "1.0.0", target_type: "SOMETHING_ELSE", target_id: "flag-itas-integration", proposed_value: { enabled: true }, reason: "Valid reason text." })).toThrowError(PlatformValidationError);
+    expect(() => validatePlatformChangeRequest({ schema_version: "1.0.0", target_type: "FEATURE_FLAG", target_id: "flag-itas-integration", proposed_value: { blob: "x".repeat(5_000) }, reason: "Valid reason text." })).toThrowError(PlatformValidationError);
+    expect(() => validatePlatformChangeRequest({ schema_version: "1.0.0", target_type: "FEATURE_FLAG", target_id: "flag-itas-integration", proposed_value: { enabled: true }, reason: "hi" })).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a DecidePlatformChange command", () => {
+    expect(validatePlatformChangeDecision({ schema_version: "1.0.0", decision: "approve", notes: "Confirmed with the release checklist." })).toEqual({
+      schema_version: "1.0.0", decision: "APPROVE", notes: "Confirmed with the release checklist.",
+    });
+  });
+
+  it("rejects a DecidePlatformChange command with an invalid decision or missing notes", () => {
+    expect(() => validatePlatformChangeDecision({ schema_version: "1.0.0", decision: "MAYBE", notes: "Valid enough notes." })).toThrowError(PlatformValidationError);
+    expect(() => validatePlatformChangeDecision({ schema_version: "1.0.0", decision: "REJECT", notes: "no" })).toThrowError(PlatformValidationError);
+  });
+
+  it("normalizes a ProvisionStaff command for an eligible platform role", () => {
+    expect(validateProvisionStaff({ schema_version: "1.0.0", external_user_id: "ext-staff-0001", email: "Staff@NamRA.test", display_name: "New Staff Member", role: "security_analyst" })).toEqual({
+      schema_version: "1.0.0", external_user_id: "ext-staff-0001", email: "staff@namra.test", display_name: "New Staff Member", role: "SECURITY_ANALYST",
+    });
+  });
+
+  it("rejects a ProvisionStaff command with an invalid email or a non-provisionable role", () => {
+    expect(() => validateProvisionStaff({ schema_version: "1.0.0", external_user_id: "ext-staff-0002", email: "not-an-email", display_name: "New Staff Member", role: "SECURITY_ANALYST" })).toThrowError(PlatformValidationError);
+    expect(() => validateProvisionStaff({ schema_version: "1.0.0", external_user_id: "ext-staff-0003", email: "staff2@namra.test", display_name: "New Staff Member", role: "TAXPAYER_OWNER" })).toThrowError(PlatformValidationError);
   });
 });

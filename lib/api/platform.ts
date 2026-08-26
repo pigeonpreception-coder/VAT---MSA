@@ -1,5 +1,5 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
-import { approveReportExport, cancelReportExport, completeDocumentScan, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformSnapshot, getReportExport, listAnomalyCandidates, listDataProducts, PlatformResourceError, publishDataProduct, publishReportRun, queryApprovedMetrics, receiveOfflineBatch, requestReportExport, runAnalyticsModel, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
+import { approveReportExport, cancelReportExport, completeDocumentScan, decidePlatformChange, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformConfig, getPlatformSnapshot, getReportExport, getTechnicalPlatformSnapshot, listAnomalyCandidates, listDataProducts, listPlatformChangeRequests, PlatformResourceError, provisionPlatformStaff, publishDataProduct, publishReportRun, queryApprovedMetrics, receiveOfflineBatch, requestPlatformChange, requestReportExport, runAnalyticsModel, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -22,12 +22,27 @@ function failure(error: unknown, correlationId: string) {
   return problem(500, "INTERNAL_ERROR", "Internal error", "The platform operation could not be completed.", correlationId);
 }
 
+const TECHNICAL_ONLY_ROLES = new Set(["SUPER_ADMIN", "INFRASTRUCTURE_ADMIN"]);
+
+/**
+ * Module 8 Phase A fix: a 2026-08-26 audit found the "finance-data exclusion
+ * from technical admin" separation was enforced only at the Next.js page
+ * level (app/integrations/page.tsx branches on the actor's role before
+ * calling this same snapshot), not here at the API route the matrix implies
+ * covers it uniformly. SUPER_ADMIN/INFRASTRUCTURE_ADMIN hold no
+ * organisation/taxpayer scope, so getPlatformSnapshot's own scoping already
+ * returned them nothing in practice — but that was incidental, not a
+ * structural guarantee. This makes it structural: a technical-only actor is
+ * routed to the technical snapshot outright, never reaching a query that
+ * touches payment_instructions/bank_imports at all.
+ */
 export async function handlePlatformList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
     requirePermission(user, "platform:read");
-    return Response.json(await getPlatformSnapshot(user), { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+    const result = TECHNICAL_ONLY_ROLES.has(user.role) ? await getTechnicalPlatformSnapshot() : await getPlatformSnapshot(user);
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context.correlationId); }
 }
 
@@ -362,4 +377,97 @@ export async function handleAnalyticsAnomalies(request: Request) {
     const result = await listAnomalyCandidates({ dataProductId: params.get("data_product_id")?.trim() || undefined });
     return Response.json({ anomalies: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 8 Phase A GetConfig: FeatureFlag/PlatformConfig/AccessPolicy, each with its current value/version. */
+export async function handlePlatformConfig(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "platform:read");
+    const result = await getPlatformConfig();
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 8 Phase A: list change requests, filterable by status. */
+export async function handlePlatformChangeRequestList(request: Request) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "platform:read");
+    const status = new URL(request.url).searchParams.get("status")?.trim().toUpperCase() || undefined;
+    const result = await listPlatformChangeRequests({ status });
+    return Response.json({ change_requests: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) { return failure(error, context.correlationId); }
+}
+
+/** Module 8 Phase A RequestPlatformChange (ChangeFeature/ChangePolicy/ChangeConfig unified). */
+export async function handlePlatformChangeRequestCreate(request: Request) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "platform:manage");
+    await enforceRateLimits([{ key: `platform-change:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "platform-change:global", limit: 500, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 8_192);
+    const result = await requestPlatformChange(user, payload, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "REQUEST_PLATFORM_CHANGE", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ change_request: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "REQUEST_PLATFORM_CHANGE", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/** Module 8 Phase A DecidePlatformChange: maker-checker approval/rejection of a pending change request. */
+export async function handlePlatformChangeDecision(request: Request, changeRequestId: string) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "platform:manage");
+    await enforceRateLimits([{ key: `platform-change-decide:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "platform-change-decide:global", limit: 500, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await decidePlatformChange(changeRequestId, user, payload, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "DECIDE_PLATFORM_CHANGE", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ change_request: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "DECIDE_PLATFORM_CHANGE", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
+}
+
+/**
+ * Module 8 Phase A ProvisionStaff: creates a platform/NamRA technical staff
+ * account. Always step-up gated (unconditionally, not the conditional
+ * hasFreshStepUp pattern Phase B's exports use) — provisioning a new
+ * national-scope account is always sensitive, the same posture
+ * CancelInvoice already established for a comparably privileged action.
+ */
+export async function handleProvisionPlatformStaff(request: Request) {
+  const context = await requestContext(request);
+  const startedAt = Date.now();
+  let actorId: string | undefined;
+  try {
+    const user = await getCurrentUser();
+    actorId = user.userId;
+    requirePermission(user, "platform:manage");
+    requireStepUp(request, user);
+    await enforceRateLimits([{ key: `platform-staff:actor:${user.userId}`, limit: 10, windowSeconds: 300 }, { key: "platform-staff:global", limit: 100, windowSeconds: 300 }]);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const payload = await readBoundedJson<never>(request, 4_096);
+    const result = await provisionPlatformStaff(user, payload, idempotencyKey, context.correlationId);
+    emitStructuredSecurityLog({ level: "INFO", event: "PROVISION_PLATFORM_STAFF", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
+    return Response.json({ staff: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "PROVISION_PLATFORM_STAFF", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
+    return failure(error, context.correlationId);
+  }
 }
