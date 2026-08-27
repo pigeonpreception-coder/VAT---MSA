@@ -486,13 +486,14 @@ const SCHEMA_STATEMENTS = [
     amount_cents INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
     evidence_status TEXT NOT NULL, risk_tier TEXT NOT NULL,
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
-    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, payment_instruction_id TEXT
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, payment_instruction_id TEXT,
+    resume_status TEXT, offset_amount_cents INTEGER NOT NULL DEFAULT 0,
+    net_payable_cents INTEGER, dispute_reason TEXT
   )`,
-  `CREATE TABLE IF NOT EXISTS refund_reviews (
+  `CREATE TABLE IF NOT EXISTS refund_claim_transitions (
     id TEXT PRIMARY KEY, refund_claim_id TEXT NOT NULL REFERENCES refund_claims(id),
-    stage TEXT NOT NULL, decision TEXT NOT NULL, findings TEXT NOT NULL,
-    reviewer_id TEXT NOT NULL REFERENCES app_users(id), reviewed_at TEXT NOT NULL,
-    UNIQUE (refund_claim_id, stage)
+    action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES app_users(id), findings TEXT NOT NULL, occurred_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS integration_connections (
     id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id), provider_key TEXT NOT NULL,
@@ -1060,6 +1061,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_disputes_status_filed ON disputes(status, filed_at)`,
   `CREATE INDEX IF NOT EXISTS idx_risk_taxpayer_status ON risk_indicators(taxpayer_id, status, severity)`,
   `CREATE INDEX IF NOT EXISTS idx_refund_claim_status_risk ON refund_claims(status, risk_tier, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_refund_claim_transitions_claim ON refund_claim_transitions(refund_claim_id, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_requested ON sync_jobs(status, requested_at)`,
   `CREATE INDEX IF NOT EXISTS idx_bank_import_status_created ON bank_imports(organisation_id, status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,

@@ -22,8 +22,9 @@ import {
   validateNotificationQueue,
   validateObligationCreation,
   validateObligationSatisfaction,
+  assertRefundClaimTransition,
+  validateRefundClaimTransition,
   validateRefundRequest,
-  validateRefundReview,
   validateRiskActionApproval,
   validateRiskEvaluationRequest,
   validateRiskReviewAssignment,
@@ -34,8 +35,8 @@ import {
   type EvidenceSourceType,
   type ObligationCreation,
   type ObligationSatisfaction,
+  type RefundClaimStatus,
   type RefundRequestSubmission,
-  type RefundReviewSubmission,
 } from "@/lib/domain/compliance";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
@@ -123,20 +124,20 @@ export async function getComplianceSnapshot(actor: UserContext) {
   const db = await ensureDatabase();
   const scoped = !isNationalScope(actor);
   const taxpayerId = actor.taxpayerId ?? "__none__";
-  const [obligations, cases, findings, disputes, risks, refunds, reviews, communicationsResult, notificationsResult, consents, delegationsResult] = await Promise.all([
+  const [obligations, cases, findings, disputes, risks, refunds, refundTransitions, communicationsResult, notificationsResult, consents, delegationsResult] = await Promise.all([
     scoped ? db.prepare("SELECT * FROM tax_obligations WHERE taxpayer_id=? ORDER BY due_date DESC").bind(taxpayerId).all<Record<string, string | number | null>>() : db.prepare("SELECT o.*,t.legal_name FROM tax_obligations o JOIN taxpayers t ON t.id=o.taxpayer_id ORDER BY o.due_date DESC LIMIT 200").all<Record<string, string | number | null>>(),
     scoped ? db.prepare("SELECT * FROM audit_cases WHERE taxpayer_id=? ORDER BY updated_at DESC").bind(taxpayerId).all<Record<string, string | null>>() : db.prepare("SELECT c.*,t.legal_name,t.vat_number FROM audit_cases c JOIN taxpayers t ON t.id=c.taxpayer_id ORDER BY c.updated_at DESC LIMIT 200").all<Record<string, string | null>>(),
     scoped ? db.prepare("SELECT f.* FROM audit_findings f JOIN audit_cases c ON c.id=f.audit_case_id WHERE c.taxpayer_id=? ORDER BY f.created_at DESC").bind(taxpayerId).all<Record<string, string | number | null>>() : db.prepare("SELECT f.*,c.case_number,t.legal_name FROM audit_findings f JOIN audit_cases c ON c.id=f.audit_case_id JOIN taxpayers t ON t.id=c.taxpayer_id ORDER BY f.created_at DESC LIMIT 200").all<Record<string, string | number | null>>(),
     scoped ? db.prepare("SELECT * FROM disputes WHERE taxpayer_id=? ORDER BY filed_at DESC").bind(taxpayerId).all<Record<string, string | number | null>>() : db.prepare("SELECT d.*,t.legal_name FROM disputes d JOIN taxpayers t ON t.id=d.taxpayer_id ORDER BY d.filed_at DESC LIMIT 200").all<Record<string, string | number | null>>(),
     scoped ? db.prepare("SELECT * FROM risk_indicators WHERE taxpayer_id=? ORDER BY detected_at DESC").bind(taxpayerId).all<Record<string, string | number | null>>() : db.prepare("SELECT r.*,t.legal_name FROM risk_indicators r JOIN taxpayers t ON t.id=r.taxpayer_id ORDER BY r.detected_at DESC LIMIT 200").all<Record<string, string | number | null>>(),
     scoped ? db.prepare("SELECT r.*,v.version_number,p.period_code FROM refund_claims r JOIN vat_return_versions v ON v.id=r.vat_return_version_id JOIN vat_periods p ON p.id=v.vat_period_id WHERE r.taxpayer_id=? ORDER BY r.requested_at DESC").bind(taxpayerId).all<Record<string, string | number | null>>() : db.prepare("SELECT r.*,v.version_number,p.period_code,t.legal_name FROM refund_claims r JOIN vat_return_versions v ON v.id=r.vat_return_version_id JOIN vat_periods p ON p.id=v.vat_period_id JOIN taxpayers t ON t.id=r.taxpayer_id ORDER BY r.requested_at DESC LIMIT 200").all<Record<string, string | number | null>>(),
-    scoped ? db.prepare("SELECT rr.* FROM refund_reviews rr JOIN refund_claims r ON r.id=rr.refund_claim_id WHERE r.taxpayer_id=? ORDER BY rr.reviewed_at DESC").bind(taxpayerId).all<Record<string, string | null>>() : db.prepare("SELECT * FROM refund_reviews ORDER BY reviewed_at DESC LIMIT 200").all<Record<string, string | null>>(),
+    scoped ? db.prepare("SELECT rt.* FROM refund_claim_transitions rt JOIN refund_claims r ON r.id=rt.refund_claim_id WHERE r.taxpayer_id=? ORDER BY rt.occurred_at DESC").bind(taxpayerId).all<Record<string, string | null>>() : db.prepare("SELECT * FROM refund_claim_transitions ORDER BY occurred_at DESC LIMIT 200").all<Record<string, string | null>>(),
     scoped ? db.prepare("SELECT * FROM communications WHERE taxpayer_id=? ORDER BY occurred_at DESC LIMIT 100").bind(taxpayerId).all<Record<string, string | null>>() : db.prepare("SELECT c.*,t.legal_name FROM communications c LEFT JOIN taxpayers t ON t.id=c.taxpayer_id ORDER BY c.occurred_at DESC LIMIT 200").all<Record<string, string | null>>(),
     db.prepare(`SELECT * FROM notifications WHERE (user_id=? OR ${scoped ? "taxpayer_id=?" : "1=1"}) ORDER BY created_at DESC LIMIT 100`).bind(...(scoped ? [actor.userId, taxpayerId] : [actor.userId])).all<Record<string, string | null>>(),
     scoped ? db.prepare("SELECT * FROM consent_grants WHERE taxpayer_id=? ORDER BY created_at DESC").bind(taxpayerId).all<Record<string, string | null>>() : db.prepare("SELECT * FROM consent_grants ORDER BY created_at DESC LIMIT 200").all<Record<string, string | null>>(),
     scoped ? db.prepare("SELECT * FROM delegations WHERE taxpayer_id=? ORDER BY created_at DESC").bind(taxpayerId).all<Record<string, string | null>>() : db.prepare("SELECT * FROM delegations ORDER BY created_at DESC LIMIT 200").all<Record<string, string | null>>(),
   ]);
-  return { obligations: obligations.results, cases: cases.results, findings: findings.results, disputes: disputes.results, risks: risks.results, refunds: refunds.results, reviews: reviews.results, communications: communicationsResult.results, notifications: notificationsResult.results, consents: consents.results, delegations: delegationsResult.results };
+  return { obligations: obligations.results, cases: cases.results, findings: findings.results, disputes: disputes.results, risks: risks.results, refunds: refunds.results, refundTransitions: refundTransitions.results, communications: communicationsResult.results, notifications: notificationsResult.results, consents: consents.results, delegations: delegationsResult.results };
 }
 
 /**
@@ -219,7 +220,7 @@ export async function requestRefund(payload: RefundRequestSubmission, actor: Use
   const claimNumber = `RFD-${new Date().getUTCFullYear()}-${id.slice(0, 8).toUpperCase()}`;
   const amount = Math.abs(version.net_payable_cents);
   const filed = version.status === "FILED";
-  const status = filed ? "EVIDENCE_REVIEW" : "BLOCKED_RETURN_NOT_FILED";
+  const status: RefundClaimStatus = filed ? "RECEIVED" : "BLOCKED_RETURN_NOT_FILED";
   const riskTier = amount >= 5_000_000 ? "CRITICAL" : amount >= 1_000_000 ? "HIGH" : "MEDIUM";
   const now = new Date().toISOString();
   await db.batch([
@@ -233,29 +234,138 @@ export async function requestRefund(payload: RefundRequestSubmission, actor: Use
   return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(id).first<Record<string, unknown>>();
 }
 
-export async function reviewRefund(claimId: string, payload: RefundReviewSubmission, actor: UserContext, key: string, correlationId: string) {
+type RefundClaimRow = {
+  id: string; taxpayer_id: string; organisation_id: string; status: RefundClaimStatus;
+  requested_by: string; resume_status: RefundClaimStatus | null; amount_cents: number;
+  vat_return_version_id: string;
+};
+
+/**
+ * Module 9 Phase A: the single code path that can change a refund claim's
+ * status — mirrors transitionCase exactly (see that function's own comment
+ * for why one shared path, not one per action). Officer-only; unlike Module
+ * 4's segregation-of-duties, refunds keep their own simpler, original
+ * hard-denial (no cases:override-sod-style escape hatch) — the requester of
+ * a refund may never also decide it. RECHECK_ELIGIBILITY re-checks the
+ * underlying VAT return's live filed status rather than trusting anything
+ * cached on the claim. PAYMENT_AUTHORISATION's APPROVE is the one action
+ * that also computes the statutory debt offset (querying tax_obligations
+ * directly for this taxpayer's PENDING obligations — not a separate
+ * persisted "Offset" status) and folds the result into this same
+ * transition's single audit/outbox row, per the "one audit row per command"
+ * constraint documented on transitionCase. This never writes to
+ * payment_instructions or touches settlement in any way: PAYMENT_PENDING is
+ * a deliberate terminal boundary here, matching the playbook's "Payment is
+ * DISABLED PENDING AUTHORITY — do not build toward a live payment
+ * instruction." Paid/Failed/Reversed and the actual payment connector are
+ * Phase D's separate, not-yet-started job.
+ */
+export async function transitionRefundClaim(claimId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
   validateKey(key);
-  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national refund role may review a refund.");
-  const input = validateRefundReview(payload);
+  if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national refund role may transition a refund claim.");
+  const input = validateRefundClaimTransition(payload);
   const db = await ensureDatabase();
-  const claim = await db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(claimId).first<{ id: string; taxpayer_id: string; status: string; requested_by: string }>();
+  const claim = await db.prepare("SELECT id,taxpayer_id,organisation_id,status,requested_by,resume_status,amount_cents,vat_return_version_id FROM refund_claims WHERE id=?").bind(claimId).first<RefundClaimRow>();
   if (!claim) throw new ComplianceResourceError("Refund claim was not found.", 404);
   if (claim.requested_by === actor.userId) throw new AccessDeniedError("Maker-checker separation prevents reviewing your own refund request.");
-  if (claim.status.startsWith("BLOCKED_")) throw new RepositoryConflictError("The refund cannot enter review until the underlying statutory filing is acknowledged.");
   const hash = await sha256Hex(stableStringify({ claim_id: claim.id, input }));
-  const prior = await replay(db, actor.userId, "REVIEW_REFUND", key, hash);
-  if (prior) return db.prepare("SELECT * FROM refund_reviews WHERE id=?").bind(prior).first<Record<string, unknown>>();
-  const id = crypto.randomUUID();
+  const prior = await replay(db, actor.userId, "TRANSITION_REFUND_CLAIM", key, hash);
+  if (prior) return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  const staticTarget = assertRefundClaimTransition(input.action, claim.status);
+  let targetStatus: RefundClaimStatus;
+  if (input.action === "RESUME") {
+    if (!claim.resume_status) throw new ComplianceResourceError("This refund claim has no recorded state to resume into.", 409);
+    targetStatus = claim.resume_status;
+  } else {
+    targetStatus = staticTarget as RefundClaimStatus;
+  }
+  const nextResumeFrom = input.action === "REQUEST_INFORMATION" || input.action === "HOLD" ? claim.status : null;
+
+  if (input.action === "RECHECK_ELIGIBILITY") {
+    const version = await db.prepare("SELECT status FROM vat_return_versions WHERE id=?").bind(claim.vat_return_version_id).first<{ status: string }>();
+    if (!version || version.status !== "FILED") throw new RepositoryConflictError("The underlying VAT return is still not filed; the claim cannot re-enter review yet.");
+  }
+
+  let offsetAmountCents: number | null = null;
+  let netPayableCents: number | null = null;
+  if (input.action === "APPROVE" && claim.status === "PAYMENT_AUTHORISATION") {
+    const debt = await db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS total FROM tax_obligations WHERE taxpayer_id=? AND status='PENDING'").bind(claim.taxpayer_id).first<{ total: number }>();
+    offsetAmountCents = Math.min(claim.amount_cents, debt?.total ?? 0);
+    netPayableCents = claim.amount_cents - offsetAmountCents;
+  }
+
   const now = new Date().toISOString();
-  const nextStatus = input.decision === "REJECT" ? "REJECTED" : input.decision === "REQUEST_INFORMATION" ? "INFORMATION_REQUIRED" : input.stage === "PAYMENT_AUTHORISATION" && input.decision === "APPROVE" ? "APPROVED_FOR_PAYMENT" : "UNDER_REVIEW";
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`UPDATE refund_claims SET
+        status=?, resume_status=?,
+        approved_by=COALESCE(?, approved_by), approved_at=COALESCE(?, approved_at),
+        offset_amount_cents=COALESCE(?, offset_amount_cents), net_payable_cents=COALESCE(?, net_payable_cents)
+      WHERE id=?`).bind(
+      targetStatus, nextResumeFrom,
+      targetStatus === "PAYMENT_PENDING" ? actor.userId : null,
+      targetStatus === "PAYMENT_PENDING" ? now : null,
+      offsetAmountCents, netPayableCents,
+      claimId,
+    ),
+    db.prepare(`INSERT INTO refund_claim_transitions (id,refund_claim_id,action,from_status,to_status,actor_id,findings,occurred_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), claimId, input.action, claim.status, targetStatus, actor.userId, input.findings, now),
+    commandRecord(db, actor.userId, "TRANSITION_REFUND_CLAIM", key, hash, "REFUND_CLAIM", claimId, now),
+    outbox(db, "REFUND_CLAIM", claimId, `RefundClaim${input.action.charAt(0)}${input.action.slice(1).toLowerCase().replaceAll("_", "")}`, claim.taxpayer_id, {
+      refund_claim_id: claimId, action: input.action, from_status: claim.status, to_status: targetStatus, correlation_id: correlationId,
+      ...(offsetAmountCents !== null ? { offset_amount_cents: offsetAmountCents, net_payable_cents: netPayableCents } : {}),
+    }, now),
+    // One audit_events row per command — see transitionCase's own comment on
+    // why the offset computation is folded into this same row rather than a
+    // second auditRecord call within the same still-uncommitted batch.
+    await auditRecord(db, actor, `REFUND_CLAIM_${input.action}`, "REFUND_CLAIM", claimId, {
+      action: input.action, fromStatus: claim.status, toStatus: targetStatus, findings: input.findings, correlationId,
+      ...(offsetAmountCents !== null ? { offsetAmountCents, netPayableCents } : {}),
+    }, now),
+  ];
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(claimId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 9 Phase A: the one taxpayer-initiated refund claim action —
+ * DISPUTE (REJECTED -> DISPUTED). Kept as a separate function from
+ * transitionRefundClaim (officer-only) rather than one function with
+ * internal actor-branching, since the two paths' authorisation shapes don't
+ * overlap — this mirrors requestRefund's own requester-facing shape more
+ * than transitionCase's. Reuses the same validateRefundClaimTransition/
+ * assertRefundClaimTransition pair as the officer path: the adjacency map
+ * only encodes structural status+action legality, independent of who is
+ * allowed to call it, and DISPUTE is simply one more entry in
+ * REFUND_CLAIM_ACTIONS/REFUND_CLAIM_TRANSITIONS. The caller must be the
+ * original requester of this specific claim, not merely in-scope for the
+ * taxpayer generally — matching the same principle enforced the other
+ * direction by transitionRefundClaim's self-review denial.
+ */
+export async function disputeRefund(claimId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
+  validateKey(key);
+  const input = validateRefundClaimTransition(payload);
+  if (input.action !== "DISPUTE") throw new ComplianceResourceError("Only a DISPUTE action may be submitted through this endpoint.", 400);
+  const db = await ensureDatabase();
+  const claim = await db.prepare("SELECT id,taxpayer_id,organisation_id,status,requested_by FROM refund_claims WHERE id=?").bind(claimId).first<{ id: string; taxpayer_id: string; organisation_id: string; status: RefundClaimStatus; requested_by: string }>();
+  if (!claim) throw new ComplianceResourceError("Refund claim was not found.", 404);
+  if (!isNationalScope(actor) && actor.taxpayerId !== claim.taxpayer_id) throw new AccessDeniedError("The refund claim is outside your authorised taxpayer scope.");
+  if (claim.requested_by !== actor.userId) throw new AccessDeniedError("Only the original requester may dispute this refund claim's outcome.");
+  const hash = await sha256Hex(stableStringify({ claim_id: claim.id, input }));
+  const prior = await replay(db, actor.userId, "DISPUTE_REFUND_CLAIM", key, hash);
+  if (prior) return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(prior).first<Record<string, unknown>>();
+
+  const targetStatus = assertRefundClaimTransition("DISPUTE", claim.status) as RefundClaimStatus;
+  const now = new Date().toISOString();
   await db.batch([
-    db.prepare("INSERT INTO refund_reviews VALUES (?,?,?,?,?,?,?)").bind(id, claim.id, input.stage, input.decision, input.findings, actor.userId, now),
-    db.prepare("UPDATE refund_claims SET status=?,approved_by=?,approved_at=? WHERE id=?").bind(nextStatus, nextStatus === "APPROVED_FOR_PAYMENT" ? actor.userId : null, nextStatus === "APPROVED_FOR_PAYMENT" ? now : null, claim.id),
-    commandRecord(db, actor.userId, "REVIEW_REFUND", key, hash, "REFUND_REVIEW", id, now),
-    outbox(db, "REFUND_CLAIM", claim.id, "RefundReviewed", claim.taxpayer_id, { refund_claim_id: claim.id, stage: input.stage, decision: input.decision, status: nextStatus, correlation_id: correlationId }, now),
-    await auditRecord(db, actor, "REFUND_REVIEWED", "REFUND_CLAIM", claim.id, { stage: input.stage, decision: input.decision, status: nextStatus, correlationId }, now),
+    db.prepare("UPDATE refund_claims SET status=?,dispute_reason=? WHERE id=?").bind(targetStatus, input.findings, claimId),
+    db.prepare(`INSERT INTO refund_claim_transitions (id,refund_claim_id,action,from_status,to_status,actor_id,findings,occurred_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), claimId, "DISPUTE", claim.status, targetStatus, actor.userId, input.findings, now),
+    commandRecord(db, actor.userId, "DISPUTE_REFUND_CLAIM", key, hash, "REFUND_CLAIM", claimId, now),
+    outbox(db, "REFUND_CLAIM", claimId, "RefundClaimDisputed", claim.taxpayer_id, { refund_claim_id: claimId, from_status: claim.status, to_status: targetStatus, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, "REFUND_CLAIM_DISPUTE", "REFUND_CLAIM", claimId, { fromStatus: claim.status, toStatus: targetStatus, reason: input.findings, correlationId }, now),
   ]);
-  return db.prepare("SELECT * FROM refund_reviews WHERE id=?").bind(id).first<Record<string, unknown>>();
+  return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(claimId).first<Record<string, unknown>>();
 }
 
 /**

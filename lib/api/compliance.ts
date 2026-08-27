@@ -8,6 +8,7 @@ import {
   closeConversation,
   ComplianceResourceError,
   createObligation,
+  disputeRefund,
   evaluateRisk,
   fileDispute,
   getCaseEvidence,
@@ -26,9 +27,9 @@ import {
   recordEvidenceCustodyEvent,
   requestRefund,
   respondToConversation,
-  reviewRefund,
   sendNotice,
   transitionCase,
+  transitionRefundClaim,
   updateNotificationPreference,
 } from "@/lib/data/compliance-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
@@ -36,7 +37,7 @@ import { ComplianceValidationError } from "@/lib/domain/compliance";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type ComplianceCommand =
-  | "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "REVIEW_REFUND"
+  | "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "TRANSITION_REFUND_CLAIM" | "DISPUTE_REFUND_CLAIM"
   | "CREATE_OBLIGATION" | "MARK_OBLIGATION_SATISFIED" | "TRANSITION_CASE" | "ISSUE_FINDING"
   | "ASSIGN_RISK_REVIEW" | "APPROVE_RISK_ACTION" | "EVALUATE_RISK"
   | "ADD_EVIDENCE" | "RECORD_EVIDENCE_CUSTODY_EVENT" | "ADD_CASE_NOTE"
@@ -184,9 +185,12 @@ export async function handleComplianceCommand(request: Request, permission: stri
     if (command === "OPEN_AUDIT_CASE") result = await openAuditCase(payload, user, key, context.correlationId) as Record<string, unknown> | null;
     else if (command === "FILE_DISPUTE") result = await fileDispute(payload, user, key, context.correlationId) as Record<string, unknown> | null;
     else if (command === "REQUEST_REFUND") result = await requestRefund(payload, user, key, context.correlationId) as Record<string, unknown> | null;
-    else if (command === "REVIEW_REFUND") {
+    else if (command === "TRANSITION_REFUND_CLAIM") {
       if (!resourceId) throw new ComplianceResourceError("Refund claim id is required.", 400);
-      result = await reviewRefund(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+      result = await transitionRefundClaim(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
+    } else if (command === "DISPUTE_REFUND_CLAIM") {
+      if (!resourceId) throw new ComplianceResourceError("Refund claim id is required.", 400);
+      result = await disputeRefund(resourceId, payload, user, key, context.correlationId) as Record<string, unknown> | null;
     } else if (command === "CREATE_OBLIGATION") result = await createObligation(payload, user, key, context.correlationId) as Record<string, unknown> | null;
     else if (command === "MARK_OBLIGATION_SATISFIED") {
       if (!resourceId) throw new ComplianceResourceError("Tax obligation id is required.", 400);
@@ -234,7 +238,7 @@ export async function handleComplianceCommand(request: Request, permission: stri
     }
     if (!result) throw new RepositoryConflictError("The idempotent compliance resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = command === "REVIEW_REFUND" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" || command === "ASSIGN_RISK_REVIEW" || command === "APPROVE_RISK_ACTION" || command === "EVALUATE_RISK" || command === "RECORD_EVIDENCE_CUSTODY_EVENT" || command === "CLOSE_CONVERSATION" || command === "CANCEL_NOTIFICATION" || command === "MARK_NOTIFICATION_READ" || command === "UPDATE_NOTIFICATION_PREFERENCE" ? 200 : 201;
+    const status = command === "TRANSITION_REFUND_CLAIM" || command === "DISPUTE_REFUND_CLAIM" || command === "MARK_OBLIGATION_SATISFIED" || command === "TRANSITION_CASE" || command === "ASSIGN_RISK_REVIEW" || command === "APPROVE_RISK_ACTION" || command === "EVALUATE_RISK" || command === "RECORD_EVIDENCE_CUSTODY_EVENT" || command === "CLOSE_CONVERSATION" || command === "CANCEL_NOTIFICATION" || command === "MARK_NOTIFICATION_READ" || command === "UPDATE_NOTIFICATION_PREFERENCE" ? 200 : 201;
     return Response.json({ resource: result }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });

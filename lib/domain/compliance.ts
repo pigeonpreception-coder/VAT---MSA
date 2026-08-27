@@ -35,12 +35,73 @@ export type RefundRequestSubmission = {
   vat_return_version_id: string;
 };
 
-export type RefundReviewSubmission = {
-  schema_version: "1.0.0";
-  stage: "EVIDENCE" | "RISK" | "SUPERVISOR" | "PAYMENT_AUTHORISATION";
-  decision: "APPROVE" | "REJECT" | "REQUEST_INFORMATION" | "HOLD";
-  findings: string;
+/**
+ * Module 9 Phase A: a 2026-08-26 audit found the refund claim "state
+ * machine" was, in reality, 6 flat status strings set inline across two
+ * functions — no adjacency table, no guard preventing an out-of-order
+ * review (nothing stopped a PAYMENT_AUTHORISATION-stage decision before
+ * EVIDENCE/RISK/SUPERVISOR ever ran), and a HOLD decision the validator
+ * accepted but the status model couldn't express (it silently fell into
+ * the same bucket as an ordinary in-progress review). This is a real
+ * adjacency-list state machine — mirrors Module 4's CASE_TRANSITIONS
+ * pattern exactly, down to the dynamic-target `null` convention for
+ * RESUME — not scattered status-string checks. The four review stages the
+ * original design already named (EVIDENCE/RISK/SUPERVISOR/
+ * PAYMENT_AUTHORISATION) are kept as-is and now genuinely gate each other
+ * in sequence: the caller no longer specifies *which* stage they're
+ * deciding (the old `stage` field, which the previous design also never
+ * cross-checked against the claim's actual status) — it's derived
+ * unambiguously from the claim's current status instead, which is what
+ * actually closes the "nothing stops an illegal jump" gap, not an added
+ * runtime check on top of a redundant field.
+ */
+export type RefundClaimStatus =
+  | "BLOCKED_RETURN_NOT_FILED" | "RECEIVED" | "RISK_REVIEW" | "OFFICER_REVIEW" | "PAYMENT_AUTHORISATION"
+  | "EVIDENCE_REQUESTED" | "ON_HOLD" | "REJECTED" | "DISPUTED" | "PAYMENT_PENDING" | "CLOSED";
+
+export type RefundClaimAction =
+  | "RECHECK_ELIGIBILITY" | "APPROVE" | "REJECT" | "REQUEST_INFORMATION" | "HOLD" | "RESUME"
+  | "DISPUTE" | "RESOLVE_DISPUTE_UPHOLD" | "RESOLVE_DISPUTE_OVERTURN" | "CLOSE";
+
+const REFUND_CLAIM_ACTIONS: readonly RefundClaimAction[] = [
+  "RECHECK_ELIGIBILITY", "APPROVE", "REJECT", "REQUEST_INFORMATION", "HOLD", "RESUME",
+  "DISPUTE", "RESOLVE_DISPUTE_UPHOLD", "RESOLVE_DISPUTE_OVERTURN", "CLOSE",
+];
+
+/**
+ * `to: null` marks RESUME as dynamic, exactly like Module 4's SUSPEND/
+ * RESUME — its real target is whichever review stage the claim was
+ * EVIDENCE_REQUESTED/ON_HOLD *from*, which only the repository layer
+ * (reading `refund_claims.resume_status`) can resolve. `PAYMENT_PENDING`
+ * and `CLOSED` are deliberately terminal here: Payment itself (Module 9
+ * Phase D) stays DISABLED PENDING AUTHORITY, so nothing beyond
+ * PAYMENT_PENDING is modeled yet — this machine stops cleanly at exactly
+ * the boundary the playbook names.
+ */
+const REFUND_CLAIM_TRANSITIONS: Record<RefundClaimStatus, Partial<Record<RefundClaimAction, RefundClaimStatus | null>>> = {
+  BLOCKED_RETURN_NOT_FILED: { RECHECK_ELIGIBILITY: "RECEIVED" },
+  RECEIVED: { APPROVE: "RISK_REVIEW", REJECT: "REJECTED", REQUEST_INFORMATION: "EVIDENCE_REQUESTED", HOLD: "ON_HOLD" },
+  RISK_REVIEW: { APPROVE: "OFFICER_REVIEW", REJECT: "REJECTED", REQUEST_INFORMATION: "EVIDENCE_REQUESTED", HOLD: "ON_HOLD" },
+  OFFICER_REVIEW: { APPROVE: "PAYMENT_AUTHORISATION", REJECT: "REJECTED", REQUEST_INFORMATION: "EVIDENCE_REQUESTED", HOLD: "ON_HOLD" },
+  PAYMENT_AUTHORISATION: { APPROVE: "PAYMENT_PENDING", REJECT: "REJECTED", REQUEST_INFORMATION: "EVIDENCE_REQUESTED", HOLD: "ON_HOLD" },
+  EVIDENCE_REQUESTED: { RESUME: null },
+  ON_HOLD: { RESUME: null },
+  REJECTED: { DISPUTE: "DISPUTED", CLOSE: "CLOSED" },
+  DISPUTED: { RESOLVE_DISPUTE_UPHOLD: "CLOSED", RESOLVE_DISPUTE_OVERTURN: "RISK_REVIEW" },
+  PAYMENT_PENDING: {},
+  CLOSED: {},
 };
+
+/** Validates the (status, action) pair is legal and returns the static target status, or null if the target is dynamic (RESUME only — see REFUND_CLAIM_TRANSITIONS). */
+export function assertRefundClaimTransition(action: RefundClaimAction, currentStatus: RefundClaimStatus): RefundClaimStatus | null {
+  const rule = REFUND_CLAIM_TRANSITIONS[currentStatus];
+  if (!rule || !(action in rule)) {
+    throw new ComplianceValidationError([{ code: "REFUND_TRANSITION_INVALID", path: "/action", message: `Cannot ${action.replaceAll("_", " ").toLowerCase()} a refund claim currently ${currentStatus}.` }]);
+  }
+  return rule[action] ?? null;
+}
+
+export type RefundClaimTransitionInput = { schema_version: "1.0.0"; action: RefundClaimAction; findings: string };
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$/;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
@@ -300,17 +361,15 @@ export function validateObligationSatisfaction(payload: unknown): ObligationSati
   return { schema_version: "1.0.0", notes };
 }
 
-export function validateRefundReview(payload: unknown): RefundReviewSubmission {
+export function validateRefundClaimTransition(payload: unknown): RefundClaimTransitionInput {
   const input = object(payload);
   const messages: ComplianceValidationMessage[] = [];
   schema(input, messages);
-  const stage = text(input.stage).toUpperCase() as RefundReviewSubmission["stage"];
-  if (!new Set(["EVIDENCE", "RISK", "SUPERVISOR", "PAYMENT_AUTHORISATION"]).has(stage)) messages.push({ code: "REVIEW_STAGE_INVALID", path: "/stage", message: "Select a supported review stage." });
-  const decision = text(input.decision).toUpperCase() as RefundReviewSubmission["decision"];
-  if (!new Set(["APPROVE", "REJECT", "REQUEST_INFORMATION", "HOLD"]).has(decision)) messages.push({ code: "REVIEW_DECISION_INVALID", path: "/decision", message: "Select a supported review decision." });
-  const findings = bounded(input.findings, "/findings", "Findings", 10, 2_000, messages);
+  const action = text(input.action).toUpperCase() as RefundClaimAction;
+  if (!REFUND_CLAIM_ACTIONS.includes(action)) messages.push({ code: "REFUND_ACTION_INVALID", path: "/action", message: "Select a supported refund action." });
+  const findings = bounded(input.findings, "/findings", "Findings", 5, 2_000, messages);
   if (messages.length) throw new ComplianceValidationError(messages);
-  return { schema_version: "1.0.0", stage, decision, findings };
+  return { schema_version: "1.0.0", action, findings };
 }
 
 /**

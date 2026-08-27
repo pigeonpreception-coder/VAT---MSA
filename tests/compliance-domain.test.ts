@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertCaseTransition,
+  assertRefundClaimTransition,
   ComplianceValidationError,
   normalizeInboxQuery,
   normalizeNotificationQuery,
@@ -20,8 +21,8 @@ import {
   validateNotificationQueue,
   validateObligationCreation,
   validateObligationSatisfaction,
+  validateRefundClaimTransition,
   validateRefundRequest,
-  validateRefundReview,
   validateRiskActionApproval,
   validateRiskEvaluationRequest,
   validateRiskReviewAssignment,
@@ -46,10 +47,37 @@ describe("compliance command validation", () => {
     expect(validateRefundRequest({ schema_version: "1.0.0", vat_return_version_id: "returnv-0003" }).vat_return_version_id).toBe("returnv-0003");
   });
 
-  it("normalizes staged refund review decisions", () => {
-    const review = validateRefundReview({ schema_version: "1.0.0", stage: "risk", decision: "request_information", findings: "The source evidence requires independent confirmation before supervisor review." });
-    expect(review.stage).toBe("RISK");
-    expect(review.decision).toBe("REQUEST_INFORMATION");
+  it("normalizes a refund claim transition action", () => {
+    const transition = validateRefundClaimTransition({ schema_version: "1.0.0", action: "approve", findings: "Risk review evidence is consistent with the claim." });
+    expect(transition.action).toBe("APPROVE");
+  });
+
+  it("rejects an unsupported refund claim action", () => {
+    expect(() => validateRefundClaimTransition({ schema_version: "1.0.0", action: "PAY", findings: "Not a real action." })).toThrowError(ComplianceValidationError);
+  });
+
+  it("walks the refund claim state machine through its ordinary happy path to PAYMENT_PENDING", () => {
+    expect(assertRefundClaimTransition("RECHECK_ELIGIBILITY", "BLOCKED_RETURN_NOT_FILED")).toBe("RECEIVED");
+    expect(assertRefundClaimTransition("APPROVE", "RECEIVED")).toBe("RISK_REVIEW");
+    expect(assertRefundClaimTransition("APPROVE", "RISK_REVIEW")).toBe("OFFICER_REVIEW");
+    expect(assertRefundClaimTransition("APPROVE", "OFFICER_REVIEW")).toBe("PAYMENT_AUTHORISATION");
+    expect(assertRefundClaimTransition("APPROVE", "PAYMENT_AUTHORISATION")).toBe("PAYMENT_PENDING");
+  });
+
+  it("resolves RESUME dynamically (null) for both pause states, matching the case machine's own convention", () => {
+    expect(assertRefundClaimTransition("RESUME", "EVIDENCE_REQUESTED")).toBeNull();
+    expect(assertRefundClaimTransition("RESUME", "ON_HOLD")).toBeNull();
+  });
+
+  it("routes a rejected claim through dispute to either outcome", () => {
+    expect(assertRefundClaimTransition("DISPUTE", "REJECTED")).toBe("DISPUTED");
+    expect(assertRefundClaimTransition("RESOLVE_DISPUTE_OVERTURN", "DISPUTED")).toBe("RISK_REVIEW");
+    expect(assertRefundClaimTransition("RESOLVE_DISPUTE_UPHOLD", "DISPUTED")).toBe("CLOSED");
+  });
+
+  it("rejects an out-of-order refund claim transition", () => {
+    expect(() => assertRefundClaimTransition("APPROVE", "REJECTED")).toThrowError(ComplianceValidationError);
+    expect(() => assertRefundClaimTransition("APPROVE", "PAYMENT_PENDING")).toThrowError(ComplianceValidationError);
   });
 
   it("normalizes a well-formed obligation creation", () => {
