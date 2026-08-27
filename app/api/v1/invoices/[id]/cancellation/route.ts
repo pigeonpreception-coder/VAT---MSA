@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "invoices:cancel");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const { id } = await params;
     const cancellation = await cancelInvoice(actor, id, await readBoundedJson(request, 4_096), context.correlationId);
     return Response.json({ cancellation }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });

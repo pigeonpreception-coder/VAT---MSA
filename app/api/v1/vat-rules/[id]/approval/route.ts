@@ -10,7 +10,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "vat-rules:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const { id } = await contextValue.params;
     const rule = await approveVatRule(actor, id, await readBoundedJson(request, 4_096), context.correlationId);
     return vatRuleJson({ rule }, context);

@@ -31,13 +31,18 @@ function actingAs(user: FixtureUser): void {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
 }
 
-function jsonRequest(url: string, body: unknown, options: { idempotencyKey?: string; stepUp?: boolean } = {}): Request {
+/** Security fix 2026-08-27: grants a real, server-verified step-up (step_up_events row) instead of the previous x-vat-msa-auth-assurance/x-vat-msa-reauthenticated-at headers, which lib/security/step-up.ts's requireStepUp no longer reads at all. */
+async function grantStepUp(userId: string): Promise<void> {
+  await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+    .bind(crypto.randomUUID(), userId, "TOTP", new Date().toISOString(), new Date(Date.now() + 5 * 60_000).toISOString()).run();
+}
+
+function jsonRequest(url: string, body: unknown, options: { idempotencyKey?: string } = {}): Request {
   return new Request(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "idempotency-key": options.idempotencyKey ?? crypto.randomUUID(),
-      ...(options.stepUp ? { "x-vat-msa-auth-assurance": "MFA_STEP_UP", "x-vat-msa-reauthenticated-at": new Date().toISOString() } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -96,6 +101,7 @@ async function containRoute(incidentId: string, actor: FixtureUser, notes: strin
 async function revokeRoute(incidentId: string, actor: FixtureUser, notes: string, options: { stepUp?: boolean; idempotencyKey?: string } = {}): Promise<Response> {
   const { POST } = await import("@/app/api/v1/security/incidents/[id]/revocation/route");
   actingAs(actor);
+  if (options.stepUp) await grantStepUp(actor.userId);
   return POST(jsonRequest(`https://vat-msa.local/api/v1/security/incidents/${incidentId}/revocation`, { schema_version: "1.0.0", notes }, options), { params: Promise.resolve({ id: incidentId }) });
 }
 

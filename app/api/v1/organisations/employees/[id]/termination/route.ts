@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "employees:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const payload = await readBoundedJson<{ reason?: string }>(request, 8_192);
     const result = await terminateEmployee(actor, (await contextValue.params).id, String(payload.reason ?? ""), organisationIdFrom(request));
     return controlPlaneJson({ employee: result }, context);

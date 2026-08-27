@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "workflows:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     return controlPlaneJson({ delegation: await revokeDelegation(actor, (await contextValue.params).id, await readBoundedJson(request, 4_096), organisationIdFrom(request)) }, context);
   } catch (error) { return controlPlaneProblem(error, context); }
 }

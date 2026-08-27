@@ -14,7 +14,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "administration:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const { id } = await contextValue.params;
     const payload = await readBoundedJson(request, 4_096);
     const suspension = await suspendUser(actor, id, payload, context.correlationId);

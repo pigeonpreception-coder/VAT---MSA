@@ -12,12 +12,12 @@
 **What exists:** Authentication delegated to platform-injected headers, resolved through `identity_links` (`lib/auth.ts:71-99`). RBAC is a 22-role static table (`lib/domain/access.ts:23-45`) unioned with tenant-defined `organisation_role_permissions`. ABAC/scope (`isNationalScope`, `requireTaxpayerScope`) is used pervasively — 143 scoping call sites. **Server-side gating is genuinely complete**: every one of 165 route files is permission-gated; the only unauthenticated routes are deliberately public (certificate verification, invitation claim). Session revocation is real and effective immediately.
 
 **Gaps:**
-1. **CRITICAL — step-up/MFA is client-asserted and forgeable.** `requireStepUp` (`lib/security/step-up.ts:7-17`) trusts two request headers the *caller* supplies (`x-vat-msa-auth-assurance`, `x-vat-msa-reauthenticated-at`). There is no server-side step-up record anywhere. All 28 "step-up gated" commands (taxpayer suspension, VAT-rule approval, invoice cancellation, identity link/revoke, platform staff provisioning, incident access revocation, etc.) are effectively ungated.
+1. ~~**CRITICAL — step-up/MFA is client-asserted and forgeable.**~~ **FIXED 2026-08-27.** `requireStepUp` (`lib/security/step-up.ts`) previously trusted two request headers the *caller* supplied (`x-vat-msa-auth-assurance`, `x-vat-msa-reauthenticated-at`) verbatim, with no server-side backing at all — no application code anywhere ever set those headers on a genuine step-up event, only test fixtures did. Replaced with a real, standards-compliant RFC 6238 TOTP implementation (`lib/domain/mfa.ts`, built entirely from Web Crypto — no external MFA provider required) and a genuine server-verified step-up record: `EnrollTotp`/`VerifyTotpEnrollment` establish a credential, `ConfirmStepUp` (`POST /api/v1/identity/step-up`) verifies a fresh 6-digit code and writes a real `step_up_events` row with anti-replay (`last_used_counter`), and `requireStepUp` now checks that row instead of any header. All 28 "step-up gated" commands are genuinely gated. Proven in `tests/mfa-domain.test.ts` and `tests/routes/security-mfa-step-up.test.ts` (the latter also exercises item #1's fix in the same end-to-end flow via `LinkIdentity`).
 2. ~~**CRITICAL — full account takeover via `LinkIdentity`.**~~ **FIXED 2026-08-27.** `linkIdentity`/`revokeIdentityLink` (`lib/data/identity-repository.ts:564-588`, `:615-633`) previously performed no tenant-scope check on the target `app_users` row/link — a `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` could link a platform subject they control to any user (including a national-scope account) and authenticate as it, or revoke any other user's session. Both now require a non-national actor's target to share their own `taxpayer_id`; a genuinely national-scope actor remains unrestricted. Proven in `tests/routes/security-identity-link-scope.test.ts`.
 3. **HIGH — the "protected-permission ceiling" is a denylist that protects almost nothing.** `PROTECTED_PERMISSION_PREFIXES` (`lib/domain/control-plane.ts:91`) only actually blocks `platform:`. `createOrganisationRole` will happily grant a tenant-defined role `audit:read`, `security:read`, `reconciliation:manage`, `refunds:review`, `administration:manage`, etc. Most sensitive commands survive because the repository layer independently re-checks `isNationalScope`; the ones that don't are listed under domains 3 and 8.
 4. **MEDIUM** — no PAM/JIT elevation; grants are permanent until revoked.
 
-**Severity: CRITICAL.**
+**Severity: HIGH** (downgraded from CRITICAL now that items #1 and #2 are fixed; item #3's denylist gap remains).
 
 ## 2. Authoritative taxpayer identity (Sec 8, 9, 10)
 
@@ -94,7 +94,7 @@ Ranked by severity × cheapness within this repo's existing patterns (S = days, 
 | # | Item | Severity | Effort |
 |---|---|---|---|
 | 1 | ~~Scope-check `linkIdentity`/`revokeIdentityLink` (closes full account-takeover path)~~ | CRITICAL | **DONE 2026-08-27** |
-| 2 | Make step-up server-verified (new `step_up_events` table + command) | CRITICAL | M |
+| 2 | ~~Make step-up server-verified (new `step_up_events` table + command)~~ | CRITICAL | **DONE 2026-08-27** |
 | 3 | Add a CI security gate (one workflow file; tools already exist and pass) | HIGH | S |
 | 4 | Emit `RATE_LIMIT_EXCEEDED`/`AUTHORISATION_DENIED` from every handler (wiring only) | HIGH | S |
 | 5 | Replace the protected-permission denylist with an allowlist/`tenant_grantable` column | HIGH | S |

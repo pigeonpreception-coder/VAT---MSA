@@ -15,7 +15,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "taxpayers:suspend");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const { id, identifierId } = await contextValue.params;
     const payload = await readBoundedJson(request, 4_096);
     const correction = await correctTaxpayerIdentifier(actor, id, identifierId, payload, context.correlationId);

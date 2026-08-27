@@ -14,7 +14,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "administration:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const { id } = await contextValue.params;
     const revocation = await revokeIdentityLink(actor, id, context.correlationId);
     return identityJson({ revocation }, context);

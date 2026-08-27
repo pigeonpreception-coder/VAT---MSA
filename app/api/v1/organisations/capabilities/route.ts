@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "roles:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const capability = await grantCapability(actor, await readBoundedJson(request, 4_096), organisationIdFrom(request));
     return controlPlaneJson({ capability }, context, 201);
   } catch (error) {

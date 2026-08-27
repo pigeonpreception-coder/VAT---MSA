@@ -38,18 +38,21 @@ const ACCOUNTANT: FixtureUser = { userId: "usr-wf-accountant", externalUserId: "
 const ORG_ID = "org-wf-a";
 const ROLE_ID = "role-wf-approver";
 
-function actingAs(user: FixtureUser): void {
+/** Also grants a fresh, server-verified step-up (step_up_events row) for the acting user — most of the commands this file exercises are step-up gated, and there is no longer a header shortcut around lib/security/step-up.ts's real requireStepUp check. */
+async function actingAs(user: FixtureUser): Promise<void> {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
+  await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+    .bind(crypto.randomUUID(), user.userId, "TOTP", new Date().toISOString(), new Date(Date.now() + 5 * 60_000).toISOString()).run();
 }
 
 function orgUrl(path: string): string {
   return `https://vat-msa.local${path}?organisation_id=${ORG_ID}`;
 }
 
-function jsonRequest(url: string, body: unknown, stepUp = true): Request {
+function jsonRequest(url: string, body: unknown): Request {
   return new Request(url, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(stepUp ? { "x-vat-msa-auth-assurance": "MFA_STEP_UP", "x-vat-msa-reauthenticated-at": new Date().toISOString() } : {}) },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 }
@@ -108,49 +111,49 @@ async function seedFixture(): Promise<void> {
 
 async function createDraftRoute(actor: FixtureUser, body: Record<string, unknown>): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflows/route");
-  actingAs(actor);
+  await actingAs(actor);
   return POST(jsonRequest(orgUrl("/api/v1/workflows"), body));
 }
 
 async function publishRoute(versionId: string, actor: FixtureUser): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflows/versions/[id]/publication/route");
-  actingAs(actor);
+  await actingAs(actor);
   return POST(jsonRequest(orgUrl(`/api/v1/workflows/versions/${versionId}/publication`), {}), { params: Promise.resolve({ id: versionId }) });
 }
 
 async function testRoute(versionId: string, actor: FixtureUser, context: Record<string, unknown>): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflows/versions/[id]/test/route");
-  actingAs(actor);
-  return POST(jsonRequest(orgUrl(`/api/v1/workflows/versions/${versionId}/test`), { context }, false), { params: Promise.resolve({ id: versionId }) });
+  await actingAs(actor);
+  return POST(jsonRequest(orgUrl(`/api/v1/workflows/versions/${versionId}/test`), { context }), { params: Promise.resolve({ id: versionId }) });
 }
 
 async function assignRoute(actor: FixtureUser, body: Record<string, unknown>): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflows/instances/route");
-  actingAs(actor);
+  await actingAs(actor);
   return POST(jsonRequest(orgUrl("/api/v1/workflows/instances"), body));
 }
 
 async function decideRoute(assignmentId: string, actor: FixtureUser, decision: string, reason: string): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflow-tasks/[id]/decision/route");
-  actingAs(actor);
+  await actingAs(actor);
   return POST(jsonRequest(orgUrl(`/api/v1/workflow-tasks/${assignmentId}/decision`), { decision, reason }), { params: Promise.resolve({ id: assignmentId }) });
 }
 
 async function createDelegationRoute(actor: FixtureUser, body: Record<string, unknown>): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflows/delegations/route");
-  actingAs(actor);
+  await actingAs(actor);
   return POST(jsonRequest(orgUrl("/api/v1/workflows/delegations"), body));
 }
 
 async function listDelegationsRoute(actor: FixtureUser): Promise<Response> {
   const { GET } = await import("@/app/api/v1/workflows/delegations/route");
-  actingAs(actor);
+  await actingAs(actor);
   return GET(new Request(orgUrl("/api/v1/workflows/delegations")));
 }
 
 async function revokeDelegationRoute(delegationId: string, actor: FixtureUser, reason: string): Promise<Response> {
   const { POST } = await import("@/app/api/v1/workflows/delegations/[id]/revocation/route");
-  actingAs(actor);
+  await actingAs(actor);
   return POST(jsonRequest(orgUrl(`/api/v1/workflows/delegations/${delegationId}/revocation`), { reason }), { params: Promise.resolve({ id: delegationId }) });
 }
 

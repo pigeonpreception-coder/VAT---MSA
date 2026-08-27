@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "vat-rules:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const rule = await proposeVatRule(actor, await readBoundedJson(request, 4_096), context.correlationId);
     return vatRuleJson({ rule }, context, 201);
   } catch (error) {

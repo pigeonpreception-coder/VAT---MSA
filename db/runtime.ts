@@ -48,6 +48,19 @@ const SCHEMA_STATEMENTS = [
     linked_at TEXT NOT NULL, last_authenticated_at TEXT,
     UNIQUE (provider_id, subject)
   )`,
+  // Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #2): a real,
+  // server-verified TOTP (RFC 6238) credential and step-up event log,
+  // replacing the previous client-asserted x-vat-msa-auth-assurance /
+  // x-vat-msa-reauthenticated-at request headers, which requireStepUp
+  // trusted verbatim from the caller with no server-side backing at all.
+  `CREATE TABLE IF NOT EXISTS mfa_totp_credentials (
+    user_id TEXT PRIMARY KEY REFERENCES app_users(id), secret_base32 TEXT NOT NULL,
+    status TEXT NOT NULL, last_used_counter INTEGER, created_at TEXT NOT NULL, verified_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS step_up_events (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_users(id),
+    method TEXT NOT NULL, verified_at TEXT NOT NULL, expires_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS user_invitations (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     email TEXT NOT NULL, role_code TEXT NOT NULL REFERENCES access_roles(code),
@@ -994,6 +1007,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_outbox_status_available ON outbox_events(status, available_at)`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id)`,
   `CREATE INDEX IF NOT EXISTS idx_identity_links_user_status ON identity_links(user_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_step_up_events_user_expires ON step_up_events(user_id, expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_branches_organisation_status ON branches(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_capabilities_status ON organisation_capabilities(status, capability)`,
   `CREATE INDEX IF NOT EXISTS idx_memberships_user_status ON organisation_memberships(user_id, status)`,

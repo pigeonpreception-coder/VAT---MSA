@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "access-governance:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const offboarding = await offboardUser(actor, await readBoundedJson(request, 4_096), organisationIdFrom(request));
     return controlPlaneJson({ offboarding }, context);
   } catch (error) { return controlPlaneProblem(error, context); }

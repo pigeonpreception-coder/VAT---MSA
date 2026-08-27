@@ -18,8 +18,11 @@ const SELLER_OWNER: FixtureUser = { userId: "usr-seller-owner", externalUserId: 
 const NAMRA_1: FixtureUser = { userId: "usr-namra-1", externalUserId: "ext-namra-1", email: "namra-1@example.test" };
 const NAMRA_2: FixtureUser = { userId: "usr-namra-2", externalUserId: "ext-namra-2", email: "namra-2@example.test" };
 
-function actingAs(user: FixtureUser): void {
+/** Also grants a fresh, server-verified step-up (step_up_events row) for the acting user — ProposeVatRule/ApproveVatRule are step-up gated and there is no longer a header shortcut around lib/security/step-up.ts's real requireStepUp check. */
+async function actingAs(user: FixtureUser): Promise<void> {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
+  await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+    .bind(crypto.randomUUID(), user.userId, "TOTP", new Date().toISOString(), new Date(Date.now() + 5 * 60_000).toISOString()).run();
 }
 
 function invoicePayload(overrides: { rate: string; taxAmount: string; category?: string }) {
@@ -94,7 +97,7 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
   describe("invoice submission against the approved rate", () => {
     it("rejects a STANDARD line taxed at a rate that doesn't match the approved rule", async () => {
       const { POST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const response = await POST(submitRequest(invoicePayload({ rate: "20.00", taxAmount: "20.00" })));
       expect(response.status).toBe(422);
       const body = await response.json();
@@ -103,7 +106,7 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
 
     it("rejects an OTHER-category line entirely, since no rule is approved for it (fails closed)", async () => {
       const { POST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const response = await POST(submitRequest(invoicePayload({ rate: "0.00", taxAmount: "0.00", category: "OTHER" })));
       expect(response.status).toBe(422);
       const body = await response.json();
@@ -112,7 +115,7 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
 
     it("certifies a STANDARD line taxed at the approved 15% rate, traceable via ExplainCalculation", async () => {
       const { POST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const response = await POST(submitRequest(invoicePayload({ rate: "15.00", taxAmount: "15.00" })));
       expect(response.status).toBe(201);
       const body = await response.json();
@@ -129,13 +132,11 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
   describe("ProposeVatRule / ApproveVatRule segregation of duties", () => {
     it("denies the proposing officer approving their own draft", async () => {
       const { POST: proposePOST } = await import("@/app/api/v1/vat-rules/route");
-      actingAs(NAMRA_1);
+      await actingAs(NAMRA_1);
       const proposeResponse = await proposePOST(new Request("https://vat-msa.local/api/v1/vat-rules", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-vat-msa-auth-assurance": "MFA_STEP_UP",
-          "x-vat-msa-reauthenticated-at": new Date().toISOString(),
         },
         body: JSON.stringify({ tax_category: "STANDARD", rate_bps: 1600, effective_from: "2027-01-01", reason: "Statutory rate increase per the 2027 budget speech." }),
       }));
@@ -143,13 +144,11 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
       const proposed = (await proposeResponse.json()).rule;
 
       const { POST: approvePOST } = await import("@/app/api/v1/vat-rules/[id]/approval/route");
-      actingAs(NAMRA_1);
+      await actingAs(NAMRA_1);
       const selfApproveResponse = await approvePOST(new Request(`https://vat-msa.local/api/v1/vat-rules/${proposed.id}/approval`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-vat-msa-auth-assurance": "MFA_STEP_UP",
-          "x-vat-msa-reauthenticated-at": new Date().toISOString(),
         },
         body: JSON.stringify({ reason: "Approving my own proposal." }),
       }), { params: Promise.resolve({ id: proposed.id }) });
@@ -157,13 +156,11 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
       const selfApproveBody = await selfApproveResponse.json();
       expect(selfApproveBody.errors?.[0]?.code).toBe("SELF_APPROVAL_DENIED");
 
-      actingAs(NAMRA_2);
+      await actingAs(NAMRA_2);
       const approveResponse = await approvePOST(new Request(`https://vat-msa.local/api/v1/vat-rules/${proposed.id}/approval`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-vat-msa-auth-assurance": "MFA_STEP_UP",
-          "x-vat-msa-reauthenticated-at": new Date().toISOString(),
         },
         body: JSON.stringify({ reason: "Verified against the published 2027 budget speech." }),
       }), { params: Promise.resolve({ id: proposed.id }) });

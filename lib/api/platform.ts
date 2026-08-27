@@ -5,8 +5,8 @@ import { PlatformValidationError } from "@/lib/domain/platform";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 import { requireStepUp } from "@/lib/security/step-up";
 
-function hasFreshStepUp(request: Request, user: Parameters<typeof requireStepUp>[1]): boolean {
-  try { requireStepUp(request, user); return true; } catch { return false; }
+async function hasFreshStepUp(request: Request, user: Parameters<typeof requireStepUp>[1]): Promise<boolean> {
+  try { await requireStepUp(request, user); return true; } catch { return false; }
 }
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown) {
@@ -220,7 +220,7 @@ export async function handleReportExportRequest(request: Request, reportRunId: s
     await enforceRateLimits([{ key: `reports-export:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "reports-export:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
-    const result = await requestReportExport(reportRunId, payload, user, idempotencyKey, context.correlationId, hasFreshStepUp(request, user));
+    const result = await requestReportExport(reportRunId, payload, user, idempotencyKey, context.correlationId, await hasFreshStepUp(request, user));
     emitStructuredSecurityLog({ level: "INFO", event: "REQUEST_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ report_export: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -241,7 +241,7 @@ export async function handleReportExportApproval(request: Request, exportId: str
     await enforceRateLimits([{ key: `reports-export-approve:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-approve:global", limit: 1_000, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
-    const result = await approveReportExport(exportId, payload, user, idempotencyKey, context.correlationId, hasFreshStepUp(request, user));
+    const result = await approveReportExport(exportId, payload, user, idempotencyKey, context.correlationId, await hasFreshStepUp(request, user));
     emitStructuredSecurityLog({ level: "INFO", event: "APPROVE_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ report_export: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -459,7 +459,7 @@ export async function handleProvisionPlatformStaff(request: Request) {
     const user = await getCurrentUser();
     actorId = user.userId;
     requirePermission(user, "platform:manage");
-    requireStepUp(request, user);
+    await requireStepUp(request, user);
     await enforceRateLimits([{ key: `platform-staff:actor:${user.userId}`, limit: 10, windowSeconds: 300 }, { key: "platform-staff:global", limit: 100, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);

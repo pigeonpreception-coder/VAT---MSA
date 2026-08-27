@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "licensing:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const payload = await readBoundedJson(request, 4_096);
     const result = await upgradeLicense(actor, payload, organisationIdFrom(request));
     return controlPlaneJson({ license: result }, context);

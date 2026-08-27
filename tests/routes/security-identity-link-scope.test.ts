@@ -31,16 +31,16 @@ const NATIONAL_ADMIN: FixtureUser = { userId: "usr-sec-national", externalUserId
 // The identity subject an attacking tenant admin controls (e.g. a second ChatGPT/OpenAI account they own).
 const ATTACKER_SUBJECT = "ext-sec-attacker-controlled-subject";
 
-function actingAs(user: FixtureUser): void {
+/** Also grants a fresh, server-verified step-up (step_up_events row) for the acting user — every command this file exercises is step-up gated, and there is no longer a header shortcut around lib/security/step-up.ts's real requireStepUp check. */
+async function actingAs(user: FixtureUser): Promise<void> {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
-}
-
-function withStepUp(headers: Record<string, string> = {}): Record<string, string> {
-  return { ...headers, "x-vat-msa-auth-assurance": "MFA_STEP_UP", "x-vat-msa-reauthenticated-at": new Date().toISOString() };
+  const now = new Date();
+  await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+    .bind(crypto.randomUUID(), user.userId, "TOTP", now.toISOString(), new Date(now.getTime() + 5 * 60_000).toISOString()).run();
 }
 
 function jsonRequest(url: string, body: unknown): Request {
-  return new Request(url, { method: "POST", headers: withStepUp({ "content-type": "application/json" }), body: JSON.stringify(body) });
+  return new Request(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
 async function linkIdentityRoute(targetUserId: string, subject: string): Promise<Response> {
@@ -50,7 +50,7 @@ async function linkIdentityRoute(targetUserId: string, subject: string): Promise
 
 async function revokeIdentityLinkRoute(identityLinkId: string): Promise<Response> {
   const { POST } = await import("@/app/api/v1/identity/links/[id]/revocation/route");
-  return POST(new Request(`https://vat-msa.local/api/v1/identity/links/${identityLinkId}/revocation`, { method: "POST", headers: withStepUp() }), { params: Promise.resolve({ id: identityLinkId }) });
+  return POST(new Request(`https://vat-msa.local/api/v1/identity/links/${identityLinkId}/revocation`, { method: "POST" }), { params: Promise.resolve({ id: identityLinkId }) });
 }
 
 async function seedFixture(): Promise<void> {
@@ -98,7 +98,7 @@ describe("Security fix: linkIdentity/revokeIdentityLink tenant-scope enforcement
   });
 
   it("denies a tenant admin linking an identity to a user in a different taxpayer (the account-takeover path)", async () => {
-    actingAs(OWNER_A);
+    await actingAs(OWNER_A);
     const response = await linkIdentityRoute(OWNER_B.userId, ATTACKER_SUBJECT);
     expect(response.status).toBe(403);
     // Confirm no link was actually created for the attacker-controlled subject.
@@ -107,13 +107,13 @@ describe("Security fix: linkIdentity/revokeIdentityLink tenant-scope enforcement
   });
 
   it("denies a tenant admin linking an identity to a national-scope account", async () => {
-    actingAs(OWNER_A);
+    await actingAs(OWNER_A);
     const response = await linkIdentityRoute(NATIONAL_ADMIN.userId, ATTACKER_SUBJECT);
     expect(response.status).toBe(403);
   });
 
   it("allows a tenant admin linking an identity to a colleague within their own taxpayer", async () => {
-    actingAs(OWNER_A);
+    await actingAs(OWNER_A);
     const response = await linkIdentityRoute(COLLEAGUE_A.userId, "ext-colleague-a-second-device");
     expect(response.status).toBe(201);
     const body = await response.json();
@@ -121,7 +121,7 @@ describe("Security fix: linkIdentity/revokeIdentityLink tenant-scope enforcement
   });
 
   it("denies a tenant admin revoking another taxpayer's identity link", async () => {
-    actingAs(OWNER_A);
+    await actingAs(OWNER_A);
     const response = await revokeIdentityLinkRoute("ilink-owner-b-second");
     expect(response.status).toBe(403);
     const link = await env.DB.prepare("SELECT status FROM identity_links WHERE id=?").bind("ilink-owner-b-second").first<{ status: string }>();
@@ -129,7 +129,7 @@ describe("Security fix: linkIdentity/revokeIdentityLink tenant-scope enforcement
   });
 
   it("allows a tenant admin revoking a colleague's identity link within their own taxpayer", async () => {
-    actingAs(OWNER_A);
+    await actingAs(OWNER_A);
     const response = await revokeIdentityLinkRoute(`ilink-${COLLEAGUE_A.userId}`);
     expect(response.status).toBe(200);
     const link = await env.DB.prepare("SELECT status FROM identity_links WHERE id=?").bind(`ilink-${COLLEAGUE_A.userId}`).first<{ status: string }>();
@@ -137,7 +137,7 @@ describe("Security fix: linkIdentity/revokeIdentityLink tenant-scope enforcement
   });
 
   it("leaves a genuinely national-scope actor unrestricted across taxpayers", async () => {
-    actingAs(NATIONAL_ADMIN);
+    await actingAs(NATIONAL_ADMIN);
     const linkResponse = await linkIdentityRoute(OWNER_B.userId, "ext-owner-b-national-linked-device");
     expect(linkResponse.status).toBe(201);
     const revokeResponse = await revokeIdentityLinkRoute("ilink-owner-b-second");

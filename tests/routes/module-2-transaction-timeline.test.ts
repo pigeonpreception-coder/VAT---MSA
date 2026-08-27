@@ -18,8 +18,11 @@ type FixtureUser = { userId: string; externalUserId: string; email: string };
 const SELLER_OWNER: FixtureUser = { userId: "usr-tl-seller-owner", externalUserId: "ext-tl-seller-owner", email: "owner@tl-seller.test" };
 const NAMRA_ADMIN: FixtureUser = { userId: "usr-tl-namra", externalUserId: "ext-tl-namra", email: "namra@tl.test" };
 
-function actingAs(user: FixtureUser): void {
+/** Also grants a fresh, server-verified step-up (step_up_events row) for the acting user — CancelInvoice is step-up gated and there is no longer a header shortcut around lib/security/step-up.ts's real requireStepUp check. */
+async function actingAs(user: FixtureUser): Promise<void> {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
+  await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+    .bind(crypto.randomUUID(), user.userId, "TOTP", new Date().toISOString(), new Date(Date.now() + 5 * 60_000).toISOString()).run();
 }
 
 function invoicePayload(input: { sourceDocumentId: string; invoiceNumber: string }) {
@@ -90,7 +93,7 @@ describe("Module 2 GetTransactionTimeline (Phase D)", () => {
 
   it("shows a single CERTIFICATION event for a plain, uncorrected invoice", async () => {
     const { POST } = await import("@/app/api/v1/invoices/route");
-    actingAs(SELLER_OWNER);
+    await actingAs(SELLER_OWNER);
     const submitResponse = await POST(submitRequest(invoicePayload({ sourceDocumentId: "tl-plain-doc", invoiceNumber: "INV-TL-PLAIN" })));
     const submitted = await submitResponse.json();
 
@@ -107,7 +110,7 @@ describe("Module 2 GetTransactionTimeline (Phase D)", () => {
 
   it("shows CERTIFICATION and CORRECTION events, linked, reachable from either invoice id", async () => {
     const { POST } = await import("@/app/api/v1/invoices/route");
-    actingAs(SELLER_OWNER);
+    await actingAs(SELLER_OWNER);
     const originalResponse = await POST(submitRequest(invoicePayload({ sourceDocumentId: "tl-orig-doc", invoiceNumber: "INV-TL-ORIG" })));
     const original = await originalResponse.json();
 
@@ -141,15 +144,15 @@ describe("Module 2 GetTransactionTimeline (Phase D)", () => {
 
   it("shows CERTIFICATION and CANCELLATION events, linked", async () => {
     const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
-    actingAs(SELLER_OWNER);
+    await actingAs(SELLER_OWNER);
     const submitResponse = await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "tl-cancel-doc", invoiceNumber: "INV-TL-CANCEL" })));
     const submitted = await submitResponse.json();
 
     const { POST: cancelPOST } = await import("@/app/api/v1/invoices/[id]/cancellation/route");
-    actingAs(NAMRA_ADMIN);
+    await actingAs(NAMRA_ADMIN);
     await cancelPOST(new Request("https://vat-msa.local/api/v1/invoices/x/cancellation", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-vat-msa-auth-assurance": "MFA_STEP_UP", "x-vat-msa-reauthenticated-at": new Date().toISOString() },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ reason: "Confirmed duplicate submission with the taxpayer." }),
     }), { params: Promise.resolve({ id: submitted.invoice_id }) });
 

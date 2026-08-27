@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "administration:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const payload = await readBoundedJson(request, 4_096);
     const link = await linkIdentity(actor, payload, context.correlationId);
     return identityJson({ link }, context, 201);

@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "administration:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const administrator = await appointAdministrator(actor, await readBoundedJson(request, 4_096), organisationIdFrom(request));
     return controlPlaneJson({ administrator }, context, 201);
   } catch (error) {

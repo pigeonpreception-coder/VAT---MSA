@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "access-governance:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const revocation = await revokeAccessGrant(actor, await readBoundedJson(request, 4_096), organisationIdFrom(request));
     return controlPlaneJson({ revocation }, context);
   } catch (error) { return controlPlaneProblem(error, context); }

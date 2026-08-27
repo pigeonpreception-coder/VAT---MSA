@@ -91,7 +91,7 @@ export async function handleIncidentRevocation(request: Request, incidentId: str
     const user = await getCurrentUser();
     actorId = user.userId;
     requirePermission(user, "security:manage");
-    requireStepUp(request, user);
+    await requireStepUp(request, user);
     await enforceRateLimits([{ key: `security-revoke:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "security-revoke:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);

@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "organisations:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     const { id } = await contextValue.params;
     const payload = await readBoundedJson(request, 4_096);
     const membership = await assignMembership(actor, id, payload, context.correlationId);

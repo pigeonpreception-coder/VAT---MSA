@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   try {
     const actor = await getCurrentUser();
     requirePermission(actor, "access-governance:manage");
-    requireStepUp(request, actor);
+    await requireStepUp(request, actor);
     return controlPlaneJson({ review: await openQuarterlyAccessReview(actor, organisationIdFrom(request)) }, context, 201);
   } catch (error) { return controlPlaneProblem(error, context); }
 }

@@ -133,8 +133,21 @@ describe("Module 1 route-level access control (Phase E)", () => {
     });
   });
 
+  /**
+   * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #2): step-up
+   * is now a real, server-verified step_up_events row (see
+   * lib/data/mfa-repository.ts), not a caller-supplied header — these
+   * tests seed that table directly rather than setting the old
+   * x-vat-msa-auth-assurance/x-vat-msa-reauthenticated-at headers, which
+   * requireStepUp no longer reads at all.
+   */
   describe("step-up freshness (taxpayer suspension)", () => {
-    it("rejects a suspension with no step-up headers at all", async () => {
+    async function grantStepUp(userId: string, expiresAt: string): Promise<void> {
+      await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+        .bind(crypto.randomUUID(), userId, "TOTP", new Date().toISOString(), expiresAt).run();
+    }
+
+    it("rejects a suspension with no step-up event at all", async () => {
       const { POST } = await import("@/app/api/v1/taxpayers/[id]/suspension/route");
       actingAs(NAMRA_ADMIN);
       const response = await POST(
@@ -146,52 +159,36 @@ describe("Module 1 route-level access control (Phase E)", () => {
       expect(body.detail).toMatch(/step-up/i);
     });
 
-    it("rejects a suspension with an expired step-up (older than the 5-minute window)", async () => {
+    it("rejects a suspension with an expired step-up event (older than the 5-minute window)", async () => {
       const { POST } = await import("@/app/api/v1/taxpayers/[id]/suspension/route");
       actingAs(NAMRA_ADMIN);
-      const staleTimestamp = new Date(Date.now() - 10 * 60_000).toISOString();
-      const request = new Request("https://vat-msa.local/api/v1/taxpayers/tp-a/suspension", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-vat-msa-auth-assurance": "MFA_STEP_UP",
-          "x-vat-msa-reauthenticated-at": staleTimestamp,
-        },
-        body: JSON.stringify({ reason: "Repeated non-filing beyond the statutory deadline." }),
-      });
-      const response = await POST(request, { params: Promise.resolve({ id: "tp-a" }) });
+      await grantStepUp(NAMRA_ADMIN.userId, new Date(Date.now() - 60_000).toISOString());
+      const response = await POST(
+        jsonRequest("https://vat-msa.local/api/v1/taxpayers/tp-a/suspension", { reason: "Repeated non-filing beyond the statutory deadline." }),
+        { params: Promise.resolve({ id: "tp-a" }) },
+      );
       expect(response.status).toBe(403);
     });
 
-    it("rejects a suspension with a fresh but insufficient assurance level (not MFA_STEP_UP)", async () => {
+    it("rejects a suspension carrying another user's step-up event", async () => {
       const { POST } = await import("@/app/api/v1/taxpayers/[id]/suspension/route");
       actingAs(NAMRA_ADMIN);
-      const request = new Request("https://vat-msa.local/api/v1/taxpayers/tp-a/suspension", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-vat-msa-auth-assurance": "PASSWORD",
-          "x-vat-msa-reauthenticated-at": new Date().toISOString(),
-        },
-        body: JSON.stringify({ reason: "Repeated non-filing beyond the statutory deadline." }),
-      });
-      const response = await POST(request, { params: Promise.resolve({ id: "tp-a" }) });
+      await grantStepUp(OWNER_A.userId, new Date(Date.now() + 5 * 60_000).toISOString());
+      const response = await POST(
+        jsonRequest("https://vat-msa.local/api/v1/taxpayers/tp-a/suspension", { reason: "Repeated non-filing beyond the statutory deadline." }),
+        { params: Promise.resolve({ id: "tp-a" }) },
+      );
       expect(response.status).toBe(403);
     });
 
-    it("accepts a suspension with a fresh MFA_STEP_UP assurance", async () => {
+    it("accepts a suspension with a fresh, server-verified step-up event", async () => {
       const { POST } = await import("@/app/api/v1/taxpayers/[id]/suspension/route");
       actingAs(NAMRA_ADMIN);
-      const request = new Request("https://vat-msa.local/api/v1/taxpayers/tp-a/suspension", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-vat-msa-auth-assurance": "MFA_STEP_UP",
-          "x-vat-msa-reauthenticated-at": new Date().toISOString(),
-        },
-        body: JSON.stringify({ reason: "Repeated non-filing beyond the statutory deadline." }),
-      });
-      const response = await POST(request, { params: Promise.resolve({ id: "tp-a" }) });
+      await grantStepUp(NAMRA_ADMIN.userId, new Date(Date.now() + 5 * 60_000).toISOString());
+      const response = await POST(
+        jsonRequest("https://vat-msa.local/api/v1/taxpayers/tp-a/suspension", { reason: "Repeated non-filing beyond the statutory deadline." }),
+        { params: Promise.resolve({ id: "tp-a" }) },
+      );
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.suspension).toMatchObject({ taxpayerId: "tp-a", vatStatus: "SUSPENDED" });

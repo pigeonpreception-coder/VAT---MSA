@@ -18,8 +18,11 @@ type FixtureUser = { userId: string; externalUserId: string; email: string };
 const SELLER_OWNER: FixtureUser = { userId: "usr-lc-seller-owner", externalUserId: "ext-lc-seller-owner", email: "owner@lc-seller.test" };
 const NAMRA_ADMIN: FixtureUser = { userId: "usr-lc-namra", externalUserId: "ext-lc-namra", email: "namra@lc.test" };
 
-function actingAs(user: FixtureUser): void {
+/** Also grants a fresh, server-verified step-up (step_up_events row) for the acting user — CancelInvoice is step-up gated and there is no longer a header shortcut around lib/security/step-up.ts's real requireStepUp check. */
+async function actingAs(user: FixtureUser): Promise<void> {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
+  await env.DB.prepare("INSERT INTO step_up_events (id,user_id,method,verified_at,expires_at) VALUES (?,?,?,?,?)")
+    .bind(crypto.randomUUID(), user.userId, "TOTP", new Date().toISOString(), new Date(Date.now() + 5 * 60_000).toISOString()).run();
 }
 
 function invoicePayload(input: { sourceDocumentId: string; invoiceNumber: string }) {
@@ -49,12 +52,11 @@ function submitRequest(body: unknown): Request {
   });
 }
 
-function cancelRequest(reason: string, stepUp = true): Request {
+function cancelRequest(reason: string): Request {
   return new Request("https://vat-msa.local/api/v1/invoices/x/cancellation", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(stepUp ? { "x-vat-msa-auth-assurance": "MFA_STEP_UP", "x-vat-msa-reauthenticated-at": new Date().toISOString() } : {}),
     },
     body: JSON.stringify({ reason }),
   });
@@ -97,7 +99,7 @@ describe("Module 2 invoice lifecycle (Phase B)", () => {
 
   it("rejects a second invoice reusing the same invoice_number for the same supplier", async () => {
     const { POST } = await import("@/app/api/v1/invoices/route");
-    actingAs(SELLER_OWNER);
+    await actingAs(SELLER_OWNER);
     const first = await POST(submitRequest(invoicePayload({ sourceDocumentId: "num-doc-1", invoiceNumber: "INV-DUP-001" })));
     expect(first.status).toBe(201);
 
@@ -108,24 +110,24 @@ describe("Module 2 invoice lifecycle (Phase B)", () => {
   describe("CancelInvoice", () => {
     it("denies the submitting taxpayer cancelling their own invoice (officer-only)", async () => {
       const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const submitResponse = await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "cancel-doc-1", invoiceNumber: "INV-CANCEL-001" })));
       const invoiceId = (await submitResponse.json()).invoice_id;
 
       const { POST: cancelPOST } = await import("@/app/api/v1/invoices/[id]/cancellation/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const response = await cancelPOST(cancelRequest("Attempting self-cancellation."), { params: Promise.resolve({ id: invoiceId }) });
       expect(response.status).toBe(403);
     });
 
     it("cancels the invoice for a NamRA officer, reversing its ledger entries, and is idempotent", async () => {
       const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const submitResponse = await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "cancel-doc-2", invoiceNumber: "INV-CANCEL-002" })));
       const invoiceId = (await submitResponse.json()).invoice_id;
 
       const { POST: cancelPOST } = await import("@/app/api/v1/invoices/[id]/cancellation/route");
-      actingAs(NAMRA_ADMIN);
+      await actingAs(NAMRA_ADMIN);
       const response = await cancelPOST(cancelRequest("Duplicate data entry by the taxpayer, confirmed with NamRA."), { params: Promise.resolve({ id: invoiceId }) });
       expect(response.status).toBe(200);
       expect((await response.json()).cancellation).toEqual({ invoiceId, status: "CANCELLED" });
@@ -145,7 +147,7 @@ describe("Module 2 invoice lifecycle (Phase B)", () => {
 
     it("rejects cancelling an invoice that already has an active credit note against it", async () => {
       const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const originalResponse = await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "cancel-doc-3", invoiceNumber: "INV-CANCEL-003" })));
       const original = await originalResponse.json();
 
@@ -164,7 +166,7 @@ describe("Module 2 invoice lifecycle (Phase B)", () => {
       expect(creditResponse.status).toBe(201);
 
       const { POST: cancelPOST } = await import("@/app/api/v1/invoices/[id]/cancellation/route");
-      actingAs(NAMRA_ADMIN);
+      await actingAs(NAMRA_ADMIN);
       const response = await cancelPOST(cancelRequest("Trying to cancel after a credit note exists."), { params: Promise.resolve({ id: original.invoice_id }) });
       expect(response.status).toBe(409);
     });
@@ -173,12 +175,12 @@ describe("Module 2 invoice lifecycle (Phase B)", () => {
   describe("VerifyInvoice correction and cancellation lineage", () => {
     it("shows a cancelled invoice's status publicly", async () => {
       const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const submitResponse = await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "verify-cancel-doc", invoiceNumber: "INV-VERIFY-CANCEL" })));
       const submitted = await submitResponse.json();
 
       const { POST: cancelPOST } = await import("@/app/api/v1/invoices/[id]/cancellation/route");
-      actingAs(NAMRA_ADMIN);
+      await actingAs(NAMRA_ADMIN);
       await cancelPOST(cancelRequest("Verifying public lineage after cancellation."), { params: Promise.resolve({ id: submitted.invoice_id }) });
 
       const { GET: verifyGET } = await import("@/app/api/v1/verify/[token]/route");
@@ -190,7 +192,7 @@ describe("Module 2 invoice lifecycle (Phase B)", () => {
 
     it("shows correction lineage on both the original and the correction", async () => {
       const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
-      actingAs(SELLER_OWNER);
+      await actingAs(SELLER_OWNER);
       const originalResponse = await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "verify-credit-doc", invoiceNumber: "INV-VERIFY-ORIG" })));
       const original = await originalResponse.json();
 
