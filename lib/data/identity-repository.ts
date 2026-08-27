@@ -560,13 +560,27 @@ export async function listIdentityLinks(userId: string): Promise<IdentityLinkSum
  * Deliberately records assurance_level='ADMINISTRATIVE_LINK' rather than
  * letting the caller assert a stronger level this manual action didn't
  * actually establish.
+ *
+ * 2026-08-27 security fix: `administration:manage` is a tenant-grantable
+ * permission (TAXPAYER_OWNER/TAXPAYER_ADMIN hold it for ordinary
+ * organisation administration, e.g. inviteEmployee), but this command had
+ * no scope check on the *target* user at all — a tenant admin could link a
+ * platform subject they control to any app_users row, including a
+ * national-scope account, and authenticate as it on the very next request.
+ * A non-national actor may now only link an identity to a user within
+ * their own taxpayer's organisation; a national-scope actor (the intended
+ * "real" identity administrator, e.g. NAMRA_SYSTEM_ADMIN) is unrestricted,
+ * matching resolveTaxpayer's own established scope pattern.
  */
 export async function linkIdentity(actor: UserContext, input: unknown, correlationId: string): Promise<IdentityLinkSummary> {
   const link = normalizeIdentityLink(input);
   const db = await ensureDatabase();
-  const targetUser = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(link.userId).first<{ id: string; status: string }>();
+  const targetUser = await db.prepare("SELECT id,status,taxpayer_id FROM app_users WHERE id=?").bind(link.userId).first<{ id: string; status: string; taxpayer_id: string | null }>();
   if (!targetUser) throw new IdentityValidationError([{ code: "USER_NOT_FOUND", path: "/user_id", message: "The target user does not exist." }]);
   if (targetUser.status !== "ACTIVE") throw new IdentityValidationError([{ code: "USER_NOT_ACTIVE", path: "/user_id", message: "The target user is not active." }]);
+  if (!isNationalScope(actor) && (actor.taxpayerId == null || targetUser.taxpayer_id !== actor.taxpayerId)) {
+    throw new AccessDeniedError("You may only link an identity to a user within your own taxpayer organisation.");
+  }
   const provider = await db.prepare("SELECT id,status,configuration_status FROM identity_providers WHERE provider_key=?").bind(link.providerKey)
     .first<{ id: string; status: string; configuration_status: string }>();
   if (!provider) throw new IdentityValidationError([{ code: "PROVIDER_NOT_FOUND", path: "/provider_key", message: "The identity provider is not registered." }]);
@@ -597,11 +611,21 @@ export async function linkIdentity(actor: UserContext, input: unknown, correlati
  * authenticating on its very next request. Admin-only: self-revocation in
  * a header-trust model with no separate login screen risks a lockout with
  * no recovery path.
+ *
+ * 2026-08-27 security fix: same missing-scope-check issue as linkIdentity
+ * above — a tenant admin could otherwise revoke any other user's session
+ * platform-wide, including a national-scope account's. Same fix: a
+ * non-national actor may only revoke a link belonging to a user within
+ * their own taxpayer's organisation.
  */
 export async function revokeIdentityLink(actor: UserContext, identityLinkId: string, correlationId: string): Promise<{ id: string; status: string }> {
   const db = await ensureDatabase();
-  const link = await db.prepare("SELECT id,user_id,status FROM identity_links WHERE id=?").bind(identityLinkId).first<{ id: string; user_id: string; status: string }>();
+  const link = await db.prepare(`SELECT l.id,l.user_id,l.status,u.taxpayer_id FROM identity_links l JOIN app_users u ON u.id=l.user_id WHERE l.id=?`)
+    .bind(identityLinkId).first<{ id: string; user_id: string; status: string; taxpayer_id: string | null }>();
   if (!link) throw new IdentityValidationError([{ code: "IDENTITY_LINK_NOT_FOUND", path: "/identity_link_id", message: "The identity link does not exist." }]);
+  if (!isNationalScope(actor) && (actor.taxpayerId == null || link.taxpayer_id !== actor.taxpayerId)) {
+    throw new AccessDeniedError("You may only revoke an identity link belonging to a user within your own taxpayer organisation.");
+  }
   if (link.status === "REVOKED") return { id: link.id, status: "REVOKED" };
   await db.batch([
     db.prepare("UPDATE identity_links SET status='REVOKED' WHERE id=?").bind(link.id),

@@ -13,7 +13,7 @@
 
 **Gaps:**
 1. **CRITICAL — step-up/MFA is client-asserted and forgeable.** `requireStepUp` (`lib/security/step-up.ts:7-17`) trusts two request headers the *caller* supplies (`x-vat-msa-auth-assurance`, `x-vat-msa-reauthenticated-at`). There is no server-side step-up record anywhere. All 28 "step-up gated" commands (taxpayer suspension, VAT-rule approval, invoice cancellation, identity link/revoke, platform staff provisioning, incident access revocation, etc.) are effectively ungated.
-2. **CRITICAL — full account takeover via `LinkIdentity`.** `linkIdentity` (`lib/data/identity-repository.ts:564-588`) performs **no tenant-scope check** on the target `app_users` row. A `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` (who holds `administration:manage`) can link a platform subject they control to *any* `app_users` row — including `SUPER_ADMIN` — and authenticate as that user. The sibling `revokeIdentityLink` (`:601-612`) has the same missing check, letting a tenant admin revoke *any* user's session.
+2. ~~**CRITICAL — full account takeover via `LinkIdentity`.**~~ **FIXED 2026-08-27.** `linkIdentity`/`revokeIdentityLink` (`lib/data/identity-repository.ts:564-588`, `:615-633`) previously performed no tenant-scope check on the target `app_users` row/link — a `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` could link a platform subject they control to any user (including a national-scope account) and authenticate as it, or revoke any other user's session. Both now require a non-national actor's target to share their own `taxpayer_id`; a genuinely national-scope actor remains unrestricted. Proven in `tests/routes/security-identity-link-scope.test.ts`.
 3. **HIGH — the "protected-permission ceiling" is a denylist that protects almost nothing.** `PROTECTED_PERMISSION_PREFIXES` (`lib/domain/control-plane.ts:91`) only actually blocks `platform:`. `createOrganisationRole` will happily grant a tenant-defined role `audit:read`, `security:read`, `reconciliation:manage`, `refunds:review`, `administration:manage`, etc. Most sensitive commands survive because the repository layer independently re-checks `isNationalScope`; the ones that don't are listed under domains 3 and 8.
 4. **MEDIUM** — no PAM/JIT elevation; grants are permanent until revoked.
 
@@ -93,7 +93,7 @@ Ranked by severity × cheapness within this repo's existing patterns (S = days, 
 
 | # | Item | Severity | Effort |
 |---|---|---|---|
-| 1 | Scope-check `linkIdentity`/`revokeIdentityLink` (closes full account-takeover path) | CRITICAL | S |
+| 1 | ~~Scope-check `linkIdentity`/`revokeIdentityLink` (closes full account-takeover path)~~ | CRITICAL | **DONE 2026-08-27** |
 | 2 | Make step-up server-verified (new `step_up_events` table + command) | CRITICAL | M |
 | 3 | Add a CI security gate (one workflow file; tools already exist and pass) | HIGH | S |
 | 4 | Emit `RATE_LIMIT_EXCEEDED`/`AUTHORISATION_DENIED` from every handler (wiring only) | HIGH | S |
