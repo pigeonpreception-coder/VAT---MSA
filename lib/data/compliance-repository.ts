@@ -210,6 +210,28 @@ type VersionForClaim = {
 
 type RefundClaimCheckResult = { code: string; status: "PASS" | "FAIL" | "NOT_CONFIGURED"; rationale: string };
 
+const RISK_SEVERITY_RANK: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+
+/**
+ * Module 9 Phase C: "Reuse Module 4's Risk.EvaluateRisk — do not fork a
+ * second risk engine here." This reads the taxpayer's own OPEN
+ * risk_indicators — the exact rows Module 4 Phase A's evaluateRisk rule
+ * catalogue writes — rather than re-deriving any risk signal independently.
+ * A refund claim never triggers a fresh EvaluateRisk run itself (that stays
+ * an explicit, national-scope-gated command an officer chooses to run);
+ * this only consumes whatever signal already exists on record at claim
+ * time, exactly the same way Module 4's own case-escalation path
+ * (approveRiskAction) consumes it.
+ */
+async function reuseTaxpayerRiskSignal(db: D1Database, taxpayerId: string): Promise<{ severity: string | null; openCount: number }> {
+  const rows = await db.prepare("SELECT severity FROM risk_indicators WHERE taxpayer_id=? AND status='OPEN'").bind(taxpayerId).all<{ severity: string }>();
+  let highest: string | null = null;
+  for (const row of rows.results) {
+    if (!highest || (RISK_SEVERITY_RANK[row.severity] ?? 0) > (RISK_SEVERITY_RANK[highest] ?? 0)) highest = row.severity;
+  }
+  return { severity: highest, openCount: rows.results.length };
+}
+
 /**
  * Module 9 Phase B: the return version, its rule set, the taxpayer's
  * reconciliation state and the exact set of invoices grounding the claim's
@@ -271,16 +293,24 @@ async function buildRefundClaimSnapshot(db: D1Database, version: VersionForClaim
  * AUTHORITY`) is to say so explicitly rather than silently pass a check
  * nothing actually evaluated.
  */
-async function evaluateRefundClaimChecks(db: D1Database, version: VersionForClaim, filed: boolean): Promise<RefundClaimCheckResult[]> {
+async function evaluateRefundClaimChecks(db: D1Database, version: VersionForClaim, filed: boolean, riskSignal: { severity: string | null; openCount: number }): Promise<RefundClaimCheckResult[]> {
   const debt = await db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS total FROM tax_obligations WHERE taxpayer_id=? AND status='PENDING'").bind(version.taxpayer_id).first<{ total: number }>();
   const frequency = await db.prepare("SELECT COUNT(*) AS n FROM refund_claims WHERE taxpayer_id=? AND requested_at >= datetime('now','-90 days')").bind(version.taxpayer_id).first<{ n: number }>();
   const claimCount = (frequency?.n ?? 0) + 1;
+  const riskFails = riskSignal.severity === "HIGH" || riskSignal.severity === "CRITICAL";
   return [
     { code: "ELIGIBILITY_NEGATIVE_NET_POSITION", status: "PASS", rationale: `The return's net VAT position is ${version.net_payable_cents} cents, a negative balance confirmed before this claim was accepted.` },
     { code: "ELIGIBILITY_RETURN_FILED", status: filed ? "PASS" : "FAIL", rationale: filed ? "The underlying VAT return is FILED." : "The underlying VAT return has not been filed yet; the claim is blocked pending filing." },
     { code: "DUPLICATE_CLAIM", status: "PASS", rationale: "No other refund claim exists for this VAT return version (enforced by a unique constraint on refund_claims.vat_return_version_id)." },
     { code: "DEBT_OFFSET_PREVIEW", status: "PASS", rationale: `${debt?.total ?? 0} cents of PENDING statutory debt is on record today. Informational only — the authoritative offset is recomputed live against current obligations at PAYMENT_AUTHORISATION, never taken from this preview.` },
     { code: "ANOMALY_CLAIM_FREQUENCY", status: claimCount >= 3 ? "FAIL" : "PASS", rationale: `${claimCount} refund claim(s) from this taxpayer within the trailing 90 days, including this one. Advisory only — does not block claim creation.` },
+    {
+      code: "RISK_INDICATOR_SIGNAL",
+      status: riskFails ? "FAIL" : "PASS",
+      rationale: riskSignal.openCount
+        ? `${riskSignal.openCount} open risk indicator(s) on record for this taxpayer from Module 4's EvaluateRisk, highest severity ${riskSignal.severity}. This is the same persisted signal EvaluateRisk itself produces, not a separately forked risk assessment — it also elevates this claim's risk_tier below and, at ${riskFails ? "HIGH/CRITICAL, " : ""}routes it to the enhanced maker-checker lane.`
+        : "No open risk indicators on record for this taxpayer in Module 4's risk_indicators table.",
+    },
     { code: "IDENTITY_VERIFICATION", status: "NOT_CONFIGURED", rationale: "No identity verification provider is configured for this pilot deployment; this check cannot be evaluated." },
     { code: "BANK_ACCOUNT_OWNERSHIP", status: "NOT_CONFIGURED", rationale: "No bank/account-ownership verification provider is configured for this pilot deployment; this check cannot be evaluated." },
     { code: "SANCTIONS_SCREENING", status: "NOT_CONFIGURED", rationale: "No sanctions/AML screening provider is configured for this pilot deployment; this check cannot be evaluated." },
@@ -305,10 +335,14 @@ export async function requestRefund(payload: RefundRequestSubmission, actor: Use
   const amount = Math.abs(version.net_payable_cents);
   const filed = version.status === "FILED";
   const status: RefundClaimStatus = filed ? "RECEIVED" : "BLOCKED_RETURN_NOT_FILED";
-  const riskTier = amount >= 5_000_000 ? "CRITICAL" : amount >= 1_000_000 ? "HIGH" : "MEDIUM";
+  const amountTier = amount >= 5_000_000 ? "CRITICAL" : amount >= 1_000_000 ? "HIGH" : "MEDIUM";
+  const riskSignal = await reuseTaxpayerRiskSignal(db, version.taxpayer_id);
+  // Module 9 Phase C: risk_tier is the more severe of the amount-based tier and Module 4's own live
+  // open-risk-indicator signal — reusing EvaluateRisk's persisted output, never forking a second engine.
+  const riskTier = riskSignal.severity && RISK_SEVERITY_RANK[riskSignal.severity] > RISK_SEVERITY_RANK[amountTier] ? riskSignal.severity : amountTier;
   const now = new Date().toISOString();
   const snapshot = await buildRefundClaimSnapshot(db, version, now);
-  const checks = await evaluateRefundClaimChecks(db, version, filed);
+  const checks = await evaluateRefundClaimChecks(db, version, filed, riskSignal);
   await db.batch([
     db.prepare(`INSERT INTO refund_claims
       (id,claim_number,organisation_id,taxpayer_id,vat_return_version_id,amount_cents,currency,status,evidence_status,risk_tier,requested_by,requested_at,approved_by,approved_at,payment_instruction_id,claim_snapshot,claim_snapshot_hash)
@@ -344,7 +378,7 @@ export async function getRefundClaimChecks(claimId: string, actor: UserContext) 
 type RefundClaimRow = {
   id: string; taxpayer_id: string; organisation_id: string; status: RefundClaimStatus;
   requested_by: string; resume_status: RefundClaimStatus | null; amount_cents: number;
-  vat_return_version_id: string;
+  vat_return_version_id: string; risk_tier: string;
 };
 
 /**
@@ -366,15 +400,48 @@ type RefundClaimRow = {
  * DISABLED PENDING AUTHORITY — do not build toward a live payment
  * instruction." Paid/Failed/Reversed and the actual payment connector are
  * Phase D's separate, not-yet-started job.
+ *
+ * Module 9 Phase C: two-distinct-actor maker-checker, per the playbook's
+ * "for any material outcome." The claim's original self-review denial
+ * above stays the first-line check; this adds a second, narrower one —
+ * the actor approving a transition must differ from the actor who
+ * performed the *immediately preceding* transition on this same claim —
+ * for two cases: (1) universally, the APPROVE that lands the claim on
+ * PAYMENT_PENDING (the material, fund-releasing outcome, checked
+ * regardless of risk tier), and (2) for every APPROVE on a HIGH/CRITICAL
+ * risk_tier claim (the "route by risk tier to configured review lane"
+ * requirement — a standard-risk claim only needs a genuine two-actor
+ * handoff at the final gate; an elevated-risk claim needs a genuinely
+ * distinct reviewer at every stage, not just the last one). risk_tier
+ * itself is set once at claim time in requestRefund, reusing Module 4's
+ * own risk_indicators signal — see reuseTaxpayerRiskSignal. Deliberately
+ * not built on Module 8's Workflow engine: migrating the refund claim
+ * state machine onto that generic engine would be a large, cross-module
+ * structural change with no functional gain here, since
+ * refund_claim_transitions already records every actor per stage — the
+ * same "not this phase's job" reasoning Phase A already documented for
+ * the same question.
  */
 export async function transitionRefundClaim(claimId: string, payload: unknown, actor: UserContext, key: string, correlationId: string) {
   validateKey(key);
   if (!isNationalScope(actor)) throw new AccessDeniedError("Only an authorised national refund role may transition a refund claim.");
   const input = validateRefundClaimTransition(payload);
   const db = await ensureDatabase();
-  const claim = await db.prepare("SELECT id,taxpayer_id,organisation_id,status,requested_by,resume_status,amount_cents,vat_return_version_id FROM refund_claims WHERE id=?").bind(claimId).first<RefundClaimRow>();
+  const claim = await db.prepare("SELECT id,taxpayer_id,organisation_id,status,requested_by,resume_status,amount_cents,vat_return_version_id,risk_tier FROM refund_claims WHERE id=?").bind(claimId).first<RefundClaimRow>();
   if (!claim) throw new ComplianceResourceError("Refund claim was not found.", 404);
   if (claim.requested_by === actor.userId) throw new AccessDeniedError("Maker-checker separation prevents reviewing your own refund request.");
+  if (input.action === "APPROVE") {
+    const isMaterialOutcome = claim.status === "PAYMENT_AUTHORISATION";
+    const isEnhancedLane = claim.risk_tier === "HIGH" || claim.risk_tier === "CRITICAL";
+    if (isMaterialOutcome || isEnhancedLane) {
+      const lastTransition = await db.prepare("SELECT actor_id FROM refund_claim_transitions WHERE refund_claim_id=? ORDER BY occurred_at DESC LIMIT 1").bind(claimId).first<{ actor_id: string }>();
+      if (lastTransition && lastTransition.actor_id === actor.userId) {
+        throw new AccessDeniedError(isMaterialOutcome
+          ? "Maker-checker separation requires a distinct reviewing officer to authorise payment."
+          : "This claim's risk tier requires a distinct reviewing officer at every stage.");
+      }
+    }
+  }
   const hash = await sha256Hex(stableStringify({ claim_id: claim.id, input }));
   const prior = await replay(db, actor.userId, "TRANSITION_REFUND_CLAIM", key, hash);
   if (prior) return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(prior).first<Record<string, unknown>>();

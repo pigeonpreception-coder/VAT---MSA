@@ -31,6 +31,10 @@ type FixtureUser = { userId: string; externalUserId: string; email: string };
 const CLAIMANT: FixtureUser = { userId: "usr-rf-claimant", externalUserId: "ext-rf-claimant", email: "owner@rf-claimant.test" };
 const COLLEAGUE: FixtureUser = { userId: "usr-rf-colleague", externalUserId: "ext-rf-colleague", email: "colleague@rf-claimant.test" };
 const REFUND_OFFICER: FixtureUser = { userId: "usr-rf-officer", externalUserId: "ext-rf-officer", email: "officer@rf-test.test" };
+// Module 9 Phase C: this fixture's 1,000,000-cent claims are amount-tier HIGH (>=1,000,000), which Phase C's
+// enhanced maker-checker lane now requires a genuinely distinct officer at every stage for — a second officer
+// is needed wherever a HIGH/CRITICAL-tier claim walks through multiple consecutive approvals.
+const REFUND_OFFICER_2: FixtureUser = { userId: "usr-rf-officer-2", externalUserId: "ext-rf-officer-2", email: "officer-2@rf-test.test" };
 
 function actingAs(user: FixtureUser): void {
   __setRequestHeaders({ "oai-authenticated-user-id": user.externalUserId, "oai-authenticated-user-email": user.email });
@@ -57,7 +61,9 @@ async function seedFixture(): Promise<void> {
       .bind(COLLEAGUE.userId, COLLEAGUE.externalUserId, COLLEAGUE.email, "Refund Claimant Admin", "TAXPAYER_ADMIN", "tp-rf-claimant", "ACTIVE", now),
     db.prepare(`INSERT INTO app_users (id,external_user_id,email,display_name,role,taxpayer_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)`)
       .bind(REFUND_OFFICER.userId, REFUND_OFFICER.externalUserId, REFUND_OFFICER.email, "NamRA Refund Officer", "NAMRA_REFUND_OFFICER", null, "ACTIVE", now),
-    ...[CLAIMANT, COLLEAGUE, REFUND_OFFICER].map((user) =>
+    db.prepare(`INSERT INTO app_users (id,external_user_id,email,display_name,role,taxpayer_id,status,created_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(REFUND_OFFICER_2.userId, REFUND_OFFICER_2.externalUserId, REFUND_OFFICER_2.email, "NamRA Refund Officer Two", "NAMRA_REFUND_OFFICER", null, "ACTIVE", now),
+    ...[CLAIMANT, COLLEAGUE, REFUND_OFFICER, REFUND_OFFICER_2].map((user) =>
       db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
         VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${user.userId}`, user.userId, "idp-rf-workspace", user.externalUserId, user.email, "PILOT", "ACTIVE", now, now)),
     db.prepare(`INSERT INTO tax_rule_sets (id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference,status,approved_by,approved_at,created_at)
@@ -131,11 +137,13 @@ describe("Module 9 refund claim state machine: RequestRefund, TransitionRefundCl
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind("ob-rf-1", "org-rf-claimant", "tp-rf-claimant", "VAT_RETURN", "2025-12", "2026-01-25", 300_000, "NAD", "PENDING", "VAT_MSA", null, "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z").run();
 
+    // This claim is amount-tier HIGH (1,000,000 cents), so Phase C's enhanced maker-checker lane requires a
+    // genuinely distinct officer at every stage, not just the final one — the two officers alternate below.
     expect((await transitionRoute(REFUND_OFFICER, claimId, "APPROVE")).status).toBe(200);
     let claim = await env.DB.prepare("SELECT status FROM refund_claims WHERE id=?").bind(claimId).first<{ status: string }>();
     expect(claim?.status).toBe("RISK_REVIEW");
 
-    expect((await transitionRoute(REFUND_OFFICER, claimId, "APPROVE")).status).toBe(200);
+    expect((await transitionRoute(REFUND_OFFICER_2, claimId, "APPROVE")).status).toBe(200);
     claim = await env.DB.prepare("SELECT status FROM refund_claims WHERE id=?").bind(claimId).first<{ status: string }>();
     expect(claim?.status).toBe("OFFICER_REVIEW");
 
@@ -143,13 +151,13 @@ describe("Module 9 refund claim state machine: RequestRefund, TransitionRefundCl
     claim = await env.DB.prepare("SELECT status FROM refund_claims WHERE id=?").bind(claimId).first<{ status: string }>();
     expect(claim?.status).toBe("PAYMENT_AUTHORISATION");
 
-    const final = await transitionRoute(REFUND_OFFICER, claimId, "APPROVE");
+    const final = await transitionRoute(REFUND_OFFICER_2, claimId, "APPROVE");
     expect(final.status).toBe(200);
     const finalBody = await final.json();
     expect(finalBody.resource.status).toBe("PAYMENT_PENDING");
     expect(finalBody.resource.offset_amount_cents).toBe(300_000);
     expect(finalBody.resource.net_payable_cents).toBe(700_000);
-    expect(finalBody.resource.approved_by).toBe(REFUND_OFFICER.userId);
+    expect(finalBody.resource.approved_by).toBe(REFUND_OFFICER_2.userId);
 
     // Deliberately never wrote a payment instruction — Module 9 Phase D's job.
     const paymentRow = await env.DB.prepare("SELECT COUNT(*) AS n FROM payment_instructions WHERE refund_claim_id=?").bind(claimId).first<{ n: number }>();
