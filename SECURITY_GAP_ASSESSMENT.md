@@ -77,7 +77,7 @@ What exists is precisely: **a 3-rule fixed-threshold catalogue over the system's
 
 Real, working tools exist: `secret-scan.mjs` (verified clean), `generate-sbom.mjs` (real CycloneDX 1.5 output), `pnpm audit` script, an aggregate `security:ci` script.
 
-**Gap — HIGH, and the cheapest fix in the whole assessment: none of it runs automatically.** No `.github/` directory, no CI config of any kind, no git hooks. `security:ci` is a script nobody invokes — Sec 42's "no deployment bypasses mandatory security gates" is currently true only because there are no gates at all.
+~~**Gap — HIGH, and the cheapest fix in the whole assessment: none of it runs automatically.**~~ **FIXED 2026-08-27.** `.github/workflows/security-ci.yml` now runs lint, typecheck, unit tests, the secret scan, SBOM generation, the production build, and `pnpm audit --audit-level high` as individually-visible, blocking checks on every push/PR to `main` — Sec 42's "no deployment bypasses mandatory security gates" now has a real gate to bypass. Fixing this surfaced a real, separate bug: `security:ci`/`security:audit`'s own script bodies invoked bare `pnpm` internally, which does not resolve on every developer machine (confirmed on this session's own Windows/corepack setup, where only `corepack pnpm` resolves) — both scripts now consistently use `corepack pnpm`, and `package.json` gained a `packageManager` pin (`pnpm@11.23.0`) so CI and every local machine install the identical, exact version. `pnpm audit --audit-level high` was verified to genuinely pass today (one pre-existing MODERATE finding, below the HIGH threshold) before wiring it in as a blocking step, so this gate starts green rather than immediately red. Enabling the workflow as a *required* branch-protection check on `main` is a GitHub repository setting, not a code change — that step is still open, and needs someone with repo-admin access to flip it. `tools/secret-scan.mjs` remains an honest heuristic local baseline, not an enterprise-grade secret scanner (its own passing message says so); a dedicated secret-scanning service (GitHub secret scanning/push protection, or gitleaks/trufflehog in CI) is a genuinely separate, still-open enhancement on top of this gate, deliberately out of this item's narrow scope.
 
 ## 11. File/upload security (Sec 26)
 
@@ -95,7 +95,7 @@ Ranked by severity × cheapness within this repo's existing patterns (S = days, 
 |---|---|---|---|
 | 1 | ~~Scope-check `linkIdentity`/`revokeIdentityLink` (closes full account-takeover path)~~ | CRITICAL | **DONE 2026-08-27** |
 | 2 | ~~Make step-up server-verified (new `step_up_events` table + command)~~ | CRITICAL | **DONE 2026-08-27** |
-| 3 | Add a CI security gate (one workflow file; tools already exist and pass) | HIGH | S |
+| 3 | ~~Add a CI security gate (one workflow file; tools already exist and pass)~~ | HIGH | **DONE 2026-08-27** (workflow live; enabling it as a *required* branch-protection check is a repo setting, not code — still open) |
 | 4 | ~~Emit `RATE_LIMIT_EXCEEDED`/`AUTHORISATION_DENIED` from every handler (wiring only)~~ | HIGH | **DONE 2026-08-27** |
 | 5 | ~~Replace the protected-permission denylist with an allowlist~~ | HIGH | **DONE 2026-08-27** |
 | 6 | ~~Scope `assignException`/`resolveException`~~; add a tenant-isolation test suite | MEDIUM→HIGH | **assignException/resolveException DONE 2026-08-27**; systematic isolation suite still open (M) |

@@ -1,0 +1,67 @@
+name: Security CI
+
+# SECURITY_GAP_ASSESSMENT.md item #3: the tools already existed and already
+# passed (lint, typecheck, unit tests, the local secret scan, SBOM
+# generation, the production build, and a dependency vulnerability audit)
+# — none of it ran automatically. Sec 42's "no deployment bypasses
+# mandatory security gates" was true only because there were no gates at
+# all. This workflow is that gate: every push and pull request to `main`
+# runs the full set as individually-visible, blocking checks.
+#
+# Each step below is the exact command a developer already runs locally
+# (see package.json's own scripts) — nothing here is CI-only tooling.
+# tools/secret-scan.mjs is an honest heuristic local baseline, not an
+# enterprise-grade secret scanner (see its own passing message); closing
+# that gap fully means adding a dedicated secret-scanning service
+# (e.g. GitHub secret scanning/push protection, or gitleaks/trufflehog in
+# CI) on top of this, which is out of this item's scope.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  security-gate:
+    name: Lint, typecheck, test, secret scan, SBOM, build, dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: corepack pnpm run lint
+
+      - name: Typecheck
+        run: corepack pnpm run typecheck
+
+      - name: Unit tests
+        run: corepack pnpm run test:unit
+
+      - name: Secret scan (heuristic local baseline)
+        run: corepack pnpm run security:secrets
+
+      - name: Generate SBOM
+        run: corepack pnpm run sbom:generate
+
+      - name: Production build
+        run: corepack pnpm run build
+
+      - name: Dependency vulnerability audit (high severity and above)
+        run: corepack pnpm run security:audit

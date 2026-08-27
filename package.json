@@ -15,10 +15,11 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "security:secrets": "node tools/secret-scan.mjs",
-    "security:audit": "pnpm audit --audit-level high",
+    "security:audit": "corepack pnpm audit --audit-level high",
     "sbom:generate": "node tools/generate-sbom.mjs",
-    "security:ci": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm security:secrets && pnpm run sbom:generate && pnpm build"
+    "security:ci": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test:unit && corepack pnpm security:secrets && corepack pnpm run sbom:generate && corepack pnpm build"
   },
+  "packageManager": "pnpm@11.23.0",
   "dependencies": {
     "drizzle-orm": "0.45.2",
     "react": "19.2.6",
