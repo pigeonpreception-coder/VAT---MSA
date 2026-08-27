@@ -1,5 +1,6 @@
 import { ensureDatabase } from "@/db/runtime";
 import { appendAuditEvent } from "@/lib/data/audit-repository";
+import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import type { TaxCategory, UserContext } from "@/lib/domain/types";
 import {
   normalizeVatRuleApproval,
@@ -14,6 +15,30 @@ const COUNTRY = "NA";
 /** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
   return appendAuditEvent(db, actor, action, resourceType, resourceId, details, new Date().toISOString());
+}
+
+type PriorCommand = { request_hash: string; resource_id: string };
+
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8): this
+ * repository had zero command_idempotency references — contradicting the
+ * pattern every other repository in this codebase already establishes.
+ * Same local validateIdempotencyKey/replay/commandRecord triple as
+ * everywhere else.
+ */
+function validateIdempotencyKey(key: string) {
+  if (key.length < 16 || key.length > 128) throw new VatRuleValidationError([{ code: "IDEMPOTENCY_KEY_INVALID", path: "/headers/idempotency-key", message: "Idempotency-Key must contain 16 to 128 characters." }]);
+}
+
+async function replay(db: D1Database, actorId: string, command: string, key: string, hash: string) {
+  const prior = await db.prepare("SELECT request_hash,resource_id FROM command_idempotency WHERE actor_id=? AND command_type=? AND idempotency_key=?").bind(actorId, command, key).first<PriorCommand>();
+  if (!prior) return null;
+  if (prior.request_hash !== hash) throw new RepositoryConflictError("The idempotency key was already used for a different VAT rule command.");
+  return prior.resource_id;
+}
+
+function commandRecord(db: D1Database, actorId: string, command: string, key: string, hash: string, resourceType: string, resourceId: string, now: string) {
+  return db.prepare("INSERT INTO command_idempotency VALUES (?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), actorId, command, key, hash, resourceType, resourceId, now);
 }
 
 function outboxEvent(db: D1Database, aggregateType: string, aggregateId: string, eventType: string, partitionKey: string, payload: Record<string, unknown>) {
@@ -68,9 +93,14 @@ export async function listVatRules(): Promise<VatRuleSummary[]> {
  * user-supplied, so a proposal can never collide with or skip an existing
  * version.
  */
-export async function proposeVatRule(actor: UserContext, input: unknown, correlationId: string): Promise<VatRuleSummary> {
+export async function proposeVatRule(actor: UserContext, input: unknown, idempotencyKey: string, correlationId: string): Promise<VatRuleSummary> {
+  validateIdempotencyKey(idempotencyKey);
   const proposal = normalizeVatRuleProposal(input);
   const db = await ensureDatabase();
+  const hash = await sha256Hex(stableStringify(proposal));
+  const prior = await replay(db, actor.userId, "PROPOSE_VAT_RULE", idempotencyKey, hash);
+  if (prior) return mapRule((await db.prepare("SELECT * FROM vat_rules WHERE id=?").bind(prior).first<VatRuleRow>())!);
+
   const current = await db.prepare("SELECT MAX(version) AS version FROM vat_rules WHERE tax_category=? AND country=?")
     .bind(proposal.taxCategory, COUNTRY).first<{ version: number | null }>();
   const version = (current?.version ?? 0) + 1;
@@ -80,6 +110,7 @@ export async function proposeVatRule(actor: UserContext, input: unknown, correla
     db.prepare(`INSERT INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
       VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL,NULL,NULL,?,NULL)`)
       .bind(id, proposal.taxCategory, COUNTRY, proposal.rateBps, "DRAFT", version, proposal.effectiveFrom, actor.userId, now, proposal.reason),
+    commandRecord(db, actor.userId, "PROPOSE_VAT_RULE", idempotencyKey, hash, "VAT_RULE", id, now),
     outboxEvent(db, "VAT_RULE", id, "VatRuleProposed", proposal.taxCategory, { ruleId: id, taxCategory: proposal.taxCategory, rateBps: proposal.rateBps, version, correlationId }),
     await appendAudit(db, actor, "VAT_RULE_PROPOSED", "VAT_RULE", id, { taxCategory: proposal.taxCategory, rateBps: proposal.rateBps, version, effectiveFrom: proposal.effectiveFrom }),
   ]);
@@ -98,11 +129,17 @@ export async function proposeVatRule(actor: UserContext, input: unknown, correla
  * an open-ended effective_to, closing it exactly where the new rule begins
  * so the two ranges never overlap and EvaluateVAT never has two candidates.
  */
-export async function approveVatRule(actor: UserContext, ruleId: string, input: unknown, correlationId: string): Promise<VatRuleSummary> {
+export async function approveVatRule(actor: UserContext, ruleId: string, input: unknown, idempotencyKey: string, correlationId: string): Promise<VatRuleSummary> {
+  validateIdempotencyKey(idempotencyKey);
   const approval = normalizeVatRuleApproval(input);
   const db = await ensureDatabase();
   const rule = await db.prepare("SELECT * FROM vat_rules WHERE id=?").bind(ruleId).first<VatRuleRow>();
   if (!rule) throw new VatRuleValidationError([{ code: "RULE_NOT_FOUND", path: "/rule_id", message: "The VAT rule proposal does not exist." }]);
+
+  const hash = await sha256Hex(stableStringify({ ruleId, approval }));
+  const prior = await replay(db, actor.userId, "APPROVE_VAT_RULE", idempotencyKey, hash);
+  if (prior) return mapRule((await db.prepare("SELECT * FROM vat_rules WHERE id=?").bind(prior).first<VatRuleRow>())!);
+
   if (rule.status !== "DRAFT") throw new RepositoryConflictError(`This VAT rule is already ${rule.status}.`);
   if (actor.userId === rule.proposed_by) {
     throw new VatRuleValidationError([{ code: "SELF_APPROVAL_DENIED", path: "/actor", message: "The proposing officer cannot approve their own VAT rule." }]);
@@ -119,6 +156,7 @@ export async function approveVatRule(actor: UserContext, ruleId: string, input: 
   const statements = [
     db.prepare("UPDATE vat_rules SET status='APPROVED',approved_by=?,approved_at=?,approval_reason=? WHERE id=?")
       .bind(actor.userId, now, approval.reason, rule.id),
+    commandRecord(db, actor.userId, "APPROVE_VAT_RULE", idempotencyKey, hash, "VAT_RULE", rule.id, now),
     outboxEvent(db, "VAT_RULE", rule.id, "VatRuleApproved", rule.tax_category, { ruleId: rule.id, taxCategory: rule.tax_category, rateBps: rule.rate_bps, version: rule.version, correlationId }),
     await appendAudit(db, actor, "VAT_RULE_APPROVED", "VAT_RULE", rule.id, { taxCategory: rule.tax_category, rateBps: rule.rate_bps, version: rule.version, reason: approval.reason }),
   ];

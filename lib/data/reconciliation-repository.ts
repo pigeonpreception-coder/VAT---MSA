@@ -8,12 +8,31 @@ import {
   normalizeWorkQueueQuery,
   ReconciliationValidationError,
 } from "@/lib/domain/reconciliation";
+import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import type { UserContext } from "@/lib/domain/types";
 import { RepositoryConflictError } from "./repository";
 
 /** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
   return appendAuditEvent(db, actor, action, resourceType, resourceId, details, new Date().toISOString());
+}
+
+type PriorCommand = { request_hash: string; resource_id: string };
+
+/** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8): this repository had zero command_idempotency references — contradicting the pattern every other repository in this codebase already establishes. Same local validateIdempotencyKey/replay/commandRecord triple as everywhere else. */
+function validateIdempotencyKey(key: string) {
+  if (key.length < 16 || key.length > 128) throw new ReconciliationValidationError([{ code: "IDEMPOTENCY_KEY_INVALID", path: "/headers/idempotency-key", message: "Idempotency-Key must contain 16 to 128 characters." }]);
+}
+
+async function replay(db: D1Database, actorId: string, command: string, key: string, hash: string) {
+  const prior = await db.prepare("SELECT request_hash,resource_id FROM command_idempotency WHERE actor_id=? AND command_type=? AND idempotency_key=?").bind(actorId, command, key).first<PriorCommand>();
+  if (!prior) return null;
+  if (prior.request_hash !== hash) throw new RepositoryConflictError("The idempotency key was already used for a different reconciliation command.");
+  return prior.resource_id;
+}
+
+function commandRecord(db: D1Database, actorId: string, command: string, key: string, hash: string, resourceType: string, resourceId: string, now: string) {
+  return db.prepare("INSERT INTO command_idempotency VALUES (?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(), actorId, command, key, hash, resourceType, resourceId, now);
 }
 
 function outboxEvent(db: D1Database, aggregateType: string, aggregateId: string, eventType: string, partitionKey: string, payload: Record<string, unknown>) {
@@ -58,13 +77,26 @@ function mapMatch(row: MatchRow): MatchSummary {
  * period-wide sweep or a literal scheduled job — this Workers deployment
  * has no cron/queue infrastructure wired up yet, so "scheduled/event-driven"
  * is left as a documented gap rather than faked; this is the correct
- * per-invoice building block such a job would call. Idempotent: a retry
- * against an already-matched invoice returns the existing match rather than
- * evaluating again, backed by reconciliation_matches' own
- * UNIQUE(invoice_id, taxpayer_id) constraint.
+ * per-invoice building block such a job would call. Idempotent two ways: a
+ * retry against an already-matched invoice returns the existing match via
+ * reconciliation_matches' own UNIQUE(invoice_id, taxpayer_id) constraint
+ * regardless of idempotency key; the standard replay() check below is
+ * still needed in front of that, though — without it, reusing the same
+ * key for two genuinely different invoices would hit command_idempotency's
+ * own UNIQUE(actor_id, command_type, idempotency_key) constraint as a raw,
+ * unhandled DB error instead of a clean 409 (SECURITY_GAP_ASSESSMENT.md
+ * item #8).
  */
-export async function runMatch(actor: UserContext, invoiceId: string, correlationId: string): Promise<MatchSummary> {
+export async function runMatch(actor: UserContext, invoiceId: string, idempotencyKey: string, correlationId: string): Promise<MatchSummary> {
+  validateIdempotencyKey(idempotencyKey);
   const db = await ensureDatabase();
+  const requestHash = await sha256Hex(stableStringify({ invoiceId }));
+  const prior = await replay(db, actor.userId, "RUN_MATCH", idempotencyKey, requestHash);
+  if (prior) {
+    const priorMatch = await db.prepare("SELECT * FROM reconciliation_matches WHERE id=?").bind(prior).first<MatchRow>();
+    if (priorMatch) return mapMatch(priorMatch);
+  }
+
   const invoice = await db.prepare(`SELECT id, status, tax_cents, supplier_taxpayer_id, customer_taxpayer_id, issue_date, transaction_id
     FROM invoices WHERE id = ?`).bind(invoiceId).first<InvoiceForMatch>();
   if (!invoice) throw new ReconciliationValidationError([{ code: "INVOICE_NOT_FOUND", path: "/invoice_id", message: "The invoice does not exist." }]);
@@ -107,6 +139,7 @@ export async function runMatch(actor: UserContext, invoiceId: string, correlatio
       matchId, organisation.id, invoice.supplier_taxpayer_id, vatPeriod?.id ?? null, invoice.id,
       "LEDGER_CONSISTENCY", result.status === "MATCHED" ? 10_000 : 0, result.status, evidence, actor.userId, now, now,
     ),
+    commandRecord(db, actor.userId, "RUN_MATCH", idempotencyKey, requestHash, "RECONCILIATION_MATCH", matchId, now),
     outboxEvent(db, "RECONCILIATION_MATCH", matchId, result.status === "MATCHED" ? "VATTransactionMatched" : "ExceptionDetected", invoice.supplier_taxpayer_id, {
       matchId, invoiceId: invoice.id, status: result.status, correlationId,
     }),
@@ -141,9 +174,14 @@ type ExceptionRow = { id: string; status: string; taxpayer_id: string | null };
  * createOrganisationRole), and the inconsistency with runMatch was itself
  * the tell. Fixed the same way runMatch already does it.
  */
-export async function assignException(actor: UserContext, exceptionId: string, input: unknown, correlationId: string): Promise<ExceptionActionResult> {
+export async function assignException(actor: UserContext, exceptionId: string, input: unknown, idempotencyKey: string, correlationId: string): Promise<ExceptionActionResult> {
+  validateIdempotencyKey(idempotencyKey);
   const { officerId } = normalizeExceptionAssignment(input);
   const db = await ensureDatabase();
+  const hash = await sha256Hex(stableStringify({ exceptionId, officerId }));
+  const prior = await replay(db, actor.userId, "ASSIGN_EXCEPTION", idempotencyKey, hash);
+  if (prior) return { id: prior, status: "ASSIGNED" };
+
   const exception = await db.prepare("SELECT id,status,taxpayer_id FROM reconciliation_exceptions WHERE id=?").bind(exceptionId).first<ExceptionRow>();
   if (!exception) throw new ReconciliationValidationError([{ code: "EXCEPTION_NOT_FOUND", path: "/exception_id", message: "The reconciliation exception does not exist." }]);
   requireTaxpayerScope(actor, exception.taxpayer_id ?? "");
@@ -152,8 +190,10 @@ export async function assignException(actor: UserContext, exceptionId: string, i
   if (!officer) throw new ReconciliationValidationError([{ code: "OFFICER_NOT_FOUND", path: "/officer_id", message: "The officer does not exist." }]);
   if (officer.status !== "ACTIVE") throw new ReconciliationValidationError([{ code: "OFFICER_NOT_ACTIVE", path: "/officer_id", message: "The officer is not active." }]);
 
+  const now = new Date().toISOString();
   await db.batch([
     db.prepare("UPDATE reconciliation_exceptions SET status='ASSIGNED',assigned_officer_id=? WHERE id=?").bind(officerId, exceptionId),
+    commandRecord(db, actor.userId, "ASSIGN_EXCEPTION", idempotencyKey, hash, "RECONCILIATION_EXCEPTION", exceptionId, now),
     outboxEvent(db, "RECONCILIATION_EXCEPTION", exceptionId, "ExceptionAssigned", exception.taxpayer_id ?? exceptionId, { exceptionId, officerId, correlationId }),
     await appendAudit(db, actor, "EXCEPTION_ASSIGNED", "RECONCILIATION_EXCEPTION", exceptionId, { officerId }),
   ]);
@@ -161,9 +201,14 @@ export async function assignException(actor: UserContext, exceptionId: string, i
 }
 
 /** Module 3 Phase A ResolveException. Idempotent on an already-resolved exception. Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #6): see assignException's comment above — same missing tenant-scope check, same fix. */
-export async function resolveException(actor: UserContext, exceptionId: string, input: unknown, correlationId: string): Promise<ExceptionActionResult> {
+export async function resolveException(actor: UserContext, exceptionId: string, input: unknown, idempotencyKey: string, correlationId: string): Promise<ExceptionActionResult> {
+  validateIdempotencyKey(idempotencyKey);
   const { notes } = normalizeExceptionResolution(input);
   const db = await ensureDatabase();
+  const hash = await sha256Hex(stableStringify({ exceptionId, notes }));
+  const prior = await replay(db, actor.userId, "RESOLVE_EXCEPTION", idempotencyKey, hash);
+  if (prior) return { id: prior, status: "RESOLVED" };
+
   const exception = await db.prepare("SELECT id,status,taxpayer_id FROM reconciliation_exceptions WHERE id=?").bind(exceptionId).first<ExceptionRow>();
   if (!exception) throw new ReconciliationValidationError([{ code: "EXCEPTION_NOT_FOUND", path: "/exception_id", message: "The reconciliation exception does not exist." }]);
   requireTaxpayerScope(actor, exception.taxpayer_id ?? "");
@@ -172,6 +217,7 @@ export async function resolveException(actor: UserContext, exceptionId: string, 
   const now = new Date().toISOString();
   await db.batch([
     db.prepare("UPDATE reconciliation_exceptions SET status='RESOLVED',resolved_at=?,resolved_by=?,resolution_notes=? WHERE id=?").bind(now, actor.userId, notes, exceptionId),
+    commandRecord(db, actor.userId, "RESOLVE_EXCEPTION", idempotencyKey, hash, "RECONCILIATION_EXCEPTION", exceptionId, now),
     outboxEvent(db, "RECONCILIATION_EXCEPTION", exceptionId, "ExceptionResolved", exception.taxpayer_id ?? exceptionId, { exceptionId, correlationId }),
     await appendAudit(db, actor, "EXCEPTION_RESOLVED", "RECONCILIATION_EXCEPTION", exceptionId, { notes }),
   ]);

@@ -137,6 +137,7 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "idempotency-key": crypto.randomUUID(),
         },
         body: JSON.stringify({ tax_category: "STANDARD", rate_bps: 1600, effective_from: "2027-01-01", reason: "Statutory rate increase per the 2027 budget speech." }),
       }));
@@ -149,6 +150,7 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "idempotency-key": crypto.randomUUID(),
         },
         body: JSON.stringify({ reason: "Approving my own proposal." }),
       }), { params: Promise.resolve({ id: proposed.id }) });
@@ -161,11 +163,75 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "idempotency-key": crypto.randomUUID(),
         },
         body: JSON.stringify({ reason: "Verified against the published 2027 budget speech." }),
       }), { params: Promise.resolve({ id: proposed.id }) });
       expect(approveResponse.status).toBe(200);
       expect((await approveResponse.json()).rule.status).toBe("APPROVED");
+    });
+  });
+
+  /**
+   * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8): this
+   * route family previously had zero rate limiting and zero idempotency-key
+   * protection at all. Proven here against the real routes, not just that
+   * a header is now required (already covered by the two requests above
+   * gaining an idempotency-key).
+   */
+  describe("SECURITY_GAP_ASSESSMENT.md item #8: rate limiting and idempotency", () => {
+    it("ProposeVatRule is idempotent under a repeated key — a retried request returns the same rule, not a duplicate", async () => {
+      const { POST } = await import("@/app/api/v1/vat-rules/route");
+      await actingAs(NAMRA_1);
+      const key = crypto.randomUUID();
+      const body = JSON.stringify({ tax_category: "STANDARD", rate_bps: 1700, effective_from: "2028-01-01", reason: "Idempotency replay test." });
+      const first = await POST(new Request("https://vat-msa.local/api/v1/vat-rules", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body }));
+      const second = await POST(new Request("https://vat-msa.local/api/v1/vat-rules", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body }));
+      expect(first.status).toBe(201);
+      expect(second.status).toBe(201);
+      const firstRule = (await first.json()).rule;
+      const secondRule = (await second.json()).rule;
+      expect(secondRule.id).toBe(firstRule.id);
+
+      const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM vat_rules WHERE tax_category='STANDARD' AND version=?").bind(firstRule.version).first<{ n: number }>();
+      expect(count?.n).toBe(1);
+    });
+
+    it("refuses a repeated idempotency key reused with a different payload", async () => {
+      const { POST } = await import("@/app/api/v1/vat-rules/route");
+      await actingAs(NAMRA_1);
+      const key = crypto.randomUUID();
+      const first = await POST(new Request("https://vat-msa.local/api/v1/vat-rules", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ tax_category: "ZERO_RATED", rate_bps: 0, effective_from: "2028-02-01", reason: "First payload for key-reuse test." }) }));
+      expect(first.status).toBe(201);
+      const second = await POST(new Request("https://vat-msa.local/api/v1/vat-rules", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ tax_category: "ZERO_RATED", rate_bps: 0, effective_from: "2028-03-01", reason: "Different payload, same key." }) }));
+      expect(second.status).toBe(409);
+    });
+
+    it("rejects a malformed (too-short) idempotency key with a validation error", async () => {
+      const { POST } = await import("@/app/api/v1/vat-rules/route");
+      await actingAs(NAMRA_1);
+      const response = await POST(new Request("https://vat-msa.local/api/v1/vat-rules", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "short" }, body: JSON.stringify({ tax_category: "EXEMPT", rate_bps: 0, effective_from: "2028-04-01", reason: "Malformed key test." }) }));
+      expect(response.status).toBe(422);
+    });
+
+    it("enforces the per-actor rate limit on ProposeVatRule and reports it as a genuine RATE_LIMIT_EXCEEDED problem", async () => {
+      const { POST } = await import("@/app/api/v1/vat-rules/route");
+      await actingAs(NAMRA_2);
+      let lastStatus = 0;
+      for (let attempt = 0; attempt < 31; attempt += 1) {
+        const response = await POST(new Request("https://vat-msa.local/api/v1/vat-rules", {
+          method: "POST",
+          headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+          body: JSON.stringify({ tax_category: "EXEMPT", rate_bps: 0, effective_from: `2029-${String((attempt % 12) + 1).padStart(2, "0")}-01`, reason: `Rate limit probe attempt ${attempt}.` }),
+        }));
+        lastStatus = response.status;
+        if (response.status === 429) {
+          const body = await response.json();
+          expect(body.code).toBe("RATE_LIMIT_EXCEEDED");
+          break;
+        }
+      }
+      expect(lastStatus).toBe(429);
     });
   });
 });

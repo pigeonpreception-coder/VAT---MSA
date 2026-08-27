@@ -58,7 +58,7 @@ function submitRequest(body: unknown): Request {
 }
 
 function matchRequest(id: string): [Request, { params: Promise<{ id: string }> }] {
-  return [new Request("https://vat-msa.local/api/v1/invoices/x/match", { method: "POST" }), { params: Promise.resolve({ id }) }];
+  return [new Request("https://vat-msa.local/api/v1/invoices/x/match", { method: "POST", headers: { "idempotency-key": crypto.randomUUID() } }), { params: Promise.resolve({ id }) }];
 }
 
 async function seedFixture(): Promise<void> {
@@ -155,7 +155,7 @@ describe("Module 3 reconciliation matching engine (Phase A)", () => {
     const { POST: assignPOST } = await import("@/app/api/v1/exceptions/[id]/assignment/route");
     actingAs(NAMRA_OFFICER);
     const assignResponse = await assignPOST(
-      new Request("https://vat-msa.local/api/v1/exceptions/x/assignment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ officer_id: NAMRA_OFFICER.userId }) }),
+      new Request("https://vat-msa.local/api/v1/exceptions/x/assignment", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ officer_id: NAMRA_OFFICER.userId }) }),
       { params: Promise.resolve({ id: exception!.id }) },
     );
     expect(assignResponse.status).toBe(200);
@@ -164,14 +164,14 @@ describe("Module 3 reconciliation matching engine (Phase A)", () => {
     const { POST: resolvePOST } = await import("@/app/api/v1/exceptions/[id]/resolution/route");
     actingAs(NAMRA_OFFICER);
     const resolveResponse = await resolvePOST(
-      new Request("https://vat-msa.local/api/v1/exceptions/x/resolution", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ notes: "Confirmed a manual data correction; re-posted the correct ledger amount." }) }),
+      new Request("https://vat-msa.local/api/v1/exceptions/x/resolution", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ notes: "Confirmed a manual data correction; re-posted the correct ledger amount." }) }),
       { params: Promise.resolve({ id: exception!.id }) },
     );
     expect(resolveResponse.status).toBe(200);
     expect((await resolveResponse.json()).resolution).toEqual({ id: exception!.id, status: "RESOLVED" });
 
     const secondResolve = await resolvePOST(
-      new Request("https://vat-msa.local/api/v1/exceptions/x/resolution", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ notes: "Resolving again to confirm idempotency." }) }),
+      new Request("https://vat-msa.local/api/v1/exceptions/x/resolution", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ notes: "Resolving again to confirm idempotency." }) }),
       { params: Promise.resolve({ id: exception!.id }) },
     );
     expect(secondResolve.status).toBe(200);
@@ -283,6 +283,68 @@ describe("Module 3 reconciliation matching engine (Phase A)", () => {
       actingAs(NAMRA_OFFICER);
       const response = await workQueueRequest("?severity=EXTREME");
       expect(response.status).toBe(422);
+    });
+  });
+
+  /** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8): this route family previously had zero rate limiting and zero idempotency-key protection on Assign/ResolveException (RunMatch already had its own natural dedup — see runMatch's own updated comment). */
+  describe("SECURITY_GAP_ASSESSMENT.md item #8: rate limiting and idempotency", () => {
+    it("AssignException is idempotent under a repeated key and refuses the same key reused for a different exception", async () => {
+      const { POST: submitPOST } = await import("@/app/api/v1/invoices/route");
+      actingAs(SELLER_OWNER);
+      const invoiceA = await (await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "item8-a-doc", invoiceNumber: "INV-ITEM8-A" })))).json();
+      const invoiceB = await (await submitPOST(submitRequest(invoicePayload({ sourceDocumentId: "item8-b-doc", invoiceNumber: "INV-ITEM8-B" })))).json();
+
+      const now = "2026-08-01T00:00:00.000Z";
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)`)
+          .bind("exc-item8-a", invoiceA.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "HIGH", "OPEN", "Fixture exception for item #8 tests.", now),
+        env.DB.prepare(`INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)`)
+          .bind("exc-item8-b", invoiceB.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "HIGH", "OPEN", "Second fixture exception for the key-reuse conflict test.", now),
+      ]);
+
+      const { POST: assignPOST } = await import("@/app/api/v1/exceptions/[id]/assignment/route");
+      actingAs(NAMRA_OFFICER);
+      const key = crypto.randomUUID();
+      const requestFor = (excId: string) => new Request(`https://vat-msa.local/api/v1/exceptions/${excId}/assignment`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ officer_id: NAMRA_OFFICER.userId }) });
+
+      const first = await assignPOST(requestFor("exc-item8-a"), { params: Promise.resolve({ id: "exc-item8-a" }) });
+      expect(first.status).toBe(200);
+      const second = await assignPOST(requestFor("exc-item8-a"), { params: Promise.resolve({ id: "exc-item8-a" }) });
+      expect(second.status).toBe(200);
+      expect((await second.json()).assignment).toEqual((await first.json()).assignment);
+
+      // Same key, different exception -> conflict, not a silent cross-assignment.
+      const conflicting = await assignPOST(requestFor("exc-item8-b"), { params: Promise.resolve({ id: "exc-item8-b" }) });
+      expect(conflicting.status).toBe(409);
+    });
+
+    it("rejects a malformed idempotency key on AssignException", async () => {
+      const { POST: assignPOST } = await import("@/app/api/v1/exceptions/[id]/assignment/route");
+      actingAs(NAMRA_OFFICER);
+      const response = await assignPOST(
+        new Request("https://vat-msa.local/api/v1/exceptions/exc-item8-a/assignment", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "short" }, body: JSON.stringify({ officer_id: NAMRA_OFFICER.userId }) }),
+        { params: Promise.resolve({ id: "exc-item8-a" }) },
+      );
+      expect(response.status).toBe(422);
+    });
+
+    it("enforces the per-actor rate limit on ResolveException and reports a genuine RATE_LIMIT_EXCEEDED problem", async () => {
+      const { POST: resolvePOST } = await import("@/app/api/v1/exceptions/[id]/resolution/route");
+      actingAs(NAMRA_OFFICER);
+      let lastStatus = 0;
+      for (let attempt = 0; attempt < 31; attempt += 1) {
+        const response = await resolvePOST(
+          new Request("https://vat-msa.local/api/v1/exceptions/exc-item8-nonexistent/resolution", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ notes: `Rate limit probe attempt ${attempt}.` }) }),
+          { params: Promise.resolve({ id: "exc-item8-nonexistent" }) },
+        );
+        lastStatus = response.status;
+        if (response.status === 429) {
+          const body = await response.json();
+          expect(body.code).toBe("RATE_LIMIT_EXCEEDED");
+          break;
+        }
+      }
+      expect(lastStatus).toBe(429);
     });
   });
 });

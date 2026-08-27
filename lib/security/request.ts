@@ -103,6 +103,61 @@ export async function enforceRegistrationRateLimits(user: UserContext, context: 
   ]);
 }
 
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8): a full-repo
+ * audit found the identity, control-plane, reconciliation and vat-rule
+ * route families called enforceRateLimits nowhere at all — roughly a third
+ * of command routes had no rate limiting, contradicting the pattern
+ * established everywhere else (compliance/vat-lifecycle/business/platform/
+ * security/audit's own dispatchers, plus enforceInvoiceRateLimits/
+ * enforceRegistrationRateLimits above). One generic, per-command bucket
+ * builder — actor/tenant-or-role/global — reused by four thin,
+ * family-named wrappers below, mirroring the exact 3-bucket shape
+ * lib/api/compliance.ts's own handleComplianceCommand already uses.
+ */
+function commandRateLimitBuckets(family: string, command: string, user: UserContext): RateBucket[] {
+  const tenant = user.taxpayerId ?? `role:${user.role}`;
+  return [
+    { key: `${family}:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
+    { key: `${family}:${command}:tenant:${tenant}`, limit: 120, windowSeconds: 60 },
+    { key: `${family}:${command}:global`, limit: 1_000, windowSeconds: 60 },
+  ];
+}
+
+export async function enforceIdentityRateLimits(command: string, user: UserContext): Promise<void> {
+  await enforceRateLimits(commandRateLimitBuckets("identity", command, user));
+}
+
+export async function enforceControlPlaneRateLimits(command: string, user: UserContext): Promise<void> {
+  await enforceRateLimits(commandRateLimitBuckets("control-plane", command, user));
+}
+
+export async function enforceReconciliationRateLimits(command: string, user: UserContext): Promise<void> {
+  await enforceRateLimits(commandRateLimitBuckets("reconciliation", command, user));
+}
+
+export async function enforceVatRuleRateLimits(command: string, user: UserContext): Promise<void> {
+  await enforceRateLimits(commandRateLimitBuckets("vat-rule", command, user));
+}
+
+/** claimInvitation is a token-guessing surface (Sec 18) — a stricter, purpose-built limit, not the generic per-command one above, keyed on the source IP/device rather than an authenticated actor (the claimant has no account yet at the point they call this). */
+export async function enforceInvitationClaimRateLimits(context: RequestContext): Promise<void> {
+  await enforceRateLimits([
+    { key: `invitation-claim:source:${context.sourceToken}`, limit: 10, windowSeconds: 300 },
+    { key: `invitation-claim:device:${context.deviceId}`, limit: 15, windowSeconds: 300 },
+    { key: "invitation-claim:global", limit: 200, windowSeconds: 300 },
+  ]);
+}
+
+/** GET /api/v1/verify/[token] is a public, unauthenticated, cached certificate-lookup endpoint — an enumeration surface (Sec 18). Keyed on source/device only, since there is no actor. */
+export async function enforceVerifyTokenRateLimits(context: RequestContext): Promise<void> {
+  await enforceRateLimits([
+    { key: `verify-token:source:${context.sourceToken}`, limit: 30, windowSeconds: 60 },
+    { key: `verify-token:device:${context.deviceId}`, limit: 45, windowSeconds: 60 },
+    { key: "verify-token:global", limit: 2_000, windowSeconds: 60 },
+  ]);
+}
+
 export async function enforceRateLimits(buckets: RateBucket[], nowMs = Date.now()): Promise<void> {
   const { ensureDatabase } = await import("@/db/runtime");
   const db = await ensureDatabase();
