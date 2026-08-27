@@ -521,11 +521,31 @@ const SCHEMA_STATEMENTS = [
     last_health_check_at TEXT, last_health_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (provider_key, organisation_id)
   )`,
+  // Module 10 Phase D: developer_account_id links each client back to the DeveloperAccount
+  // that owns it (get-or-created by CreateClient — no separate "create account" verb is named).
   `CREATE TABLE IF NOT EXISTS api_clients (
-    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), name TEXT NOT NULL,
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    developer_account_id TEXT REFERENCES developer_accounts(id), name TEXT NOT NULL,
     client_key TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL, credential_reference TEXT NOT NULL,
     status TEXT NOT NULL, rate_limit_profile TEXT NOT NULL, last_rotated_at TEXT,
     expires_at TEXT, created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS developer_accounts (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    owner_user_id TEXT NOT NULL REFERENCES app_users(id), display_name TEXT NOT NULL,
+    status TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, owner_user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS credential_refs (
+    id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id),
+    credential_reference TEXT NOT NULL, status TEXT NOT NULL,
+    issued_by TEXT NOT NULL REFERENCES app_users(id), issued_at TEXT NOT NULL,
+    revoked_by TEXT REFERENCES app_users(id), revoked_at TEXT, revocation_reason TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS test_runs (
+    id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id),
+    checks TEXT NOT NULL, outcome TEXT NOT NULL,
+    run_by TEXT NOT NULL REFERENCES app_users(id), run_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
     id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id), event_types TEXT NOT NULL,
