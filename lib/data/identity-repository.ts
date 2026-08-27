@@ -22,6 +22,9 @@ import type { UserContext } from "@/lib/domain/types";
 import { getItasIdentityPort, ItasIntegrationUnavailableError } from "@/lib/integrations/itas";
 import { RepositoryConflictError } from "./repository";
 
+/** Module 10 Phase B: the ITAS anti-corruption-layer contract version this codebase is built against — tracked so TaxpayerVerified's "source_version" (event-catalog.csv) has a real, versioned value rather than a placeholder, and so a future contract revision has one place to bump. */
+const ITAS_CONTRACT_VERSION = "1.0";
+
 /** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function appendAudit(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>) {
   return appendAuditEvent(db, actor, action, resourceType, resourceId, details, new Date().toISOString());
@@ -137,7 +140,7 @@ export async function getIdentityFoundationSnapshot(user: UserContext) {
           (SELECT COUNT(*) FROM branches b JOIN organisations o ON o.id=b.organisation_id WHERE b.status='ACTIVE' AND o.taxpayer_id=?) AS active_branches`)
         .bind(user.taxpayerId, user.taxpayerId, user.taxpayerId, user.taxpayerId).first<Record<string, number>>(),
   ]);
-  return { providers: providers.results, organisations, registrations, access: access ?? {}, itas: await getItasIdentityPort().status() };
+  return { providers: providers.results, organisations, registrations, access: access ?? {}, itas: await getItasIdentityPort(db).status() };
 }
 
 export async function submitRegistrationApplication(
@@ -174,8 +177,34 @@ export async function submitRegistrationApplication(
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const verificationId = crypto.randomUUID();
-  const verificationReference = `itas-contract-pending:${id}`;
   const outboxId = crypto.randomUUID();
+
+  // Module 10 Phase B: this used to hardcode AWAITING_PROVIDER_CONTRACT
+  // directly, never actually going through ItasIdentityPort at all -- a
+  // registration intake could never reflect a real ITAS outcome even once
+  // the sandbox/mock adapter is reachable. Now genuinely attempts the same
+  // verifyTaxpayer call verifyTaxpayerIdentifiers makes, with the identical
+  // fail-closed catch below.
+  const itas = getItasIdentityPort(db);
+  let verificationStatus: "VERIFIED" | "AWAITING_PROVIDER_CONTRACT" = "AWAITING_PROVIDER_CONTRACT";
+  let verificationReference = `itas-verify:${id}`;
+  let responseHash: string | null = null;
+  let checkedAt = now;
+  let expiresAt: string | null = null;
+  try {
+    const result = await itas.verifyTaxpayer({ vatNumber: registration.vat_number, tin: registration.tin, companyRegistrationNumber: registration.company_registration_number, correlationId });
+    verificationStatus = "VERIFIED";
+    verificationReference = result.requestReference;
+    responseHash = result.responseHash;
+    checkedAt = result.checkedAt;
+    expiresAt = result.expiresAt ?? null;
+    // registration_verifications.verified_taxpayer_id is a FK to an *existing* taxpayers row — it is for
+    // ITAS matching this application to an already-on-file taxpayer (e.g. a duplicate detection signal),
+    // never for the not-yet-created applicant itself, so it deliberately stays NULL at intake regardless
+    // of what a provider's own response claims — result.authoritativeTaxpayerId is not a real row here.
+  } catch (error) {
+    if (!(error instanceof ItasIntegrationUnavailableError)) throw error;
+  }
 
   await db.batch([
     db.prepare(`INSERT INTO registration_applications
@@ -188,7 +217,7 @@ export async function submitRegistrationApplication(
       ),
     db.prepare(`INSERT INTO registration_verifications
       (id,registration_application_id,provider,request_reference,status,response_hash,verified_taxpayer_id,checked_at,expires_at)
-      VALUES (?,?,?,?,?,NULL,NULL,?,NULL)`).bind(verificationId, id, "ITAS", verificationReference, "AWAITING_PROVIDER_CONTRACT", now),
+      VALUES (?,?,?,?,?,?,NULL,?,?)`).bind(verificationId, id, "ITAS", verificationReference, verificationStatus, responseHash, checkedAt, expiresAt),
     db.prepare(`INSERT INTO outbox_events
       (id,aggregate_type,aggregate_id,event_type,event_version,partition_key,payload,status,publish_attempts,occurred_at,available_at,published_at,last_error)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
@@ -196,7 +225,7 @@ export async function submitRegistrationApplication(
         JSON.stringify({ registration_id: id, status: "PENDING_VERIFICATION", correlation_id: correlationId }),
         "PENDING", 0, now, now, null, null,
       ),
-    await appendAuditEvent(db, actor, "TAXPAYER_REGISTRATION_SUBMITTED", "REGISTRATION", id, { registrationId: id, vatNumber: registration.vat_number, correlationId, verificationState: "AWAITING_PROVIDER_CONTRACT" }, now),
+    await appendAuditEvent(db, actor, "TAXPAYER_REGISTRATION_SUBMITTED", "REGISTRATION", id, { registrationId: id, vatNumber: registration.vat_number, correlationId, verificationState: verificationStatus }, now),
   ]);
 
   return {
@@ -211,7 +240,7 @@ export async function submitRegistrationApplication(
     email: registration.email,
     status: "PENDING_VERIFICATION",
     verification_source: "ITAS",
-    verification_status: "AWAITING_PROVIDER_CONTRACT",
+    verification_status: verificationStatus,
     submitted_by: actor.userId,
     submitted_at: now,
   };
@@ -595,7 +624,9 @@ export async function linkIdentity(actor: UserContext, input: unknown, correlati
   await db.batch([
     db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
       VALUES (?,?,?,?,NULL,?,?,?,NULL)`).bind(id, link.userId, provider.id, link.subject, "ADMINISTRATIVE_LINK", "ACTIVE", now),
-    outboxEvent(db, "IDENTITY", id, "IdentityLinked", link.userId, { userId: link.userId, providerKey: link.providerKey, correlationId }),
+    // Module 10 Phase B: payload now carries every field 08-enterprise-architecture/event-catalog.csv's
+    // IdentityLinked row names as its minimum payload (user_id,provider_id,assurance,occurred_at) -- previously missing assurance/occurred_at entirely.
+    outboxEvent(db, "IDENTITY", id, "IdentityLinked", link.userId, { userId: link.userId, providerId: provider.id, providerKey: link.providerKey, assurance: "ADMINISTRATIVE_LINK", occurredAt: now, correlationId }),
     await appendAudit(db, actor, "IDENTITY_LINKED", "IDENTITY_LINK", id, { userId: link.userId, providerKey: link.providerKey }),
   ]);
   return { id, providerKey: link.providerKey, subject: link.subject, assuranceLevel: "ADMINISTRATIVE_LINK", status: "ACTIVE", linkedAt: now, lastAuthenticatedAt: null };
@@ -860,12 +891,15 @@ export async function verifyTaxpayerIdentifiers(
   requireTaxpayerScope(actor, taxpayer.id);
 
   const now = new Date().toISOString();
-  const itas = getItasIdentityPort();
+  const itas = getItasIdentityPort(db);
   try {
     const result = await itas.verifyTaxpayer({ vatNumber: taxpayer.vat_number, tin: taxpayer.tin, correlationId });
     await db.batch([
       db.prepare("UPDATE taxpayer_identifiers SET verified_at=? WHERE taxpayer_id=? AND identifier_type IN ('VAT_NUMBER','TIN') AND status='ACTIVE'").bind(result.checkedAt, taxpayerId),
-      outboxEvent(db, "TAXPAYER", taxpayerId, "TaxpayerIdentifiersVerified", taxpayerId, { taxpayerId, provider: "ITAS", requestReference: result.requestReference, correlationId }),
+      // Module 10 Phase B: renamed from the non-conforming "TaxpayerIdentifiersVerified" to the
+      // catalog's own "TaxpayerVerified" (event-catalog.csv), payload now carries every minimum field
+      // the catalog names (taxpayer_id,source,source_version,verified_at) instead of a convenience shape.
+      outboxEvent(db, "TAXPAYER", taxpayerId, "TaxpayerVerified", taxpayerId, { taxpayerId, source: "ITAS", sourceVersion: ITAS_CONTRACT_VERSION, verifiedAt: result.checkedAt, requestReference: result.requestReference, correlationId }),
       await appendAudit(db, actor, "TAXPAYER_IDENTIFIERS_VERIFIED", "TAXPAYER", taxpayerId, { provider: "ITAS", requestReference: result.requestReference }),
     ]);
     return { taxpayerId, provider: "ITAS", status: "VERIFIED", checkedAt: result.checkedAt, requestReference: result.requestReference };
