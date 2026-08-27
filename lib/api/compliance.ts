@@ -18,6 +18,7 @@ import {
   getConversation,
   getInbox,
   getNotifications,
+  getRefundClaimChecks,
   getRestrictedRisk,
   issueFinding,
   markNotificationRead,
@@ -72,6 +73,21 @@ export async function handleCaseTimeline(request: Request, resourceId: string) {
   } catch (error) {
     if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
     return problem(500, "INTERNAL_ERROR", "Internal error", "The case timeline is temporarily unavailable.", context.correlationId);
+  }
+}
+
+/** Module 9 Phase B GetRefundClaimChecks. Same tenant-visibility rule as CaseTimeline: national-scope or the claim's own taxpayer. */
+export async function handleRefundClaimChecks(request: Request, resourceId: string) {
+  const context = await requestContext(request);
+  try {
+    const user = await getCurrentUser();
+    requirePermission(user, "refunds:read");
+    const result = await getRefundClaimChecks(resourceId, user);
+    if (!result) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Refund claim was not found.", context.correlationId);
+    return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    return problem(500, "INTERNAL_ERROR", "Internal error", "The refund claim checks are temporarily unavailable.", context.correlationId);
   }
 }
 

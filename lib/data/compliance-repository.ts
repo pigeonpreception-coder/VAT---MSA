@@ -201,13 +201,97 @@ export async function fileDispute(payload: DisputeSubmission, actor: UserContext
   return db.prepare("SELECT * FROM disputes WHERE id=?").bind(id).first<Record<string, unknown>>();
 }
 
+type VersionForClaim = {
+  id: string; organisation_id: string; taxpayer_id: string; tax_rule_set_id: string;
+  output_tax_cents: number; input_tax_cents: number; adjustment_cents: number; net_payable_cents: number;
+  version_number: number; status: string; ledger_snapshot_hash: string; generated_at: string;
+  period_code: string; period_start: string; period_end: string;
+};
+
+type RefundClaimCheckResult = { code: string; status: "PASS" | "FAIL" | "NOT_CONFIGURED"; rationale: string };
+
+/**
+ * Module 9 Phase B: the return version, its rule set, the taxpayer's
+ * reconciliation state and the exact set of invoices grounding the claim's
+ * period — captured once, here, at claim time, and never touched again by
+ * any later code path (transitionRefundClaim/disputeRefund never write to
+ * claim_snapshot/claim_snapshot_hash). This is deliberately a *different*
+ * kind of freeze than PAYMENT_AUTHORISATION's debt-offset computation
+ * (Phase A), which stays intentionally live: the claim's evidentiary basis
+ * (what the return/invoices/rule set actually said when the claim was
+ * filed) must never silently drift even if a later correction supersedes
+ * the return, but the taxpayer's *current* statutory debt position is the
+ * financially correct thing to offset against at payment time, not
+ * whatever it happened to be weeks earlier when the claim was lodged.
+ * invoiceEvidence.hash is a tamper-evident fingerprint of exactly which
+ * invoices (id + payload_hash) were on record for this period at freeze
+ * time — the same sha256Hex/stableStringify pair used for the hash-chained
+ * audit trail, reused here rather than reinvented.
+ */
+async function buildRefundClaimSnapshot(db: D1Database, version: VersionForClaim, now: string) {
+  const taxRuleSet = await db.prepare("SELECT id,jurisdiction,version,standard_rate_bps FROM tax_rule_sets WHERE id=?").bind(version.tax_rule_set_id)
+    .first<{ id: string; jurisdiction: string; version: string; standard_rate_bps: number }>();
+  const reconciliation = await db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('OPEN','ASSIGNED') THEN 1 ELSE 0 END) AS open FROM reconciliation_exceptions WHERE taxpayer_id=?")
+    .bind(version.taxpayer_id).first<{ total: number; open: number | null }>();
+  const invoices = await db.prepare("SELECT id,payload_hash FROM invoices WHERE supplier_taxpayer_id=? AND status!='CANCELLED' AND issue_date BETWEEN ? AND ? ORDER BY id")
+    .bind(version.taxpayer_id, version.period_start, version.period_end).all<{ id: string; payload_hash: string }>();
+  const invoiceHash = await sha256Hex(stableStringify(invoices.results.map((row) => ({ id: row.id, payloadHash: row.payload_hash }))));
+  const snapshot = {
+    returnVersion: {
+      id: version.id, versionNumber: version.version_number, outputTaxCents: version.output_tax_cents,
+      inputTaxCents: version.input_tax_cents, adjustmentCents: version.adjustment_cents, netPayableCents: version.net_payable_cents,
+      status: version.status, ledgerSnapshotHash: version.ledger_snapshot_hash, generatedAt: version.generated_at, periodCode: version.period_code,
+    },
+    taxRuleSet: taxRuleSet ? { id: taxRuleSet.id, jurisdiction: taxRuleSet.jurisdiction, version: taxRuleSet.version, standardRateBps: taxRuleSet.standard_rate_bps } : null,
+    reconciliation: { openExceptions: reconciliation?.open ?? 0, totalExceptions: reconciliation?.total ?? 0 },
+    invoiceEvidence: { count: invoices.results.length, hash: invoiceHash },
+    frozenAt: now,
+  };
+  const json = stableStringify(snapshot);
+  return { json, hash: await sha256Hex(json) };
+}
+
+/**
+ * Module 9 Phase B: "each its own testable policy with an explainable
+ * pass/fail, never a black-box composite score." ELIGIBILITY_NEGATIVE_NET_
+ * POSITION/ELIGIBILITY_RETURN_FILED/DUPLICATE_CLAIM formalise gates
+ * requestRefund already hard-enforces above this call — persisted here as
+ * inspectable evidence of what was verified, not new gates. DEBT_OFFSET_
+ * PREVIEW and ANOMALY_CLAIM_FREQUENCY are genuinely new, small,
+ * code-versioned checks specific to refunds (the same fixed-catalogue
+ * shape Module 4 Phase A already established for risk rules) — both
+ * non-blocking/advisory: using them to actually route or gate a decision
+ * is Phase C's job ("Reuse Module 4's Risk.EvaluateRisk... route by risk
+ * tier"), not this phase's. IDENTITY_VERIFICATION/BANK_ACCOUNT_OWNERSHIP/
+ * SANCTIONS_SCREENING are explicitly NOT_CONFIGURED rather than a
+ * fabricated PASS: no identity/bank/AML screening provider exists
+ * anywhere in this codebase, and this deployment's own established
+ * convention (the ITAS `UnconfiguredItasIdentityAdapter`, HSM's
+ * `component-hsm` DISABLED row, Payment's own `DISABLED PENDING
+ * AUTHORITY`) is to say so explicitly rather than silently pass a check
+ * nothing actually evaluated.
+ */
+async function evaluateRefundClaimChecks(db: D1Database, version: VersionForClaim, filed: boolean): Promise<RefundClaimCheckResult[]> {
+  const debt = await db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS total FROM tax_obligations WHERE taxpayer_id=? AND status='PENDING'").bind(version.taxpayer_id).first<{ total: number }>();
+  const frequency = await db.prepare("SELECT COUNT(*) AS n FROM refund_claims WHERE taxpayer_id=? AND requested_at >= datetime('now','-90 days')").bind(version.taxpayer_id).first<{ n: number }>();
+  const claimCount = (frequency?.n ?? 0) + 1;
+  return [
+    { code: "ELIGIBILITY_NEGATIVE_NET_POSITION", status: "PASS", rationale: `The return's net VAT position is ${version.net_payable_cents} cents, a negative balance confirmed before this claim was accepted.` },
+    { code: "ELIGIBILITY_RETURN_FILED", status: filed ? "PASS" : "FAIL", rationale: filed ? "The underlying VAT return is FILED." : "The underlying VAT return has not been filed yet; the claim is blocked pending filing." },
+    { code: "DUPLICATE_CLAIM", status: "PASS", rationale: "No other refund claim exists for this VAT return version (enforced by a unique constraint on refund_claims.vat_return_version_id)." },
+    { code: "DEBT_OFFSET_PREVIEW", status: "PASS", rationale: `${debt?.total ?? 0} cents of PENDING statutory debt is on record today. Informational only — the authoritative offset is recomputed live against current obligations at PAYMENT_AUTHORISATION, never taken from this preview.` },
+    { code: "ANOMALY_CLAIM_FREQUENCY", status: claimCount >= 3 ? "FAIL" : "PASS", rationale: `${claimCount} refund claim(s) from this taxpayer within the trailing 90 days, including this one. Advisory only — does not block claim creation.` },
+    { code: "IDENTITY_VERIFICATION", status: "NOT_CONFIGURED", rationale: "No identity verification provider is configured for this pilot deployment; this check cannot be evaluated." },
+    { code: "BANK_ACCOUNT_OWNERSHIP", status: "NOT_CONFIGURED", rationale: "No bank/account-ownership verification provider is configured for this pilot deployment; this check cannot be evaluated." },
+    { code: "SANCTIONS_SCREENING", status: "NOT_CONFIGURED", rationale: "No sanctions/AML screening provider is configured for this pilot deployment; this check cannot be evaluated." },
+  ];
+}
+
 export async function requestRefund(payload: RefundRequestSubmission, actor: UserContext, key: string, correlationId: string) {
   validateKey(key);
   const input = validateRefundRequest(payload);
   const db = await ensureDatabase();
-  const version = await db.prepare(`SELECT v.*,p.period_code FROM vat_return_versions v JOIN vat_periods p ON p.id=v.vat_period_id WHERE v.id=?`).bind(input.vat_return_version_id).first<{
-    id: string; organisation_id: string; taxpayer_id: string; net_payable_cents: number; status: string; period_code: string;
-  }>();
+  const version = await db.prepare(`SELECT v.*,p.period_code,p.period_start,p.period_end FROM vat_return_versions v JOIN vat_periods p ON p.id=v.vat_period_id WHERE v.id=?`).bind(input.vat_return_version_id).first<VersionForClaim>();
   if (!version) throw new ComplianceResourceError("VAT return version was not found.", 404);
   if (!isNationalScope(actor) && actor.taxpayerId !== version.taxpayer_id) throw new AccessDeniedError("The return is outside your authorised taxpayer scope.");
   if (version.net_payable_cents >= 0) throw new RepositoryConflictError("A refund request requires a negative net VAT position.");
@@ -223,15 +307,38 @@ export async function requestRefund(payload: RefundRequestSubmission, actor: Use
   const status: RefundClaimStatus = filed ? "RECEIVED" : "BLOCKED_RETURN_NOT_FILED";
   const riskTier = amount >= 5_000_000 ? "CRITICAL" : amount >= 1_000_000 ? "HIGH" : "MEDIUM";
   const now = new Date().toISOString();
+  const snapshot = await buildRefundClaimSnapshot(db, version, now);
+  const checks = await evaluateRefundClaimChecks(db, version, filed);
   await db.batch([
     db.prepare(`INSERT INTO refund_claims
-      (id,claim_number,organisation_id,taxpayer_id,vat_return_version_id,amount_cents,currency,status,evidence_status,risk_tier,requested_by,requested_at,approved_by,approved_at,payment_instruction_id)
-      VALUES (?,?,?,?,?,?,'NAD',?,? ,?,?,?,NULL,NULL,NULL)`).bind(id, claimNumber, version.organisation_id, version.taxpayer_id, version.id, amount, status, filed ? "PENDING_REVIEW" : "AWAITING_ITAS_ACKNOWLEDGEMENT", riskTier, actor.userId, now),
+      (id,claim_number,organisation_id,taxpayer_id,vat_return_version_id,amount_cents,currency,status,evidence_status,risk_tier,requested_by,requested_at,approved_by,approved_at,payment_instruction_id,claim_snapshot,claim_snapshot_hash)
+      VALUES (?,?,?,?,?,?,'NAD',?,? ,?,?,?,NULL,NULL,NULL,?,?)`).bind(id, claimNumber, version.organisation_id, version.taxpayer_id, version.id, amount, status, filed ? "PENDING_REVIEW" : "AWAITING_ITAS_ACKNOWLEDGEMENT", riskTier, actor.userId, now, snapshot.json, snapshot.hash),
+    ...checks.map((check) => db.prepare("INSERT INTO refund_claim_checks (id,refund_claim_id,check_code,status,rationale,evaluated_at) VALUES (?,?,?,?,?,?)").bind(crypto.randomUUID(), id, check.code, check.status, check.rationale, now)),
     commandRecord(db, actor.userId, "REQUEST_REFUND", key, hash, "REFUND_CLAIM", id, now),
-    outbox(db, "REFUND_CLAIM", id, filed ? "RefundRequested" : "RefundRequestBlocked", version.taxpayer_id, { refund_claim_id: id, status, return_version_id: version.id, correlation_id: correlationId }, now),
-    await auditRecord(db, actor, filed ? "REFUND_REQUESTED" : "REFUND_REQUEST_BLOCKED", "REFUND_CLAIM", id, { claimNumber, status, amountCents: amount, correlationId }, now),
+    outbox(db, "REFUND_CLAIM", id, filed ? "RefundRequested" : "RefundRequestBlocked", version.taxpayer_id, { refund_claim_id: id, status, return_version_id: version.id, snapshot_hash: snapshot.hash, correlation_id: correlationId }, now),
+    await auditRecord(db, actor, filed ? "REFUND_REQUESTED" : "REFUND_REQUEST_BLOCKED", "REFUND_CLAIM", id, { claimNumber, status, amountCents: amount, snapshotHash: snapshot.hash, checks: checks.map((c) => ({ code: c.code, status: c.status })), correlationId }, now),
   ]);
   return db.prepare("SELECT * FROM refund_claims WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 9 Phase B GetRefundClaimChecks: reads back the frozen claim
+ * snapshot (claim_snapshot/claim_snapshot_hash, written once by
+ * requestRefund and never updated after) alongside the persisted check
+ * battery. Tenant-scoped exactly like CaseTimeline: a taxpayer may read
+ * their own claim's checks, any national-scope actor may read any claim's.
+ */
+export async function getRefundClaimChecks(claimId: string, actor: UserContext) {
+  const db = await ensureDatabase();
+  const claim = await db.prepare("SELECT id,taxpayer_id,claim_number,status,claim_snapshot,claim_snapshot_hash FROM refund_claims WHERE id=?").bind(claimId)
+    .first<{ id: string; taxpayer_id: string; claim_number: string; status: string; claim_snapshot: string | null; claim_snapshot_hash: string | null }>();
+  if (!claim) return null;
+  if (!isNationalScope(actor) && actor.taxpayerId !== claim.taxpayer_id) throw new AccessDeniedError("The refund claim is outside your authorised taxpayer scope.");
+  const checks = await db.prepare("SELECT check_code,status,rationale,evaluated_at FROM refund_claim_checks WHERE refund_claim_id=? ORDER BY evaluated_at").bind(claimId).all<Record<string, unknown>>();
+  return {
+    claim: { id: claim.id, claimNumber: claim.claim_number, status: claim.status, claimSnapshot: claim.claim_snapshot, claimSnapshotHash: claim.claim_snapshot_hash },
+    checks: checks.results,
+  };
 }
 
 type RefundClaimRow = {
