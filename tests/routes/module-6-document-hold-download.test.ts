@@ -35,10 +35,12 @@ function jsonRequest(url: string, body: unknown, idempotencyKey = crypto.randomU
   });
 }
 
+/** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #7): uploadDocument now sniffs the file's own leading bytes against its declared MIME type, so a PDF upload's fixture content must actually start with the real PDF magic bytes ("%PDF-"). */
 async function multipartRequest(url: string, fields: Record<string, string>, file: { name: string; type: string; content: string }): Promise<Request> {
   const form = new FormData();
   for (const [key, value] of Object.entries(fields)) form.set(key, value);
-  form.set("file", new File([file.content], file.name, { type: file.type }));
+  const content = file.type === "application/pdf" ? `%PDF-1.4\n${file.content}` : file.content;
+  form.set("file", new File([content], file.name, { type: file.type }));
   const probe = new Request(url, { method: "POST", body: form });
   const byteLength = (await probe.clone().arrayBuffer()).byteLength;
   return new Request(url, { method: "POST", body: form, headers: { "content-length": String(byteLength) } });
@@ -120,7 +122,7 @@ describe("Module 6 document retention hold and authorized download (Phase B)", (
     await scanResultRoute(documentId, NAMRA_ADMIN, "CLEAN");
     const response = await downloadRoute(documentId, OWNER);
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("downloadable payload");
+    expect(await response.text()).toBe("%PDF-1.4\ndownloadable payload");
     expect(response.headers.get("content-disposition")).toContain("receipt.pdf");
   });
 
@@ -140,7 +142,7 @@ describe("Module 6 document retention hold and authorized download (Phase B)", (
 
     const response = await downloadRoute(originalId, OWNER);
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("original historical payload");
+    expect(await response.text()).toBe("%PDF-1.4\noriginal historical payload");
   });
 
   it("returns 404 downloading a non-existent document", async () => {

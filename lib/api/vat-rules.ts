@@ -1,10 +1,16 @@
 import { AccessDeniedError } from "@/lib/auth";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { VatRuleValidationError } from "@/lib/domain/vat-rules";
-import { RequestGuardError, type RequestContext } from "@/lib/security/request";
+import { recordAuthorizationDenial, recordRateLimitBreach, RequestGuardError, type RequestContext } from "@/lib/security/request";
 
-/** Shared problem+json/response helpers for Module 2's VAT rule engine (Phase A). */
-export function vatRuleProblem(error: unknown, context: RequestContext): Response {
+/**
+ * Shared problem+json/response helpers for Module 2's VAT rule engine
+ * (Phase A). Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4):
+ * see lib/api/identity.ts's identityProblem for why this is now async and
+ * what it records — this route family previously emitted no security
+ * events at all.
+ */
+export async function vatRuleProblem(error: unknown, context: RequestContext): Promise<Response> {
   let status = 500;
   let code = "INTERNAL_ERROR";
   let detail = "The VAT rule operation could not be completed.";
@@ -13,6 +19,7 @@ export function vatRuleProblem(error: unknown, context: RequestContext): Respons
     status = error.status;
     code = status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED";
     detail = error.message;
+    await recordAuthorizationDenial(context, error.message, status);
   } else if (error instanceof VatRuleValidationError) {
     status = 422;
     code = "VALIDATION_FAILED";
@@ -26,6 +33,7 @@ export function vatRuleProblem(error: unknown, context: RequestContext): Respons
     status = error.status;
     code = error.code;
     detail = error.message;
+    await recordRateLimitBreach(context, error);
   }
   return Response.json({
     type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`,

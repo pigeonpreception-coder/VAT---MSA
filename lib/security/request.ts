@@ -147,6 +147,39 @@ export async function recordSecurityEvent(input: {
   await evaluateDetectionRules(db, eventId, input.eventType, input.actorId ?? null, input.context.sourceToken, now).catch(() => undefined);
 }
 
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): a 2026-08-26
+ * audit found `AUTHORISATION_DENIED`/`RATE_LIMIT_EXCEEDED` events — the two
+ * inputs Module 8's `REPEATED_AUTHORISATION_DENIALS`/`RATE_LIMIT_ABUSE`
+ * detection rules actually watch — were emitted from only a handful of
+ * route families, so those rules structurally could not fire across most
+ * of the API. These two shared, best-effort recorders let every `lib/api/*`
+ * problem+json helper wire both events with one call each, instead of
+ * every individual route threading its own actor id and event-recording
+ * logic through. `getCurrentUser()` is re-resolved here rather than
+ * requiring every call site to pass one through: it is a pure, idempotent
+ * read (no side effects), so calling it again on an already-failed request
+ * is safe, gives real per-actor attribution for the common case (an
+ * authenticated actor denied by a permission/role/rate-limit check), and
+ * degrades gracefully to `actorId=null` for a genuinely unauthenticated
+ * request. Neither function ever throws — a security-telemetry failure
+ * must never mask the real error response, matching every existing call
+ * site's own `.catch(() => undefined)` convention.
+ */
+export async function recordAuthorizationDenial(context: RequestContext, message: string, status: number): Promise<void> {
+  const { getCurrentUser } = await import("@/lib/auth");
+  const actorId = await getCurrentUser().then((user) => user.userId).catch(() => null);
+  const permissionMatch = message.match(/does not have (\S+) permission/);
+  await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: permissionMatch ? permissionMatch[1] : "ACCESS_DENIED", outcome: "DENIED", details: { status } }).catch(() => undefined);
+}
+
+export async function recordRateLimitBreach(context: RequestContext, error: RequestGuardError, action = "RATE_LIMIT"): Promise<void> {
+  if (![413, 429].includes(error.status)) return;
+  const { getCurrentUser } = await import("@/lib/auth");
+  const actorId = await getCurrentUser().then((user) => user.userId).catch(() => null);
+  await recordSecurityEvent({ eventType: error.code, severity: error.status === 429 ? "MEDIUM" : "LOW", actorId, context, action, outcome: "REJECTED", details: { status: error.status } }).catch(() => undefined);
+}
+
 type DetectionRuleRow = { id: string; code: string; group_by: string; threshold_count: number; window_minutes: number; severity: string };
 
 /**

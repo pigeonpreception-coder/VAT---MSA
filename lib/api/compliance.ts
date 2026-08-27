@@ -35,7 +35,7 @@ import {
 } from "@/lib/data/compliance-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { ComplianceValidationError } from "@/lib/domain/compliance";
-import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
+import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordAuthorizationDenial, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type ComplianceCommand =
   | "OPEN_AUDIT_CASE" | "FILE_DISPUTE" | "REQUEST_REFUND" | "TRANSITION_REFUND_CLAIM" | "DISPUTE_REFUND_CLAIM"
@@ -56,7 +56,7 @@ export async function handleComplianceList(request: Request) {
     requirePermission(user, "compliance:read");
     return Response.json(await getComplianceSnapshot(user), { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The compliance workspace is temporarily unavailable.", context.correlationId);
   }
 }
@@ -71,7 +71,7 @@ export async function handleCaseTimeline(request: Request, resourceId: string) {
     if (!timeline) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
     return Response.json(timeline, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The case timeline is temporarily unavailable.", context.correlationId);
   }
 }
@@ -86,7 +86,7 @@ export async function handleRefundClaimChecks(request: Request, resourceId: stri
     if (!result) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Refund claim was not found.", context.correlationId);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The refund claim checks are temporarily unavailable.", context.correlationId);
   }
 }
@@ -101,7 +101,7 @@ export async function handleCaseEvidence(request: Request, resourceId: string) {
     if (!evidence) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
     return Response.json(evidence, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The case evidence register is temporarily unavailable.", context.correlationId);
   }
 }
@@ -116,7 +116,7 @@ export async function handleCaseNotes(request: Request, resourceId: string) {
     if (!notes) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
     return Response.json(notes, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The case notes are temporarily unavailable.", context.correlationId);
   }
 }
@@ -132,7 +132,7 @@ export async function handleRestrictedRiskQuery(request: Request) {
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof ComplianceValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "Risk indicators are temporarily unavailable.", context.correlationId);
   }
 }
@@ -147,7 +147,7 @@ export async function handleInbox(request: Request) {
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof ComplianceValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The correspondence inbox is temporarily unavailable.", context.correlationId);
   }
 }
@@ -162,7 +162,7 @@ export async function handleConversation(request: Request, resourceId: string) {
     if (!conversation) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Correspondence thread was not found.", context.correlationId);
     return Response.json(conversation, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "The correspondence thread is temporarily unavailable.", context.correlationId);
   }
 }
@@ -177,7 +177,7 @@ export async function handleNotifications(request: Request) {
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof ComplianceValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
+    if (error instanceof AccessDeniedError) { await recordAuthorizationDenial(context, error.message, error.status); return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId); }
     return problem(500, "INTERNAL_ERROR", "Internal error", "Notifications are temporarily unavailable.", context.correlationId);
   }
 }
@@ -258,7 +258,13 @@ export async function handleComplianceCommand(request: Request, permission: stri
     return Response.json({ resource: result }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
-    if (error instanceof RequestGuardError) return problem(error.status, error.code, error.status === 429 ? "Rate limited" : "Bad request", error.message, context.correlationId, undefined, error.retryAfter);
+    if (error instanceof RequestGuardError) {
+      // Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): this branch returned without ever recording RATE_LIMIT_ABUSE's input event, even though actorId was already known here.
+      if ([413, 429].includes(error.status)) {
+        await recordSecurityEvent({ eventType: error.code, severity: error.status === 429 ? "MEDIUM" : "LOW", actorId, context, action: command, outcome: "REJECTED", details: { status: error.status } }).catch(() => undefined);
+      }
+      return problem(error.status, error.code, error.status === 429 ? "Rate limited" : "Bad request", error.message, context.correlationId, undefined, error.retryAfter);
+    }
     if (error instanceof ComplianceValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
     if (error instanceof ComplianceResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
     if (error instanceof RepositoryConflictError) return problem(409, "COMPLIANCE_CONFLICT", "Conflict", error.message, context.correlationId);

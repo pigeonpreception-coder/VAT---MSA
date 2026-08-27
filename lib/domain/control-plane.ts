@@ -1,3 +1,5 @@
+import { TENANT_GRANTABLE_PERMISSIONS } from "@/lib/domain/access";
+
 export type LicenseState =
   | "TRIAL"
   | "ACTIVE"
@@ -88,8 +90,6 @@ export function evaluateEntitlement(input: EntitlementInput): EntitlementEvaluat
   };
 }
 
-export const PROTECTED_PERMISSION_PREFIXES = ["namra:", "platform:", "security-policy:", "tax-rules:", "licensing-state:", "tenant-override:"] as const;
-
 export type OrganisationRoleInput = {
   name: string;
   description?: string;
@@ -125,7 +125,7 @@ export function normalizeOrganisationRole(input: unknown): OrganisationRoleInput
   if (!permissions.length) throw new ControlPlaneValidationError("PERMISSION_REQUIRED", "Select at least one permission.");
   for (const permission of permissions) {
     if (!/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/.test(permission)) throw new ControlPlaneValidationError("PERMISSION_INVALID", `Permission ${permission} is not valid.`);
-    if (PROTECTED_PERMISSION_PREFIXES.some((prefix) => permission.startsWith(prefix))) {
+    if (!TENANT_GRANTABLE_PERMISSIONS.has(permission)) {
       throw new ControlPlaneValidationError("PROTECTED_PERMISSION", `${permission} is system-controlled and cannot be placed in an organisation role.`);
     }
   }

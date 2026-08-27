@@ -73,7 +73,13 @@ export async function handleVatCommand(request: Request, permission: string, com
     return Response.json({ resource: result }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
-    if (error instanceof RequestGuardError) return problem(error.status, error.code, error.status === 429 ? "Rate limited" : "Bad request", error.message, context.correlationId, undefined, error.retryAfter);
+    if (error instanceof RequestGuardError) {
+      // Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): this branch returned without ever recording RATE_LIMIT_ABUSE's input event, even though actorId was already known here.
+      if ([413, 429].includes(error.status)) {
+        await recordSecurityEvent({ eventType: error.code, severity: error.status === 429 ? "MEDIUM" : "LOW", actorId, context, action: command, outcome: "REJECTED", details: { status: error.status } }).catch(() => undefined);
+      }
+      return problem(error.status, error.code, error.status === 429 ? "Rate limited" : "Bad request", error.message, context.correlationId, undefined, error.retryAfter);
+    }
     if (error instanceof VatLifecycleValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, context.correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
     if (error instanceof VatLifecycleResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, context.correlationId);
     if (error instanceof RepositoryConflictError) return problem(409, "VAT_LIFECYCLE_CONFLICT", "Conflict", error.message, context.correlationId);

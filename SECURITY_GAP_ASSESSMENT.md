@@ -14,10 +14,10 @@
 **Gaps:**
 1. ~~**CRITICAL — step-up/MFA is client-asserted and forgeable.**~~ **FIXED 2026-08-27.** `requireStepUp` (`lib/security/step-up.ts`) previously trusted two request headers the *caller* supplied (`x-vat-msa-auth-assurance`, `x-vat-msa-reauthenticated-at`) verbatim, with no server-side backing at all — no application code anywhere ever set those headers on a genuine step-up event, only test fixtures did. Replaced with a real, standards-compliant RFC 6238 TOTP implementation (`lib/domain/mfa.ts`, built entirely from Web Crypto — no external MFA provider required) and a genuine server-verified step-up record: `EnrollTotp`/`VerifyTotpEnrollment` establish a credential, `ConfirmStepUp` (`POST /api/v1/identity/step-up`) verifies a fresh 6-digit code and writes a real `step_up_events` row with anti-replay (`last_used_counter`), and `requireStepUp` now checks that row instead of any header. All 28 "step-up gated" commands are genuinely gated. Proven in `tests/mfa-domain.test.ts` and `tests/routes/security-mfa-step-up.test.ts` (the latter also exercises item #1's fix in the same end-to-end flow via `LinkIdentity`).
 2. ~~**CRITICAL — full account takeover via `LinkIdentity`.**~~ **FIXED 2026-08-27.** `linkIdentity`/`revokeIdentityLink` (`lib/data/identity-repository.ts:564-588`, `:615-633`) previously performed no tenant-scope check on the target `app_users` row/link — a `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` could link a platform subject they control to any user (including a national-scope account) and authenticate as it, or revoke any other user's session. Both now require a non-national actor's target to share their own `taxpayer_id`; a genuinely national-scope actor remains unrestricted. Proven in `tests/routes/security-identity-link-scope.test.ts`.
-3. **HIGH — the "protected-permission ceiling" is a denylist that protects almost nothing.** `PROTECTED_PERMISSION_PREFIXES` (`lib/domain/control-plane.ts:91`) only actually blocks `platform:`. `createOrganisationRole` will happily grant a tenant-defined role `audit:read`, `security:read`, `reconciliation:manage`, `refunds:review`, `administration:manage`, etc. Most sensitive commands survive because the repository layer independently re-checks `isNationalScope`; the ones that don't are listed under domains 3 and 8.
+3. ~~**HIGH — the "protected-permission ceiling" is a denylist that protects almost nothing.**~~ **FIXED 2026-08-27.** `PROTECTED_PERMISSION_PREFIXES` (`lib/domain/control-plane.ts`) only ever actually blocked `platform:` — `createOrganisationRole` would happily grant a tenant-defined role `audit:read`, `security:read`, `reconciliation:manage`, `refunds:review`, `administration:manage`, etc. Replaced with `TENANT_GRANTABLE_PERMISSIONS` (`lib/domain/access.ts`) — an allowlist derived directly from the union of every real tenant-facing role's own permissions (`ROLE_PERMISSIONS`/`CONTROL_PLANE_PERMISSIONS`, excluding national/platform-only roles), so a tenant-defined role can never exceed what an existing built-in tenant role already has. Proven in `tests/routes/security-tenant-role-permissions.test.ts`.
 4. **MEDIUM** — no PAM/JIT elevation; grants are permanent until revoked.
 
-**Severity: HIGH** (downgraded from CRITICAL now that items #1 and #2 are fixed; item #3's denylist gap remains).
+**Severity: MEDIUM** (downgraded from CRITICAL/HIGH now that items #1, #2 and #3 are fixed; only the PAM/JIT gap remains, which is out of scope for this pilot's remediation pass).
 
 ## 2. Authoritative taxpayer identity (Sec 8, 9, 10)
 
@@ -29,7 +29,7 @@ Duplicate detection on VAT number/TIN is real (`lib/data/identity-repository.ts:
 
 **Real gaps found:**
 - **HIGH — `audit_events` has no tenant dimension and is read unscoped.** `searchAuditTrail` filters only by resource/action/actor. `audit:read` is a seeded, tenant-grantable permission (compounds with domain 1, gap 3).
-- **MEDIUM — `reconciliation-repository.ts`'s `assignException`/`resolveException`** perform no tenant check, inconsistent with the sibling `runMatch` in the same file which does.
+- ~~**MEDIUM — `reconciliation-repository.ts`'s `assignException`/`resolveException`** perform no tenant check~~ **FIXED 2026-08-27** — both now call `requireTaxpayerScope`, matching the sibling `runMatch` in the same file.
 - **LOW** — `security_incidents` has no tenant dimension (correct for a SOC surface, but `security:read` is tenant-grantable).
 - **MEDIUM — no systematic tenant-isolation test suite** exists (Sec 14 requires "continuously test").
 
@@ -69,7 +69,7 @@ The CREATE→VALIDATE→AUTHORIZE→SIGN→SUBMIT→ACKNOWLEDGE→RECORD→AUDIT
 What exists is precisely: **a 3-rule fixed-threshold catalogue over the system's own event log**, with a real, working, tested incident lifecycle (create/contain/revoke/close, genuine technical containment via session revocation). What Sec 33 describes is adaptive, multi-method, behavioural detection — a different class of thing, and the distance is large but expected for a pilot.
 
 **Gaps:**
-- **HIGH — detection input coverage is much thinner than the rule catalogue implies.** `RATE_LIMIT_EXCEEDED` is recorded from only 2 of ~20 rate-limited routes; `AUTHORISATION_DENIED` is missing from ~60 routes (identity/control-plane/reconciliation/vat-rules families) — so two of the three detection rules structurally cannot fire across most of the API. **This is the single cheapest, highest-leverage fix available.**
+- ~~**HIGH — detection input coverage is much thinner than the rule catalogue implies.**~~ **FIXED 2026-08-27.** `AUTHORISATION_DENIED` was missing from ~60 routes (identity/control-plane/reconciliation/vat-rules families), and `RATE_LIMIT_EXCEEDED` from every already-partially-wired dispatcher's `RequestGuardError` branch (business/compliance/platform/security/vat-lifecycle/audit) — so two of the three detection rules structurally could not fire across most of the API. Fixed by two new shared, best-effort recorders (`lib/security/request.ts`'s `recordAuthorizationDenial`/`recordRateLimitBreach`, which re-resolve the actor rather than requiring every route to thread one through) wired into each family's shared `*Problem()`/`failure()` error-mapping helper, so no individual route needed touching. Proven in `tests/routes/security-event-emission.test.ts`, which shows `REPEATED_AUTHORISATION_DENIALS` now genuinely opens an incident from a previously-blind route family — not just that an event row gets written.
 - **HIGH — none of Sec 33's named threats (account takeover, credential abuse, privilege escalation, exfiltration) or Sec 24's insider-threat set (bulk downloads, unusual exports, permission changes) have any rule**, despite the underlying audit events already existing.
 - **MEDIUM** — no behavioural baseline of any kind; automated response is one action (incident creation) and is not reversible; incident lifecycle is compressed to 3 states vs. Sec 37's 9.
 
@@ -83,7 +83,7 @@ Real, working tools exist: `secret-scan.mjs` (verified clean), `generate-sbom.mj
 
 MIME allowlist, 10 MiB size cap, SHA-256 checksum, path-traversal-safe object keys, quarantine-before-availability, audited downloads — all genuinely enforced (`lib/data/platform-repository.ts:127-162`).
 
-**Gaps:** **HIGH — no malware scanning exists at all.** `CompleteDocumentScan` records a verdict *asserted by a human admin* — that click is the entire control. The matrix's "VERIFIED QUARANTINE" label is accurate for the workflow, not for scanning. **MEDIUM** — MIME validation trusts the client-supplied `Content-Type` with no magic-byte check, despite the file bytes already being in memory at the validation point.
+**Gaps:** **HIGH — no malware scanning exists at all.** `CompleteDocumentScan` records a verdict *asserted by a human admin* — that click is the entire control. The matrix's "VERIFIED QUARANTINE" label is accurate for the workflow, not for scanning. ~~**MEDIUM** — MIME validation trusts the client-supplied `Content-Type` with no magic-byte check~~ **FIXED 2026-08-27** — `validateAndHashFile` (`lib/data/platform-repository.ts`) now sniffs the file's own leading bytes against real PDF/PNG/JPEG/XLSX magic numbers (CSV, having no signature, instead fails a bounded NUL-byte sniff test), refusing a file whose content doesn't match its declared type before it's ever stored. This is content-sniffing, not malware scanning — the HIGH gap above remains.
 
 ---
 
@@ -96,10 +96,10 @@ Ranked by severity × cheapness within this repo's existing patterns (S = days, 
 | 1 | ~~Scope-check `linkIdentity`/`revokeIdentityLink` (closes full account-takeover path)~~ | CRITICAL | **DONE 2026-08-27** |
 | 2 | ~~Make step-up server-verified (new `step_up_events` table + command)~~ | CRITICAL | **DONE 2026-08-27** |
 | 3 | Add a CI security gate (one workflow file; tools already exist and pass) | HIGH | S |
-| 4 | Emit `RATE_LIMIT_EXCEEDED`/`AUTHORISATION_DENIED` from every handler (wiring only) | HIGH | S |
-| 5 | Replace the protected-permission denylist with an allowlist/`tenant_grantable` column | HIGH | S |
-| 6 | Scope `assignException`/`resolveException`; add a tenant-isolation test suite | MEDIUM→HIGH | S / M |
-| 7 | Magic-byte content validation on upload | HIGH | S |
+| 4 | ~~Emit `RATE_LIMIT_EXCEEDED`/`AUTHORISATION_DENIED` from every handler (wiring only)~~ | HIGH | **DONE 2026-08-27** |
+| 5 | ~~Replace the protected-permission denylist with an allowlist~~ | HIGH | **DONE 2026-08-27** |
+| 6 | ~~Scope `assignException`/`resolveException`~~; add a tenant-isolation test suite | MEDIUM→HIGH | **assignException/resolveException DONE 2026-08-27**; systematic isolation suite still open (M) |
+| 7 | ~~Magic-byte content validation on upload~~ | HIGH | **DONE 2026-08-27** |
 | 8 | Rate-limit + idempotency-key the 4 uncovered route families | HIGH | M |
 | 9 | Fix audit-chain concurrency race; consolidate the 2 remaining hand-rolled writers | MEDIUM | S |
 | 10 | Introduce a `SignatureProvider` seam behind existing `certificates.signature` columns | HIGH | M |

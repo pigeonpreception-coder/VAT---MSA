@@ -33,10 +33,12 @@ function jsonRequest(url: string, body: unknown, idempotencyKey = crypto.randomU
   });
 }
 
+/** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #7): uploadDocument now sniffs the file's own leading bytes against its declared MIME type, so a PDF upload's fixture content must actually start with the real PDF magic bytes ("%PDF-"). */
 async function multipartRequest(url: string, fields: Record<string, string>, file: { name: string; type: string; content: string }): Promise<Request> {
   const form = new FormData();
   for (const [key, value] of Object.entries(fields)) form.set(key, value);
-  form.set("file", new File([file.content], file.name, { type: file.type }));
+  const content = file.type === "application/pdf" ? `%PDF-1.4\n${file.content}` : file.content;
+  form.set("file", new File([content], file.name, { type: file.type }));
   const probe = new Request(url, { method: "POST", body: form });
   const byteLength = (await probe.clone().arrayBuffer()).byteLength;
   return new Request(url, { method: "POST", body: form, headers: { "content-length": String(byteLength) } });
@@ -108,6 +110,21 @@ describe("Module 6 document scan lifecycle and versioning (Phase A)", () => {
     const body = await response.json();
     expect(body.document.status).toBe("QUARANTINED");
     expect(body.document.scan_status).toBe("PENDING_EXTERNAL_SCANNER");
+  });
+
+  it("rejects a file whose content doesn't match its declared type (security fix 2026-08-27, magic-byte content sniffing)", async () => {
+    const { POST } = await import("@/app/api/v1/documents/route");
+    actingAs(OWNER);
+    const form = new FormData();
+    form.set("owner_domain", "EXPENSE");
+    form.set("owner_resource_id", "exp-0001");
+    form.set("classification", "TAX_CONFIDENTIAL");
+    // Declared application/pdf, but the actual bytes are plain text with none of the real PDF magic bytes.
+    form.set("file", new File(["definitely not a pdf"], "fake.pdf", { type: "application/pdf" }));
+    const probe = new Request("https://vat-msa.local/api/v1/documents", { method: "POST", body: form });
+    const byteLength = (await probe.clone().arrayBuffer()).byteLength;
+    const response = await POST(new Request("https://vat-msa.local/api/v1/documents", { method: "POST", body: form, headers: { "content-length": String(byteLength) } }));
+    expect(response.status).toBe(415);
   });
 
   it("clears a quarantined document to ACTIVE on a CLEAN verdict", async () => {

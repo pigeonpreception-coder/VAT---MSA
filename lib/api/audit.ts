@@ -1,17 +1,25 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
 import { AuditResourceError, listAuditChainVerifications, runAuditChainVerification, searchAuditTrail } from "@/lib/data/audit-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
-import { emitStructuredSecurityLog, enforceRateLimits, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
+import { emitStructuredSecurityLog, enforceRateLimits, recordAuthorizationDenial, recordRateLimitBreach, requestContext, type RequestContext, RequestGuardError } from "@/lib/security/request";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string) {
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store" } });
 }
 
-function failure(error: unknown, correlationId: string) {
+/** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): the two read handlers recorded no security event at all on denial, and the RequestGuardError branch never recorded a rate-limit breach either. Now takes the full RequestContext (not just the correlationId string) so it can record both. */
+async function failure(error: unknown, context: RequestContext) {
+  const correlationId = context.correlationId;
   if (error instanceof AuditResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, correlationId);
   if (error instanceof RepositoryConflictError) return problem(409, "AUDIT_CONFLICT", "Conflict", error.message, correlationId);
-  if (error instanceof RequestGuardError) return problem(error.status, error.code, "Bad request", error.message, correlationId);
-  if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, correlationId);
+  if (error instanceof RequestGuardError) {
+    await recordRateLimitBreach(context, error);
+    return problem(error.status, error.code, "Bad request", error.message, correlationId);
+  }
+  if (error instanceof AccessDeniedError) {
+    await recordAuthorizationDenial(context, error.message, error.status);
+    return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, correlationId);
+  }
   return problem(500, "INTERNAL_ERROR", "Internal error", "The audit operation could not be completed.", correlationId);
 }
 
@@ -31,7 +39,7 @@ export async function handleAuditTrailSearch(request: Request) {
       offset: params.get("offset") ? Number(params.get("offset")) : undefined,
     });
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 8 Phase D: past chain-verification runs. */
@@ -43,7 +51,7 @@ export async function handleAuditChainVerificationList(request: Request) {
     const limitParam = new URL(request.url).searchParams.get("limit");
     const result = await listAuditChainVerifications(limitParam ? Number(limitParam) : undefined);
     return Response.json({ verifications: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 8 Phase D VerifyAuditChain: on-demand (no cron infrastructure exists), persists its own result, opens a CRITICAL incident on a detected break. */
@@ -60,7 +68,6 @@ export async function handleAuditChainVerificationTrigger(request: Request) {
     emitStructuredSecurityLog({ level: result.status === "PASSED" ? "INFO" : "ERROR", event: "VERIFY_AUDIT_CHAIN", correlationId: context.correlationId, actorId, outcome: result.status, durationMs: Date.now() - startedAt });
     return Response.json({ verification: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "VERIFY_AUDIT_CHAIN", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }

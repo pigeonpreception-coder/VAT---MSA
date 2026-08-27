@@ -97,9 +97,42 @@ export function requirePermission(user: UserContext, permission: string): void {
   }
 }
 
+const NATIONAL_SCOPE_ROLES = ["PILOT_ADMIN", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "NAMRA_REFUND_OFFICER", "NAMRA_SUPERVISOR", "NAMRA_SYSTEM_ADMIN", "INTERNAL_AUDITOR", "SECURITY_ANALYST"];
+
 export function isNationalScope(user: UserContext): boolean {
-  return user.taxpayerId === null && ["PILOT_ADMIN", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "NAMRA_REFUND_OFFICER", "NAMRA_SUPERVISOR", "NAMRA_SYSTEM_ADMIN", "INTERNAL_AUDITOR", "SECURITY_ANALYST"].includes(user.role);
+  return user.taxpayerId === null && NATIONAL_SCOPE_ROLES.includes(user.role);
 }
+
+/** Roles that never represent a tenant/organisation — national tax-administration roles (NATIONAL_SCOPE_ROLES) plus the platform-technical roles Module 8 Phase A's TECHNICAL_ONLY_ROLES also treats specially. Neither set's permissions should ever flow into a tenant-defined organisation role. */
+const NATIONAL_OR_PLATFORM_ONLY_ROLES = new Set([...NATIONAL_SCOPE_ROLES, "SUPER_ADMIN", "INFRASTRUCTURE_ADMIN"]);
+
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #5): the union
+ * of every permission any tenant/organisation-facing role legitimately
+ * holds today (every role *not* in NATIONAL_OR_PLATFORM_ONLY_ROLES, across
+ * both ROLE_PERMISSIONS and CONTROL_PLANE_PERMISSIONS). This is the real
+ * safe ceiling for what a tenant-*defined* custom role
+ * (`createOrganisationRole`) may ever be granted — derived directly from
+ * this same source of truth, so it can never grant more than an existing
+ * built-in tenant role already has. Replaces the previous
+ * `PROTECTED_PERMISSION_PREFIXES` denylist in `lib/domain/control-plane.ts`,
+ * which only actually blocked the `platform:` prefix: a tenant-defined role
+ * could otherwise be granted `audit:read`, `security:read`,
+ * `reconciliation:manage`, `refunds:review`, etc. — permissions no tenant
+ * role has ever legitimately held.
+ */
+export const TENANT_GRANTABLE_PERMISSIONS: ReadonlySet<string> = (() => {
+  const union = new Set<string>();
+  for (const [role, permissions] of Object.entries(ROLE_PERMISSIONS)) {
+    if (NATIONAL_OR_PLATFORM_ONLY_ROLES.has(role)) continue;
+    for (const permission of permissions) union.add(permission);
+  }
+  for (const [role, permissions] of Object.entries(CONTROL_PLANE_PERMISSIONS)) {
+    if (NATIONAL_OR_PLATFORM_ONLY_ROLES.has(role)) continue;
+    for (const permission of permissions) union.add(permission);
+  }
+  return union;
+})();
 
 export function requireTaxpayerScope(user: UserContext, taxpayerId: string): void {
   if (!isNationalScope(user) && user.taxpayerId !== taxpayerId) {

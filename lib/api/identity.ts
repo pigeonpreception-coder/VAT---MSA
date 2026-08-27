@@ -1,7 +1,7 @@
 import { AccessDeniedError } from "@/lib/auth";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { IdentityValidationError } from "@/lib/domain/identity";
-import { RequestGuardError, type RequestContext } from "@/lib/security/request";
+import { recordAuthorizationDenial, recordRateLimitBreach, RequestGuardError, type RequestContext } from "@/lib/security/request";
 
 /**
  * Shared problem+json/response helpers for the identity domain (Module 1:
@@ -9,8 +9,19 @@ import { RequestGuardError, type RequestContext } from "@/lib/security/request";
  * `problem()` that previously lived only in the registration-applications
  * route so new identity routes (registration decisions, membership
  * assignment) don't re-duplicate it.
+ *
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): this whole
+ * route family emitted no `AUTHORISATION_DENIED`/`RATE_LIMIT_EXCEEDED`
+ * security events at all, so Module 8's detection rules were structurally
+ * blind to it. Now async so it can record both (best-effort — see
+ * lib/security/request.ts's recordAuthorizationDenial/
+ * recordRateLimitBreach) without every one of this family's ~15 routes
+ * needing to thread an actor id or event-recording call through
+ * themselves; every existing `return identityProblem(error, context);`
+ * call site keeps working unchanged, since returning a promise from an
+ * async route handler already awaits it.
  */
-export function identityProblem(error: unknown, context: RequestContext): Response {
+export async function identityProblem(error: unknown, context: RequestContext): Promise<Response> {
   let status = 500;
   let code = "INTERNAL_ERROR";
   let detail = "The identity operation could not be completed.";
@@ -19,6 +30,7 @@ export function identityProblem(error: unknown, context: RequestContext): Respon
     status = error.status;
     code = status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED";
     detail = error.message;
+    await recordAuthorizationDenial(context, error.message, status);
   } else if (error instanceof IdentityValidationError) {
     status = 422;
     code = "VALIDATION_FAILED";
@@ -32,6 +44,7 @@ export function identityProblem(error: unknown, context: RequestContext): Respon
     status = error.status;
     code = error.code;
     detail = error.message;
+    await recordRateLimitBreach(context, error);
   }
   return Response.json({
     type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`,

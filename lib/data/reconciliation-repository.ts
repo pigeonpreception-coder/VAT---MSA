@@ -132,12 +132,21 @@ type ExceptionRow = { id: string; status: string; taxpayer_id: string | null };
  * officer. Not itself the work-queue (that's GetWorkQueue, Phase B — no
  * filter/status/officer/age query exists yet), just the mutation a queue
  * would call.
+ *
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #6): this
+ * command performed no tenant-scope check at all — unlike runMatch in this
+ * same file, which already calls requireTaxpayerScope. Every current
+ * holder of reconciliation:manage is national-scope, so there was no live
+ * leak, but the permission is tenant-grantable (see item #5's fix to
+ * createOrganisationRole), and the inconsistency with runMatch was itself
+ * the tell. Fixed the same way runMatch already does it.
  */
 export async function assignException(actor: UserContext, exceptionId: string, input: unknown, correlationId: string): Promise<ExceptionActionResult> {
   const { officerId } = normalizeExceptionAssignment(input);
   const db = await ensureDatabase();
   const exception = await db.prepare("SELECT id,status,taxpayer_id FROM reconciliation_exceptions WHERE id=?").bind(exceptionId).first<ExceptionRow>();
   if (!exception) throw new ReconciliationValidationError([{ code: "EXCEPTION_NOT_FOUND", path: "/exception_id", message: "The reconciliation exception does not exist." }]);
+  requireTaxpayerScope(actor, exception.taxpayer_id ?? "");
   if (exception.status === "RESOLVED") throw new RepositoryConflictError("This exception is already resolved and cannot be reassigned.");
   const officer = await db.prepare("SELECT id,status FROM app_users WHERE id=?").bind(officerId).first<{ id: string; status: string }>();
   if (!officer) throw new ReconciliationValidationError([{ code: "OFFICER_NOT_FOUND", path: "/officer_id", message: "The officer does not exist." }]);
@@ -151,12 +160,13 @@ export async function assignException(actor: UserContext, exceptionId: string, i
   return { id: exceptionId, status: "ASSIGNED" };
 }
 
-/** Module 3 Phase A ResolveException. Idempotent on an already-resolved exception. */
+/** Module 3 Phase A ResolveException. Idempotent on an already-resolved exception. Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #6): see assignException's comment above — same missing tenant-scope check, same fix. */
 export async function resolveException(actor: UserContext, exceptionId: string, input: unknown, correlationId: string): Promise<ExceptionActionResult> {
   const { notes } = normalizeExceptionResolution(input);
   const db = await ensureDatabase();
   const exception = await db.prepare("SELECT id,status,taxpayer_id FROM reconciliation_exceptions WHERE id=?").bind(exceptionId).first<ExceptionRow>();
   if (!exception) throw new ReconciliationValidationError([{ code: "EXCEPTION_NOT_FOUND", path: "/exception_id", message: "The reconciliation exception does not exist." }]);
+  requireTaxpayerScope(actor, exception.taxpayer_id ?? "");
   if (exception.status === "RESOLVED") return { id: exceptionId, status: "RESOLVED" };
 
   const now = new Date().toISOString();

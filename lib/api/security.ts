@@ -2,18 +2,23 @@ import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth
 import { closeIncident, containIncident, createIncident, getIncidentDetail, getSOCQueue, revokeIncidentAccess, SecurityResourceError } from "@/lib/data/security-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { SecurityValidationError } from "@/lib/domain/security";
-import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
+import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordRateLimitBreach, recordSecurityEvent, requestContext, type RequestContext, RequestGuardError } from "@/lib/security/request";
 import { requireStepUp } from "@/lib/security/step-up";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown) {
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId, ...(errors ? { errors } : {}) }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store" } });
 }
 
-function failure(error: unknown, correlationId: string) {
+/** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): the RequestGuardError branch returned without ever recording RATE_LIMIT_ABUSE's input event — every write handler in this file already records AUTHORISATION_DENIED itself, but none of them, nor this shared fallback, recorded a rate-limit breach. Now takes the full RequestContext (not just the correlationId string) so it can. */
+async function failure(error: unknown, context: RequestContext) {
+  const correlationId = context.correlationId;
   if (error instanceof SecurityValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
   if (error instanceof SecurityResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, correlationId);
   if (error instanceof RepositoryConflictError) return problem(409, "SECURITY_CONFLICT", "Conflict", error.message, correlationId);
-  if (error instanceof RequestGuardError) return problem(error.status, error.code, "Bad request", error.message, correlationId);
+  if (error instanceof RequestGuardError) {
+    await recordRateLimitBreach(context, error);
+    return problem(error.status, error.code, "Bad request", error.message, correlationId);
+  }
   if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, correlationId);
   return problem(500, "INTERNAL_ERROR", "Internal error", "The security operation could not be completed.", correlationId);
 }
@@ -27,7 +32,7 @@ export async function handleSOCQueue(request: Request) {
     const params = new URL(request.url).searchParams;
     const result = await getSOCQueue({ status: params.get("status")?.trim().toUpperCase() || undefined, severity: params.get("severity")?.trim().toUpperCase() || undefined });
     return Response.json({ incidents: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 export async function handleIncidentDetail(request: Request, incidentId: string) {
@@ -37,7 +42,7 @@ export async function handleIncidentDetail(request: Request, incidentId: string)
     requirePermission(user, "security:read");
     const result = await getIncidentDetail(incidentId);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 8 Phase B CreateIncident: the manual counterpart to a detection-rule-opened incident. */
@@ -57,7 +62,7 @@ export async function handleIncidentCreate(request: Request) {
     return Response.json(result, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "CREATE_SECURITY_INCIDENT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -78,7 +83,7 @@ export async function handleIncidentContainment(request: Request, incidentId: st
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "CONTAIN_SECURITY_INCIDENT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -100,7 +105,7 @@ export async function handleIncidentRevocation(request: Request, incidentId: str
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "REVOKE_SECURITY_INCIDENT_ACCESS", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -121,6 +126,6 @@ export async function handleIncidentClosure(request: Request, incidentId: string
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "CLOSE_SECURITY_INCIDENT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }

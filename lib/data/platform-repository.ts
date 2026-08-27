@@ -124,10 +124,46 @@ export async function getDeveloperPortalSnapshot(actor: UserContext) {
 
 const ALLOWED_DOCUMENT_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #7): the MIME
+ * check above only ever looked at the client-supplied multipart
+ * Content-Type — entirely caller-controlled, and the master architecture's
+ * Sec 26 names this exact mistake ("never trust user-controlled ... MIME
+ * types"). A .exe declared as application/pdf previously passed straight
+ * through. This sniffs the file's own leading bytes against the format its
+ * declared type claims to be, using the same signatures browsers/OS file
+ * pickers use. PDF/PNG/JPEG/XLSX (a ZIP container) all have real magic
+ * numbers; CSV is plain text with no signature to check, so it instead
+ * fails a NUL-byte sniff test in a bounded prefix — the standard heuristic
+ * for "this is binary data, not text" (mirrors what `file`(1)/git use).
+ * This is content-sniffing, not malware scanning — CompleteDocumentScan's
+ * human-asserted verdict remains the only scanning this codebase has; see
+ * that command's own comment.
+ */
+function matchesDeclaredType(mimeType: string, bytes: Uint8Array): boolean {
+  const prefix = bytes.subarray(0, 8);
+  switch (mimeType) {
+    case "application/pdf":
+      return prefix[0] === 0x25 && prefix[1] === 0x50 && prefix[2] === 0x44 && prefix[3] === 0x46; // "%PDF"
+    case "image/png":
+      return prefix[0] === 0x89 && prefix[1] === 0x50 && prefix[2] === 0x4e && prefix[3] === 0x47 && prefix[4] === 0x0d && prefix[5] === 0x0a && prefix[6] === 0x1a && prefix[7] === 0x0a;
+    case "image/jpeg":
+      return prefix[0] === 0xff && prefix[1] === 0xd8 && prefix[2] === 0xff;
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+      // XLSX is a ZIP container: local-file-header "PK\x03\x04", or the empty/spanned-archive variants.
+      return prefix[0] === 0x50 && prefix[1] === 0x4b && (prefix[2] === 0x03 || prefix[2] === 0x05 || prefix[2] === 0x07);
+    case "text/csv":
+      return !bytes.subarray(0, 512).includes(0); // no NUL byte in a bounded prefix — plain text has none, binary usually does.
+    default:
+      return false;
+  }
+}
+
 async function validateAndHashFile(file: File) {
   if (!ALLOWED_DOCUMENT_TYPES.has(file.type)) throw new PlatformResourceError("File type is not allowed for governed evidence.", 415);
   if (file.size < 1 || file.size > 10_485_760) throw new PlatformResourceError("Evidence files must contain 1 byte to 10 MiB.", 413);
   const bytes = await file.arrayBuffer();
+  if (!matchesDeclaredType(file.type, new Uint8Array(bytes))) throw new PlatformResourceError("File content does not match its declared type.", 415);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   const checksum = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return { bytes, checksum, fileName: safeFileName(file.name) };

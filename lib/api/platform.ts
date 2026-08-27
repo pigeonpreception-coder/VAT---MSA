@@ -2,7 +2,7 @@ import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth
 import { approveReportExport, cancelReportExport, completeDocumentScan, decidePlatformChange, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformConfig, getPlatformSnapshot, getReportExport, getTechnicalPlatformSnapshot, listAnomalyCandidates, listDataProducts, listPlatformChangeRequests, PlatformResourceError, provisionPlatformStaff, publishDataProduct, publishReportRun, queryApprovedMetrics, receiveOfflineBatch, requestPlatformChange, requestReportExport, runAnalyticsModel, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PlatformValidationError } from "@/lib/domain/platform";
-import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
+import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordAuthorizationDenial, recordRateLimitBreach, requestContext, type RequestContext, RequestGuardError } from "@/lib/security/request";
 import { requireStepUp } from "@/lib/security/step-up";
 
 async function hasFreshStepUp(request: Request, user: Parameters<typeof requireStepUp>[1]): Promise<boolean> {
@@ -13,12 +13,30 @@ function problem(status: number, code: string, title: string, detail: string, co
   return Response.json({ type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`, title, status, code, detail, correlationId, ...(errors ? { errors } : {}) }, { status, headers: { "content-type": "application/problem+json", "x-correlation-id": correlationId, "cache-control": "no-store" } });
 }
 
-function failure(error: unknown, correlationId: string) {
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): the
+ * RequestGuardError branch returned without ever recording
+ * RATE_LIMIT_ABUSE's input event, and roughly half this file's handlers
+ * (the read-only ones, plus a few writes) relied solely on this shared
+ * fallback for AccessDeniedError too — which previously recorded nothing.
+ * Now takes the full RequestContext (not just the correlationId string)
+ * and records both centrally; the individual write handlers' own inline
+ * AccessDeniedError recording was removed as redundant (see each
+ * handler's own comment history) rather than left to double-record.
+ */
+async function failure(error: unknown, context: RequestContext) {
+  const correlationId = context.correlationId;
   if (error instanceof PlatformValidationError) return problem(422, "VALIDATION_FAILED", "Validation failed", error.message, correlationId, error.messages.map((item) => ({ ...item, severity: "ERROR" })));
   if (error instanceof PlatformResourceError) return problem(error.status, error.status === 404 ? "RESOURCE_NOT_FOUND" : "RESOURCE_INVALID", error.status === 404 ? "Not found" : "Invalid resource", error.message, correlationId);
   if (error instanceof RepositoryConflictError) return problem(409, "PLATFORM_CONFLICT", "Conflict", error.message, correlationId);
-  if (error instanceof RequestGuardError) return problem(error.status, error.code, "Bad request", error.message, correlationId);
-  if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, correlationId);
+  if (error instanceof RequestGuardError) {
+    await recordRateLimitBreach(context, error);
+    return problem(error.status, error.code, "Bad request", error.message, correlationId);
+  }
+  if (error instanceof AccessDeniedError) {
+    await recordAuthorizationDenial(context, error.message, error.status);
+    return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, correlationId);
+  }
   return problem(500, "INTERNAL_ERROR", "Internal error", "The platform operation could not be completed.", correlationId);
 }
 
@@ -43,7 +61,7 @@ export async function handlePlatformList(request: Request) {
     requirePermission(user, "platform:read");
     const result = TECHNICAL_ONLY_ROLES.has(user.role) ? await getTechnicalPlatformSnapshot() : await getPlatformSnapshot(user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 export async function handleOfflineBatch(request: Request) {
@@ -59,8 +77,7 @@ export async function handleOfflineBatch(request: Request) {
     emitStructuredSecurityLog({ level: "WARN", event: "OFFLINE_BATCH", correlationId: context.correlationId, actorId, outcome: String(result?.status ?? "REJECTED"), durationMs: Date.now() - startedAt });
     return Response.json({ batch: result }, { status: 202, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "OFFLINE_BATCH", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -72,7 +89,7 @@ export async function handleReportRun(request: Request, code: string) {
     await enforceRateLimits([{ key: `reports:actor:${user.userId}`, limit: 20, windowSeconds: 60 }, { key: "reports:global", limit: 500, windowSeconds: 60 }]);
     const result = await runInlineReport(code, await readBoundedJson<never>(request, 32_768), user);
     return Response.json({ report_run: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 export async function handleDocumentUpload(request: Request) {
@@ -91,7 +108,7 @@ export async function handleDocumentUpload(request: Request) {
     if (!(file instanceof File)) throw new PlatformResourceError("Multipart field 'file' is required.");
     const result = await uploadDocument({ file, ownerDomain: String(form.get("owner_domain") ?? ""), ownerResourceId: String(form.get("owner_resource_id") ?? ""), classification: String(form.get("classification") ?? "TAX_CONFIDENTIAL"), organisationId: String(form.get("organisation_id") ?? "") || null }, user, context.correlationId);
     return Response.json({ document: result, next_action: "External malware scanning must mark the object clean before it can become available." }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 6 Phase A CompleteDocumentScan: records an external scanner's verdict on a quarantined document. */
@@ -110,8 +127,7 @@ export async function handleDocumentScanResult(request: Request, documentId: str
     emitStructuredSecurityLog({ level: "INFO", event: "COMPLETE_DOCUMENT_SCAN", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ document: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "COMPLETE_DOCUMENT_SCAN", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -132,7 +148,7 @@ export async function handleDocumentSupersession(request: Request, documentId: s
     if (!(file instanceof File)) throw new PlatformResourceError("Multipart field 'file' is required.");
     const result = await supersedeDocument(documentId, { file, organisationId: String(form.get("organisation_id") ?? "") || null }, user, context.correlationId);
     return Response.json({ document: result, next_action: "External malware scanning must mark the object clean before it can become available." }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 6 Phase A GetDocumentVersionHistory. */
@@ -143,7 +159,7 @@ export async function handleDocumentVersionHistory(request: Request, documentId:
     requirePermission(user, "documents:read");
     const result = await getDocumentVersionHistory(documentId, user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 6 Phase B ApplyRetentionHold/ReleaseRetentionHold, a direct hold on a document independent of Module 4's evidence-citation path. */
@@ -162,8 +178,7 @@ export async function handleDocumentRetentionHold(request: Request, documentId: 
     emitStructuredSecurityLog({ level: "INFO", event: "SET_DOCUMENT_RETENTION_HOLD", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ document: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "SET_DOCUMENT_RETENTION_HOLD", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -184,7 +199,7 @@ export async function handleDocumentDownload(request: Request, documentId: strin
         "cache-control": "no-store",
       },
     });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 7 Phase C PublishReport: reconciles the run's stored result against a fresh recomputation of the same source data before marking it the official, published figure. */
@@ -203,8 +218,7 @@ export async function handleReportRunPublication(request: Request, reportRunId: 
     emitStructuredSecurityLog({ level: "INFO", event: "PUBLISH_REPORT_RUN", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ report_run: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "PUBLISH_REPORT_RUN", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -224,8 +238,7 @@ export async function handleReportExportRequest(request: Request, reportRunId: s
     emitStructuredSecurityLog({ level: "INFO", event: "REQUEST_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ report_export: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "REQUEST_REPORT_EXPORT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -245,8 +258,7 @@ export async function handleReportExportApproval(request: Request, exportId: str
     emitStructuredSecurityLog({ level: "INFO", event: "APPROVE_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ report_export: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "APPROVE_REPORT_EXPORT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -266,8 +278,7 @@ export async function handleReportExportCancellation(request: Request, exportId:
     emitStructuredSecurityLog({ level: "INFO", event: "CANCEL_REPORT_EXPORT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ report_export: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "CANCEL_REPORT_EXPORT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -279,7 +290,7 @@ export async function handleReportExportStatus(request: Request, exportId: strin
     requirePermission(user, "reports:read");
     const result = await getReportExport(exportId, user);
     return Response.json({ report_export: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 7 Phase B AuthorizedDownload for exports: refuses anything not currently APPROVED and unexpired. */
@@ -299,7 +310,7 @@ export async function handleReportExportDownload(request: Request, exportId: str
         "cache-control": "no-store",
       },
     });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 7 Phase D: DataProduct list, with lineage, certified metrics and the latest published snapshot. */
@@ -310,7 +321,7 @@ export async function handleAnalyticsDataProducts(request: Request) {
     requirePermission(user, "reports:read");
     const result = await listDataProducts();
     return Response.json({ data_products: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 7 Phase D RunModel: computes a ModelRun from an already-published, reconciled report run. */
@@ -329,8 +340,7 @@ export async function handleAnalyticsModelRun(request: Request, dataProductId: s
     emitStructuredSecurityLog({ level: "INFO", event: "RUN_ANALYTICS_MODEL", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ model_run: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "RUN_ANALYTICS_MODEL", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -350,8 +360,7 @@ export async function handleAnalyticsDataProductPublication(request: Request, da
     emitStructuredSecurityLog({ level: "INFO", event: "PUBLISH_DATA_PRODUCT", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ snapshot: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "PUBLISH_DATA_PRODUCT", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -364,7 +373,7 @@ export async function handleAnalyticsMetrics(request: Request) {
     const params = new URL(request.url).searchParams;
     const result = await queryApprovedMetrics({ dataProductId: params.get("data_product_id")?.trim() || undefined, code: params.get("code")?.trim() || undefined });
     return Response.json({ metrics: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 7 Phase D: queryable AnomalyCandidate list, not just a fire-and-forget outbox event. */
@@ -376,7 +385,7 @@ export async function handleAnalyticsAnomalies(request: Request) {
     const params = new URL(request.url).searchParams;
     const result = await listAnomalyCandidates({ dataProductId: params.get("data_product_id")?.trim() || undefined });
     return Response.json({ anomalies: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 8 Phase A GetConfig: FeatureFlag/PlatformConfig/AccessPolicy, each with its current value/version. */
@@ -387,7 +396,7 @@ export async function handlePlatformConfig(request: Request) {
     requirePermission(user, "platform:read");
     const result = await getPlatformConfig();
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 8 Phase A: list change requests, filterable by status. */
@@ -399,7 +408,7 @@ export async function handlePlatformChangeRequestList(request: Request) {
     const status = new URL(request.url).searchParams.get("status")?.trim().toUpperCase() || undefined;
     const result = await listPlatformChangeRequests({ status });
     return Response.json({ change_requests: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
-  } catch (error) { return failure(error, context.correlationId); }
+  } catch (error) { return failure(error, context); }
 }
 
 /** Module 8 Phase A RequestPlatformChange (ChangeFeature/ChangePolicy/ChangeConfig unified). */
@@ -418,8 +427,7 @@ export async function handlePlatformChangeRequestCreate(request: Request) {
     emitStructuredSecurityLog({ level: "INFO", event: "REQUEST_PLATFORM_CHANGE", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ change_request: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "REQUEST_PLATFORM_CHANGE", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -439,8 +447,7 @@ export async function handlePlatformChangeDecision(request: Request, changeReque
     emitStructuredSecurityLog({ level: "INFO", event: "DECIDE_PLATFORM_CHANGE", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ change_request: result }, { status: 200, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "DECIDE_PLATFORM_CHANGE", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
 
@@ -467,7 +474,6 @@ export async function handleProvisionPlatformStaff(request: Request) {
     emitStructuredSecurityLog({ level: "INFO", event: "PROVISION_PLATFORM_STAFF", correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
     return Response.json({ staff: result }, { status: 201, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
-    if (error instanceof AccessDeniedError) await recordSecurityEvent({ eventType: "AUTHORISATION_DENIED", severity: "HIGH", actorId, context, action: "PROVISION_PLATFORM_STAFF", outcome: "DENIED", details: { status: error.status } }).catch(() => undefined);
-    return failure(error, context.correlationId);
+    return failure(error, context);
   }
 }
