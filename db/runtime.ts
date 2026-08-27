@@ -547,6 +547,29 @@ const SCHEMA_STATEMENTS = [
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
     started_at TEXT, completed_at TEXT, last_error TEXT
   )`,
+  // Module 10 Phase C: SaaS provider onboarding (SaaSProvider/Application/EnvironmentApproval).
+  `CREATE TABLE IF NOT EXISTS saas_providers (
+    id TEXT PRIMARY KEY, provider_key TEXT NOT NULL UNIQUE, legal_name TEXT NOT NULL,
+    contact_email TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL,
+    registered_by TEXT NOT NULL REFERENCES app_users(id), registered_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS saas_applications (
+    id TEXT PRIMARY KEY, saas_provider_id TEXT NOT NULL REFERENCES saas_providers(id),
+    name TEXT NOT NULL, description TEXT NOT NULL, requested_capabilities TEXT NOT NULL,
+    endpoint_reference TEXT NOT NULL, status TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS saas_conformance_runs (
+    id TEXT PRIMARY KEY, saas_application_id TEXT NOT NULL REFERENCES saas_applications(id),
+    environment TEXT NOT NULL, test_suite_version TEXT NOT NULL, checks TEXT NOT NULL,
+    outcome TEXT NOT NULL, submitted_by TEXT NOT NULL REFERENCES app_users(id), submitted_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS saas_environment_approvals (
+    id TEXT PRIMARY KEY, saas_application_id TEXT NOT NULL REFERENCES saas_applications(id),
+    environment TEXT NOT NULL, status TEXT NOT NULL,
+    conformance_run_id TEXT NOT NULL REFERENCES saas_conformance_runs(id), updated_at TEXT NOT NULL,
+    UNIQUE (saas_application_id, environment)
+  )`,
   `CREATE TABLE IF NOT EXISTS bank_imports (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     integration_connection_id TEXT REFERENCES integration_connections(id), document_id TEXT REFERENCES document_metadata(id),
