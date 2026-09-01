@@ -11,8 +11,7 @@ use App\Models\OrganisationLicense;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
-use Illuminate\Auth\Access\AuthorizationException;
+use App\Support\Licensing\LicenseResolver;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -20,35 +19,33 @@ use Illuminate\Support\Str;
 /**
  * Ported from lib/data/control-plane-repository.ts's getEntitlementsSnapshot/
  * getUsageSnapshot/changeLicenseState/upgradeLicense -- the Licensing &
- * Entitlements slice of Phase 12 (portals/licensing/governance).
- * `assertEntitledOperation` (the internal cross-cutting entitlement gate
- * other admin commands call before a privileged write) is deliberately not
- * ported this slice: grepped and confirmed no route calls it directly, and
- * its own `ADMIN_WRITE` branch depends on `access_reviews` (Access
- * governance -- a separate, still-unbuilt slice of this same phase). It
- * belongs with whichever slice actually ports the admin-write commands
- * that call it, not this one.
+ * Entitlements slice of Phase 12 (portals/licensing/governance). Resolution
+ * logic (resolveOrganisation/getLicense/getEntitlements) lives in
+ * `App\Support\Licensing\LicenseResolver`, single-sourced with
+ * `App\Support\Licensing\EntitlementGate::assertEntitledOperation`
+ * (organisation administration/employees, Phase 12 slice 2) rather than
+ * duplicated here.
  */
 class LicensingService
 {
     /** @return array<string, mixed> */
     public function entitlementsSnapshot(User $actor, ?string $requestedOrganisationId): array
     {
-        $organisation = $this->resolveOrganisation($actor, $requestedOrganisationId);
-        $license = $this->getLicense($organisation);
+        $organisation = LicenseResolver::resolveOrganisation($actor, $requestedOrganisationId);
+        $license = LicenseResolver::getLicense($organisation);
 
         return [
             'organisation' => $this->presentOrganisation($organisation),
             'license' => array_merge($this->presentLicense($license), ['price' => null, 'pricing_configured' => false]),
-            'entitlements' => $this->getEntitlements($license),
+            'entitlements' => LicenseResolver::getEntitlements($license),
         ];
     }
 
     /** @return array<string, mixed> */
     public function usageSnapshot(User $actor, ?string $requestedOrganisationId): array
     {
-        $organisation = $this->resolveOrganisation($actor, $requestedOrganisationId);
-        $license = $this->getLicense($organisation);
+        $organisation = LicenseResolver::resolveOrganisation($actor, $requestedOrganisationId);
+        $license = LicenseResolver::getLicense($organisation);
         $usage = DB::table('license_usage')->where('organisation_license_id', $license['id'])
             ->orderBy('metric_key')
             ->get(['metric_key', 'period_key', 'used_value', 'reserved_value', 'version', 'updated_at']);
@@ -74,8 +71,8 @@ class LicensingService
     public function changeState(array $payload, User $actor, ?string $requestedOrganisationId): array
     {
         $input = LicensingValidator::stateChange($payload);
-        $organisation = $this->resolveOrganisation($actor, $requestedOrganisationId);
-        $license = $this->getLicense($organisation);
+        $organisation = LicenseResolver::resolveOrganisation($actor, $requestedOrganisationId);
+        $license = LicenseResolver::getLicense($organisation);
         LicensingValidator::assertStateTransition($input['action'], $license['state']);
         $toState = $input['action'] === 'SUSPEND' ? 'SUSPENDED' : 'ACTIVE';
         $now = now();
@@ -115,8 +112,8 @@ class LicensingService
     public function upgrade(array $payload, User $actor, ?string $requestedOrganisationId): array
     {
         $input = LicensingValidator::upgrade($payload);
-        $organisation = $this->resolveOrganisation($actor, $requestedOrganisationId);
-        $license = $this->getLicense($organisation);
+        $organisation = LicenseResolver::resolveOrganisation($actor, $requestedOrganisationId);
+        $license = LicenseResolver::getLicense($organisation);
         if ($input['licensePlanCode'] === $license['plan_code']) {
             throw new LicensingValidationException('LICENSE_PLAN_UNCHANGED', 'The organisation is already on this licence plan.');
         }
@@ -148,103 +145,6 @@ class LicensingService
         });
 
         return ['license_id' => $newLicenseId, 'plan_code' => $targetPlan->code, 'plan_name' => $targetPlan->name, 'state' => 'ACTIVE'];
-    }
-
-    /**
-     * Ported from resolveOrganisation. A national-scope actor may pick any
-     * active, *licensed* organisation (or the alphabetically-first one if
-     * none is requested -- matching the source's own ORDER BY legal_name);
-     * a taxpayer-scoped actor is always confined to their own organisation.
-     * The source resolves an unspecified organisation for a taxpayer-scoped
-     * actor from their current session membership (`actor.organisationId`);
-     * this port's simpler session model (Phase 6) has no per-request
-     * membership concept beyond `taxpayer_id`, so it falls back to that
-     * taxpayer's own active organisation -- the same simplification
-     * `App\Support\Business\OrganisationResolver` already established for
-     * every other module reusing this exact resolution shape.
-     */
-    private function resolveOrganisation(User $actor, ?string $requestedOrganisationId): Organisation
-    {
-        if ($requestedOrganisationId) {
-            $organisation = Organisation::where('id', $requestedOrganisationId)->where('status', 'ACTIVE')->first();
-            if (! $organisation) {
-                throw new AuthorizationException('The organisation scope is unavailable.');
-            }
-            if (! TenantScope::isNational($actor) && $organisation->taxpayer_id !== $actor->taxpayer_id) {
-                throw new AuthorizationException('The requested organisation is outside your authorised scope.');
-            }
-
-            return $organisation;
-        }
-        if (! TenantScope::isNational($actor)) {
-            $organisation = Organisation::where('taxpayer_id', $actor->taxpayer_id ?? '__none__')->where('status', 'ACTIVE')->first();
-            if (! $organisation) {
-                throw new AuthorizationException('An active organisation membership is required.');
-            }
-
-            return $organisation;
-        }
-        $organisation = Organisation::where('organisations.status', 'ACTIVE')
-            ->join('organisation_licenses', 'organisation_licenses.organisation_id', '=', 'organisations.id')
-            ->orderBy('organisations.legal_name')
-            ->select('organisations.*')
-            ->first();
-        if (! $organisation) {
-            throw new AuthorizationException('No licensed organisation is available in this environment.');
-        }
-
-        return $organisation;
-    }
-
-    /** @return array{id: string, organisation_id: string, subscription_id: string, plan_id: string, plan_code: string, plan_name: string, plan_version: int, state: string, retention_policy: string, current_period_start: string, current_period_end: string} */
-    private function getLicense(Organisation $organisation): array
-    {
-        $row = DB::table('organisation_licenses as l')
-            ->join('license_plans as p', 'p.id', '=', 'l.license_plan_id')
-            ->join('subscriptions as s', 's.id', '=', 'l.subscription_id')
-            ->where('l.organisation_id', $organisation->id)
-            ->orderByDesc('l.effective_from')
-            ->select([
-                'l.id', 'l.organisation_id', 'l.subscription_id', 'p.id as plan_id', 'p.code as plan_code', 'p.name as plan_name',
-                'p.version as plan_version', 'l.state', 'l.retention_policy', 's.current_period_start', 's.current_period_end',
-            ])->first();
-        if (! $row) {
-            throw new AuthorizationException('The organisation has no configured licence.');
-        }
-
-        return (array) $row;
-    }
-
-    /**
-     * Ported from getEntitlements. `period_key IN ('2026-Q3','2026-08')` is
-     * a hardcoded pair of literal period keys in the source itself, not
-     * derived from the current date -- a genuine, pre-existing pilot-scope
-     * limitation carried forward faithfully, not introduced by this port
-     * (confirmed against lib/data/control-plane-repository.ts's own
-     * getEntitlements, unchanged).
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function getEntitlements(array $license): array
-    {
-        return DB::table('license_plan_entitlements as e')
-            ->join('license_features as f', 'f.feature_key', '=', 'e.feature_key')
-            ->leftJoin('license_usage as u', function ($join) use ($license) {
-                $join->on('u.metric_key', '=', 'f.metric_key')
-                    ->where('u.organisation_license_id', $license['id'])
-                    ->whereIn('u.period_key', ['2026-Q3', '2026-08']);
-            })
-            ->where('e.license_plan_id', $license['plan_id'])
-            ->orderBy('f.name')
-            ->select([
-                'e.feature_key', 'f.name', 'f.description', 'f.metric_key', 'e.enabled', 'e.limit_value',
-                DB::raw('COALESCE(u.used_value, 0) as used_value'), DB::raw('COALESCE(u.reserved_value, 0) as reserved_value'),
-            ])->get()->map(fn ($row) => [
-                'feature_key' => $row->feature_key, 'name' => $row->name, 'description' => $row->description,
-                'metric_key' => $row->metric_key, 'enabled' => (bool) $row->enabled,
-                'limit_value' => $row->limit_value !== null ? (int) $row->limit_value : null,
-                'used_value' => (int) $row->used_value, 'reserved_value' => (int) $row->reserved_value,
-            ])->values()->all();
     }
 
     /** @return array<string, mixed> */

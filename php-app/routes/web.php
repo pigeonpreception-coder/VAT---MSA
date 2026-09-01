@@ -24,6 +24,7 @@ use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
+use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use Illuminate\Support\Facades\Route;
 
@@ -54,6 +55,12 @@ Route::middleware('auth')->group(function () {
             ->middleware('password.confirm');
 
         Route::get('/organisations', [OrganisationController::class, 'index']);
+        // Registered before the /organisations/{id} wildcard below --
+        // Laravel matches routes in registration order, and the literal
+        // "capabilities" segment would otherwise be swallowed by {id} and
+        // 404 inside OrganisationController::show (found the hard way via
+        // OrganisationAdminTest's listing assertion).
+        Route::get('/organisations/capabilities', [OrganisationAdminController::class, 'capabilities']);
         Route::get('/organisations/{id}', [OrganisationController::class, 'show']);
 
         Route::get('/organisations/{organisation}/branches', [BranchController::class, 'index']);
@@ -232,15 +239,39 @@ Route::middleware('auth')->group(function () {
         // getEntitlementsSnapshot/getUsageSnapshot/changeLicenseState/
         // upgradeLicense). Kept 1:1 with the source's
         // app/api/v1/licensing/** shape; state/upgrade are step-up gated.
-        // assertEntitledOperation and the rest of control-plane-
-        // repository.ts (portal navigation, organisation administration/
-        // employees, the workflow engine, access governance) remain
-        // deferred -- see docs/MIGRATION_MATRIX.md.
         Route::get('/licensing/entitlements', [LicensingController::class, 'entitlements']);
         Route::get('/licensing/usage', [LicensingController::class, 'usage']);
         Route::post('/licensing/state', [LicensingController::class, 'state'])
             ->middleware('password.confirm');
         Route::post('/licensing/upgrade', [LicensingController::class, 'upgrade'])
+            ->middleware('password.confirm');
+
+        // Phase 12 slice 2: organisation administration/employees (also
+        // closing out "the rest of Phase 8" -- employees, organisation-
+        // defined custom roles) plus openQuarterlyAccessReview, pulled
+        // forward from Access governance since assertEntitledOperation's
+        // own ADMIN_WRITE gate hard-requires it. Every GET list route in
+        // the source bundles its data inside getAdministrationSnapshot
+        // (the dashboard aggregate, deferred) except listCapabilityGrants,
+        // the one standalone read ported here. Portal navigation, the
+        // workflow engine, and the rest of Access governance
+        // (certifyQuarterlyAccess and beyond) remain deferred -- see
+        // docs/MIGRATION_MATRIX.md.
+        Route::post('/organisations/employees', [OrganisationAdminController::class, 'storeEmployee'])
+            ->middleware('password.confirm');
+        Route::post('/organisations/employees/{id}/activation', [OrganisationAdminController::class, 'activateEmployee'])
+            ->middleware('password.confirm');
+        Route::post('/organisations/employees/{id}/termination', [OrganisationAdminController::class, 'terminateEmployee'])
+            ->middleware('password.confirm');
+        Route::post('/organisations/administrators', [OrganisationAdminController::class, 'storeAdministrator'])
+            ->middleware('password.confirm');
+        Route::post('/organisations/roles', [OrganisationAdminController::class, 'storeRole'])
+            ->middleware('password.confirm');
+        // GET /organisations/capabilities is registered earlier, above the
+        // /organisations/{id} wildcard -- see that route's comment.
+        Route::post('/organisations/capabilities', [OrganisationAdminController::class, 'storeCapability'])
+            ->middleware('password.confirm');
+        Route::post('/access-reviews', [OrganisationAdminController::class, 'storeAccessReview'])
             ->middleware('password.confirm');
     });
 });

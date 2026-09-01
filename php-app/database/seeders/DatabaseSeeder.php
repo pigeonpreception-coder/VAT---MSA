@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             VatRuleSeeder::class,
             TaxRuleSetSeeder::class,
             LicensePlanSeeder::class,
+            OrganisationAdministratorRoleSeeder::class,
             DemoSeeder::class,
         ]);
     }

@@ -37,15 +37,15 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 80 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 91 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) plus Phase 12 slice 2's organisation-administration/employees tables (access_reviews, departments, business_units, job_titles, employees, organisation_administrator_roles, organisation_administrators, organisation_roles, organisation_role_permissions, user_capability_assignments, user_role_assignments) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, TaxRuleSetSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
-| 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
+| 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, membership assignment, and now (Phase 12 slice 2, see "Organisation administration & employees" below) employees, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), and capability grants. NOT covered yet: the `positions` table (never written by the source itself), workflow-task reassignment on offboarding (needs the still-unbuilt workflow tables), access *requests* (as opposed to the quarterly reviews this slice does cover), and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
 | 9 | Invoices and VAT | COMPLETE -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion"). Also COMPLETE (see "VAT-return-generation prerequisite"): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. Also now COMPLETE (see "Standalone VAT-rule routes" below): `listVatRules`/`proposeVatRule`/`approveVatRule`/`evaluateVatRule` -- `lib/data/vat-rule-repository.ts`'s remaining exports, the last narrow gap this phase had. |
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- now including `VAT_RETURN`-sourced citations, see "VAT_RETURN evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: `DOCUMENT`-sourced evidence citation (still blocked on the unbuilt `document_metadata` table and its Module 22 quarantine/scan pipeline) and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
-| 12 | Portals/licensing/governance | PARTIAL -- slice 1 of `control-plane-repository.ts`'s ~30 functions COMPLETE for its actual scope (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. NOT covered yet: portal navigation (GetEffectiveNavigation and siblings), organisation administration/employees/custom roles (also "the rest of Phase 8's" own deferred gap), the workflow engine, and access governance (requests/quarterly reviews/certification) -- all deferred, not silently dropped; `assertEntitledOperation` (the internal cross-cutting entitlement gate other admin commands call) is deferred alongside whichever future slice actually calls it. |
+| 12 | Portals/licensing/governance | PARTIAL -- slices 1 and 2 of `control-plane-repository.ts`'s ~30 functions COMPLETE for their actual scope. Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate, ported now that real callers need it) and `openQuarterlyAccessReview` (pulled forward from Access governance as `assertEntitledOperation`'s own genuine `ADMIN_WRITE` prerequisite) -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. NOT covered yet: portal navigation (GetEffectiveNavigation and siblings), the `getAdministrationSnapshot` dashboard aggregate, the workflow engine, and the rest of Access governance (`certifyQuarterlyAccess` and its bulk role/capability revocation, access *requests* as opposed to reviews) -- all deferred, not silently dropped. |
 | 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -1030,6 +1030,125 @@ necessary second half of the same fix, not a red herring: without it, a
 licence upgraded within the same wall-clock second as its own creation
 would still tie under `ORDER BY effective_from DESC`.)
 
+## Organisation administration & employees (Phase 12 slice 2: portals/licensing/governance)
+
+Second slice of `control-plane-repository.ts`, built directly on slice 1's
+`LicenseResolver` (extracted from `LicensingService` as a pure refactor so
+both slices share the identical organisation/license resolution logic --
+see `App\Support\Licensing\LicenseResolver`'s own doc comment). Also closes
+out "the rest of Phase 8" -- employees and organisation-defined custom
+roles were Phase 8's own explicitly-deferred gap (see that phase's row
+above), and land here instead since they are genuinely part of this same
+source file and share its entitlement gating.
+
+Schema (11 new tables, 91/155 total): `departments`/`business_units`/
+`job_titles`/`employees` (an organisation's HR org-chart; `position_id` on
+`employees` is deliberately left without an FK -- the `positions` table
+itself is never written anywhere in the TypeScript source, a genuine gap
+carried forward rather than inventing a table the source doesn't have),
+`organisation_administrator_roles` (a fixed, seed-only catalogue -- 6 rows,
+`OrganisationAdministratorRoleSeeder`, the same real-prerequisite pattern
+as `LicensePlanSeeder`)/`organisation_administrators`, `organisation_roles`/
+`organisation_role_permissions` (an organisation's own custom roles, distinct
+from the platform's static `access_roles`), `user_capability_assignments`
+(BUYER/SELLER capability grants, narrowing what an organisation itself
+already holds), `user_role_assignments` (built with zero writers in this
+slice -- `terminateEmployee` needs the table to exist for its own cleanup
+`UPDATE`, but no command in this slice populates it), and `access_reviews`
+(pulled forward from Access governance -- see below).
+
+Domain: `App\Domain\OrganisationAdmin\OrganisationAdminValidator`, ported
+from `lib/domain/control-plane.ts`'s `normalizeEmployee`/
+`normalizeEmployeeActivation`/`normalizeAdministratorAppointment`/
+`normalizeCapabilityGrant`/organisation-role validation. Deliberately
+reuses the existing `App\Exceptions\LicensingValidationException` rather
+than a new exception class, exactly matching the source's own single
+`ControlPlaneValidationError` covering this whole file (slice 1 and slice
+2 alike).
+
+Support: `App\Support\Licensing\EntitlementGate` ports
+`assertEntitledOperation` -- the internal cross-cutting gate every write
+command in this slice calls first, deliberately deferred in slice 1 since
+nothing there needed it. Its `ADMIN_WRITE` operation class hard-requires a
+real, open-or-completed quarterly `access_reviews` row, which is why
+`openQuarterlyAccessReview` (and the `access_reviews` table itself) is
+pulled forward from Access governance here as a genuine prerequisite --
+the same "unblock the real dependency, don't invent a shortcut" pattern
+the VAT-return-generation prerequisite already established for Phase 11's
+refund slice. `certifyQuarterlyAccess` (the review's own completion path,
+with its bulk role/capability revocation) is deliberately not pulled
+forward alongside it -- nothing in this slice's own command set calls it.
+
+Service: `App\Services\OrganisationAdmin\OrganisationAdminService` --
+`inviteEmployee`/`activateEmployee`/`terminateEmployee`/
+`appointAdministrator`/`createOrganisationRole`/`listCapabilityGrants`/
+`grantCapability`/`openQuarterlyAccessReview`. `getAdministrationSnapshot`
+(the fixed-list dashboard aggregate the source bundles every GET-list
+route into except `listCapabilityGrants`) is deferred -- it pulls in
+workflow/access-request tables this slice doesn't build; `listCapabilityGrants`
+is the one genuinely standalone read and is the only GET route ported here.
+Workflow-task reassignment inside `terminateEmployee` is likewise deferred
+-- it needs `workflow_assignments`/`workflow_instances`, neither built yet.
+
+A 5-test PHPUnit feature suite (`tests/Feature/OrganisationAdmin/
+OrganisationAdminTest.php`, run against real MySQL) confirms:
+
+- **`assertEntitledOperation`'s `ADMIN_WRITE` gate is real, not a no-op**:
+  inviting an employee is refused `403 QUARTERLY_ACCESS_REVIEW_REQUIRED`
+  until the current quarter's `access_reviews` row is opened, then
+  succeeds immediately after.
+- **The employee lifecycle genuinely drives the license seat count, not
+  just the employee row's own status**: inviting reserves a real
+  `license_usage.reserved_value` seat; activating converts that reservation
+  into `used_value` (`reserved_value` back to 0); terminating releases
+  `used_value` back down -- all three verified against the actual
+  `license_usage` row, not asserted from the response body alone.
+  Duplicate employee number/email is a real `409` conflict; a manager/
+  department/branch/job-title reference from a different organisation is
+  refused `422 REFERENCE_OUT_OF_SCOPE`.
+- **Appointing an administrator requires a real active employee and
+  correctly demotes the prior PRIMARY administrator**, not just inserting
+  a second row -- appointing a new PRIMARY administrator sets the previous
+  PRIMARY's row `INACTIVE` in the same transaction, matching the source's
+  own single-PRIMARY invariant.
+- **Custom organisation roles are genuinely versioned, and reject
+  platform-reserved permissions**: creating a role with a permission
+  outside the tenant-grantable set (`vat-rules:manage`, a national-only
+  permission) is refused `422 PROTECTED_PERMISSION`; creating two
+  successive roles under the same name produces real `version` 1 then 2,
+  not two independent rows.
+- **Capability grants only ever narrow what the organisation itself
+  already holds, and require real active membership**: granting a
+  capability the organisation's own `organisation_capabilities` doesn't
+  hold is refused `422` before membership is even checked; granting a
+  held capability to a user who isn't yet an active member of the
+  organisation is separately refused `422 USER_NOT_MEMBER`; granting it
+  after a real `organisation_memberships` row exists succeeds and is
+  readable back via `listCapabilityGrants`.
+
+**A genuine bug was caught and fixed by this verification process, not
+shipped**: `Route::get('/organisations/capabilities', ...)` was registered
+*after* the pre-existing Phase 8 route `Route::get('/organisations/{id}',
+...)` in `routes/web.php`. Laravel matches routes in registration order, so
+the literal `capabilities` segment was being swallowed by the `{id}`
+wildcard -- `OrganisationController::show('capabilities')` would look up an
+organisation with that literal ID, find none, and return a genuine `404`,
+never reaching `OrganisationAdminController::capabilities` at all. Caught
+by this slice's own capability-listing test (`GET
+/organisations/capabilities` returning `404` instead of `200`). Fixed by
+moving the specific route ahead of the wildcard, with a comment on both
+sides explaining why the ordering matters -- a durable trap for any future
+literal-segment route added under `/organisations/*`.
+
+Separately, `organisation_administrators.effective_from` and
+`user_capability_assignments.effective_from` were given an explicit
+`DEFAULT CURRENT_TIMESTAMP` (via `->useCurrent()`, deliberately without
+`ON UPDATE`) at migration-authoring time -- *before* either column could
+actually exhibit the problem, applying the exact lesson already learned
+and documented in slice 1's own `organisation_licenses.effective_from` fix
+(see "Licensing & Entitlements" above) rather than waiting to rediscover
+the same MariaDB legacy TIMESTAMP auto-initialisation trap a third time.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Three genuine gaps in the TypeScript source itself, discovered while
@@ -1107,36 +1226,38 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (75 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (64 more tables), Phase 5 (remaining seed data -- identity proofing,
 navigation, etc.), Phase 7's reusable Eloquent organisation-scope trait/
-global scope, the rest of Phase 8 (employees/positions/departments,
-organisation-defined custom roles, access requests/reviews, the
-administration-dashboard aggregate -- now overlapping with Phase 12's own
-remaining organisation-administration/access-governance slices below),
+global scope, the rest of Phase 8 (the `positions` table itself -- never
+written anywhere in the source, so genuinely nothing to port -- and the
+`GetIdentityFoundationSnapshot`/administration-dashboard aggregate, now
+overlapping with Phase 12's own `getAdministrationSnapshot` gap below),
 the rest of Phase 11 (`DOCUMENT`-sourced evidence citation, genuinely
 blocked on the still-unbuilt `document_metadata` table and its Module 22
 quarantine/scan pipeline -- not a scoping choice -- and the compliance
 dashboard snapshot aggregate; see the Phase 11 verification sections
-above), the rest of Phase 12 (portal navigation, organisation
-administration/employees/custom roles, the workflow engine, and access
-governance -- see "Licensing & Entitlements" above for the one slice
-done), and Phases 13 through 15 in full (documents/integrations/offline/
-reports, the legacy D1 importer, and deployment documentation) are all
-outstanding. Phases 9 and 10 (invoices/VAT and accounting/commercial) are
-now both fully COMPLETE -- see "Standalone VAT-rule routes" and "Supplier
-verification" above. This is genuinely a multi-week engineering effort at
-the pace of careful, verified, per-field-checked porting demonstrated in
-this session's Phase 3/4/6/7/8/9/10/11/12 slice -- continuing it means
-repeating this same rigor across the remaining ~75 tables and ~150 routes,
-phase by phase (or sub-slice by sub-slice, as Phases 10, 11 and now 12
-both demonstrate), as originally scoped. Given the genuine scale each
-remaining module represents (`control-plane-repository.ts` alone, at
-~1,200 lines and ~30 exports, is comparable in size to the whole of
-Phase 10's `business-repository.ts`, which itself took 6 separate
-sub-slices to close out; Phases 9 and 10 are now both entirely done, and
-Phase 11 is complete down to one narrow deferred surface -- itself
-genuinely blocked on Module 22's document pipeline, not a scoping gap
-this session left on the table), continuing to completion is realistically
-a multi-session effort, not a single
+above), the rest of Phase 12 (portal navigation, the
+`getAdministrationSnapshot` dashboard aggregate, the workflow engine, and
+the rest of Access governance -- access requests and `certifyQuarterlyAccess`
+with its bulk revocation, as opposed to the quarterly-review opening slice
+2 already covers -- see "Licensing & Entitlements" and "Organisation
+administration & employees" above for the two slices done), and Phases 13
+through 15 in full (documents/integrations/offline/reports, the legacy D1
+importer, and deployment documentation) are all outstanding. Phases 9 and
+10 (invoices/VAT and accounting/commercial) are now both fully COMPLETE --
+see "Standalone VAT-rule routes" and "Supplier verification" above. This is
+genuinely a multi-week engineering effort at the pace of careful, verified,
+per-field-checked porting demonstrated in this session's Phase
+3/4/6/7/8/9/10/11/12 slices -- continuing it means repeating this same
+rigor across the remaining ~64 tables and ~140 routes, phase by phase (or
+sub-slice by sub-slice, as Phases 10, 11 and 12 all demonstrate), as
+originally scoped. Given the genuine scale each remaining module represents
+(`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports, is
+comparable in size to the whole of Phase 10's `business-repository.ts`,
+which itself took 6 separate sub-slices to close out; Phases 9 and 10 are
+now both entirely done, Phase 11 is complete down to one narrow deferred
+surface genuinely blocked on Module 22's document pipeline, and Phase 12
+now has two of its five sub-domains done), continuing to completion is
+realistically a multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far
 that effort has gotten at each point.
