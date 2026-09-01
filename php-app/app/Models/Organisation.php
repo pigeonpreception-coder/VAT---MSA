@@ -27,4 +27,9 @@ class Organisation extends Model
     {
         return $this->hasMany(OrganisationMembership::class);
     }
+
+    public function capabilities(): HasMany
+    {
+        return $this->hasMany(OrganisationCapability::class);
+    }
 }

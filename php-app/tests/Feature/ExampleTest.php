@@ -2,18 +2,20 @@
 
 namespace Tests\Feature;
 
-// use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
     /**
-     * A basic test example.
+     * Replaces Laravel's default scaffold assertion (which expected a 200
+     * welcome page at `/`) -- routes/web.php redirects `/` to `/dashboard`,
+     * which itself requires authentication and (unfollowed, one hop at a
+     * time, matching the test client's own behaviour) bounces an
+     * unauthenticated visitor on to `/login` in turn.
      */
-    public function test_the_application_returns_a_successful_response(): void
+    public function test_the_root_route_redirects_toward_the_dashboard_which_then_requires_login(): void
     {
-        $response = $this->get('/');
-
-        $response->assertStatus(200);
+        $this->get('/')->assertRedirect('/dashboard');
+        $this->get('/dashboard')->assertRedirect('/login');
     }
 }

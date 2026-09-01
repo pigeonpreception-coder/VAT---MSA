@@ -32,6 +32,11 @@ class Taxpayer extends Model
         return $this->hasMany(User::class);
     }
 
+    public function identifiers(): HasMany
+    {
+        return $this->hasMany(TaxpayerIdentifier::class);
+    }
+
     public function isActive(): bool
     {
         return $this->vat_status === 'ACTIVE';

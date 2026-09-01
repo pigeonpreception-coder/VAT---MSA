@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Integrations\Itas\ItasIdentityPort;
+use App\Integrations\Itas\UnavailableItasIdentityAdapter;
 use App\Models\User;
 use App\Support\Access\Permissions;
 use Illuminate\Support\Facades\Gate;
@@ -14,7 +16,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(ItasIdentityPort::class, UnavailableItasIdentityAdapter::class);
     }
 
     /**

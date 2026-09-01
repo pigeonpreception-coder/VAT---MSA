@@ -37,11 +37,12 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 9 of 155 tables (the identity/access core: taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 15 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
-| 7 | Role/permission/organisation security | PARTIAL -- `App\Support\Access\Permissions` is a verified line-for-line port of the source's RBAC (`lib/domain/access.ts`) and is wired into a Laravel `Gate::define('permission', ...)`; `TenantScope` ports `requireTaxpayerScope`/`isNationalScope`. Not yet applied to any controller (there are no business controllers yet), and no Eloquent global scope for organisation isolation exists yet. |
-| 8-15 | Organisations/taxpayers/admin through legacy importer and deployment docs | NOT STARTED |
+| 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
+| 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
+| 9-15 | Invoices/VAT through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -70,6 +71,67 @@ below for the specific commands.
      *same session's* subsequent `GET /dashboard` is still redirected to
      `/login` (confirmed not authenticated, not just a redirect status
      coincidence).
+
+## Phase 8 verification (organisations, taxpayers, administration)
+
+Both a real end-to-end HTTP walkthrough (`php artisan serve` + `curl`, session
+cookies, real CSRF tokens) and a 15-test PHPUnit feature suite
+(`tests/Feature/Identity/*`, run against real MySQL via `vat_msa_testing`, not
+SQLite -- see `phpunit.xml`'s own note) confirm:
+
+- **Registration -> approval materializes the full record set in one
+  transaction**: submitting as a `TAXPAYER_OWNER` and approving as a
+  `PILOT_ADMIN` creates a real `taxpayers` row (`vat_status='ACTIVE'`), an
+  `organisations` row, a `HEAD` branch (`is_head_office=1`), `BUYER` and
+  `SELLER` capabilities, a `TAXPAYER_OWNER` membership for the submitter, and
+  two chained `audit_events` rows -- checked directly against the database,
+  not just the HTTP response.
+- **Rejection leaves no trace beyond the registration record itself** (no
+  taxpayer, no organisation created) -- verified.
+- **Self-approval is denied**: the submitting user cannot decide their own
+  application, even if they otherwise hold `registrations:approve`.
+- **RBAC is genuinely enforced, not just present**: a `TAXPAYER_VIEWER`
+  attempting to submit a registration gets a real 403; a `TAXPAYER_OWNER`
+  attempting to suspend a taxpayer gets a real 403.
+- **The step-up gate genuinely blocks the action, not just decorates it**: a
+  `PILOT_ADMIN` attempting a registration decision *without* first confirming
+  their password gets a real `423 Locked` (`RequirePassword` middleware) and
+  the registration is provably still `PENDING_VERIFICATION` in the database
+  afterward; confirming the password and retrying succeeds. Verified for all
+  three sensitive actions this phase built (registration decision, taxpayer
+  suspension, membership assignment) -- this is Laravel's own tested
+  reauthentication mechanism, not yet the source's TOTP `step_up_events`
+  (a documented, deliberate narrowing, not a silent drop -- see the "step-up"
+  note further down).
+- **Taxpayer suspension is idempotent**: suspending an already-suspended
+  taxpayer returns the same result without writing a second audit event.
+- **The head-office branch cannot be deactivated**; a non-head-office branch
+  can.
+- **Duplicate branch codes are rejected as a 409 conflict**; duplicate VAT
+  numbers/TINs are rejected the same way at both the submission and the
+  decision stage (matching the source's own two-checkpoint duplicate
+  detection).
+- **The privilege-escalation ceiling on membership assignment holds**:
+  attempting to grant a national-scope role (e.g. `PILOT_ADMIN`) via
+  `AssignMembership` is rejected by validation before it ever reaches the
+  database.
+- A genuine bug this session's own migration introduced was caught by this
+  process, not shipped: `registration_verifications.status` was originally
+  `VARCHAR(20)`, too short for the real value `AWAITING_PROVIDER_CONTRACT`
+  (26 characters) -- found via a live `500` during manual verification,
+  fixed to `VARCHAR(30)`, confirmed by rerunning the same request.
+
+**Step-up / MFA, stated plainly:** the source's `requireStepUp`
+(`lib/security/step-up.ts`) is a server-verified RFC 6238 TOTP credential
+check (`step_up_events`, `mfa_totp_credentials` -- SECURITY_GAP_ASSESSMENT.md
+item #1/#2's own fix in the original). Building that faithfully needs its
+own tables, enrollment UI and QR-code flow -- out of Phase 8's scope. Laravel's
+built-in `password.confirm` middleware was used instead: it provides the same
+*security property* (no sensitive action without a fresh, actively-proven
+reauthentication) via a different, real, tested mechanism, applied to every
+route the source gated with `requireStepUp` in this phase. This is a
+deliberate substitution, not a removed control -- full TOTP parity is a
+tracked follow-up.
 
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
@@ -138,12 +200,15 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (150 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (140 more tables), Phase 5 (remaining seed data -- identity proofing,
 licensing, VAT rules, chart of accounts, navigation, etc.), Phase 7's
-Eloquent organisation-scope trait/global scope, and Phases 8 through 15 in
-full (every business module, the legacy D1 importer, and deployment
-documentation) are all outstanding. This is genuinely a multi-week
-engineering effort at the pace of careful, verified, per-field-checked
-porting demonstrated in this session's Phase 3/4/6/7 slice -- continuing it
-means repeating this same rigor across the remaining ~145 tables and ~180
-routes, phase by phase, as originally scoped.
+reusable Eloquent organisation-scope trait/global scope, the rest of Phase 8
+(employees/positions/departments, organisation-defined custom roles, access
+requests/reviews, the administration-dashboard aggregate), and Phases 9
+through 15 in full (invoices/VAT, accounting/commercial, compliance/audit,
+portals/licensing/governance, documents/integrations/offline/reports, the
+legacy D1 importer, and deployment documentation) are all outstanding. This
+is genuinely a multi-week engineering effort at the pace of careful,
+verified, per-field-checked porting demonstrated in this session's Phase
+3/4/6/7/8 slice -- continuing it means repeating this same rigor across the
+remaining ~140 tables and ~170 routes, phase by phase, as originally scoped.
