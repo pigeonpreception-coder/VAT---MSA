@@ -14,6 +14,14 @@ class VatTransaction extends Model
 
     protected $guarded = [];
 
+    // Microsecond precision, matching the `created_at` column's own
+    // timestamp(6) -- see that migration's own note: GetTransactionTimeline
+    // orders a lineage's events by this column, and needs sub-second
+    // resolution to break ties between two transactions posted within the
+    // same wall-clock second (e.g. a certification followed immediately by
+    // its own correction or cancellation).
+    protected $dateFormat = 'Y-m-d H:i:s.u';
+
     protected $casts = ['created_at' => 'datetime'];
 
     public function invoice(): BelongsTo

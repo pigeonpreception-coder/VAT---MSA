@@ -42,7 +42,7 @@ below for the specific commands.
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
-| 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. Also now COMPLETE (see "VAT-return-generation prerequisite" below): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, and the standalone VAT-rule evaluate/propose/approve routes -- deferred, not silently dropped. |
+| 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion" below). Also COMPLETE (see "VAT-return-generation prerequisite" below): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. NOT covered yet: the standalone VAT-rule evaluate/propose/approve routes (`lib/data/vat-rule-repository.ts`'s other exports) -- deferred, not silently dropped. |
 | 10 | Accounting/commercial | COMPLETE for its actual scope (see below) -- all 5 sub-slices of business-repository.ts's ~34 functions: business parties, quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). The one function NOT ported: `verifySupplier`/party verification snapshots -- it reuses `classifyTransaction` from the still-unported `identity-repository.ts`, deferred not silently dropped. |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and now the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: DOCUMENT/VAT_RETURN-sourced evidence citation and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
 | 12-15 | Portals/licensing/governance through legacy importer and deployment docs | NOT STARTED |
@@ -740,6 +740,71 @@ in the test itself) to exercise that branch, exactly as a real
 `FILE_RETURN` command -- not built in either system -- would eventually
 need to.
 
+## Invoice lifecycle completion (cancelInvoice/explainInvoiceVat/getTransactionTimeline)
+
+Closes out the rest of Phase 9's own deferred scope (`lib/data/
+repository.ts`'s three remaining exports), leaving only the standalone
+VAT-rule evaluate/propose/approve routes outstanding for that module.
+`App\Services\Invoice\InvoiceService` gains `cancel`/`explainVat`/
+`transactionTimeline`; `InvoiceController` gains matching routes, the
+cancellation one step-up gated via the same `password.confirm` middleware
+Phase 8's taxpayer suspension already established. Both a real end-to-end
+HTTP walkthrough (via PHPUnit's HTTP test client) and a 5-test PHPUnit
+feature suite (`tests/Feature/Invoice/InvoiceLifecycleTest.php`, run
+against real MySQL, certifying real invoices first via `InvoiceService::submit`)
+confirm:
+
+- **`explainInvoiceVat` traces each line back to the exact approved VATRule
+  version that produced its tax amount**, and **`getTransactionTimeline`
+  resolves the complete chronological lineage** -- a plain certified
+  invoice shows one `CERTIFICATION` event with its two ledger postings;
+  querying by *either* the original invoice or one of its corrections
+  resolves to the same root and the same full lineage (`CERTIFICATION`
+  then `CORRECTION`, in true chronological order -- see the genuine bug
+  below).
+- **Both read endpoints are scoped to the supplier or customer only**: an
+  unrelated third taxpayer gets a real `404`, not a filtered-but-visible
+  response.
+- **Cancellation is genuinely officer-only, step-up gated, reversing, and
+  idempotent**: a `TAXPAYER_OWNER` (no `invoices:cancel`) is refused `403`
+  even for their own invoice; a reason under 10 characters is rejected
+  `422`; a successful cancellation flips `status='CANCELLED'`, writes a new
+  `CANCELLATION` `vat_transactions` row referencing the original
+  certification, and posts two new flipped-direction ledger entries
+  (`OUTPUT_VAT DEBIT` on the supplier, `INPUT_VAT CREDIT` on the customer)
+  -- checked as exact rows in the database, not just a success response.
+  Cancelling an already-cancelled invoice a second time is a clean no-op
+  (checked as the same row counts, not a second reversal) rather than an
+  error.
+- **The correction-lineage guard rails hold**: a `CREDIT_NOTE`/`DEBIT_NOTE`
+  itself cannot be cancelled (`422 NOT_CANCELLABLE_DOCUMENT_TYPE` -- only an
+  original tax invoice can be); an original invoice with an active
+  correction against it is refused `409` rather than silently orphaning the
+  correction lineage.
+
+**Two genuine pre-existing bugs in this migration's own earlier Phase 9
+work were caught and fixed by this verification process, not shipped**:
+
+1. `vat_transactions.transaction_type` had been narrowed to
+   `ENUM('CERTIFICATION','CORRECTION')` in the original Phase 9 migration
+   -- a real mistake, not a source constraint (`db/runtime.ts`'s own schema
+   declares this column plain `TEXT NOT NULL`, no `CHECK`). `cancelInvoice`
+   genuinely inserts a third value, `CANCELLATION`, which the narrowed enum
+   would have rejected outright the first time this code path was ever
+   exercised. Widened to `VARCHAR(20)` instead, consistent with this
+   migration's own documented ENUM-vs-VARCHAR convention (see "Design
+   decisions" below).
+2. The exact same same-second timestamp-tie bug already found once in
+   Phase 11 slice 2 (`communications.occurred_at`) turned out to also be
+   latent in `vat_transactions.created_at` -- `getTransactionTimeline`
+   orders a lineage's events by this column, and this session's own test
+   (a certification followed immediately by its own correction, well
+   within reach of an automated test) reproduced it live: `events.0` came
+   back `CORRECTION`, not `CERTIFICATION`. Fixed the identical way --
+   `TIMESTAMP(6)` column precision plus `VatTransaction`'s own
+   `$dateFormat = 'Y-m-d H:i:s.u'` to preserve it end to end through
+   Eloquent's serialization.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Three genuine gaps in the TypeScript source itself, discovered while
@@ -822,16 +887,15 @@ licensing, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
 requests/reviews, the administration-dashboard aggregate), the rest of
-Phase 9 (`cancelInvoice`, `explainInvoiceVat`'s full computation, transaction
-timeline, standalone VAT-rule evaluate/propose/approve routes -- see the
-Phase 9 verification section above), the rest of Phase 10 (`verifySupplier`
-only -- see the Phase 10 verification sections above), the rest of Phase 11
-(DOCUMENT/VAT_RETURN evidence citation and the compliance dashboard
-snapshot aggregate only -- refunds are now done, see the "Refund workflow"
-section above), and Phases 12 through 15 in full
-(portals/licensing/governance, documents/integrations/offline/reports, the
-legacy D1 importer, and deployment documentation) are all outstanding. This
-is genuinely a multi-week engineering effort at the pace of careful,
+Phase 9 (the standalone VAT-rule evaluate/propose/approve routes only --
+see the Phase 9/"Invoice lifecycle completion" verification sections
+above), the rest of Phase 10 (`verifySupplier` only -- see the Phase 10
+verification sections above), the rest of Phase 11 (DOCUMENT/VAT_RETURN
+evidence citation and the compliance dashboard snapshot aggregate only --
+see the Phase 11 verification sections above), and Phases 12 through 15 in
+full (portals/licensing/governance, documents/integrations/offline/reports,
+the legacy D1 importer, and deployment documentation) are all outstanding.
+This is genuinely a multi-week engineering effort at the pace of careful,
 verified, per-field-checked porting demonstrated in this session's Phase
 3/4/6/7/8/9/10/11 slice -- continuing it means repeating this same rigor
 across the remaining ~83 tables and ~159 routes, phase by phase (or
@@ -839,8 +903,8 @@ sub-slice by sub-slice, as Phases 10 and 11 both now demonstrate), as
 originally scoped. Given the genuine scale each remaining module
 represents (Phase 10's own `business-repository.ts` alone was larger than
 everything ported in Phases 8 and 9 combined, and took 5 separate
-sub-slices to close out; Phase 11's `compliance-repository.ts` is now
-genuinely complete, refunds included), continuing to completion is
+sub-slices to close out; Phases 9 and 11 are now both essentially complete
+down to one narrow deferred surface each), continuing to completion is
 realistically a multi-session effort, not a single continuous run -- this
-document is the honest record of exactly how
-far that effort has gotten at each point.
+document is the honest record of exactly how far that effort has gotten at
+each point.

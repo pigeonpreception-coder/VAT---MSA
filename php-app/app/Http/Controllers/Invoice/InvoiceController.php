@@ -11,8 +11,9 @@ use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Ported from app/api/v1/invoices/route.ts and its [id] sibling. Deliberately
- * narrower than the source for this phase: no port yet of
+ * Ported from app/api/v1/invoices/route.ts and its [id]/cancellation,
+ * [id]/vat-explanation and [id]/transaction-timeline siblings.
+ * Deliberately narrower than the source: no port yet of
  * enforceInvoiceRateLimits/emitStructuredSecurityLog (rate-limiting and
  * structured request logging are cross-cutting concerns shared by several
  * still-unmigrated route files -- tracked in docs/MIGRATION_MATRIX.md rather
@@ -41,6 +42,44 @@ class InvoiceController extends Controller
         }
 
         return response()->json($invoice);
+    }
+
+    /** Module 2 Phase B CancelInvoice: { reason }. Officer-only (invoices:cancel) and step-up gated via the route's own 'password.confirm' middleware, matching the sensitivity of suspending a taxpayer outright. */
+    public function cancel(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'invoices:cancel');
+
+        $payload = $request->json()->all();
+        $correlationId = (string) Str::uuid();
+        $cancellation = $this->invoices->cancel($request->user(), $id, is_array($payload) ? $payload : [], $correlationId);
+
+        return response()->json(['cancellation' => $cancellation], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
+    }
+
+    /** Module 2 Phase A ExplainCalculation: per-line trace back to the exact approved VATRule version that produced its tax amount. */
+    public function vatExplanation(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'invoices:read');
+
+        $explanation = $this->invoices->explainVat($id, $request->user());
+        if (! $explanation) {
+            return response()->json(['title' => 'Not found', 'status' => 404], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->json($explanation);
+    }
+
+    /** Module 2 Phase D GetTransactionTimeline: certification, every correction and any cancellation for one invoice's lineage, as a chronological narrative of VATTransaction events. */
+    public function transactionTimeline(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'invoices:read');
+
+        $timeline = $this->invoices->transactionTimeline($id, $request->user());
+        if (! $timeline) {
+            return response()->json(['title' => 'Not found', 'status' => 404], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->json($timeline);
     }
 
     public function store(Request $request): JsonResponse

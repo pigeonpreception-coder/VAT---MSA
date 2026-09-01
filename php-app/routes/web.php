@@ -66,12 +66,15 @@ Route::middleware('auth')->group(function () {
 
         // Phase 9: invoice certification and VAT. Kept 1:1 with the source's
         // app/api/v1/invoices/** shape -- see InvoiceController's own doc
-        // comment for what is and isn't ported yet (cancellation, transaction
-        // timeline, VAT explanation and the standalone VAT-rule evaluate route
-        // are deferred, tracked in docs/MIGRATION_MATRIX.md).
+        // comment; the standalone VAT-rule evaluate/propose/approve routes
+        // remain deferred, tracked in docs/MIGRATION_MATRIX.md.
         Route::get('/invoices', [InvoiceController::class, 'index']);
         Route::post('/invoices', [InvoiceController::class, 'store']);
         Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+        Route::post('/invoices/{id}/cancellation', [InvoiceController::class, 'cancel'])
+            ->middleware('password.confirm');
+        Route::get('/invoices/{id}/vat-explanation', [InvoiceController::class, 'vatExplanation']);
+        Route::get('/invoices/{id}/transaction-timeline', [InvoiceController::class, 'transactionTimeline']);
 
         // Phase 10 (slice 1 of Accounting/commercial): business parties and
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**

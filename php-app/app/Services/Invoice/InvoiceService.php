@@ -26,14 +26,17 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Ported from lib/data/repository.ts's submitInvoice/getInvoiceById/listInvoices
- * (Module 2 Phases A-E). Deliberately in scope for this phase: certification
- * of TAX_INVOICE/SIMPLIFIED_TAX_INVOICE/SELF_BILLED_INVOICE/CREDIT_NOTE/
- * DEBIT_NOTE, idempotent replay, VAT-rule resolution, correction lineage and
- * the ledger/audit/outbox/security-event side effects. Deliberately deferred
- * to a follow-up phase (see docs/MIGRATION_MATRIX.md): cancelInvoice,
- * explainInvoiceVat, getTransactionTimeline, and the VAT-period/return/
- * adjustment/reconciliation-workflow surface built on top of these tables.
+ * Ported from lib/data/repository.ts's submitInvoice/getInvoiceById/
+ * listInvoices/cancelInvoice/explainInvoiceVat/getTransactionTimeline
+ * (Module 2 Phases A-E, in full). Covers: certification of TAX_INVOICE/
+ * SIMPLIFIED_TAX_INVOICE/SELF_BILLED_INVOICE/CREDIT_NOTE/DEBIT_NOTE,
+ * idempotent replay, VAT-rule resolution, correction lineage and the
+ * ledger/audit/outbox/security-event side effects, officer-only
+ * cancellation (with its own reversing ledger entries), per-line VAT-rule
+ * explanation, and the full cross-invoice transaction timeline. The
+ * standalone VAT-rule evaluate/propose/approve routes
+ * (lib/data/vat-rule-repository.ts's other exports) remain deferred -- see
+ * docs/MIGRATION_MATRIX.md.
  */
 class InvoiceService
 {
@@ -388,6 +391,210 @@ class InvoiceService
                 'direction' => $e->direction, 'amountCents' => (int) $e->amount_cents, 'period' => $e->period,
             ])->values()->all(),
         ]);
+    }
+
+    /**
+     * Ported from lib/data/repository.ts's cancelInvoice (Module 2 Phase B).
+     * Deliberately narrow and officer-only (invoices:cancel, step-up
+     * gated -- see the route's own 'password.confirm' middleware): only a
+     * TAX_INVOICE/SIMPLIFIED_TAX_INVOICE/SELF_BILLED_INVOICE with no active
+     * correction against it can be cancelled. Never deletes or mutates the
+     * original row; reverses its ledger effect the same way a credit note
+     * does (new flipped-direction rows, never mutating existing ones) and
+     * marks status='CANCELLED'. Idempotent on an already-cancelled invoice.
+     * No idempotency-key handling here -- the source itself has none for
+     * this command (unlike submit(), which uses idempotency_records).
+     *
+     * @return array{invoiceId: string, status: string}
+     */
+    public function cancel(User $actor, string $invoiceId, array $payload, string $correlationId): array
+    {
+        $reason = $this->normalizeCancellationReason($payload);
+        $invoice = Invoice::find($invoiceId);
+        if (! $invoice) {
+            throw new InvoiceValidationException([
+                ['code' => 'INVOICE_NOT_FOUND', 'path' => '/invoice_id', 'message' => 'The invoice does not exist.'],
+            ]);
+        }
+        TenantScope::requireTaxpayer($actor, $invoice->supplier_taxpayer_id);
+        if ($invoice->status === 'CANCELLED') {
+            return ['invoiceId' => $invoice->id, 'status' => 'CANCELLED'];
+        }
+        if (! in_array($invoice->document_type, ['TAX_INVOICE', 'SIMPLIFIED_TAX_INVOICE', 'SELF_BILLED_INVOICE'], true)) {
+            throw new InvoiceValidationException([
+                ['code' => 'NOT_CANCELLABLE_DOCUMENT_TYPE', 'path' => '/document_type', 'message' => 'Only an original tax invoice can be cancelled; a credit or debit note cannot.'],
+            ]);
+        }
+        $activeCorrection = InvoiceCorrection::where('original_invoice_id', $invoice->id)->where('status', 'ACTIVE')->exists();
+        if ($activeCorrection) {
+            throw new RepositoryConflictException('This invoice already has an active credit or debit note against it; resolve the correction lineage instead of cancelling.');
+        }
+
+        $now = now();
+        $transactionId = (string) Str::uuid();
+        $period = mb_substr($invoice->issue_date->toDateString(), 0, 7);
+
+        DB::transaction(function () use ($invoice, $actor, $now, $transactionId, $period, $reason, $correlationId) {
+            Invoice::where('id', $invoice->id)->update(['status' => 'CANCELLED']);
+            // Module 2 Phase D: Reverse. A new VATTransaction linked back to the
+            // certification it reverses via reference_transaction_id -- the
+            // certification row itself is never mutated.
+            VatTransaction::create([
+                'id' => $transactionId, 'invoice_id' => $invoice->id, 'taxpayer_id' => $invoice->supplier_taxpayer_id,
+                'transaction_type' => 'CANCELLATION', 'reference_transaction_id' => $invoice->transaction_id, 'created_at' => $now,
+            ]);
+            LedgerEntry::create([
+                'id' => (string) Str::uuid(), 'transaction_id' => $transactionId, 'invoice_id' => $invoice->id,
+                'taxpayer_id' => $invoice->supplier_taxpayer_id, 'entry_type' => 'OUTPUT_VAT', 'direction' => 'DEBIT',
+                'amount_cents' => $invoice->tax_cents, 'period' => $period, 'created_at' => $now,
+            ]);
+            if ($invoice->customer_taxpayer_id) {
+                LedgerEntry::create([
+                    'id' => (string) Str::uuid(), 'transaction_id' => $transactionId, 'invoice_id' => $invoice->id,
+                    'taxpayer_id' => $invoice->customer_taxpayer_id, 'entry_type' => 'INPUT_VAT', 'direction' => 'CREDIT',
+                    'amount_cents' => $invoice->tax_cents, 'period' => $period, 'created_at' => $now,
+                ]);
+            }
+            // The source reimplements a raw audit_events insert here, ordering
+            // its prior-hash lookup by occurred_at DESC rather than true
+            // insertion order -- the same caller-supplied-timestamp race
+            // SECURITY_GAP_ASSESSMENT.md item #9 flags elsewhere in this
+            // codebase. Using the canonical AuditService::append writer here
+            // instead (as every other command in this migration does) avoids
+            // reintroducing that race rather than faithfully reproducing it.
+            AuditService::append($actor, 'INVOICE_CANCELLED', 'INVOICE', $invoice->id, ['invoiceId' => $invoice->id, 'reason' => $reason, 'correlationId' => $correlationId], $now);
+            OutboxEvent::create([
+                'id' => (string) Str::uuid(), 'aggregate_type' => 'INVOICE', 'aggregate_id' => $invoice->id,
+                'event_type' => 'InvoiceCancelled', 'event_version' => 1, 'partition_key' => $invoice->supplier_taxpayer_id,
+                'payload' => AuditService::canonicalJson(['invoice_id' => $invoice->id, 'reason' => $reason, 'correlation_id' => $correlationId]),
+                'status' => 'PENDING', 'publish_attempts' => 0, 'occurred_at' => $now, 'available_at' => $now,
+            ]);
+        });
+
+        return ['invoiceId' => $invoice->id, 'status' => 'CANCELLED'];
+    }
+
+    /**
+     * Ported from lib/data/repository.ts's explainInvoiceVat (Module 2 Phase
+     * A ExplainCalculation): for an already-certified invoice, exactly which
+     * approved VATRule version produced each line's tax amount. vat_rule_id
+     * is stored on invoice_lines at submission time (submit() above); this
+     * just projects it back out, tenant-scoped the same way find() is (a
+     * supplier or a customer may both read it).
+     *
+     * @return ?array<string, mixed>
+     */
+    public function explainVat(string $id, User $actor): ?array
+    {
+        $query = Invoice::query();
+        if (! TenantScope::isNational($actor)) {
+            $taxpayerId = $actor->taxpayer_id ?? '__none__';
+            $query->where(fn ($q) => $q->where('supplier_taxpayer_id', $taxpayerId)->orWhere('customer_taxpayer_id', $taxpayerId));
+        }
+        $invoice = $query->find($id, ['id', 'invoice_number']);
+        if (! $invoice) {
+            return null;
+        }
+
+        $lines = InvoiceLine::where('invoice_lines.invoice_id', $id)
+            ->leftJoin('vat_rules', 'vat_rules.id', '=', 'invoice_lines.vat_rule_id')
+            ->orderBy('invoice_lines.line_number')
+            ->select([
+                'invoice_lines.line_number', 'invoice_lines.tax_category', 'invoice_lines.net_amount_cents',
+                'invoice_lines.tax_rate_bps', 'invoice_lines.tax_amount_cents',
+                'vat_rules.id as vat_rule_id', 'vat_rules.version as vat_rule_version',
+                'vat_rules.effective_from as rule_effective_from', 'vat_rules.effective_to as rule_effective_to',
+            ])->get();
+
+        return [
+            'invoiceId' => $invoice->id, 'invoiceNumber' => $invoice->invoice_number,
+            'lines' => $lines->map(fn ($line) => [
+                'lineNumber' => (int) $line->line_number, 'taxCategory' => $line->tax_category,
+                'taxableAmountCents' => (int) $line->net_amount_cents, 'taxRateBps' => (int) $line->tax_rate_bps,
+                'taxAmountCents' => (int) $line->tax_amount_cents, 'vatRuleId' => $line->vat_rule_id,
+                'vatRuleVersion' => $line->vat_rule_version !== null ? (int) $line->vat_rule_version : null,
+                'ruleEffectiveFrom' => $line->rule_effective_from, 'ruleEffectiveTo' => $line->rule_effective_to,
+            ])->values()->all(),
+        ];
+    }
+
+    /**
+     * Ported from lib/data/repository.ts's getTransactionTimeline (Module 2
+     * Phase D): the complete audit narrative for one invoice's lineage --
+     * its certification, every correction issued against it, and its
+     * cancellation if any -- as a chronological sequence of VATTransaction
+     * events, each with the ledger postings it actually made. Accepts any
+     * invoice id within a lineage (the true original, or one of its
+     * corrections) and always resolves to the same timeline, rooted at the
+     * original. Tenant scope is checked once, against the invoice the
+     * caller asked for; that transitively secures the rest of the lineage,
+     * since a correction's supplier and customer are invariant with its
+     * original by construction (submit() enforces both).
+     *
+     * @return ?array<string, mixed>
+     */
+    public function transactionTimeline(string $id, User $actor): ?array
+    {
+        $query = Invoice::query();
+        if (! TenantScope::isNational($actor)) {
+            $taxpayerId = $actor->taxpayer_id ?? '__none__';
+            $query->where(fn ($q) => $q->where('supplier_taxpayer_id', $taxpayerId)->orWhere('customer_taxpayer_id', $taxpayerId));
+        }
+        $invoice = $query->find($id, ['id', 'invoice_number']);
+        if (! $invoice) {
+            return null;
+        }
+
+        $asCorrectionOf = InvoiceCorrection::where('correction_invoice_id', $invoice->id)->value('original_invoice_id');
+        $rootId = $asCorrectionOf ?? $invoice->id;
+        $root = $rootId === $invoice->id ? $invoice : Invoice::find($rootId, ['id', 'invoice_number']);
+        if (! $root) {
+            return null;
+        }
+
+        $correctionIds = InvoiceCorrection::where('original_invoice_id', $rootId)->orderBy('created_at')->pluck('correction_invoice_id')->all();
+        $lineageInvoiceIds = [$rootId, ...$correctionIds];
+
+        $transactions = VatTransaction::whereIn('vat_transactions.invoice_id', $lineageInvoiceIds)
+            ->join('invoices', 'invoices.id', '=', 'vat_transactions.invoice_id')
+            ->orderBy('vat_transactions.created_at')
+            ->select([
+                'vat_transactions.id', 'vat_transactions.transaction_type', 'vat_transactions.reference_transaction_id',
+                'vat_transactions.invoice_id', 'vat_transactions.created_at',
+                'invoices.invoice_number', 'invoices.document_type',
+            ])->get();
+
+        $ledgerByTransaction = LedgerEntry::whereIn('ledger_entries.transaction_id', $transactions->pluck('id')->all())
+            ->join('taxpayers', 'taxpayers.id', '=', 'ledger_entries.taxpayer_id')
+            ->orderByDesc('ledger_entries.entry_type')
+            ->select(['ledger_entries.transaction_id', 'ledger_entries.entry_type', 'ledger_entries.direction', 'ledger_entries.amount_cents', 'ledger_entries.period', 'taxpayers.legal_name as taxpayer_name'])
+            ->get()->groupBy('transaction_id');
+
+        return [
+            'rootInvoiceId' => $root->id, 'rootInvoiceNumber' => $root->invoice_number,
+            'events' => $transactions->map(fn ($transaction) => [
+                'transactionId' => $transaction->id, 'transactionType' => $transaction->transaction_type,
+                'referenceTransactionId' => $transaction->reference_transaction_id, 'invoiceId' => $transaction->invoice_id,
+                'invoiceNumber' => $transaction->invoice_number, 'documentType' => $transaction->document_type,
+                'occurredAt' => optional($transaction->created_at)->toISOString(),
+                'ledgerEntries' => ($ledgerByTransaction->get($transaction->id) ?? collect())->map(fn ($entry) => [
+                    'taxpayerName' => $entry->taxpayer_name, 'entryType' => $entry->entry_type,
+                    'direction' => $entry->direction, 'amountCents' => (int) $entry->amount_cents, 'period' => $entry->period,
+                ])->values()->all(),
+            ])->values()->all(),
+        ];
+    }
+
+    private function normalizeCancellationReason(array $payload): string
+    {
+        $reason = isset($payload['reason']) && is_string($payload['reason']) ? trim(preg_replace('/\s+/', ' ', $payload['reason'])) : '';
+        if (mb_strlen($reason) < 10 || mb_strlen($reason) > 240) {
+            throw new InvoiceValidationException([
+                ['code' => 'REASON_INVALID', 'path' => '/reason', 'message' => 'Provide a 10 to 240 character cancellation reason.'],
+            ]);
+        }
+
+        return $reason;
     }
 
     /** @return array<string, mixed> */
