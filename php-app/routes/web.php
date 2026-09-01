@@ -21,6 +21,7 @@ use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
+use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use Illuminate\Support\Facades\Route;
 
@@ -199,5 +200,15 @@ Route::middleware('auth')->group(function () {
         Route::post('/vat-returns/{versionId}/approval-requests', [VatLifecycleController::class, 'requestReturnApproval']);
         Route::post('/vat-returns/{versionId}/submissions', [VatLifecycleController::class, 'submitReturn']);
         Route::post('/approval-tasks/{taskId}/decision', [VatLifecycleController::class, 'decideApproval']);
+
+        // Refund workflow (compliance-repository.ts's requestRefund/
+        // getRefundClaimChecks/transitionRefundClaim/disputeRefund) -- kept
+        // 1:1 with the source's app/api/v1/refunds/** shape. Closes out
+        // Phase 11's own refund gap, now unblocked by the
+        // VAT-return-generation prerequisite above.
+        Route::post('/refunds', [RefundController::class, 'store']);
+        Route::get('/refunds/{id}/checks', [RefundController::class, 'checks']);
+        Route::post('/refunds/{id}/transition', [RefundController::class, 'transition']);
+        Route::post('/refunds/{id}/disputes', [RefundController::class, 'dispute']);
     });
 });

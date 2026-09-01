@@ -7,18 +7,14 @@ use App\Exceptions\ComplianceValidationException;
 /**
  * Direct port of lib/domain/compliance.ts's normalize/validate functions
  * and its two adjacency-list state machines (audit case lifecycle,
- * refund-claim lifecycle). This phase's slice covers: audit cases
- * (open/transition/findings/evidence/notes), obligations, disputes, and
- * risk (assign review/approve action/evaluate/restricted query). NOT
- * covered yet (see docs/MIGRATION_MATRIX.md's Phase 11 section): refunds
- * (blocked on the still-unbuilt vat_return_versions/tax_rule_sets tables
- * -- Phase 9's own deferred VAT-period/return-workflow surface),
- * communications, and notifications' own standalone queue/preference
- * commands (though the shared notificationRecord side-effect these five
- * case/dispute/obligation/risk commands trigger IS ported -- see
- * App\Support\Compliance\NotificationRecorder). Every validate* function
- * throws ComplianceValidationException (a list of {code, path, message})
- * on failure, matching the source's own ComplianceValidationError exactly.
+ * refund-claim lifecycle). Covers: audit cases (open/transition/findings/
+ * evidence/notes), obligations, disputes, risk (assign review/approve
+ * action/evaluate/restricted query), communications/notifications, and
+ * refunds (request/transition/dispute -- the workflow the VAT-return-
+ * generation prerequisite was built to unblock; see
+ * App\Services\Refund\RefundService). Every validate* function throws
+ * ComplianceValidationException (a list of {code, path, message}) on
+ * failure, matching the source's own ComplianceValidationError exactly.
  */
 class ComplianceValidator
 {
@@ -45,6 +41,34 @@ class ComplianceValidator
     private const NOTIFICATION_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
     private const NOTIFICATION_TYPE_PATTERN = '/^[A-Z][A-Z0-9_]{2,59}$/';
     private const NOTIFICATION_STATUSES = ['UNREAD', 'READ', 'CANCELLED'];
+    private const REFUND_CLAIM_ACTIONS = [
+        'RECHECK_ELIGIBILITY', 'APPROVE', 'REJECT', 'REQUEST_INFORMATION', 'HOLD', 'RESUME',
+        'DISPUTE', 'RESOLVE_DISPUTE_UPHOLD', 'RESOLVE_DISPUTE_OVERTURN', 'CLOSE',
+    ];
+
+    /**
+     * Ported from lib/domain/compliance.ts's REFUND_CLAIM_TRANSITIONS -- a
+     * real adjacency-list state machine, mirroring CASE_TRANSITIONS's own
+     * shape exactly, down to the dynamic-target `null` convention for
+     * RESUME (its real target is whichever stage the claim was
+     * EVIDENCE_REQUESTED/ON_HOLD *from*, resolved by RefundService reading
+     * `refund_claims.resume_status`, not by this map). PAYMENT_PENDING and
+     * CLOSED are deliberately terminal: Payment itself stays DISABLED
+     * PENDING AUTHORITY, so nothing beyond PAYMENT_PENDING is modeled.
+     */
+    private const REFUND_CLAIM_TRANSITIONS = [
+        'BLOCKED_RETURN_NOT_FILED' => ['RECHECK_ELIGIBILITY' => 'RECEIVED'],
+        'RECEIVED' => ['APPROVE' => 'RISK_REVIEW', 'REJECT' => 'REJECTED', 'REQUEST_INFORMATION' => 'EVIDENCE_REQUESTED', 'HOLD' => 'ON_HOLD'],
+        'RISK_REVIEW' => ['APPROVE' => 'OFFICER_REVIEW', 'REJECT' => 'REJECTED', 'REQUEST_INFORMATION' => 'EVIDENCE_REQUESTED', 'HOLD' => 'ON_HOLD'],
+        'OFFICER_REVIEW' => ['APPROVE' => 'PAYMENT_AUTHORISATION', 'REJECT' => 'REJECTED', 'REQUEST_INFORMATION' => 'EVIDENCE_REQUESTED', 'HOLD' => 'ON_HOLD'],
+        'PAYMENT_AUTHORISATION' => ['APPROVE' => 'PAYMENT_PENDING', 'REJECT' => 'REJECTED', 'REQUEST_INFORMATION' => 'EVIDENCE_REQUESTED', 'HOLD' => 'ON_HOLD'],
+        'EVIDENCE_REQUESTED' => ['RESUME' => null],
+        'ON_HOLD' => ['RESUME' => null],
+        'REJECTED' => ['DISPUTE' => 'DISPUTED', 'CLOSE' => 'CLOSED'],
+        'DISPUTED' => ['RESOLVE_DISPUTE_UPHOLD' => 'CLOSED', 'RESOLVE_DISPUTE_OVERTURN' => 'RISK_REVIEW'],
+        'PAYMENT_PENDING' => [],
+        'CLOSED' => [],
+    ];
 
     private const CASE_ACTIONS = ['AUTHORIZE', 'ASSIGN', 'ADVANCE', 'SUSPEND', 'RESUME', 'CANCEL', 'REOPEN', 'CLOSE', 'LINK_APPEAL'];
 
@@ -542,6 +566,53 @@ class ComplianceValidator
         }
 
         return ['status' => $status, 'severity' => $severity, 'limit' => $limit, 'offset' => $offset];
+    }
+
+    /** @return array{schema_version: string, vat_return_version_id: string} */
+    public static function refundRequest(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $versionId = self::id($input['vat_return_version_id'] ?? null, '/vat_return_version_id', $messages) ?? '';
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'vat_return_version_id' => $versionId];
+    }
+
+    /**
+     * Validates the (status, action) pair is legal and returns the static
+     * target status, or null if the target is dynamic (RESUME only -- see
+     * REFUND_CLAIM_TRANSITIONS's own doc comment).
+     */
+    public static function assertRefundClaimTransition(string $action, string $currentStatus): ?string
+    {
+        $rule = self::REFUND_CLAIM_TRANSITIONS[$currentStatus] ?? null;
+        if ($rule === null || ! array_key_exists($action, $rule)) {
+            throw new ComplianceValidationException([
+                ['code' => 'REFUND_TRANSITION_INVALID', 'path' => '/action', 'message' => 'Cannot '.mb_strtolower(str_replace('_', ' ', $action))." a refund claim currently {$currentStatus}."],
+            ]);
+        }
+
+        return $rule[$action];
+    }
+
+    /** @return array{schema_version: string, action: string, findings: string} */
+    public static function refundClaimTransition(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $action = mb_strtoupper(self::text($input['action'] ?? null));
+        if (! in_array($action, self::REFUND_CLAIM_ACTIONS, true)) {
+            $messages[] = ['code' => 'REFUND_ACTION_INVALID', 'path' => '/action', 'message' => 'Select a supported refund action.'];
+        }
+        $findings = self::bounded($input['findings'] ?? null, '/findings', 'Findings', 5, 2000, $messages);
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'action' => $action, 'findings' => $findings];
     }
 
     // -- shared field helpers, ported from lib/domain/compliance.ts's own private helpers --
