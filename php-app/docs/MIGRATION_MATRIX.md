@@ -37,13 +37,13 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 72 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 73 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, TaxRuleSetSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
 | 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion" below). Also COMPLETE (see "VAT-return-generation prerequisite" below): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. NOT covered yet: the standalone VAT-rule evaluate/propose/approve routes (`lib/data/vat-rule-repository.ts`'s other exports) -- deferred, not silently dropped. |
-| 10 | Accounting/commercial | COMPLETE for its actual scope (see below) -- all 5 sub-slices of business-repository.ts's ~34 functions: business parties, quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). The one function NOT ported: `verifySupplier`/party verification snapshots -- it reuses `classifyTransaction` from the still-unported `identity-repository.ts`, deferred not silently dropped. |
+| 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and now the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: DOCUMENT/VAT_RETURN-sourced evidence citation and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
 | 12-15 | Portals/licensing/governance through legacy importer and deployment docs | NOT STARTED |
 
@@ -805,6 +805,45 @@ work were caught and fixed by this verification process, not shipped**:
    `$dateFormat = 'Y-m-d H:i:s.u'` to preserve it end to end through
    Eloquent's serialization.
 
+## Supplier verification (verifySupplier/getSupplierVerificationHistory)
+
+Closes out Phase 10 (accounting/commercial) entirely -- the one function
+that phase deferred. Ports `App\Support\Business\TransactionClassifier`
+(the single function pulled out of the still-unported
+`lib/data/identity-repository.ts` -- `classifyTransaction`, the same
+taxpayer/organisation/capability resolution rule invoice certification
+already uses) and `App\Services\Business\SupplierVerificationService`, plus
+one new table, `party_verification_snapshots`. Both a real end-to-end HTTP
+walkthrough (via PHPUnit's HTTP test client) and a 5-test PHPUnit feature
+suite (`tests/Feature/Business/SupplierVerificationTest.php`, run against
+real MySQL) confirm:
+
+- **Verification reflects the real, live taxpayer register, not the
+  business party's own locally-entered fields**: verifying a party whose
+  recorded VAT number matches a real, active, `SELLER`-capable
+  organisation reports `taxpayer_active`/`organisation_active`/
+  `can_act_as_seller` all `true` with the real capability list; verifying
+  an unregistered VAT number reports every flag `false` -- checked as
+  exact response values and a real database row, not just a non-error
+  response.
+- **The two eligibility gates hold**: a party with no active `SUPPLIER`
+  relationship is refused `409` even if otherwise valid; a party with no
+  VAT number recorded at all is refused `409` before ever reaching
+  `TransactionClassifier`.
+- **Verification always re-checks live and writes a genuinely new snapshot
+  every time, even on an idempotent replay** -- the one deliberate
+  departure from this migration's usual idempotency pattern (matching
+  Module 4's `evaluateRisk`): calling it twice with the identical
+  Idempotency-Key returns two *different* snapshot ids and two real rows in
+  `party_verification_snapshots`, while the audit/outbox pair is written
+  only once (checked as an exact row count of 1 for each, not merely "no
+  error on replay"). `GetSupplierVerificationHistory` then reads back both
+  snapshots, most recent first.
+- **Tenant scope and RBAC are both genuinely enforced**: a different
+  organisation gets a real `404` (not a leaked existence signal) attempting
+  to verify or read another organisation's own party; a role without
+  `parties:manage` (`SELLER_VIEWER`) is refused `403`.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Three genuine gaps in the TypeScript source itself, discovered while
@@ -882,29 +921,29 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (83 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (82 more tables), Phase 5 (remaining seed data -- identity proofing,
 licensing, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
 requests/reviews, the administration-dashboard aggregate), the rest of
 Phase 9 (the standalone VAT-rule evaluate/propose/approve routes only --
 see the Phase 9/"Invoice lifecycle completion" verification sections
-above), the rest of Phase 10 (`verifySupplier` only -- see the Phase 10
-verification sections above), the rest of Phase 11 (DOCUMENT/VAT_RETURN
-evidence citation and the compliance dashboard snapshot aggregate only --
-see the Phase 11 verification sections above), and Phases 12 through 15 in
-full (portals/licensing/governance, documents/integrations/offline/reports,
-the legacy D1 importer, and deployment documentation) are all outstanding.
-This is genuinely a multi-week engineering effort at the pace of careful,
-verified, per-field-checked porting demonstrated in this session's Phase
-3/4/6/7/8/9/10/11 slice -- continuing it means repeating this same rigor
-across the remaining ~83 tables and ~159 routes, phase by phase (or
-sub-slice by sub-slice, as Phases 10 and 11 both now demonstrate), as
-originally scoped. Given the genuine scale each remaining module
-represents (Phase 10's own `business-repository.ts` alone was larger than
-everything ported in Phases 8 and 9 combined, and took 5 separate
-sub-slices to close out; Phases 9 and 11 are now both essentially complete
-down to one narrow deferred surface each), continuing to completion is
-realistically a multi-session effort, not a single continuous run -- this
-document is the honest record of exactly how far that effort has gotten at
-each point.
+above), the rest of Phase 11 (DOCUMENT/VAT_RETURN evidence citation and the
+compliance dashboard snapshot aggregate only -- see the Phase 11
+verification sections above), and Phases 12 through 15 in full
+(portals/licensing/governance, documents/integrations/offline/reports, the
+legacy D1 importer, and deployment documentation) are all outstanding.
+Phase 10 (accounting/commercial) is now fully COMPLETE -- see "Supplier
+verification" above. This is genuinely a multi-week engineering effort at
+the pace of careful, verified, per-field-checked porting demonstrated in
+this session's Phase 3/4/6/7/8/9/10/11 slice -- continuing it means
+repeating this same rigor across the remaining ~82 tables and ~158 routes,
+phase by phase (or sub-slice by sub-slice, as Phases 10 and 11 both now
+demonstrate), as originally scoped. Given the genuine scale each remaining
+module represents (Phase 10's own `business-repository.ts` alone was
+larger than everything ported in Phases 8 and 9 combined, and took 6
+separate sub-slices to close out; Phase 9 and Phase 11 are now both
+essentially complete down to one narrow deferred surface each), continuing
+to completion is realistically a multi-session effort, not a single
+continuous run -- this document is the honest record of exactly how far
+that effort has gotten at each point.

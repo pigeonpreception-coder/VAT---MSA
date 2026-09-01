@@ -78,13 +78,13 @@ Route::middleware('auth')->group(function () {
 
         // Phase 10 (slice 1 of Accounting/commercial): business parties and
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
-        // and app/api/v1/quotations/** shape -- see BusinessPartyController's
-        // and QuotationController's own doc comments for what's deferred
-        // (verifySupplier -- tracked in docs/MIGRATION_MATRIX.md).
+        // and app/api/v1/quotations/** shape.
         Route::get('/business-parties', [BusinessPartyController::class, 'index']);
         Route::post('/business-parties', [BusinessPartyController::class, 'store']);
         Route::patch('/business-parties/{id}', [BusinessPartyController::class, 'update']);
         Route::post('/business-parties/{id}/deactivation', [BusinessPartyController::class, 'deactivate']);
+        Route::get('/business-parties/{id}/verification', [BusinessPartyController::class, 'verificationHistory']);
+        Route::post('/business-parties/{id}/verification', [BusinessPartyController::class, 'verify']);
 
         Route::get('/quotations', [QuotationController::class, 'index']);
         Route::post('/quotations', [QuotationController::class, 'store']);
