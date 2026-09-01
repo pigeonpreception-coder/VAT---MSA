@@ -21,6 +21,7 @@ use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
+use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -185,5 +186,18 @@ Route::middleware('auth')->group(function () {
         Route::post('/notifications/{id}/cancellation', [NotificationController::class, 'cancel']);
         Route::post('/notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::post('/notifications/preferences', [NotificationController::class, 'updatePreference']);
+
+        // VAT-return-generation prerequisite (Phase 9's own deferred scope,
+        // built to unblock Phase 11's refund slice -- see
+        // docs/MIGRATION_MATRIX.md). Kept 1:1 with the source's
+        // app/api/v1/vat-periods/**, app/api/v1/vat-returns/** and
+        // app/api/v1/approval-tasks/[id]/decision/route.ts shape.
+        Route::get('/vat-periods', [VatLifecycleController::class, 'periods']);
+        Route::post('/vat-periods/{periodId}/adjustments', [VatLifecycleController::class, 'createAdjustment']);
+        Route::post('/vat-periods/{periodId}/returns', [VatLifecycleController::class, 'generateReturn']);
+        Route::get('/vat-returns/{id}', [VatLifecycleController::class, 'showReturn']);
+        Route::post('/vat-returns/{versionId}/approval-requests', [VatLifecycleController::class, 'requestReturnApproval']);
+        Route::post('/vat-returns/{versionId}/submissions', [VatLifecycleController::class, 'submitReturn']);
+        Route::post('/approval-tasks/{taskId}/decision', [VatLifecycleController::class, 'decideApproval']);
     });
 });

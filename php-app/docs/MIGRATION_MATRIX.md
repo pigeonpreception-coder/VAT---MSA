@@ -37,14 +37,14 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 60 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
-| 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 69 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) |
+| 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, TaxRuleSetSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
-| 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, the standalone VAT-rule evaluate/propose/approve routes, and the whole VAT-period/return/adjustment/reconciliation-workflow surface built on top of these tables -- deferred, not silently dropped. |
+| 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. Also now COMPLETE (see "VAT-return-generation prerequisite" below): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, and the standalone VAT-rule evaluate/propose/approve routes -- deferred, not silently dropped. |
 | 10 | Accounting/commercial | COMPLETE for its actual scope (see below) -- all 5 sub-slices of business-repository.ts's ~34 functions: business parties, quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). The one function NOT ported: `verifySupplier`/party verification snapshots -- it reuses `classifyTransaction` from the still-unported `identity-repository.ts`, deferred not silently dropped. |
-| 11 | Compliance/audits/disputes/refunds/risk | PARTIAL -- slices 1-2 of compliance-repository.ts's ~30 functions COMPLETE for their actual scope (see below): audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), and the standalone notification commands (queue/cancel/mark-read/preferences/list). NOT covered yet within Phase 11: refunds (blocked on Phase 9's still-deferred vat_return_versions/tax_rule_sets tables; REFUND_CLAIM-referenced notices are consequently deferred alongside it), DOCUMENT/VAT_RETURN-sourced evidence citation, and the compliance dashboard snapshot aggregate -- deferred, not silently dropped. |
+| 11 | Compliance/audits/disputes/refunds/risk | PARTIAL -- slices 1-2 of compliance-repository.ts's ~30 functions COMPLETE for their actual scope (see below): audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), and the standalone notification commands (queue/cancel/mark-read/preferences/list). Refunds' own real blocker (Phase 9's deferred `vat_return_versions`/`tax_rule_sets`) is now resolved -- see "VAT-return-generation prerequisite" below -- but `requestRefund`/`getRefundClaimChecks`/`transitionRefundClaim`/`disputeRefund` themselves (and their own `refund_claims`/`refund_claim_transitions`/`refund_claim_checks` tables) are still NOT STARTED, a natural next slice rather than something this pass built. NOT covered yet within Phase 11: refunds (as just described), DOCUMENT/VAT_RETURN-sourced evidence citation, and the compliance dashboard snapshot aggregate -- deferred, not silently dropped. |
 | 12-15 | Portals/licensing/governance through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -586,6 +586,100 @@ precision natively and never hit this; fixed here by giving
 serialization truncates to whole seconds regardless of the column's own
 declared precision unless a model opts in.
 
+## VAT-return-generation prerequisite (Phase 9's own deferred scope, built to unblock Phase 11's refund slice)
+
+Ports `lib/data/vat-lifecycle-repository.ts` in full (`getVatLifecycleSnapshot`/
+`getVatReturnDetail`/`createVatAdjustment`/`generateVatReturn`/
+`requestReturnApproval`/`decideVatApproval`/`submitVatReturn`) -- 9 new
+tables, `App\Domain\VatLifecycle\VatLifecycleValidator`,
+`App\Services\VatLifecycle\VatLifecycleService`, a new
+`ItasIdentityPort::submitVatReturn` method. Both a real end-to-end HTTP
+walkthrough (via PHPUnit's own HTTP test client, which drives the full
+routing/middleware/controller stack exactly as a real request would --
+no separate manual curl pass was run for this slice) and a 7-test PHPUnit
+feature suite (`tests/Feature/VatLifecycle/VatReturnLifecycleTest.php`, run
+against real MySQL, certifying real invoices first via Phase 9's own
+`InvoiceService` so return generation reads genuine `ledger_entries`, not
+fixtures) confirm:
+
+- **A real certified invoice pair produces a correct, sign-correct return
+  on both sides**: the supplier's period sees `output_tax_cents`; the
+  customer's period -- read back from the very same certified invoice's
+  `INPUT_VAT` ledger entries -- correctly computes a *negative*
+  `net_payable_cents` (a genuine refund position), checked directly against
+  the database and the response body, not asserted separately.
+- **Maker-checker separation is real, not cosmetic**: the same user who
+  requested return approval is refused (`403`) when attempting to decide
+  their own task; a different (national-scope) actor can.
+- **Approving a return version genuinely locks the period**: `vat_periods.status`
+  flips to `LOCKED` and `lock_version` increments only on `APPROVE`, checked
+  directly against the database.
+- **Regenerating a still-`DRAFT` return supersedes it (a real `SUPERSEDED`
+  row, version 2 created) but a return already in a controlled status
+  (`PENDING_APPROVAL`/`APPROVED`/...) blocks further generation outright**,
+  and generation itself requires an `OPEN` period -- all three checked as
+  independent `409`/success paths, not just the happy path.
+- **Tenant scope is genuinely enforced**: a different taxpayer's owner is
+  refused `403` reading another taxpayer's return detail or submitting an
+  adjustment against another taxpayer's period.
+- **An approved VAT adjustment genuinely feeds the next generated return's
+  totals** (checked as an exact `output_tax_cents`/`net_payable_cents`
+  delta against the database, not just a non-error response); an adjustment
+  that supplies `evidence_document_id` is rejected outright with a clear
+  scoping error, `document_metadata` not being ported yet -- the same
+  deferral pattern already used for `REFUND_CLAIM`-referenced notices in
+  `CommunicationService`.
+- **Idempotent replay holds and a reused key across two different periods
+  conflicts**: replaying the identical key returns the identical return
+  version (checked as exactly one row in the database, not just an
+  identical response body); reusing that same key for a different period
+  is rejected `409`.
+- **`submitVatReturn`'s two independent gates both hold, and the retry race
+  is genuinely fixed, not just claimed**: under the seeded `PILOT_CONTROLLED`
+  rule set, submission is blocked purely by the local authority gate --
+  ITAS is never even attempted (`BLOCKED_CONFIGURATION`, "Tax rule set
+  lacks authority approval."); against a separately-created
+  `AUTHORITY_APPROVED` rule set, the real `ItasIdentityPort::submitVatReturn`
+  call path is reached and reports unavailable (this migration's ITAS
+  adapter is unconditionally unavailable -- see that port's own doc
+  comment), producing a different, ITAS-specific blocker; retrying under a
+  fresh idempotency key (the "try again once ITAS might be configured"
+  scenario the source itself documents) `UPDATE`s the existing attempt in
+  place (`attempt_count` incremented to 2) rather than colliding with the
+  `UNIQUE(provider, request_reference)` constraint -- checked as exactly
+  one row for that reference in the database, not just a non-500 response.
+- **RBAC is genuinely enforced**: a `TAXPAYER_VIEWER` (which the source
+  grants `returns:read` but neither `returns:generate` nor
+  `vat-adjustments:manage`) gets a real `403` attempting either command,
+  while the read-only list endpoint still succeeds for them.
+
+**Two things confirmed to have no application write path anywhere in the
+source** (grepped across every `.ts` file under `lib/` before writing any
+of this, not assumed): opening a `vat_periods` row and provisioning a
+`tax_rule_sets` row are both pure out-of-band/seed data in the original --
+a still-undocumented ops process outside the source's own scope, not a gap
+introduced by this port. `VatLifecycleService` therefore only ever reads
+and transitions periods/rule sets, never creates either; a new
+`TaxRuleSetSeeder` (mirroring `VatRuleSeeder`'s own established pattern --
+a real functional prerequisite, not cosmetic demo data) provisions the same
+one pilot rule set and its four box mappings the source's own
+`db/runtime.ts` seeds, since without it no VAT return could ever be
+generated in either system. `vat_periods`/`vat_return_versions`/
+`vat_return_boxes`/`reconciliation_matches`'s own source demo-seed rows
+were not additionally replicated into `DemoSeeder` -- consistent with that
+seeder's already-established minimal-scenario scope (one supplier/customer
+pair, not a byte-for-byte replica of `db/runtime.ts`'s multi-organisation
+seed set); test fixtures provision their own periods directly instead,
+exactly as the source's own seed data does.
+
+**Explicitly still not built** (this was a prerequisite-only pass, per the
+user's own request): `requestRefund`/`getRefundClaimChecks`/
+`transitionRefundClaim`/`disputeRefund` and their own
+`refund_claims`/`refund_claim_transitions`/`refund_claim_checks` tables --
+now genuinely unblocked (`vat_return_versions` exists and is exercised end
+to end), but building the refund workflow itself is its own next slice, not
+something this pass did.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Two places where the TypeScript source's own seed data was incomplete
@@ -653,7 +747,7 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (95 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (86 more tables), Phase 5 (remaining seed data -- identity proofing,
 licensing, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
@@ -662,22 +756,23 @@ Phase 9 (`cancelInvoice`, `explainInvoiceVat`'s full computation, transaction
 timeline, standalone VAT-rule evaluate/propose/approve routes -- see the
 Phase 9 verification section above), the rest of Phase 10 (`verifySupplier`
 only -- see the Phase 10 verification sections above), the rest of Phase 11
-(refunds and DOCUMENT/VAT_RETURN evidence citation, both blocked on
-still-unbuilt prerequisites -- see the Phase 11 verification sections
-above), and Phases 12 through 15 in full (portals/licensing/governance,
+(the refund workflow itself -- now genuinely unblocked at the data layer,
+see the VAT-return-generation prerequisite section above -- plus
+DOCUMENT/VAT_RETURN evidence citation, still blocked on an unbuilt
+prerequisite), and Phases 12 through 15 in full (portals/licensing/governance,
 documents/integrations/offline/reports, the legacy D1 importer, and
 deployment documentation) are all outstanding. This is genuinely a
 multi-week engineering effort at the pace of careful, verified,
 per-field-checked porting demonstrated in this session's Phase
 3/4/6/7/8/9/10/11 slice -- continuing it means repeating this same rigor
-across the remaining ~95 tables and ~163 routes, phase by phase (or
+across the remaining ~86 tables and ~163 routes, phase by phase (or
 sub-slice by sub-slice, as Phases 10 and 11 both now demonstrate), as
 originally scoped. Given the genuine scale each remaining module
 represents (Phase 10's own `business-repository.ts` alone was larger than
 everything ported in Phases 8 and 9 combined, and took 5 separate
 sub-slices to close out; Phase 11's `compliance-repository.ts` is now
-essentially complete except refunds, which -- once Phase 9's
-VAT-return-generation prerequisite exists -- is its own substantial
-sub-slice on top), continuing to completion is realistically a
-multi-session effort, not a single continuous run -- this document is the
-honest record of exactly how far that effort has gotten at each point.
+complete except the refund workflow itself, which is now genuinely
+buildable as its own substantial sub-slice, its prerequisite done),
+continuing to completion is realistically a multi-session effort, not a
+single continuous run -- this document is the honest record of exactly how
+far that effort has gotten at each point.

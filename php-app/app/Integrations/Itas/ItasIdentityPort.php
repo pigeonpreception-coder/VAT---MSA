@@ -14,6 +14,10 @@ namespace App\Integrations\Itas;
  * unavailable unconditionally -- the identical real-world outcome the
  * source's own guard produces, just without the guard table to point at
  * yet. Upgrade to the full gated adapter when Module 10 is migrated.
+ *
+ * submitVatReturn was added for the VAT-return-generation prerequisite
+ * (docs/MIGRATION_MATRIX.md's Phase 9/11 rows) -- same unconditional-
+ * unavailable stub shape as verifyTaxpayer above, for the identical reason.
  */
 interface ItasIdentityPort
 {
@@ -27,4 +31,12 @@ interface ItasIdentityPort
      * @throws ItasIntegrationUnavailableException
      */
     public function verifyTaxpayer(array $request): array;
+
+    /**
+     * @param array{request_reference: string, taxpayer_vat_number: string, period_code: string, return_version: int, payload_hash: string, boxes: list<array{code: string, amount_cents: int}>, correlation_id: string} $request
+     * @return array{provider_reference: string, status: string, response_hash: string, submitted_at: string}
+     *
+     * @throws ItasIntegrationUnavailableException
+     */
+    public function submitVatReturn(array $request): array;
 }

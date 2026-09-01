@@ -18,4 +18,9 @@ class UnavailableItasIdentityAdapter implements ItasIdentityPort
     {
         throw new ItasIntegrationUnavailableException('taxpayer verification');
     }
+
+    public function submitVatReturn(array $request): array
+    {
+        throw new ItasIntegrationUnavailableException('VAT return submission');
+    }
 }

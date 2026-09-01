@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             PermissionSeeder::class,
             VatRuleSeeder::class,
+            TaxRuleSetSeeder::class,
             DemoSeeder::class,
         ]);
     }
