@@ -16,7 +16,9 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
+use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use Illuminate\Support\Facades\Route;
@@ -165,5 +167,23 @@ Route::middleware('auth')->group(function () {
         Route::post('/risk-indicators/{id}/assignment', [RiskController::class, 'assignReview']);
         Route::post('/risk-indicators/{id}/decision', [RiskController::class, 'approveAction']);
         Route::post('/taxpayers/{id}/risk-evaluation', [RiskController::class, 'evaluate']);
+
+        // Phase 11 (slice 2): communications/conversations and the
+        // standalone notification commands. Kept 1:1 with the source's
+        // app/api/v1/communications/** and app/api/v1/notifications/**
+        // shape -- see each controller's own doc comment for what's
+        // deferred (REFUND_CLAIM-referenced notices -- tracked in
+        // docs/MIGRATION_MATRIX.md's Phase 11 section).
+        Route::get('/communications', [CommunicationController::class, 'inbox']);
+        Route::get('/communications/{id}', [CommunicationController::class, 'show']);
+        Route::post('/communications/notices', [CommunicationController::class, 'sendNotice']);
+        Route::post('/communications/{id}/responses', [CommunicationController::class, 'respond']);
+        Route::post('/communications/{id}/closure', [CommunicationController::class, 'close']);
+
+        Route::get('/notifications', [NotificationController::class, 'index']);
+        Route::post('/notifications', [NotificationController::class, 'queue']);
+        Route::post('/notifications/{id}/cancellation', [NotificationController::class, 'cancel']);
+        Route::post('/notifications/{id}/read', [NotificationController::class, 'markRead']);
+        Route::post('/notifications/preferences', [NotificationController::class, 'updatePreference']);
     });
 });

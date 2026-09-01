@@ -37,14 +37,14 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 57 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 60 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
 | 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, the standalone VAT-rule evaluate/propose/approve routes, and the whole VAT-period/return/adjustment/reconciliation-workflow surface built on top of these tables -- deferred, not silently dropped. |
 | 10 | Accounting/commercial | COMPLETE for its actual scope (see below) -- all 5 sub-slices of business-repository.ts's ~34 functions: business parties, quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). The one function NOT ported: `verifySupplier`/party verification snapshots -- it reuses `classifyTransaction` from the still-unported `identity-repository.ts`, deferred not silently dropped. |
-| 11 | Compliance/audits/disputes/refunds/risk | PARTIAL -- slice 1 of compliance-repository.ts's ~30 functions COMPLETE for its actual scope (see below): audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), and risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate). NOT covered yet within Phase 11: refunds (blocked on Phase 9's still-deferred vat_return_versions/tax_rule_sets tables), communications/conversations, the standalone notification-queue/preference commands, DOCUMENT/VAT_RETURN-sourced evidence citation, and the compliance dashboard snapshot aggregate -- deferred, not silently dropped. |
+| 11 | Compliance/audits/disputes/refunds/risk | PARTIAL -- slices 1-2 of compliance-repository.ts's ~30 functions COMPLETE for their actual scope (see below): audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), and the standalone notification commands (queue/cancel/mark-read/preferences/list). NOT covered yet within Phase 11: refunds (blocked on Phase 9's still-deferred vat_return_versions/tax_rule_sets tables; REFUND_CLAIM-referenced notices are consequently deferred alongside it), DOCUMENT/VAT_RETURN-sourced evidence citation, and the compliance dashboard snapshot aggregate -- deferred, not silently dropped. |
 | 12-15 | Portals/licensing/governance through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -524,20 +524,67 @@ failure), fixed by rewording the comment to avoid the sequence.
 above): refunds (`requestRefund`/`getRefundClaimChecks`/
 `transitionRefundClaim`/`disputeRefund` -- fundamentally anchored to
 `vat_return_versions`, a real prerequisite this migration has not built
-yet, not a scoping choice), communications/conversations
-(`sendNotice`/`respondToConversation`/`closeConversation`/`getInbox`/
-`getConversation`), the standalone notification-queue/preference commands
-(`queueNotification`/`cancelNotification`/`markNotificationRead`/
-`updateNotificationPreference`/`getNotifications` -- the shared
-`NotificationRecorder` side-effect these five case/dispute/obligation/risk
-commands trigger *is* ported, just not the standalone commands),
-`DOCUMENT`/`VAT_RETURN`-sourced evidence citation (both need tables from
-still-unported modules), and `getComplianceSnapshot` (the fixed-list
-dashboard aggregate, consistent with the same deferral pattern applied to
-`getBusinessPlatformSnapshot` in Phase 10). The source's own partial
-unique index on `audit_evidence` (`WHERE status='PRESERVED'`) has no
-MySQL/MariaDB equivalent and is enforced at the application layer only --
-see that migration's own doc comment for the honest limitation.
+yet, not a scoping choice), `DOCUMENT`/`VAT_RETURN`-sourced evidence
+citation (both need tables from still-unported modules), and
+`getComplianceSnapshot` (the fixed-list dashboard aggregate, consistent
+with the same deferral pattern applied to `getBusinessPlatformSnapshot` in
+Phase 10). The source's own partial unique index on `audit_evidence`
+(`WHERE status='PRESERVED'`) has no MySQL/MariaDB equivalent and is
+enforced at the application layer only -- see that migration's own doc
+comment for the honest limitation.
+
+## Phase 11 verification (compliance/audits/disputes/risk, slice 2: communications + notifications)
+
+Both a real end-to-end HTTP walkthrough and an 8-test PHPUnit feature
+suite (`tests/Feature/Compliance/CommunicationAndNotificationTest.php`,
+run against real MySQL) confirm:
+
+- **SendNotice opens exactly one thread per case reference**: a second
+  notice attempt against the same audit case is rejected `409` (the real
+  `UNIQUE(related_resource_type, related_resource_id)` constraint's own
+  backstop, not just the pre-check), and the thread's `taxpayer_id`/
+  `organisation_id` are genuinely derived from the referenced case's own
+  columns, never caller-supplied -- checked with a real reconciliation
+  exception reference too, not only an audit case.
+- **A taxpayer can reply within their own thread, but never after it is
+  closed** (`409` on the post-closure attempt, checked as a genuinely
+  separate case from the tenant-scope check below) -- **and a different
+  taxpayer can neither read nor reply to a thread that isn't theirs** (a
+  real `403` on both `GET` and the reply attempt, distinct assertions for
+  each).
+- **The inbox's "latest message" and message count are computed from real
+  data, not the thread's own row**: a thread with an original notice plus
+  one reply correctly reports `message_count: 2` and the *reply's* own
+  text as `latest_message`, not the original notice's.
+- **A notification correctly attempts every requested channel by
+  default**, but **a user's own disabled channel preference is honoured
+  for every channel except IN_APP** (verified against real
+  `notification_deliveries` rows -- `EMAIL` genuinely missing after being
+  disabled, `IN_APP` and `SMS` still present), matching the source's own
+  "the notifications row itself *is* the in-app channel" design.
+- **MarkRead is genuinely idempotent** (a second call on an already-read
+  notification stays `200`/`READ`, not an error), and **a read
+  notification can no longer be cancelled** (`409`, since cancellation is
+  only legal from `UNREAD`) -- **and a taxpayer cannot cancel another
+  taxpayer's notification** (`403`, checked with a second, genuinely
+  different taxpayer's real notification).
+
+**A genuine bug in this session's own new code was caught and fixed by
+this verification process, not shipped**: `communications.occurred_at`
+used this codebase's usual bare (0-fractional-second) `TIMESTAMP` column,
+so two messages posted within the same wall-clock second (an original
+notice and its reply, well within reach in an automated test and not
+implausible for a fast human reply either) tied under `ORDER BY
+occurred_at DESC`, making GetInbox's "latest message" ambiguous --
+reproduced live by the inbox test itself (asserting the reply's text,
+getting the original notice's back instead). The source's own SQLite
+`TEXT` timestamps (`new Date().toISOString()`) carry millisecond
+precision natively and never hit this; fixed here by giving
+`communications.occurred_at` explicit microsecond column precision
+(`timestamp('occurred_at', 6)`) and setting `Communication`'s own
+`$dateFormat` to preserve it end to end -- Eloquent's default datetime
+serialization truncates to whole seconds regardless of the column's own
+declared precision unless a model opts in.
 
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
@@ -606,7 +653,7 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (98 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (95 more tables), Phase 5 (remaining seed data -- identity proofing,
 licensing, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
@@ -615,22 +662,22 @@ Phase 9 (`cancelInvoice`, `explainInvoiceVat`'s full computation, transaction
 timeline, standalone VAT-rule evaluate/propose/approve routes -- see the
 Phase 9 verification section above), the rest of Phase 10 (`verifySupplier`
 only -- see the Phase 10 verification sections above), the rest of Phase 11
-(refunds, communications, standalone notifications commands, DOCUMENT/
-VAT_RETURN evidence -- see the Phase 11 verification section above), and
-Phases 12 through 15 in full (portals/licensing/governance,
+(refunds and DOCUMENT/VAT_RETURN evidence citation, both blocked on
+still-unbuilt prerequisites -- see the Phase 11 verification sections
+above), and Phases 12 through 15 in full (portals/licensing/governance,
 documents/integrations/offline/reports, the legacy D1 importer, and
 deployment documentation) are all outstanding. This is genuinely a
 multi-week engineering effort at the pace of careful, verified,
 per-field-checked porting demonstrated in this session's Phase
 3/4/6/7/8/9/10/11 slice -- continuing it means repeating this same rigor
-across the remaining ~98 tables and ~163 routes, phase by phase (or
+across the remaining ~95 tables and ~163 routes, phase by phase (or
 sub-slice by sub-slice, as Phases 10 and 11 both now demonstrate), as
 originally scoped. Given the genuine scale each remaining module
 represents (Phase 10's own `business-repository.ts` alone was larger than
 everything ported in Phases 8 and 9 combined, and took 5 separate
-sub-slices to close out; Phase 11's `compliance-repository.ts` is a
-comparable size, and refunds alone -- once Phase 9's VAT-return-generation
-prerequisite exists -- is its own substantial sub-slice), continuing to
-completion is realistically a multi-session effort, not a single
-continuous run -- this document is the honest record of exactly how far
-that effort has gotten at each point.
+sub-slices to close out; Phase 11's `compliance-repository.ts` is now
+essentially complete except refunds, which -- once Phase 9's
+VAT-return-generation prerequisite exists -- is its own substantial
+sub-slice on top), continuing to completion is realistically a
+multi-session effort, not a single continuous run -- this document is the
+honest record of exactly how far that effort has gotten at each point.

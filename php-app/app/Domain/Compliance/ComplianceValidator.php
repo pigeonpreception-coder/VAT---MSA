@@ -37,6 +37,14 @@ class ComplianceValidator
     private const RISK_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
     private const MAX_QUERY_LIMIT = 200;
     private const DEFAULT_QUERY_LIMIT = 50;
+    private const CASE_REFERENCE_TYPES = ['AUDIT_CASE', 'REFUND_CLAIM', 'RECONCILIATION_EXCEPTION'];
+    private const COMMUNICATION_CHANNELS = ['PORTAL', 'EMAIL', 'SMS', 'LETTER'];
+    private const COMMUNICATION_CLASSIFICATIONS = ['INTERNAL', 'CONFIDENTIAL', 'TAX_CONFIDENTIAL', 'RESTRICTED'];
+    private const CONVERSATION_STATUSES = ['OPEN', 'CLOSED'];
+    private const NOTIFICATION_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'PORTAL'];
+    private const NOTIFICATION_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+    private const NOTIFICATION_TYPE_PATTERN = '/^[A-Z][A-Z0-9_]{2,59}$/';
+    private const NOTIFICATION_STATUSES = ['UNREAD', 'READ', 'CANCELLED'];
 
     private const CASE_ACTIONS = ['AUTHORIZE', 'ASSIGN', 'ADVANCE', 'SUSPEND', 'RESUME', 'CANCEL', 'REOPEN', 'CLOSE', 'LINK_APPEAL'];
 
@@ -359,6 +367,181 @@ class ComplianceValidator
         }
 
         return ['schema_version' => '1.0.0', 'body' => $body, 'supersedesNoteId' => $supersedesNoteId];
+    }
+
+    /**
+     * Deliberately takes no taxpayer_id -- the service derives it from the
+     * referenced case/claim/exception's own taxpayer_id column, so a caller
+     * can never send a notice to a taxpayer that doesn't match the case it
+     * is actually about.
+     *
+     * @return array{schema_version: string, related_resource_type: string, related_resource_id: string, channel: string, subject: string, content_summary: string, classification: string}
+     */
+    public static function notice(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $relatedResourceType = mb_strtoupper(self::text($input['related_resource_type'] ?? null));
+        if (! in_array($relatedResourceType, self::CASE_REFERENCE_TYPES, true)) {
+            $messages[] = ['code' => 'CASE_REFERENCE_TYPE_INVALID', 'path' => '/related_resource_type', 'message' => 'related_resource_type must be one of: '.implode(', ', self::CASE_REFERENCE_TYPES).'.'];
+        }
+        $relatedResourceId = self::id($input['related_resource_id'] ?? null, '/related_resource_id', $messages) ?? '';
+        $channel = mb_strtoupper(self::text($input['channel'] ?? null));
+        if (! in_array($channel, self::COMMUNICATION_CHANNELS, true)) {
+            $messages[] = ['code' => 'CHANNEL_INVALID', 'path' => '/channel', 'message' => 'Select a supported channel.'];
+        }
+        $subject = self::bounded($input['subject'] ?? null, '/subject', 'Subject', 5, 200, $messages);
+        $contentSummary = self::bounded($input['content_summary'] ?? null, '/content_summary', 'Content summary', 10, 4000, $messages);
+        $classification = mb_strtoupper(self::text($input['classification'] ?? null));
+        if (! in_array($classification, self::COMMUNICATION_CLASSIFICATIONS, true)) {
+            $messages[] = ['code' => 'CLASSIFICATION_INVALID', 'path' => '/classification', 'message' => 'Select a supported classification.'];
+        }
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'related_resource_type' => $relatedResourceType, 'related_resource_id' => $relatedResourceId, 'channel' => $channel, 'subject' => $subject, 'content_summary' => $contentSummary, 'classification' => $classification];
+    }
+
+    /** Inherits the thread's own subject and classification rather than re-declaring them per message. @return array{schema_version: string, channel: string, content_summary: string} */
+    public static function conversationResponse(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $channel = mb_strtoupper(self::text($input['channel'] ?? null));
+        if (! in_array($channel, self::COMMUNICATION_CHANNELS, true)) {
+            $messages[] = ['code' => 'CHANNEL_INVALID', 'path' => '/channel', 'message' => 'Select a supported channel.'];
+        }
+        $contentSummary = self::bounded($input['content_summary'] ?? null, '/content_summary', 'Content summary', 10, 4000, $messages);
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'channel' => $channel, 'content_summary' => $contentSummary];
+    }
+
+    /** @return array{schema_version: string, reason: string} */
+    public static function conversationClosure(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $reason = self::bounded($input['reason'] ?? null, '/reason', 'Closure reason', 10, 2000, $messages);
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
+    /** @return array{status: ?string, relatedResourceType: ?string, taxpayerId: ?string, limit: int, offset: int} */
+    public static function inboxQuery(array $params): array
+    {
+        $messages = [];
+        $status = isset($params['status']) && $params['status'] !== '' ? mb_strtoupper(trim((string) $params['status'])) : null;
+        if ($status && ! in_array($status, self::CONVERSATION_STATUSES, true)) {
+            $messages[] = ['code' => 'STATUS_INVALID', 'path' => '/status', 'message' => 'status must be OPEN or CLOSED.'];
+        }
+        $relatedResourceType = isset($params['related_resource_type']) && $params['related_resource_type'] !== '' ? mb_strtoupper(trim((string) $params['related_resource_type'])) : null;
+        if ($relatedResourceType && ! in_array($relatedResourceType, self::CASE_REFERENCE_TYPES, true)) {
+            $messages[] = ['code' => 'CASE_REFERENCE_TYPE_INVALID', 'path' => '/related_resource_type', 'message' => 'related_resource_type must be one of: '.implode(', ', self::CASE_REFERENCE_TYPES).'.'];
+        }
+        $taxpayerId = isset($params['taxpayer_id']) && $params['taxpayer_id'] !== '' ? trim((string) $params['taxpayer_id']) : null;
+        [$limit, $offset] = self::limitOffset($params, $messages);
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['status' => $status, 'relatedResourceType' => $relatedResourceType, 'taxpayerId' => $taxpayerId, 'limit' => $limit, 'offset' => $offset];
+    }
+
+    /** At least one of user_id/taxpayer_id is required -- a notification with neither has no one to reach. @return array{schema_version: string, user_id: ?string, taxpayer_id: ?string, notification_type: string, title: string, message: string, severity: string, action_url: ?string, channels: list<string>} */
+    public static function notificationQueue(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $userId = self::id($input['user_id'] ?? null, '/user_id', $messages, true);
+        $taxpayerId = self::id($input['taxpayer_id'] ?? null, '/taxpayer_id', $messages, true);
+        if (! $userId && ! $taxpayerId) {
+            $messages[] = ['code' => 'RECIPIENT_REQUIRED', 'path' => '/user_id', 'message' => 'At least one of user_id or taxpayer_id is required.'];
+        }
+        $notificationType = mb_strtoupper(self::text($input['notification_type'] ?? null));
+        if (! preg_match(self::NOTIFICATION_TYPE_PATTERN, $notificationType)) {
+            $messages[] = ['code' => 'NOTIFICATION_TYPE_INVALID', 'path' => '/notification_type', 'message' => 'notification_type must be 3 to 60 uppercase letters, digits or underscores, starting with a letter.'];
+        }
+        $title = self::bounded($input['title'] ?? null, '/title', 'Title', 3, 200, $messages);
+        $message = self::bounded($input['message'] ?? null, '/message', 'Message', 3, 2000, $messages);
+        $severity = mb_strtoupper(self::text($input['severity'] ?? null));
+        if (! in_array($severity, self::NOTIFICATION_SEVERITIES, true)) {
+            $messages[] = ['code' => 'SEVERITY_INVALID', 'path' => '/severity', 'message' => 'Select a supported severity.'];
+        }
+        $actionUrl = self::optionalBounded($input['action_url'] ?? null, '/action_url', 'Action URL', 1, 500, $messages);
+        $rawChannels = is_array($input['channels'] ?? null) ? $input['channels'] : [];
+        $channels = array_values(array_unique(array_map(fn ($v) => mb_strtoupper(self::text($v)), $rawChannels)));
+        if (count($channels) < 1 || count($channels) > count(self::NOTIFICATION_CHANNELS)) {
+            $messages[] = ['code' => 'CHANNELS_INVALID', 'path' => '/channels', 'message' => 'channels must contain 1 to '.count(self::NOTIFICATION_CHANNELS).' entries.'];
+        }
+        foreach ($channels as $channel) {
+            if (! in_array($channel, self::NOTIFICATION_CHANNELS, true)) {
+                $messages[] = ['code' => 'CHANNEL_INVALID', 'path' => '/channels', 'message' => ($channel ?: 'Empty channel').' is not a supported channel.'];
+            }
+        }
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'user_id' => $userId, 'taxpayer_id' => $taxpayerId, 'notification_type' => $notificationType, 'title' => $title, 'message' => $message, 'severity' => $severity, 'action_url' => $actionUrl, 'channels' => $channels];
+    }
+
+    /** @return array{schema_version: string, reason: string} */
+    public static function notificationCancellation(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $reason = self::bounded($input['reason'] ?? null, '/reason', 'Cancellation reason', 5, 500, $messages);
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
+    /** Self-service -- every actor manages only their own row. @return array{schema_version: string, channel: string, enabled: bool} */
+    public static function notificationPreference(array $input): array
+    {
+        $messages = [];
+        self::schema($input, $messages);
+        $channel = mb_strtoupper(self::text($input['channel'] ?? null));
+        if (! in_array($channel, self::NOTIFICATION_CHANNELS, true)) {
+            $messages[] = ['code' => 'CHANNEL_INVALID', 'path' => '/channel', 'message' => 'Select a supported channel.'];
+        }
+        if (! is_bool($input['enabled'] ?? null)) {
+            $messages[] = ['code' => 'ENABLED_INVALID', 'path' => '/enabled', 'message' => 'enabled must be a boolean.'];
+        }
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'channel' => $channel, 'enabled' => (bool) ($input['enabled'] ?? false)];
+    }
+
+    /** @return array{status: ?string, severity: ?string, limit: int, offset: int} */
+    public static function notificationQuery(array $params): array
+    {
+        $messages = [];
+        $status = isset($params['status']) && $params['status'] !== '' ? mb_strtoupper(trim((string) $params['status'])) : null;
+        if ($status && ! in_array($status, self::NOTIFICATION_STATUSES, true)) {
+            $messages[] = ['code' => 'STATUS_INVALID', 'path' => '/status', 'message' => 'status must be UNREAD, READ or CANCELLED.'];
+        }
+        $severity = isset($params['severity']) && $params['severity'] !== '' ? mb_strtoupper(trim((string) $params['severity'])) : null;
+        if ($severity && ! in_array($severity, self::NOTIFICATION_SEVERITIES, true)) {
+            $messages[] = ['code' => 'SEVERITY_INVALID', 'path' => '/severity', 'message' => 'Select a supported severity.'];
+        }
+        [$limit, $offset] = self::limitOffset($params, $messages);
+        if (count($messages) > 0) {
+            throw new ComplianceValidationException($messages);
+        }
+
+        return ['status' => $status, 'severity' => $severity, 'limit' => $limit, 'offset' => $offset];
     }
 
     // -- shared field helpers, ported from lib/domain/compliance.ts's own private helpers --
