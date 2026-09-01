@@ -15,6 +15,10 @@ use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
+use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\DisputeController;
+use App\Http\Controllers\Compliance\ObligationController;
+use App\Http\Controllers\Compliance\RiskController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -130,5 +134,36 @@ Route::middleware('auth')->group(function () {
         Route::post('/projects/{id}/budget-approval', [ProjectController::class, 'approveBudget']);
         Route::post('/projects/{id}/costs', [ProjectController::class, 'postCost']);
         Route::get('/projects/{id}/profitability', [ProjectController::class, 'profitability']);
+
+        // Phase 11 (slice 1): audit cases + evidence/notes, obligations,
+        // disputes, and risk. Kept 1:1 with the source's app/api/v1/{
+        // audit-cases,audit-evidence,obligations,disputes,risk-indicators}/**
+        // and app/api/v1/taxpayers/[id]/risk-evaluation shape -- see each
+        // controller's own doc comment for what's deferred (refunds,
+        // communications, the standalone notification-queue commands, and
+        // DOCUMENT/VAT_RETURN-sourced evidence -- tracked in
+        // docs/MIGRATION_MATRIX.md's Phase 11 section).
+        Route::get('/audit-cases', [AuditCaseController::class, 'index']);
+        Route::post('/audit-cases', [AuditCaseController::class, 'store']);
+        Route::post('/audit-cases/{id}/transition', [AuditCaseController::class, 'transition']);
+        Route::post('/audit-cases/{id}/findings', [AuditCaseController::class, 'issueFinding']);
+        Route::get('/audit-cases/{id}/timeline', [AuditCaseController::class, 'timeline']);
+        Route::get('/audit-cases/{id}/evidence', [AuditCaseController::class, 'evidence']);
+        Route::post('/audit-cases/{id}/evidence', [AuditCaseController::class, 'addEvidence']);
+        Route::post('/audit-evidence/{id}/custody-events', [AuditCaseController::class, 'recordEvidenceCustodyEvent']);
+        Route::get('/audit-cases/{id}/notes', [AuditCaseController::class, 'notes']);
+        Route::post('/audit-cases/{id}/notes', [AuditCaseController::class, 'addNote']);
+
+        Route::get('/obligations', [ObligationController::class, 'index']);
+        Route::post('/obligations', [ObligationController::class, 'store']);
+        Route::post('/obligations/{id}/satisfaction', [ObligationController::class, 'markSatisfied']);
+
+        Route::get('/disputes', [DisputeController::class, 'index']);
+        Route::post('/disputes', [DisputeController::class, 'store']);
+
+        Route::get('/risk-indicators', [RiskController::class, 'restricted']);
+        Route::post('/risk-indicators/{id}/assignment', [RiskController::class, 'assignReview']);
+        Route::post('/risk-indicators/{id}/decision', [RiskController::class, 'approveAction']);
+        Route::post('/taxpayers/{id}/risk-evaluation', [RiskController::class, 'evaluate']);
     });
 });
