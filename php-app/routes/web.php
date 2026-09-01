@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
@@ -285,5 +286,25 @@ Route::middleware('auth')->group(function () {
         Route::get('/navigation/children', [NavigationController::class, 'children']);
         Route::get('/navigation/actions', [NavigationController::class, 'actions']);
         Route::post('/navigation/preferences', [NavigationController::class, 'storePreference']);
+
+        // Phase 12 slice 4: the rest of Access governance (requestRoleAccess/
+        // decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/
+        // offboardUser). openQuarterlyAccessReview itself was already ported
+        // in slice 2 -- see the /access-reviews route above. GET
+        // /access-requests bundles into getAdministrationSnapshot (the
+        // dashboard aggregate, deferred), so only its POST half is here.
+        // Only the initial access *request* is not step-up gated (matching
+        // the source -- it needs access-governance:read, not :manage, and
+        // no requireStepUp call); every decide/certify/revoke/offboard
+        // command is. Only the workflow engine remains after this slice.
+        Route::post('/access-requests', [AccessGovernanceController::class, 'storeAccessRequest']);
+        Route::post('/access-requests/{id}/decision', [AccessGovernanceController::class, 'decideAccessRequest'])
+            ->middleware('password.confirm');
+        Route::post('/access-reviews/{id}/certifications', [AccessGovernanceController::class, 'storeCertification'])
+            ->middleware('password.confirm');
+        Route::post('/access-grants/revocation', [AccessGovernanceController::class, 'storeRevocation'])
+            ->middleware('password.confirm');
+        Route::post('/organisations/offboarding', [AccessGovernanceController::class, 'storeOffboarding'])
+            ->middleware('password.confirm');
     });
 });

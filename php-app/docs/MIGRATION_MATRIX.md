@@ -37,7 +37,7 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 95 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) plus Phase 12 slice 2's organisation-administration/employees tables (access_reviews, departments, business_units, job_titles, employees, organisation_administrator_roles, organisation_administrators, organisation_roles, organisation_role_permissions, user_capability_assignments, user_role_assignments) plus Phase 12 slice 3's portal-navigation tables (navigation_workspaces, navigation_folders, navigation_items, navigation_preferences) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 98 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) plus Phase 12 slice 2's organisation-administration/employees tables (access_reviews, departments, business_units, job_titles, employees, organisation_administrator_roles, organisation_administrators, organisation_roles, organisation_role_permissions, user_capability_assignments, user_role_assignments) plus Phase 12 slice 3's portal-navigation tables (navigation_workspaces, navigation_folders, navigation_items, navigation_preferences) plus Phase 12 slice 4's Access-governance tables (access_requests, access_approvals, access_certifications) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
@@ -45,7 +45,7 @@ below for the specific commands.
 | 9 | Invoices and VAT | COMPLETE -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion"). Also COMPLETE (see "VAT-return-generation prerequisite"): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. Also now COMPLETE (see "Standalone VAT-rule routes" below): `listVatRules`/`proposeVatRule`/`approveVatRule`/`evaluateVatRule` -- `lib/data/vat-rule-repository.ts`'s remaining exports, the last narrow gap this phase had. |
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- now including `VAT_RETURN`-sourced citations, see "VAT_RETURN evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: `DOCUMENT`-sourced evidence citation (still blocked on the unbuilt `document_metadata` table and its Module 22 quarantine/scan pipeline) and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
-| 12 | Portals/licensing/governance | PARTIAL -- slices 1, 2 and 3 of `control-plane-repository.ts`'s ~30 functions COMPLETE for their actual scope. Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate, ported now that real callers need it) and `openQuarterlyAccessReview` (pulled forward from Access governance as `assertEntitledOperation`'s own genuine `ADMIN_WRITE` prerequisite) -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference -- the last self-contained sub-domain in this file besides the workflow engine and the rest of Access governance. NOT covered yet: the `getAdministrationSnapshot` dashboard aggregate, the workflow engine, and the rest of Access governance (`certifyQuarterlyAccess` and its bulk role/capability revocation, access *requests* as opposed to reviews) -- all deferred, not silently dropped. |
+| 12 | Portals/licensing/governance | PARTIAL -- slices 1 through 4 of `control-plane-repository.ts`'s ~30 functions COMPLETE for their actual scope; only the workflow engine and the `getAdministrationSnapshot` dashboard aggregate remain. Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate, ported now that real callers need it) and `openQuarterlyAccessReview` (pulled forward from Access governance as `assertEntitledOperation`'s own genuine `ADMIN_WRITE` prerequisite) -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser -- the rest of Access governance, alongside slice 2's own `openQuarterlyAccessReview`. NOT covered yet: the `getAdministrationSnapshot` dashboard aggregate (every GET-list route across all four slices bundles into it) and the workflow engine (Module 8 Phase C: definitions/versions/instances/tasks/delegations, and the `requestRoleAccess`/`decideAccessRequest` pair's own `ADVANCED_WORKFLOW` feature gate notwithstanding, neither function actually touches a workflow table) -- both deferred, not silently dropped. |
 | 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -1267,6 +1267,104 @@ NavigationTest.php`, run against real MySQL) confirms:
   proving the grant is scoped to what the custom role actually carries,
   not a blanket bypass.
 
+## Access governance (Phase 12 slice 4: portals/licensing/governance)
+
+Fourth and final self-contained slice of `control-plane-repository.ts`
+besides the workflow engine: `requestRoleAccess`/`decideAccessRequest`/
+`certifyQuarterlyAccess`/`revokeAccessGrant`/`offboardUser`.
+`openQuarterlyAccessReview` itself, and `access_reviews`, were already
+pulled forward into Phase 12 slice 2 as `assertEntitledOperation`'s own
+genuine `ADMIN_WRITE` prerequisite -- this slice is everything else in
+Access governance. `searchWorkspace` (`/api/v1/search`) is deliberately
+excluded from this slice's scope despite living in the same source file
+and reusing `assertEntitledOperation` -- it is genuinely a separate
+Workspace & Navigation route (confirmed against the module playbook's own
+domain list and the route file it actually lives under), not Access
+governance; a small, self-contained follow-up, not silently dropped.
+
+Schema (3 new tables, 98/155 total): `access_requests` (a maker-checker
+request for one existing organisation-defined custom role, decided by
+`decideAccessRequest`), `access_approvals` (one append-only row per
+decision), `access_certifications` (`certifyQuarterlyAccess`'s own write
+target, one row per (review, subject) pair -- the `UNIQUE(access_review_
+id, subject_user_id)` index matches the source exactly).
+
+Domain: `App\Domain\AccessGovernance\AccessGovernanceValidator`, ported
+from `lib/domain/control-plane.ts`'s `normalizeAccessRevocation`/
+`normalizeOffboarding` -- the only two functions in this slice that have
+a dedicated source-side normalizer at all. `requestRoleAccess`/
+`decideAccessRequest`/`certifyQuarterlyAccess` validate inline in the
+repository function itself in the source too, so `AccessGovernanceService`
+mirrors that inline validation directly rather than inventing normalizer
+methods the source doesn't have.
+
+Service: `App\Services\AccessGovernance\AccessGovernanceService`. Each
+command's own entitlement gate deliberately varies to match the source
+exactly, not uniformly: `requestRoleAccess` uses `ADVANCED_WORKFLOW`/
+`BUSINESS_WRITE` (no quarterly-review prerequisite -- filing a request is
+not itself a privileged write); `decideAccessRequest`/`revokeAccessGrant`/
+`offboardUser` use `ADMIN_WRITE` (the quarterly-review prerequisite
+applies); `certifyQuarterlyAccess` uses `ADMINISTRATION`/`COMPLIANCE_WRITE`
+(deliberately *not* `ADMIN_WRITE` -- gating a review's own certification
+behind a review already being open would be circular; the function
+instead checks the specific review's own `OPEN` status internally, exactly
+matching `openQuarterlyAccessReview`'s own choice of operation class).
+
+A 5-test PHPUnit feature suite (`tests/Feature/AccessGovernance/
+AccessGovernanceTest.php`, run against real MySQL) confirms:
+
+- **`requestRoleAccess` genuinely validates both the subject's active
+  membership and the role's active status against the real organisation
+  scope**, not just presence -- a syntactically valid but non-existent
+  role id is refused `422 ACCESS_REFERENCE_INVALID` before any row is
+  written.
+- **`decideAccessRequest` refuses self-approval from *either* side of the
+  request** -- the requester deciding their own filed request, and
+  separately the access *subject* deciding a request filed on their own
+  behalf, are both refused `422 SELF_APPROVAL_DENIED`; a real approval
+  from a genuine third party creates a real `user_role_assignments` row,
+  and a second decision on an already-decided request is a real `409`
+  conflict, not a silent no-op.
+- **`certifyQuarterlyAccess`'s review-completion count is exact, not
+  approximate**: certifying one of two active members leaves the review
+  `OPEN`; certifying the second brings it to `COMPLETED` in the same
+  request that submits the second certification -- verified by reading
+  `access_reviews.status` back from the database after each call, not
+  merely asserting the HTTP response. `REVOKE` genuinely cascades to the
+  membership row and a real capability grant in the same transaction, not
+  just the certification row itself. An invalid disposition, a
+  self-certification attempt, and a subject with no active membership are
+  each refused their own distinct `422`; a review that is not open (or
+  does not exist -- the source conflates the two into the same branch,
+  reproduced faithfully) is a `409`, not a `422`.
+- **`revokeAccessGrant` is genuinely idempotent and self-revocation-safe**:
+  revoking an already-`REVOKED` grant returns its current state without a
+  second write (`assertDatabaseCount` confirms no duplicate row); revoking
+  one's own active grant is refused `422 SELF_REVOCATION_DENIED` before
+  any write; a grant id outside the active organisation is `422
+  GRANT_NOT_FOUND`.
+- **`offboardUser` genuinely revokes every active grant type in one call
+  and is a true no-op the second time**, not merely returning success --
+  the exact `roleAssignmentsRevoked`/`capabilityAssignmentsRevoked` counts
+  are asserted against the real rows, and self-offboarding is refused
+  `422 SELF_OFFBOARD_DENIED`.
+
+**A genuine bug in this port itself was caught and fixed before it could
+ship, not by this slice's own tests but by writing this slice's own
+migration**: `access_reviews.due_at` (Phase 12 slice 2's own table) was
+the one NOT-NULL timestamp column left without an explicit default,
+exactly the MariaDB legacy TIMESTAMP auto-initialisation trap already
+found and fixed twice before. It was latent and harmless while
+`access_reviews` was only ever `INSERT`ed into (slice 2 never updates it);
+`certifyQuarterlyAccess`'s own completion `UPDATE` (which never sets
+`due_at` itself) would have silently corrupted it the moment this slice's
+service code could reach that statement. Fixed by amending the original
+migration file directly (this branch has no live deployment yet, so
+editing history in place -- rather than adding a follow-up `ALTER
+TABLE` migration -- keeps the schema's own record honest) with an
+explicit `DEFAULT CURRENT_TIMESTAMP` (still deliberately without `ON
+UPDATE`), verified via a fresh `migrate:fresh`.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Three genuine gaps in the TypeScript source itself, discovered while
@@ -1352,7 +1450,7 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (60 more tables), Phase 5 (remaining seed data -- identity
+Phase 4 (57 more tables), Phase 5 (remaining seed data -- identity
 proofing, etc.), Phase 7's reusable Eloquent organisation-scope trait/
 global scope, the rest of Phase 8 (the `positions` table itself -- never
 written anywhere in the source, so genuinely nothing to port -- and the
@@ -1363,19 +1461,19 @@ blocked on the still-unbuilt `document_metadata` table and its Module 22
 quarantine/scan pipeline -- not a scoping choice -- and the compliance
 dashboard snapshot aggregate; see the Phase 11 verification sections
 above), the rest of Phase 12 (the `getAdministrationSnapshot` dashboard
-aggregate, the workflow engine, and the rest of Access governance --
-access requests and `certifyQuarterlyAccess` with its bulk revocation, as
-opposed to the quarterly-review opening slice 2 already covers -- see
-"Licensing & Entitlements", "Organisation administration & employees" and
-"Portal navigation" above for the three slices done), and Phases 13
-through 15 in full (documents/integrations/offline/reports, the legacy D1
-importer, and deployment documentation) are all outstanding. Phases 9 and
-10 (invoices/VAT and accounting/commercial) are now both fully COMPLETE --
+aggregate and the workflow engine -- see "Licensing & Entitlements",
+"Organisation administration & employees", "Portal navigation" and
+"Access governance" above for the four slices done, `searchWorkspace`'s
+own small separate `/api/v1/search` route noted but not yet built in
+"Access governance"'s own scope note), and Phases 13 through 15 in full
+(documents/integrations/offline/reports, the legacy D1 importer, and
+deployment documentation) are all outstanding. Phases 9 and 10
+(invoices/VAT and accounting/commercial) are now both fully COMPLETE --
 see "Standalone VAT-rule routes" and "Supplier verification" above. This is
 genuinely a multi-week engineering effort at the pace of careful, verified,
 per-field-checked porting demonstrated in this session's Phase
 3/4/6/7/8/9/10/11/12 slices -- continuing it means repeating this same
-rigor across the remaining ~60 tables and ~135 routes, phase by phase (or
+rigor across the remaining ~57 tables and ~130 routes, phase by phase (or
 sub-slice by sub-slice, as Phases 10, 11 and 12 all demonstrate), as
 originally scoped. Given the genuine scale each remaining module represents
 (`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports, is
@@ -1383,8 +1481,9 @@ comparable in size to the whole of Phase 10's `business-repository.ts`,
 which itself took 6 separate sub-slices to close out; Phases 9 and 10 are
 now both entirely done, Phase 11 is complete down to one narrow deferred
 surface genuinely blocked on Module 22's document pipeline, and Phase 12
-now has three of its five sub-domains done, leaving only the workflow
-engine and the rest of Access governance), continuing to completion is
-realistically a multi-session effort, not a single
+now has four of its five sub-domains done, leaving only the workflow
+engine -- and the `getAdministrationSnapshot` aggregate that bundles
+across several of them), continuing to completion is realistically a
+multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far
 that effort has gotten at each point.
