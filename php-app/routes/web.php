@@ -11,6 +11,7 @@ use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
+use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\QuotationController;
 use Illuminate\Support\Facades\Route;
 
@@ -94,5 +95,17 @@ Route::middleware('auth')->group(function () {
         Route::post('/accounting/periods/closure', [AccountingController::class, 'closePeriod']);
         Route::get('/accounting/trial-balance', [AccountingController::class, 'trialBalance']);
         Route::get('/accounting/statements', [AccountingController::class, 'statements']);
+
+        // Phase 10 (slice 3): expenses. Kept 1:1 with the source's
+        // app/api/v1/expenses/** shape -- see ExpenseController's own doc
+        // comment for what's deferred.
+        Route::get('/expenses', [ExpenseController::class, 'index']);
+        Route::post('/expenses', [ExpenseController::class, 'store']);
+        Route::get('/expenses/categories', [ExpenseController::class, 'indexCategories']);
+        Route::post('/expenses/categories', [ExpenseController::class, 'storeCategory']);
+        Route::get('/expenses/report', [ExpenseController::class, 'report']);
+        Route::post('/expenses/{id}/submission', [ExpenseController::class, 'submit']);
+        Route::post('/expenses/{id}/approval', [ExpenseController::class, 'approve']);
+        Route::post('/expenses/{id}/rejection', [ExpenseController::class, 'reject']);
     });
 });

@@ -419,6 +419,76 @@ class BusinessValidator
         return ['schema_version' => '1.0.0', 'period_code' => $periodCode];
     }
 
+    /** @return array{schema_version: string, code: string, name: string, default_tax_category: string, requires_receipt: bool} */
+    public static function expenseCategory(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $code = mb_strtoupper(self::textField($input['code'] ?? null, '/code', 'Category code', 1, 20, $messages));
+        if ($code && ! preg_match('/^[A-Z0-9][A-Z0-9._-]{0,19}$/', $code)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/code', 'message' => 'Category code contains unsupported characters.'];
+        }
+        $name = self::textField($input['name'] ?? null, '/name', 'Category name', 2, 200, $messages);
+        $defaultTaxCategory = mb_strtoupper(self::textValue($input['default_tax_category'] ?? null));
+        if (! in_array($defaultTaxCategory, self::TAX_CATEGORIES, true)) {
+            $messages[] = ['code' => 'TAX_CATEGORY_INVALID', 'path' => '/default_tax_category', 'message' => 'Select a supported default tax category.'];
+        }
+        $requiresReceipt = ! array_key_exists('requires_receipt', $input) || $input['requires_receipt'] === null ? true : (bool) $input['requires_receipt'];
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'code' => $code, 'name' => $name, 'default_tax_category' => $defaultTaxCategory, 'requires_receipt' => $requiresReceipt];
+    }
+
+    /**
+     * @return array{schema_version: string, category_id: string, supplier_party_id: ?string, project_id: ?string,
+     *   branch_id: ?string, expense_number: string, expense_date: string, description: string, currency: string,
+     *   net_cents: int, tax_cents: int, total_cents: int}
+     */
+    public static function expense(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $categoryId = self::idField($input['category_id'] ?? null, '/category_id', 'Expense category', $messages) ?? '';
+        $supplierPartyId = self::idField($input['supplier_party_id'] ?? null, '/supplier_party_id', 'Supplier party', $messages, true);
+        $projectId = self::idField($input['project_id'] ?? null, '/project_id', 'Project', $messages, true);
+        $branchId = self::idField($input['branch_id'] ?? null, '/branch_id', 'Branch', $messages, true);
+        $expenseNumber = mb_strtoupper(self::textField($input['expense_number'] ?? null, '/expense_number', 'Expense number', 2, 40, $messages));
+        $expenseDate = self::dateField($input['expense_date'] ?? null, '/expense_date', 'Expense date', $messages);
+        $description = self::textField($input['description'] ?? null, '/description', 'Description', 2, 500, $messages);
+        $currency = self::currencyField($input['currency'] ?? null, $messages);
+        $netCents = self::integerField($input['net_cents'] ?? null, '/net_cents', 'Net cents', $messages);
+        $taxCents = self::integerField($input['tax_cents'] ?? null, '/tax_cents', 'Tax cents', $messages);
+        $totalCents = self::integerField($input['total_cents'] ?? null, '/total_cents', 'Total cents', $messages);
+        if ($netCents + $taxCents !== $totalCents) {
+            $messages[] = ['code' => 'TOTAL_MISMATCH', 'path' => '/total_cents', 'message' => 'Total cents must equal net cents plus tax cents.'];
+        }
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'supplier_party_id' => $supplierPartyId,
+            'project_id' => $projectId, 'branch_id' => $branchId, 'expense_number' => $expenseNumber,
+            'expense_date' => $expenseDate, 'description' => $description, 'currency' => $currency,
+            'net_cents' => $netCents, 'tax_cents' => $taxCents, 'total_cents' => $totalCents,
+        ];
+    }
+
+    /** @return array{schema_version: string, reason: string} */
+    public static function expenseRejection(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Rejection reason', 5, 500, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
     // -- shared field helpers, ported from lib/domain/business.ts's own private helpers --
 
     private static function schemaVersion(array $input, array &$messages): void
