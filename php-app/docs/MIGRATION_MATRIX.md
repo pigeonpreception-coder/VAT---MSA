@@ -37,13 +37,13 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 38 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 46 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
 | 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, the standalone VAT-rule evaluate/propose/approve routes, and the whole VAT-period/return/adjustment/reconciliation-workflow surface built on top of these tables -- deferred, not silently dropped. |
-| 10 | Accounting/commercial | PARTIAL -- slices 1-3 of business-repository.ts's ~34 functions COMPLETE for their actual scope (see below): business parties, quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), and expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting). NOT covered yet within Phase 10: `verifySupplier`/party verification snapshots, inventory (products/warehouses/stock movements/transfers), and projects (budgets/costs/profitability) -- each its own remaining sub-slice, deferred not silently dropped. |
+| 10 | Accounting/commercial | COMPLETE for its actual scope (see below) -- all 5 sub-slices of business-repository.ts's ~34 functions: business parties, quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). The one function NOT ported: `verifySupplier`/party verification snapshots -- it reuses `classifyTransaction` from the still-unported `identity-repository.ts`, deferred not silently dropped. |
 | 11-15 | Compliance/audits/disputes/refunds/risk through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -370,6 +370,80 @@ profitability) -- `lib/data/business-repository.ts`'s remaining ~10
 exported functions, each its own sub-slice. This closes out every
 Phase 10 function except those two remaining modules.
 
+## Phase 10 verification (accounting/commercial, slices 4-5: inventory + projects)
+
+Both real end-to-end HTTP walkthroughs and 11 new PHPUnit feature tests
+(`tests/Feature/Business/InventoryTest.php`, `ProjectTest.php`, run against
+real MySQL) confirm:
+
+- **A product and a warehouse are each created against the organisation's
+  own catalog**, with a real `409` on a duplicate `(organisation_id, sku)`
+  or `(organisation_id, code)`.
+- **A RECEIPT movement increases the on-hand balance and correctly
+  computes/records the weighted-average cost**; an ISSUE that would drive
+  on-hand inventory negative is rejected `409` and writes nothing --
+  checked directly against `inventory_balances`, not just the movement
+  response.
+- **`inventoryBalanceStatement`'s documented pre-existing upsert bug is
+  structurally avoided, not re-introduced**: this port never attempts an
+  `INSERT ... ON CONFLICT DO UPDATE` against a CHECK-constrained column at
+  all -- `upsertBalance` always fetches the current balance first and
+  computes the new quantity/average cost in PHP, exactly as the source's
+  own fix does. Verified by actually exercising a second write to an
+  existing balance row (the transfer test's destination leg) -- the exact
+  scenario the source's own bug report says had never been exercised
+  before it was found.
+- **A stock transfer posts both legs atomically and preserves cost
+  basis**: the destination warehouse's balance is created at the *source*
+  warehouse's own current average cost, not a fabricated new one, and both
+  `stock_movements` rows (`TRANSFER_OUT`/`TRANSFER_IN`) share one transfer
+  id under the real `UNIQUE(organisation_id, reference_type, reference_id)`
+  constraint.
+- **Availability and valuation aggregate correctly across warehouses**:
+  a real weighted-average-cost calculation (`quantity_micros *
+  average_cost_cents / 1_000_000`) was checked against an actual computed
+  total, not a value chosen to match the code.
+- **A project is created with its proposed 'TOTAL' budget row in one
+  transaction**, and **budget approval enforces real maker-checker
+  separation**: the project's own manager (whoever created it) gets a real
+  `403` attempting to approve their own project's budget; a second,
+  genuinely different `projects:manage` holder succeeds and the approved
+  amount (independently settable, not required to match the proposal) is
+  recorded correctly.
+- **Project cost posting correctly branches on cost_type**: an `EXPENSE`
+  cost derives its amount/currency/date from a real, already-`APPROVED`
+  expense genuinely tagged to that project (an expense from a different
+  project, or one not yet approved, is rejected -- code-reviewed against
+  the source's own two checks, not separately re-tested this session); the
+  same expense cannot be posted as a project cost twice (`409`, backed by
+  the real `UNIQUE(project_id, cost_type, source_id)` constraint); a
+  `MANUAL` cost is accepted with caller-supplied values directly.
+- **Profitability genuinely reuses the accounting infrastructure for
+  revenue**, not a separately-invented figure: a real journal posting a
+  REVENUE-type credit tagged with `project_id` was checked to flow through
+  into `revenue_cents`, and `profit_cents` correctly nets it against the
+  summed `project_costs`.
+- **RBAC is genuinely enforced** for both modules: `TAXPAYER_VIEWER`
+  (granted `inventory:read`/`projects:read` but not the `:manage`
+  counterparts) gets a real `403` on both a product creation and a project
+  creation attempt.
+
+**A retrofit, not a new gap**: `journal_lines.project_id`,
+`expenses.project_id`, and `quotation_lines.product_id` were deliberately
+left without their FK constraints by the migrations that created those
+tables (documented at the time as "the referenced table doesn't exist
+yet"). Now that `projects` and `products` exist, a dedicated migration
+(`..._add_deferred_project_and_product_foreign_keys.php`) adds all three
+constraints retroactively -- verified via a clean `php artisan migrate` on
+a database that already had those earlier tables populated by the test
+suite's own prior runs, confirming no orphaned reference existed to block
+the constraint.
+
+**This closes out Phase 10 (`lib/data/business-repository.ts`) entirely**
+except `verifySupplier`/`party_verification_snapshots`, which reuses
+`classifyTransaction` from the still-unported `identity-repository.ts` --
+a genuine, documented gap, not a silent one.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Two places where the TypeScript source's own seed data was incomplete
@@ -437,26 +511,26 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (117 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (109 more tables), Phase 5 (remaining seed data -- identity proofing,
 licensing, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
 requests/reviews, the administration-dashboard aggregate), the rest of
 Phase 9 (`cancelInvoice`, `explainInvoiceVat`'s full computation, transaction
 timeline, standalone VAT-rule evaluate/propose/approve routes -- see the
-Phase 9 verification section above), the rest of Phase 10
-(`verifySupplier`, inventory/products/warehouses, projects -- see the
-Phase 10 verification sections above), and Phases 11 through 15 in
-full (compliance/audit/disputes/refunds/risk, portals/licensing/governance,
-documents/integrations/offline/reports, the legacy D1 importer, and
-deployment documentation) are all outstanding. This is genuinely a
-multi-week engineering effort at the pace of careful, verified,
-per-field-checked porting demonstrated in this session's Phase
+Phase 9 verification section above), the rest of Phase 10 (`verifySupplier`
+only -- see the Phase 10 verification sections above), and Phases 11
+through 15 in full (compliance/audit/disputes/refunds/risk,
+portals/licensing/governance, documents/integrations/offline/reports, the
+legacy D1 importer, and deployment documentation) are all outstanding.
+This is genuinely a multi-week engineering effort at the pace of careful,
+verified, per-field-checked porting demonstrated in this session's Phase
 3/4/6/7/8/9/10 slice -- continuing it means repeating this same rigor
-across the remaining ~117 tables and ~163 routes, phase by phase (or
+across the remaining ~109 tables and ~163 routes, phase by phase (or
 sub-slice by sub-slice, as Phase 10 itself now demonstrates), as originally
 scoped. Given the genuine scale each remaining module represents (Phase
-10's own `business-repository.ts` alone is larger than everything ported
-in Phases 8 and 9 combined), continuing to completion is realistically a
-multi-session effort, not a single continuous run -- this document is the
-honest record of exactly how far that effort has gotten at each point.
+10's own `business-repository.ts` alone was larger than everything ported
+in Phases 8 and 9 combined, and took 5 separate sub-slices to close out),
+continuing to completion is realistically a multi-session effort, not a
+single continuous run -- this document is the honest record of exactly
+how far that effort has gotten at each point.

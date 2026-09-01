@@ -6,13 +6,14 @@ use App\Exceptions\BusinessValidationException;
 
 /**
  * Direct port of lib/domain/business.ts's normalize/validate functions --
- * this phase's slice covers business parties, quotations, and accounting
- * (journals/chart of accounts/periods) (see docs/MIGRATION_MATRIX.md's
- * Phase 10 section for what's still deferred: expenses,
- * inventory/products/warehouses, projects). Every function returns a
- * normalized array and throws BusinessValidationException (a list of
- * {code, path, message}, never a single message) on any failure, matching
- * the source's own BusinessValidationError exactly.
+ * covers every Phase 10 sub-slice built so far: business parties,
+ * quotations, accounting (journals/chart of accounts/periods), expenses,
+ * inventory (stock movements/products/warehouses/transfers), and projects
+ * (see docs/MIGRATION_MATRIX.md's Phase 10 section for what's still
+ * deferred: verifySupplier). Every function returns a normalized array and
+ * throws BusinessValidationException (a list of {code, path, message},
+ * never a single message) on any failure, matching the source's own
+ * BusinessValidationError exactly.
  */
 class BusinessValidator
 {
@@ -26,6 +27,8 @@ class BusinessValidator
     private const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
     private const JOURNAL_SOURCE_TYPES = ['MANUAL', 'EXPENSE', 'INVOICE', 'IMPORT', 'ADJUSTMENT'];
     private const PERIOD_CODE_PATTERN = '/^\d{4}-\d{2}$/';
+    private const STOCK_MOVEMENT_TYPES = ['RECEIPT', 'ISSUE', 'TRANSFER_IN', 'TRANSFER_OUT', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT'];
+    private const ISO_PATTERN = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/';
     private const QUOTATION_STATUSES = ['DRAFT', 'ISSUED', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CONVERTED'];
     private const MAX_SEARCH_LIMIT = 200;
     private const DEFAULT_SEARCH_LIMIT = 50;
@@ -487,6 +490,213 @@ class BusinessValidator
         }
 
         return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
+    /**
+     * @return array{schema_version: string, warehouse_id: string, product_id: string, movement_type: string,
+     *   quantity_micros: int, unit_cost_cents: int, reference_type: string, reference_id: string, reason: string, occurred_at: string}
+     */
+    public static function stockMovement(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $warehouseId = self::idField($input['warehouse_id'] ?? null, '/warehouse_id', 'Warehouse', $messages) ?? '';
+        $productId = self::idField($input['product_id'] ?? null, '/product_id', 'Product', $messages) ?? '';
+        $movementType = mb_strtoupper(self::textValue($input['movement_type'] ?? null));
+        if (! in_array($movementType, self::STOCK_MOVEMENT_TYPES, true)) {
+            $messages[] = ['code' => 'MOVEMENT_TYPE_INVALID', 'path' => '/movement_type', 'message' => 'Select a supported stock movement type.'];
+        }
+        $rawQuantity = self::integerField($input['quantity_micros'] ?? null, '/quantity_micros', 'Quantity micros', $messages, 1);
+        $quantityMicros = str_ends_with($movementType, 'OUT') || $movementType === 'ISSUE' ? -$rawQuantity : $rawQuantity;
+        $unitCostCents = self::integerField($input['unit_cost_cents'] ?? null, '/unit_cost_cents', 'Unit cost cents', $messages);
+        $referenceType = mb_strtoupper(self::textField($input['reference_type'] ?? null, '/reference_type', 'Reference type', 2, 40, $messages));
+        $referenceId = self::idField($input['reference_id'] ?? null, '/reference_id', 'Reference', $messages) ?? '';
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Reason', 2, 500, $messages);
+        $occurredAt = self::textValue($input['occurred_at'] ?? null) ?: gmdate('Y-m-d\TH:i:s.000\Z');
+        if (! preg_match(self::ISO_PATTERN, $occurredAt)) {
+            $messages[] = ['code' => 'TIMESTAMP_INVALID', 'path' => '/occurred_at', 'message' => 'occurred_at must be an ISO UTC timestamp.'];
+        }
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'warehouse_id' => $warehouseId, 'product_id' => $productId, 'movement_type' => $movementType,
+            'quantity_micros' => $quantityMicros, 'unit_cost_cents' => $unitCostCents, 'reference_type' => $referenceType,
+            'reference_id' => $referenceId, 'reason' => $reason, 'occurred_at' => $occurredAt,
+        ];
+    }
+
+    /**
+     * @return array{schema_version: string, sku: string, name: string, description: ?string, unit_code: string,
+     *   tax_category: string, tax_rate_bps: int, sales_price_cents: int, cost_price_cents: int}
+     */
+    public static function product(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $sku = mb_strtoupper(self::textField($input['sku'] ?? null, '/sku', 'SKU', 1, 40, $messages));
+        if ($sku && ! preg_match(self::CODE_PATTERN, $sku)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/sku', 'message' => 'SKU contains unsupported characters.'];
+        }
+        $name = self::textField($input['name'] ?? null, '/name', 'Product name', 2, 200, $messages);
+        $description = self::optionalText($input['description'] ?? null, '/description', 'Description', 2000, $messages);
+        $unitCode = mb_strtoupper(self::textField($input['unit_code'] ?? null, '/unit_code', 'Unit code', 1, 12, $messages));
+        $taxCategory = mb_strtoupper(self::textValue($input['tax_category'] ?? null));
+        if (! in_array($taxCategory, self::TAX_CATEGORIES, true)) {
+            $messages[] = ['code' => 'TAX_CATEGORY_INVALID', 'path' => '/tax_category', 'message' => 'Select a supported tax category.'];
+        }
+        $taxRateBps = self::integerField($input['tax_rate_bps'] ?? null, '/tax_rate_bps', 'Tax rate basis points', $messages);
+        if ($taxRateBps > 10000) {
+            $messages[] = ['code' => 'TAX_RATE_INVALID', 'path' => '/tax_rate_bps', 'message' => 'Tax rate cannot exceed 10000 basis points.'];
+        }
+        if ($taxCategory !== 'STANDARD' && $taxRateBps !== 0) {
+            $messages[] = ['code' => 'TAX_RATE_CATEGORY_MISMATCH', 'path' => '/tax_rate_bps', 'message' => 'Only standard-rated products may have a non-zero tax rate.'];
+        }
+        $salesPriceCents = self::integerField($input['sales_price_cents'] ?? null, '/sales_price_cents', 'Sales price cents', $messages);
+        $costPriceCents = self::integerField($input['cost_price_cents'] ?? null, '/cost_price_cents', 'Cost price cents', $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'sku' => $sku, 'name' => $name, 'description' => $description, 'unit_code' => $unitCode,
+            'tax_category' => $taxCategory, 'tax_rate_bps' => $taxRateBps, 'sales_price_cents' => $salesPriceCents, 'cost_price_cents' => $costPriceCents,
+        ];
+    }
+
+    /** @return array{schema_version: string, branch_id: ?string, code: string, name: string, address: string} */
+    public static function warehouse(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $branchId = self::idField($input['branch_id'] ?? null, '/branch_id', 'Branch', $messages, true);
+        $code = mb_strtoupper(self::textField($input['code'] ?? null, '/code', 'Warehouse code', 1, 20, $messages));
+        if ($code && ! preg_match('/^[A-Z0-9][A-Z0-9._-]{0,19}$/', $code)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/code', 'message' => 'Warehouse code contains unsupported characters.'];
+        }
+        $name = self::textField($input['name'] ?? null, '/name', 'Warehouse name', 2, 200, $messages);
+        $address = self::textField($input['address'] ?? null, '/address', 'Address', 2, 1000, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'branch_id' => $branchId, 'code' => $code, 'name' => $name, 'address' => $address];
+    }
+
+    /**
+     * @return array{schema_version: string, from_warehouse_id: string, to_warehouse_id: string, product_id: string,
+     *   quantity_micros: int, reason: string, occurred_at: string}
+     */
+    public static function stockTransfer(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $fromWarehouseId = self::idField($input['from_warehouse_id'] ?? null, '/from_warehouse_id', 'Source warehouse', $messages) ?? '';
+        $toWarehouseId = self::idField($input['to_warehouse_id'] ?? null, '/to_warehouse_id', 'Destination warehouse', $messages) ?? '';
+        if ($fromWarehouseId && $toWarehouseId && $fromWarehouseId === $toWarehouseId) {
+            $messages[] = ['code' => 'TRANSFER_SAME_WAREHOUSE', 'path' => '/to_warehouse_id', 'message' => 'Source and destination warehouse must be different.'];
+        }
+        $productId = self::idField($input['product_id'] ?? null, '/product_id', 'Product', $messages) ?? '';
+        $quantityMicros = self::integerField($input['quantity_micros'] ?? null, '/quantity_micros', 'Quantity micros', $messages, 1);
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Reason', 2, 500, $messages);
+        $occurredAt = self::textValue($input['occurred_at'] ?? null) ?: gmdate('Y-m-d\TH:i:s.000\Z');
+        if (! preg_match(self::ISO_PATTERN, $occurredAt)) {
+            $messages[] = ['code' => 'TIMESTAMP_INVALID', 'path' => '/occurred_at', 'message' => 'occurred_at must be an ISO UTC timestamp.'];
+        }
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'from_warehouse_id' => $fromWarehouseId, 'to_warehouse_id' => $toWarehouseId,
+            'product_id' => $productId, 'quantity_micros' => $quantityMicros, 'reason' => $reason, 'occurred_at' => $occurredAt,
+        ];
+    }
+
+    /**
+     * @return array{schema_version: string, code: string, name: string, customer_party_id: ?string, currency: string,
+     *   start_date: string, end_date: ?string, budget_cents: ?int}
+     */
+    public static function project(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $code = mb_strtoupper(self::textField($input['code'] ?? null, '/code', 'Project code', 2, 40, $messages));
+        if ($code && ! preg_match(self::CODE_PATTERN, $code)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/code', 'message' => 'Project code contains unsupported characters.'];
+        }
+        $name = self::textField($input['name'] ?? null, '/name', 'Project name', 2, 200, $messages);
+        $customerPartyId = self::idField($input['customer_party_id'] ?? null, '/customer_party_id', 'Customer party', $messages, true);
+        $currency = self::currencyField($input['currency'] ?? null, $messages);
+        $startDate = self::dateField($input['start_date'] ?? null, '/start_date', 'Start date', $messages);
+        $endDate = self::textValue($input['end_date'] ?? null) !== '' ? self::dateField($input['end_date'], '/end_date', 'End date', $messages) : null;
+        if ($endDate && $startDate && $endDate < $startDate) {
+            $messages[] = ['code' => 'DATE_ORDER_INVALID', 'path' => '/end_date', 'message' => 'End date cannot be earlier than start date.'];
+        }
+        $budgetCents = array_key_exists('budget_cents', $input) && $input['budget_cents'] !== null
+            ? self::integerField($input['budget_cents'], '/budget_cents', 'Budget cents', $messages)
+            : null;
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'code' => $code, 'name' => $name, 'customer_party_id' => $customerPartyId,
+            'currency' => $currency, 'start_date' => $startDate, 'end_date' => $endDate, 'budget_cents' => $budgetCents,
+        ];
+    }
+
+    /** @return array{schema_version: string, approved_amount_cents: int, notes: ?string} */
+    public static function projectBudgetApproval(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $approvedAmountCents = self::integerField($input['approved_amount_cents'] ?? null, '/approved_amount_cents', 'Approved amount cents', $messages);
+        $notes = self::optionalText($input['notes'] ?? null, '/notes', 'Notes', 1000, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'approved_amount_cents' => $approvedAmountCents, 'notes' => $notes];
+    }
+
+    /**
+     * Ported from lib/domain/business.ts's normalizeAndValidateProjectCost --
+     * a discriminated union on cost_type: EXPENSE cites an already-approved
+     * expense tagged to this project (amount/currency/date derived from
+     * that expense by the service layer, never re-entered here); MANUAL is
+     * for expenditure this system has no other record of.
+     *
+     * @return array{schema_version: string, cost_type: string, source_id: string, amount_cents: ?int,
+     *   currency: ?string, description: ?string, occurred_at: ?string}
+     */
+    public static function projectCost(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $costType = mb_strtoupper(self::textValue($input['cost_type'] ?? null));
+        if (! in_array($costType, ['EXPENSE', 'MANUAL'], true)) {
+            $messages[] = ['code' => 'COST_TYPE_INVALID', 'path' => '/cost_type', 'message' => 'cost_type must be EXPENSE or MANUAL.'];
+        }
+        if ($costType === 'MANUAL') {
+            $sourceId = self::textField($input['source_id'] ?? null, '/source_id', 'Source reference', 2, 100, $messages);
+            $amountCents = self::integerField($input['amount_cents'] ?? null, '/amount_cents', 'Amount cents', $messages, 1);
+            $currency = self::currencyField($input['currency'] ?? null, $messages);
+            $description = self::textField($input['description'] ?? null, '/description', 'Description', 2, 500, $messages);
+            $occurredAt = self::dateField($input['occurred_at'] ?? gmdate('Y-m-d'), '/occurred_at', 'Occurred at', $messages);
+            if (count($messages) > 0) {
+                throw new BusinessValidationException($messages);
+            }
+
+            return ['schema_version' => '1.0.0', 'cost_type' => 'MANUAL', 'source_id' => $sourceId, 'amount_cents' => $amountCents, 'currency' => $currency, 'description' => $description, 'occurred_at' => $occurredAt];
+        }
+        $sourceId = self::idField($input['source_id'] ?? null, '/source_id', 'Source expense', $messages) ?? '';
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'cost_type' => 'EXPENSE', 'source_id' => $sourceId, 'amount_cents' => null, 'currency' => null, 'description' => null, 'occurred_at' => null];
     }
 
     // -- shared field helpers, ported from lib/domain/business.ts's own private helpers --

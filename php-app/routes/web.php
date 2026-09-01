@@ -12,6 +12,8 @@ use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\ExpenseController;
+use App\Http\Controllers\Business\InventoryController;
+use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use Illuminate\Support\Facades\Route;
 
@@ -67,8 +69,7 @@ Route::middleware('auth')->group(function () {
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
         // and app/api/v1/quotations/** shape -- see BusinessPartyController's
         // and QuotationController's own doc comments for what's deferred
-        // (verifySupplier, expenses, inventory/products/warehouses, projects
-        // -- tracked in docs/MIGRATION_MATRIX.md).
+        // (verifySupplier -- tracked in docs/MIGRATION_MATRIX.md).
         Route::get('/business-parties', [BusinessPartyController::class, 'index']);
         Route::post('/business-parties', [BusinessPartyController::class, 'store']);
         Route::patch('/business-parties/{id}', [BusinessPartyController::class, 'update']);
@@ -107,5 +108,27 @@ Route::middleware('auth')->group(function () {
         Route::post('/expenses/{id}/submission', [ExpenseController::class, 'submit']);
         Route::post('/expenses/{id}/approval', [ExpenseController::class, 'approve']);
         Route::post('/expenses/{id}/rejection', [ExpenseController::class, 'reject']);
+
+        // Phase 10 (slice 4): inventory -- products, warehouses, stock
+        // movements/transfers, availability/valuation. Kept 1:1 with the
+        // source's app/api/v1/{products,warehouses,inventory/**}/route.ts shape.
+        Route::get('/products', [InventoryController::class, 'indexProducts']);
+        Route::post('/products', [InventoryController::class, 'storeProduct']);
+        Route::get('/warehouses', [InventoryController::class, 'indexWarehouses']);
+        Route::post('/warehouses', [InventoryController::class, 'storeWarehouse']);
+        Route::get('/inventory/movements', [InventoryController::class, 'indexMovements']);
+        Route::post('/inventory/movements', [InventoryController::class, 'storeMovement']);
+        Route::post('/inventory/transfers', [InventoryController::class, 'storeTransfer']);
+        Route::get('/inventory/availability', [InventoryController::class, 'availability']);
+        Route::get('/inventory/valuation', [InventoryController::class, 'valuation']);
+
+        // Phase 10 (slice 5, final): projects. Kept 1:1 with the source's
+        // app/api/v1/projects/** shape -- this closes out every
+        // business-repository.ts function except verifySupplier.
+        Route::get('/projects', [ProjectController::class, 'index']);
+        Route::post('/projects', [ProjectController::class, 'store']);
+        Route::post('/projects/{id}/budget-approval', [ProjectController::class, 'approveBudget']);
+        Route::post('/projects/{id}/costs', [ProjectController::class, 'postCost']);
+        Route::get('/projects/{id}/profitability', [ProjectController::class, 'profitability']);
     });
 });
