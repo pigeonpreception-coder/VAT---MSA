@@ -13,6 +13,7 @@ use App\Models\AuditEvidenceCustodyEvent;
 use App\Models\AuditFinding;
 use App\Models\Invoice;
 use App\Models\User;
+use App\Models\VatReturnVersion;
 use App\Services\Audit\AuditService;
 use App\Support\Access\TenantScope;
 use App\Support\Business\CommandLedger;
@@ -219,12 +220,40 @@ class AuditCaseService
     }
 
     /**
-     * A document citation must already be clean-scanned -- deferred in this
-     * port (see docs/MIGRATION_MATRIX.md's Phase 11 note): DOCUMENT/
-     * VAT_RETURN source types are not yet supported since document_metadata
-     * and vat_return_versions haven't been migrated. INVOICE and OTHER are
-     * fully supported. A supersedes_evidence_id flips the prior row to
-     * SUPERSEDED before the new row is inserted.
+     * Ported from lib/data/compliance-repository.ts's
+     * resolveEvidenceChecksum -- the single place both addEvidence (at
+     * insertion time) and recordEvidenceCustodyEvent's VERIFY action
+     * (re-checked later) derive a cited source's checksum from, so the two
+     * can never silently disagree about what "the hash" means for a given
+     * source type. DOCUMENT deliberately has no case here (and no caller
+     * of this method ever reaches it with DOCUMENT) -- see addEvidence's
+     * own doc comment for why.
+     *
+     * @return ?array{checksum: string, evidenceType: string}
+     */
+    private function resolveEvidenceChecksum(string $sourceResourceType, string $sourceResourceId): ?array
+    {
+        if ($sourceResourceType === 'INVOICE') {
+            $invoice = Invoice::find($sourceResourceId);
+
+            return $invoice ? ['checksum' => $invoice->payload_hash, 'evidenceType' => 'CERTIFIED_RECORD'] : null;
+        }
+        if ($sourceResourceType === 'VAT_RETURN') {
+            $version = VatReturnVersion::find($sourceResourceId);
+
+            return $version ? ['checksum' => $version->ledger_snapshot_hash, 'evidenceType' => 'CERTIFIED_RECORD'] : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * INVOICE, VAT_RETURN and OTHER are all fully supported; DOCUMENT
+     * remains deferred (see docs/MIGRATION_MATRIX.md's Phase 11 note) --
+     * "a document citation must already be clean-scanned" per the source's
+     * own comment, and neither document_metadata nor its Module 22
+     * quarantine/scan pipeline have been migrated. A supersedes_evidence_id
+     * flips the prior row to SUPERSEDED before the new row is inserted.
      *
      * @return array<string, mixed>
      */
@@ -248,8 +277,8 @@ class AuditCaseService
             return $this->presentEvidence($this->findEvidenceOrFail($prior));
         }
 
-        if (in_array($input['sourceResourceType'], ['VAT_RETURN', 'DOCUMENT'], true)) {
-            throw new ComplianceResourceException("Evidence sourced from {$input['sourceResourceType']} is not yet supported by this migration -- its underlying table has not been ported. Cite an INVOICE or an OTHER (externally hashed) record instead.", 422);
+        if ($input['sourceResourceType'] === 'DOCUMENT') {
+            throw new ComplianceResourceException('Evidence sourced from DOCUMENT is not yet supported by this migration -- document_metadata (and its clean-scan quarantine pipeline) has not been ported. Cite an INVOICE, a VAT_RETURN, or an OTHER (externally hashed) record instead.', 422);
         }
 
         $checksum = null;
@@ -258,12 +287,12 @@ class AuditCaseService
             $checksum = $input['checksumSha256'];
             $evidenceType = 'EXTERNAL_RECORD';
         } else {
-            $invoice = Invoice::find($input['sourceResourceId']);
-            if (! $invoice) {
-                throw new ComplianceResourceException('The cited invoice was not found.', 404);
+            $resolved = $this->resolveEvidenceChecksum($input['sourceResourceType'], $input['sourceResourceId']);
+            if (! $resolved) {
+                throw new ComplianceResourceException('The cited '.mb_strtolower($input['sourceResourceType']).' was not found.', 404);
             }
-            $checksum = $invoice->payload_hash;
-            $evidenceType = 'CERTIFIED_RECORD';
+            $checksum = $resolved['checksum'];
+            $evidenceType = $resolved['evidenceType'];
         }
 
         if ($input['supersedesEvidenceId']) {
@@ -338,9 +367,9 @@ class AuditCaseService
         $integrityVerified = null;
         DB::transaction(function () use ($evidence, $evidenceId, $input, $actor, $now, $idempotencyKey, $requestHash, $correlationId, &$integrityVerified) {
             if ($input['action'] === 'VERIFY') {
-                if ($evidence->source_resource_type === 'INVOICE') {
-                    $invoice = Invoice::find($evidence->source_resource_id);
-                    $integrityVerified = $invoice && $invoice->payload_hash === $evidence->checksum_sha256;
+                if (in_array($evidence->source_resource_type, ['INVOICE', 'VAT_RETURN'], true)) {
+                    $resolved = $this->resolveEvidenceChecksum($evidence->source_resource_type, $evidence->source_resource_id);
+                    $integrityVerified = $resolved && $resolved['checksum'] === $evidence->checksum_sha256;
                 }
                 // OTHER (externally supplied) evidence has nothing this system can
                 // re-derive, so integrity_verified stays null rather than a false claim.

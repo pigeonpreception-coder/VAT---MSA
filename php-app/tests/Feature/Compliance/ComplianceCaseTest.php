@@ -248,6 +248,45 @@ class ComplianceCaseTest extends TestCase
         $listing->assertStatus(200)->assertJsonCount(2, 'evidence');
     }
 
+    public function test_vat_return_evidence_can_be_cited_and_verified_but_document_evidence_is_still_rejected(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-CASE-0005B');
+        $auditor = $this->namraAuditor();
+        $caseId = $this->openCase($auditor, $tp['taxpayer']->id);
+
+        // A minimal real VAT return version this case can cite as evidence.
+        $this->seed(\Database\Seeders\TaxRuleSetSeeder::class);
+        $periodId = (string) Str::uuid();
+        \App\Models\VatPeriod::create([
+            'id' => $periodId, 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'period_code' => '2026-09', 'period_start' => '2026-09-01', 'period_end' => '2026-09-30', 'due_date' => '2026-10-25',
+            'status' => 'OPEN', 'lock_version' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $versionId = (string) Str::uuid();
+        \App\Models\VatReturnVersion::create([
+            'id' => $versionId, 'vat_period_id' => $periodId, 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'version_number' => 1, 'parent_version_id' => null, 'tax_rule_set_id' => 'taxrule-na-pilot-2026-1',
+            'output_tax_cents' => 15000, 'input_tax_cents' => 0, 'adjustment_cents' => 0, 'net_payable_cents' => 15000,
+            'status' => 'DRAFT', 'ledger_snapshot_hash' => str_repeat('b', 64), 'generated_by' => $auditor->id, 'generated_at' => now(),
+        ]);
+
+        $add = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/evidence", [
+            'schema_version' => '1.0.0', 'source_resource_type' => 'VAT_RETURN', 'source_resource_id' => $versionId, 'description' => 'The generated return underlying the disputed period.',
+        ], ['Idempotency-Key' => 'test-idem-evidence-vr-0001']);
+        $add->assertStatus(201)->assertJsonPath('resource.status', 'PRESERVED')->assertJsonPath('resource.checksum_sha256', str_repeat('b', 64));
+        $evidenceId = $add->json('resource.id');
+
+        $verify = $this->actingAs($auditor)->postJson("/api/v1/audit-evidence/{$evidenceId}/custody-events", ['schema_version' => '1.0.0', 'action' => 'VERIFY'], ['Idempotency-Key' => 'test-idem-verify-vr-0001']);
+        $verify->assertStatus(200);
+        $this->assertDatabaseHas('audit_evidence_custody_events', ['audit_evidence_id' => $evidenceId, 'action' => 'VERIFY', 'integrity_verified' => 1]);
+
+        // DOCUMENT remains explicitly rejected -- document_metadata has not been ported.
+        $document = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/evidence", [
+            'schema_version' => '1.0.0', 'source_resource_type' => 'DOCUMENT', 'source_resource_id' => (string) Str::uuid(), 'description' => 'An uploaded supporting document.',
+        ], ['Idempotency-Key' => 'test-idem-evidence-doc-0001']);
+        $document->assertStatus(422);
+    }
+
     public function test_case_notes_are_append_only_and_a_correction_supersedes_without_deleting(): void
     {
         $tp = $this->makeTaxpayer('VAT-CASE-0006');

@@ -44,7 +44,7 @@ below for the specific commands.
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
 | 9 | Invoices and VAT | COMPLETE -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion"). Also COMPLETE (see "VAT-return-generation prerequisite"): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. Also now COMPLETE (see "Standalone VAT-rule routes" below): `listVatRules`/`proposeVatRule`/`approveVatRule`/`evaluateVatRule` -- `lib/data/vat-rule-repository.ts`'s remaining exports, the last narrow gap this phase had. |
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
-| 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold, append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and now the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: DOCUMENT/VAT_RETURN-sourced evidence citation and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
+| 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- now including `VAT_RETURN`-sourced citations, see "VAT_RETURN evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: `DOCUMENT`-sourced evidence citation (still blocked on the unbuilt `document_metadata` table and its Module 22 quarantine/scan pipeline) and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
 | 12-15 | Portals/licensing/governance through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -520,15 +520,16 @@ every request the controller was ever invoked for. Caught by the very
 first test that exercised the route (a `500`, not a clean assertion
 failure), fixed by rewording the comment to avoid the sequence.
 
-**Explicitly not ported in this slice** (see the Phase 11 matrix row
-above): refunds (`requestRefund`/`getRefundClaimChecks`/
-`transitionRefundClaim`/`disputeRefund` -- fundamentally anchored to
-`vat_return_versions`, a real prerequisite this migration has not built
-yet, not a scoping choice), `DOCUMENT`/`VAT_RETURN`-sourced evidence
-citation (both need tables from still-unported modules), and
-`getComplianceSnapshot` (the fixed-list dashboard aggregate, consistent
-with the same deferral pattern applied to `getBusinessPlatformSnapshot` in
-Phase 10). The source's own partial unique index on `audit_evidence`
+**Explicitly not ported in this slice, at the time it was written** (see
+the Phase 11 matrix row above for current status): refunds and
+`VAT_RETURN`-sourced evidence citation were both anchored to
+`vat_return_versions`, a real prerequisite this migration had not built
+yet at the time -- both are since done (see "Refund workflow" and
+"VAT_RETURN evidence citation" below). `DOCUMENT`-sourced evidence
+citation and `getComplianceSnapshot` (the fixed-list dashboard aggregate,
+consistent with the same deferral pattern applied to
+`getBusinessPlatformSnapshot` in Phase 10) remain genuinely outstanding.
+The source's own partial unique index on `audit_evidence`
 (`WHERE status='PRESERVED'`) has no MySQL/MariaDB equivalent and is
 enforced at the application layer only -- see that migration's own doc
 comment for the honest limitation.
@@ -893,6 +894,33 @@ HTTP test client) and a 7-test PHPUnit feature suite
 
 No bugs surfaced this pass. This closes out Phase 9 entirely.
 
+## VAT_RETURN evidence citation (the smaller half of Phase 11's last gap)
+
+Extends `AuditCaseService::addEvidence`/`recordEvidenceCustodyEvent` to
+support `source_resource_type='VAT_RETURN'`, now that
+`vat_return_versions` exists (see "VAT-return-generation prerequisite"
+above). No new tables or migrations -- purely extending already-shipped
+Phase 11 slice-1 code. Ports `lib/data/compliance-repository.ts`'s
+`resolveEvidenceChecksum` as a genuinely shared private method (rather
+than inlining the resolution logic separately in each of the two callers
+that need it), matching the source's own stated intent -- "the single
+place both AddEvidence ... and RecordEvidenceCustodyEvent's VERIFY action
+... derive it from, so the two can never silently disagree." `DOCUMENT`
+remains explicitly rejected with a `422` (not silently accepted, not
+crashing) -- `document_metadata` and its Module 22 clean-scan quarantine
+pipeline are still unported, tracked as the one remaining Phase 11 gap.
+
+Verified by a new PHPUnit test extending
+`tests/Feature/Compliance/ComplianceCaseTest.php` (117 total, 0
+regressions), run against real MySQL: a real `vat_return_versions` row is
+cited as evidence, its `ledger_snapshot_hash` becomes the evidence's
+`checksum_sha256` exactly as `resolveEvidenceChecksum` specifies, and a
+later `VERIFY` custody event correctly re-derives and confirms it
+(`integrity_verified=1`) -- the same round-trip the existing `INVOICE`
+evidence test already proved, now shown to hold for `VAT_RETURN` too; a
+`DOCUMENT` citation attempt in the same test still gets a clean `422`, not
+a crash or a silent accept. No bugs surfaced this pass.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Three genuine gaps in the TypeScript source itself, discovered while
@@ -975,23 +1003,26 @@ licensing, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
 requests/reviews, the administration-dashboard aggregate), the rest of
-Phase 11 (DOCUMENT/VAT_RETURN evidence citation and the compliance
-dashboard snapshot aggregate only -- see the Phase 11 verification sections
-above), and Phases 12 through 15 in full (portals/licensing/governance,
-documents/integrations/offline/reports, the legacy D1 importer, and
-deployment documentation) are all outstanding. Phases 9 and 10 (invoices/
-VAT and accounting/commercial) are now both fully COMPLETE -- see
-"Standalone VAT-rule routes" and "Supplier verification" above. This is
-genuinely a multi-week engineering effort at the pace of careful, verified,
-per-field-checked porting demonstrated in this session's Phase
-3/4/6/7/8/9/10/11 slice -- continuing it means repeating this same rigor
-across the remaining ~82 tables and ~154 routes, phase by phase (or
-sub-slice by sub-slice, as Phases 10 and 11 both now demonstrate), as
-originally scoped. Given the genuine scale each remaining module
-represents (Phase 10's own `business-repository.ts` alone was larger than
-everything ported in Phases 8 and 9 combined, and took 6 separate
-sub-slices to close out; Phases 9 and 10 are now both entirely done, and
-Phase 11 is complete down to one narrow deferred surface), continuing to
-completion is realistically a multi-session effort, not a single
+Phase 11 (`DOCUMENT`-sourced evidence citation, genuinely blocked on the
+still-unbuilt `document_metadata` table and its Module 22 quarantine/scan
+pipeline -- not a scoping choice -- and the compliance dashboard snapshot
+aggregate; see the Phase 11 verification sections above), and Phases 12
+through 15 in full (portals/licensing/governance, documents/integrations/
+offline/reports, the legacy D1 importer, and deployment documentation) are
+all outstanding. Phases 9 and 10 (invoices/VAT and accounting/commercial)
+are now both fully COMPLETE -- see "Standalone VAT-rule routes" and
+"Supplier verification" above. This is genuinely a multi-week engineering
+effort at the pace of careful, verified, per-field-checked porting
+demonstrated in this session's Phase 3/4/6/7/8/9/10/11 slice -- continuing
+it means repeating this same rigor across the remaining ~82 tables and
+~154 routes, phase by phase (or sub-slice by sub-slice, as Phases 10 and
+11 both now demonstrate), as originally scoped. Given the genuine scale
+each remaining module represents (Phase 10's own `business-repository.ts`
+alone was larger than everything ported in Phases 8 and 9 combined, and
+took 6 separate sub-slices to close out; Phases 9 and 10 are now both
+entirely done, and Phase 11 is complete down to one narrow deferred
+surface -- itself genuinely blocked on Module 22's document pipeline, not
+a scoping gap this session left on the table), continuing to completion is
+realistically a multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far
 that effort has gotten at each point.
