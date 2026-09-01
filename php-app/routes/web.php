@@ -9,6 +9,8 @@ use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
+use App\Http\Controllers\Business\BusinessPartyController;
+use App\Http\Controllers\Business\QuotationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -58,5 +60,25 @@ Route::middleware('auth')->group(function () {
         Route::get('/invoices', [InvoiceController::class, 'index']);
         Route::post('/invoices', [InvoiceController::class, 'store']);
         Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+
+        // Phase 10 (slice 1 of Accounting/commercial): business parties and
+        // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
+        // and app/api/v1/quotations/** shape -- see BusinessPartyController's
+        // and QuotationController's own doc comments for what's deferred
+        // (verifySupplier, journals/chart of accounts, expenses, inventory/
+        // products/warehouses, projects -- tracked in docs/MIGRATION_MATRIX.md).
+        Route::get('/business-parties', [BusinessPartyController::class, 'index']);
+        Route::post('/business-parties', [BusinessPartyController::class, 'store']);
+        Route::patch('/business-parties/{id}', [BusinessPartyController::class, 'update']);
+        Route::post('/business-parties/{id}/deactivation', [BusinessPartyController::class, 'deactivate']);
+
+        Route::get('/quotations', [QuotationController::class, 'index']);
+        Route::post('/quotations', [QuotationController::class, 'store']);
+        Route::patch('/quotations/{id}', [QuotationController::class, 'update']);
+        Route::post('/quotations/{id}/sending', [QuotationController::class, 'send']);
+        Route::post('/quotations/{id}/accept', [QuotationController::class, 'accept']);
+        Route::post('/quotations/{id}/rejection', [QuotationController::class, 'reject']);
+        Route::post('/quotations/{id}/expiration', [QuotationController::class, 'expire']);
+        Route::post('/quotations/{id}/convert', [QuotationController::class, 'convert']);
     });
 });

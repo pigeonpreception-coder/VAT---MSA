@@ -37,13 +37,14 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 26 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 32 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
 | 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, the standalone VAT-rule evaluate/propose/approve routes, and the whole VAT-period/return/adjustment/reconciliation-workflow surface built on top of these tables -- deferred, not silently dropped. |
-| 10-15 | Accounting/commercial through legacy importer and deployment docs | NOT STARTED |
+| 10 | Accounting/commercial | PARTIAL -- slice 1 of 3 COMPLETE for its actual scope (see below): business parties (customer/supplier CRUD + search) and quotations (create/edit/send/accept/reject/expire, and conversion into a real certified invoice via Phase 9's InvoiceService). NOT covered yet within Phase 10: `verifySupplier`/party verification snapshots, journals/chart of accounts/accounting periods/trial balance/financial statements, expenses/expense categories, inventory (products/warehouses/stock movements/transfers), and projects (budgets/costs/profitability) -- these are `lib/data/business-repository.ts`'s other ~24 exported functions, each its own sub-slice, deferred not silently dropped. |
+| 11-15 | Compliance/audits/disputes/refunds/risk through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -217,6 +218,81 @@ request-level concerns shared by several still-unmigrated route files) are
 also not yet ported; `InvoiceController` calls out this specific gap in its
 own doc comment rather than half-porting a rate limiter for one route only.
 
+## Phase 10 verification (accounting/commercial, slice 1: business parties + quotations)
+
+Both a real end-to-end HTTP walkthrough (`php artisan serve` + `curl`, the
+Phase 6 demo login, real CSRF tokens) and a 12-test PHPUnit feature suite
+(`tests/Feature/Business/BusinessPartyAndQuotationTest.php`, run against
+real MySQL) confirm:
+
+- **A business party is created with its relationship grants in one
+  transaction**: `business_parties`, one `party_relationships` row per
+  requested relationship, a chained `audit_events` row, and an
+  `outbox_events` row all materialize correctly.
+- **A duplicate active VAT number or TIN within the same organisation is
+  rejected `409`**, matching the source's own dedup rule; **idempotent
+  replay of the same key+payload returns the identical party** without a
+  second insert.
+- **An inactive party cannot be edited** (`409`, "create a new active
+  relationship record if trading resumes" — the source's own stated
+  design, not a bug); **deactivation preserves every existing record**
+  (invoices, quotations, revisions already tied to that party are never
+  touched, only the party's and its relationships' own status flip).
+- **RBAC is genuinely enforced**: a `TAXPAYER_VIEWER` (which the source
+  grants `commercial:read` but not `parties:manage`) gets a real `403`
+  attempting to create a party.
+- **The quotation lifecycle state machine holds exactly as
+  `evaluateQuotationLifecycle` specifies**: a `DRAFT` quotation cannot be
+  accepted directly (`409`); `DRAFT` -> `SEND` -> `ISSUED` ->
+  `ACCEPT` -> `ACCEPTED` all transition correctly with their own audit/
+  outbox/revision rows; an `ISSUED` quotation can be rejected or edited;
+  a quotation's number is immutable once created (`409` on attempted
+  change); a duplicate quotation number within the organisation is
+  rejected `409`; a quotation referencing a party without an active
+  `CUSTOMER` relationship is rejected `422` rather than silently allowed.
+- **Quotation revisions are a real hash-chained history, not a stub**: a
+  fresh quotation gets revision 1 (`CREATE`); editing an already-`ISSUED`
+  quotation that has no prior revision row first backfills the implicit
+  revision 1 from its own creation state before appending revision 2
+  (`EDIT`) -- matching the source's own backfill logic for a quotation
+  created before revisioning existed.
+- **Quotation-to-invoice conversion is a genuine cross-module integration,
+  verified against Phase 9's real code, not a mock**: converting an
+  `ACCEPTED` quotation calls `InvoiceService::submit` directly, producing
+  a real `invoices` row with lines/certificate/ledger entries/audit event
+  exactly as a directly-submitted invoice would; the quotation flips to
+  `CONVERTED` with `converted_invoice_id` set in the same operation. Live
+  HTTP verification against the demo taxpayer pair (whose VAT number *is*
+  a registered national taxpayer) produced `status: MATCHED`; the PHPUnit
+  suite's synthetic business party (which is *not* itself a registered
+  taxpayer) correctly produced `status: CERTIFIED` instead -- confirming
+  the two systems are correctly decoupled exactly as the source intends
+  (a commercial-ledger "customer" and a NamRA-registered taxpayer are
+  different concepts, and invoice certification's buyer resolution only
+  ever consults the latter).
+- **Search is real and paginated, not a fixed list**: `GET
+  /api/v1/quotations?status=...&customer_party_id=...` filters correctly
+  and returns a genuine `total_count` independent of the page `limit`.
+
+**A genuine bug in this session's own new code was caught and fixed by
+this verification process, not shipped**: `BusinessPartyService` and
+`QuotationService` referenced `OrganisationResolver` without importing it
+(`App\Support\Business\OrganisationResolver`), so PHP resolved the bare
+class name against the wrong namespace (`App\Services\Business`) and every
+request failed with "Target class ... does not exist" the moment either
+service was constructed. Caught immediately by the first test run, fixed
+by adding the missing `use` statement to both files.
+
+**Explicitly not ported this slice** (see the Phase 10 matrix row above):
+`verifySupplier`/`party_verification_snapshots` (reuses
+`classifyTransaction` from the still-unported `identity-repository.ts`),
+`getBusinessPlatformSnapshot` (the fixed-list dashboard aggregate --
+superseded by the real search endpoints above for any new UI), and
+`getQuotationForEdit` (the detail-read endpoint the search results already
+carry the same line-level data for). None of `lib/data/business-repository.ts`'s
+journal/expense/inventory/project functions (~24 more exported functions)
+have been touched.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Two places where the TypeScript source's own seed data was incomplete
@@ -284,18 +360,27 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (129 more tables), Phase 5 (remaining seed data -- identity proofing,
+Phase 4 (123 more tables), Phase 5 (remaining seed data -- identity proofing,
 licensing, chart of accounts, navigation, etc.), Phase 7's reusable Eloquent
 organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
 requests/reviews, the administration-dashboard aggregate), the rest of
 Phase 9 (`cancelInvoice`, `explainInvoiceVat`'s full computation, transaction
 timeline, standalone VAT-rule evaluate/propose/approve routes -- see the
-Phase 9 verification section above), and Phases 10 through 15 in full
-(accounting/commercial, compliance/audit, portals/licensing/governance,
+Phase 9 verification section above), the rest of Phase 10
+(`verifySupplier`, journals/chart of accounts/periods/trial balance/
+financial statements, expenses, inventory/products/warehouses, projects --
+see the Phase 10 verification section above), and Phases 11 through 15 in
+full (compliance/audit/disputes/refunds/risk, portals/licensing/governance,
 documents/integrations/offline/reports, the legacy D1 importer, and
 deployment documentation) are all outstanding. This is genuinely a
 multi-week engineering effort at the pace of careful, verified,
-per-field-checked porting demonstrated in this session's Phase 3/4/6/7/8/9
-slice -- continuing it means repeating this same rigor across the remaining
-~129 tables and ~165 routes, phase by phase, as originally scoped.
+per-field-checked porting demonstrated in this session's Phase
+3/4/6/7/8/9/10 slice -- continuing it means repeating this same rigor
+across the remaining ~123 tables and ~163 routes, phase by phase (or
+sub-slice by sub-slice, as Phase 10 itself now demonstrates), as originally
+scoped. Given the genuine scale each remaining module represents (Phase
+10's own `business-repository.ts` alone is larger than everything ported
+in Phases 8 and 9 combined), continuing to completion is realistically a
+multi-session effort, not a single continuous run -- this document is the
+honest record of exactly how far that effort has gotten at each point.
