@@ -9,6 +9,7 @@ use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
+use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\QuotationController;
 use Illuminate\Support\Facades\Route;
@@ -65,8 +66,8 @@ Route::middleware('auth')->group(function () {
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
         // and app/api/v1/quotations/** shape -- see BusinessPartyController's
         // and QuotationController's own doc comments for what's deferred
-        // (verifySupplier, journals/chart of accounts, expenses, inventory/
-        // products/warehouses, projects -- tracked in docs/MIGRATION_MATRIX.md).
+        // (verifySupplier, expenses, inventory/products/warehouses, projects
+        // -- tracked in docs/MIGRATION_MATRIX.md).
         Route::get('/business-parties', [BusinessPartyController::class, 'index']);
         Route::post('/business-parties', [BusinessPartyController::class, 'store']);
         Route::patch('/business-parties/{id}', [BusinessPartyController::class, 'update']);
@@ -80,5 +81,18 @@ Route::middleware('auth')->group(function () {
         Route::post('/quotations/{id}/rejection', [QuotationController::class, 'reject']);
         Route::post('/quotations/{id}/expiration', [QuotationController::class, 'expire']);
         Route::post('/quotations/{id}/convert', [QuotationController::class, 'convert']);
+
+        // Phase 10 (slice 2): accounting -- journals, chart of accounts,
+        // period close, trial balance, financial statements. Kept 1:1 with
+        // the source's app/api/v1/accounting/** shape -- see
+        // AccountingController's own doc comment for what's deferred.
+        Route::get('/accounting/accounts', [AccountingController::class, 'indexAccounts']);
+        Route::post('/accounting/accounts', [AccountingController::class, 'storeAccount']);
+        Route::get('/accounting/journals', [AccountingController::class, 'indexJournals']);
+        Route::post('/accounting/journals', [AccountingController::class, 'storeJournal']);
+        Route::post('/accounting/journals/{id}/reversal', [AccountingController::class, 'reverseJournal']);
+        Route::post('/accounting/periods/closure', [AccountingController::class, 'closePeriod']);
+        Route::get('/accounting/trial-balance', [AccountingController::class, 'trialBalance']);
+        Route::get('/accounting/statements', [AccountingController::class, 'statements']);
     });
 });

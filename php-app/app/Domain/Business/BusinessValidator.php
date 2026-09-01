@@ -6,13 +6,13 @@ use App\Exceptions\BusinessValidationException;
 
 /**
  * Direct port of lib/domain/business.ts's normalize/validate functions --
- * this phase's slice covers business parties and quotations only (see
- * docs/MIGRATION_MATRIX.md's Phase 10 section for what's deferred:
- * journals/chart of accounts, expenses, inventory/products/warehouses,
- * projects). Every function returns a normalized array and throws
- * BusinessValidationException (a list of {code, path, message}, never a
- * single message) on any failure, matching the source's own
- * BusinessValidationError exactly.
+ * this phase's slice covers business parties, quotations, and accounting
+ * (journals/chart of accounts/periods) (see docs/MIGRATION_MATRIX.md's
+ * Phase 10 section for what's still deferred: expenses,
+ * inventory/products/warehouses, projects). Every function returns a
+ * normalized array and throws BusinessValidationException (a list of
+ * {code, path, message}, never a single message) on any failure, matching
+ * the source's own BusinessValidationError exactly.
  */
 class BusinessValidator
 {
@@ -23,6 +23,9 @@ class BusinessValidator
     private const TAX_CATEGORIES = ['STANDARD', 'ZERO_RATED', 'EXEMPT', 'OUT_OF_SCOPE'];
     private const PARTY_RELATIONSHIPS = ['CUSTOMER', 'SUPPLIER'];
     private const PARTY_STATUSES = ['ACTIVE', 'INACTIVE'];
+    private const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
+    private const JOURNAL_SOURCE_TYPES = ['MANUAL', 'EXPENSE', 'INVOICE', 'IMPORT', 'ADJUSTMENT'];
+    private const PERIOD_CODE_PATTERN = '/^\d{4}-\d{2}$/';
     private const QUOTATION_STATUSES = ['DRAFT', 'ISSUED', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CONVERTED'];
     private const MAX_SEARCH_LIMIT = 200;
     private const DEFAULT_SEARCH_LIMIT = 50;
@@ -297,6 +300,123 @@ class BusinessValidator
         }
 
         return ['allowed' => true, 'targetStatus' => $targetStatus[$action], 'reason' => 'The issued quotation may be '.mb_strtolower($action).'ed.'];
+    }
+
+    /**
+     * @return array{schema_version: string, journal_number: string, journal_date: string, reference: ?string,
+     *   description: string, currency: string, source_type: string, source_id: ?string, lines: list<array<string, mixed>>}
+     */
+    public static function journal(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $journalNumber = mb_strtoupper(self::textField($input['journal_number'] ?? null, '/journal_number', 'Journal number', 2, 40, $messages));
+        if ($journalNumber && ! preg_match(self::CODE_PATTERN, $journalNumber)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/journal_number', 'message' => 'Journal number contains unsupported characters.'];
+        }
+        $journalDate = self::dateField($input['journal_date'] ?? null, '/journal_date', 'Journal date', $messages);
+        $reference = self::optionalText($input['reference'] ?? null, '/reference', 'Reference', 100, $messages);
+        $description = self::textField($input['description'] ?? null, '/description', 'Description', 2, 500, $messages);
+        $currency = self::currencyField($input['currency'] ?? null, $messages);
+        $sourceType = mb_strtoupper(self::textValue($input['source_type'] ?? null));
+        if (! in_array($sourceType, self::JOURNAL_SOURCE_TYPES, true)) {
+            $messages[] = ['code' => 'SOURCE_TYPE_INVALID', 'path' => '/source_type', 'message' => 'Select a supported journal source type.'];
+        }
+        $sourceId = self::idField($input['source_id'] ?? null, '/source_id', 'Source', $messages, true);
+
+        $rawLines = is_array($input['lines'] ?? null) ? $input['lines'] : [];
+        if (count($rawLines) < 2 || count($rawLines) > 500) {
+            $messages[] = ['code' => 'LINE_COUNT_INVALID', 'path' => '/lines', 'message' => 'A journal must contain 2 to 500 lines.'];
+        }
+        $debitTotal = 0;
+        $creditTotal = 0;
+        $lines = [];
+        foreach (array_slice($rawLines, 0, 500) as $index => $rawLine) {
+            $line = is_array($rawLine) ? $rawLine : [];
+            $path = "/lines/{$index}";
+            $accountId = self::idField($line['account_id'] ?? null, "{$path}/account_id", 'Account', $messages) ?? '';
+            $branchId = self::idField($line['branch_id'] ?? null, "{$path}/branch_id", 'Branch', $messages, true);
+            $projectId = self::idField($line['project_id'] ?? null, "{$path}/project_id", 'Project', $messages, true);
+            $lineDescription = self::textField($line['description'] ?? null, "{$path}/description", 'Description', 2, 500, $messages);
+            $debitCents = self::integerField($line['debit_cents'] ?? null, "{$path}/debit_cents", 'Debit cents', $messages);
+            $creditCents = self::integerField($line['credit_cents'] ?? null, "{$path}/credit_cents", 'Credit cents', $messages);
+            if (($debitCents === 0) === ($creditCents === 0)) {
+                $messages[] = ['code' => 'JOURNAL_SIDE_INVALID', 'path' => $path, 'message' => 'Each journal line must contain a positive debit or credit, but not both.'];
+            }
+            $debitTotal += $debitCents;
+            $creditTotal += $creditCents;
+            $taxCode = self::optionalText($line['tax_code'] ?? null, "{$path}/tax_code", 'Tax code', 40, $messages);
+            $lines[] = [
+                'account_id' => $accountId, 'branch_id' => $branchId, 'project_id' => $projectId,
+                'description' => $lineDescription, 'debit_cents' => $debitCents, 'credit_cents' => $creditCents, 'tax_code' => $taxCode,
+            ];
+        }
+        if ($debitTotal <= 0 || $debitTotal !== $creditTotal) {
+            $messages[] = ['code' => 'JOURNAL_UNBALANCED', 'path' => '/lines', 'message' => 'Total debits must equal total credits and be greater than zero.'];
+        }
+
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'journal_number' => $journalNumber, 'journal_date' => $journalDate,
+            'reference' => $reference, 'description' => $description, 'currency' => $currency,
+            'source_type' => $sourceType, 'source_id' => $sourceId, 'lines' => $lines,
+        ];
+    }
+
+    /** @return array{schema_version: string, code: string, name: string, account_type: string, currency: string, control_type: ?string} */
+    public static function account(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $code = mb_strtoupper(self::textField($input['code'] ?? null, '/code', 'Account code', 1, 20, $messages));
+        if ($code && ! preg_match('/^[A-Z0-9][A-Z0-9._-]{0,19}$/', $code)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/code', 'message' => 'Account code contains unsupported characters.'];
+        }
+        $name = self::textField($input['name'] ?? null, '/name', 'Account name', 2, 200, $messages);
+        $accountType = mb_strtoupper(self::textValue($input['account_type'] ?? null));
+        if (! in_array($accountType, self::ACCOUNT_TYPES, true)) {
+            $messages[] = ['code' => 'ACCOUNT_TYPE_INVALID', 'path' => '/account_type', 'message' => 'account_type must be one of: '.implode(', ', self::ACCOUNT_TYPES).'.'];
+        }
+        $currency = self::currencyField($input['currency'] ?? null, $messages);
+        $controlType = self::optionalText($input['control_type'] ?? null, '/control_type', 'Control type', 40, $messages);
+        $controlType = $controlType !== null ? mb_strtoupper($controlType) : null;
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'code' => $code, 'name' => $name, 'account_type' => $accountType, 'currency' => $currency, 'control_type' => $controlType];
+    }
+
+    /** @return array{schema_version: string, reason: string} */
+    public static function journalReversal(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Reversal reason', 10, 500, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
+    /** @return array{schema_version: string, period_code: string} */
+    public static function periodClose(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $periodCode = self::textValue($input['period_code'] ?? null);
+        if (! preg_match(self::PERIOD_CODE_PATTERN, $periodCode)) {
+            $messages[] = ['code' => 'PERIOD_CODE_INVALID', 'path' => '/period_code', 'message' => 'period_code must use YYYY-MM.'];
+        }
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'period_code' => $periodCode];
     }
 
     // -- shared field helpers, ported from lib/domain/business.ts's own private helpers --
