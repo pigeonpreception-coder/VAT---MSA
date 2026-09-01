@@ -37,12 +37,13 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 15 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) |
-| 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 26 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) |
+| 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, and membership assignment. NOT covered yet: employees/positions/departments/HR org-chart tables, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), access requests/reviews, and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
-| 9-15 | Invoices/VAT through legacy importer and deployment docs | NOT STARTED |
+| 9 | Invoices and VAT | COMPLETE for its actual scope (see below) -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, and invoice list/detail reads. NOT covered yet: `cancelInvoice`, `explainInvoiceVat`'s full computation/timeline, `getTransactionTimeline`, the standalone VAT-rule evaluate/propose/approve routes, and the whole VAT-period/return/adjustment/reconciliation-workflow surface built on top of these tables -- deferred, not silently dropped. |
+| 10-15 | Accounting/commercial through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -50,8 +51,10 @@ below for the specific commands.
    cleanly against a real MariaDB 10.4.32 database (`vat_msa`), in correct
    FK-dependency order.
 2. `php artisan migrate:fresh --seed` -- RoleSeeder (21 roles), PermissionSeeder
-   (79 permission codes), DemoSeeder (1 taxpayer, 1 organisation, 1 branch, 1
-   membership, 2 users) all run without error.
+   (79 permission codes), VatRuleSeeder (5 approved VAT rules, ported verbatim
+   from `db/runtime.ts`'s own bootstrap seed), DemoSeeder (2 taxpayers, 2
+   organisations with BUYER+SELLER capabilities, 1 branch, 1 membership, 3
+   users) all run without error.
 3. `npm run build` -- Vite production build succeeds (Bootstrap 5 CSS/JS
    bundled).
 4. Live HTTP verification via `php artisan serve` + `curl`, session cookies
@@ -133,6 +136,87 @@ route the source gated with `requireStepUp` in this phase. This is a
 deliberate substitution, not a removed control -- full TOTP parity is a
 tracked follow-up.
 
+## Phase 9 verification (invoices and VAT)
+
+Both a real end-to-end HTTP walkthrough (`php artisan serve` + `curl`, session
+cookies, real CSRF tokens, a demo supplier/customer pair) and a 13-test
+PHPUnit feature suite (`tests/Feature/Invoice/InvoiceCertificationTest.php`,
+run against real MySQL via `vat_msa_testing`) confirm:
+
+- **A valid `TAX_INVOICE` against a registered buyer is certified end-to-end
+  in one transaction**: `invoices`, `invoice_lines`, `certificates`,
+  `vat_transactions`, two `ledger_entries` (`OUTPUT_VAT` on the supplier,
+  `INPUT_VAT` on the customer), a chained `audit_events` row, an
+  `outbox_events` row, and an `idempotency_records` row all materialize
+  correctly -- checked directly against the database over live HTTP, not
+  just the JSON response (`invoice_id`/`transaction_id`/`certificate_id`
+  round-tripped and cross-checked against `GET /api/v1/invoices/{id}`).
+- **VAT-rule resolution fails closed, exactly as the source requires**: a
+  line whose supplied rate doesn't match the NamRA-approved rule for its
+  category on the invoice's issue date is rejected `422
+  VAT_RATE_RULE_MISMATCH` (server-side rate is authoritative, never the
+  client-supplied one); a tax category with no approved rule bound at all is
+  rejected `422 NO_APPROVED_VAT_RULE`. Neither writes anything to the
+  database.
+- **Supplier/customer resolution is the dynamic `organisation_capabilities`
+  grant, never a static role**: a VAT number without an active `SELLER`
+  capability is rejected `422 SUPPLIER_NOT_AUTHORISED`; an unregistered buyer
+  VAT number still certifies the invoice (status `CERTIFIED` rather than
+  `MATCHED`) but opens an `UNREGISTERED_BUYER` reconciliation exception,
+  matching the source's fail-open-but-flag design for that specific case.
+- **Duplicate and collision detection holds**: the same
+  `(supplier, source_system, source_document_id)` is rejected `409`; a
+  second invoice re-using an already-used `(supplier, invoice_number)` is
+  rejected `409` (checked independently of the idempotency-key path).
+- **Idempotent replay is genuinely idempotent, not just re-validated**:
+  replaying the identical `Idempotency-Key` + payload returns the *same*
+  `invoice_id`/`certificate_id`/`transaction_id` without writing a second
+  `invoices` row; reusing the same key with a *different* payload is
+  rejected `409` rather than silently returning either response. The
+  concurrent-race recovery path (`QueryException` -> unique-constraint check
+  -> idempotency-record re-read) exists and is code-reviewed against the
+  source's own documented race, though a true concurrent-request race was
+  not separately exercised in this session (the non-racing replay path was).
+- **Credit-note correction lineage and its cumulative-credit cap both
+  hold**: a `CREDIT_NOTE` referencing a real original invoice creates an
+  `ACTIVE` `invoice_corrections` row and the correct negative-signed
+  `ledger_entries` (direction flipped from the original); a second credit
+  note that would push the cumulative credited value or VAT past the
+  original invoice's own value is rejected `409`, checked against the sum of
+  every prior `ACTIVE` `CREDIT_NOTE` against that original, not just the
+  latest one.
+- **Tenant scope is genuinely enforced on submission, not just on read**: a
+  `TAXPAYER_OWNER` scoped to a different taxpayer than the invoice's
+  supplier is denied `403` and nothing is written; a national-scope
+  `PILOT_ADMIN` can submit on behalf of any supplier, matching
+  `TenantScope::requireTaxpayer`'s existing (Phase 7) semantics reused here
+  unchanged.
+- **RBAC is genuinely enforced**: a role without `invoices:submit` gets a
+  real `403` attempting `POST /api/v1/invoices`.
+- **A genuine pre-existing bug was caught and fixed by this verification
+  process, not shipped**: `DemoSeeder`'s `updateOrCreate` calls (written in
+  Phase 8) included `'id' => Str::uuid()` in the *update* values array for
+  every row -- since every model here uses `HasUuids` (auto-assigns `id` on
+  create only), this silently re-assigned a *fresh random id* to each
+  already-existing demo row on every re-seed, breaking every FK pointing at
+  the old id. Surfaced as a live `1451` FK-constraint violation while
+  reseeding this phase's own capability grants; fixed by removing `'id'`
+  from every such values array across `DemoSeeder` (see that file's own
+  updated doc comment).
+
+**Explicitly not ported this phase** (see the Phase 9 matrix row above for
+the full list): `cancelInvoice`, `explainInvoiceVat`'s real per-line VAT
+computation/breakdown (a lightweight standalone `vatRulesApplied()` lookup
+was built instead, just enough to populate the submission response's
+`vat_rules_applied` field faithfully -- not the source's full explanation
+endpoint), `getTransactionTimeline`, and the standalone VAT-rule
+evaluate/propose/approve routes (`lib/data/vat-rule-repository.ts`'s other
+exports) are all real, scoped-out gaps, not silent omissions.
+**`enforceInvoiceRateLimits`/`emitStructuredSecurityLog`** (cross-cutting
+request-level concerns shared by several still-unmigrated route files) are
+also not yet ported; `InvoiceController` calls out this specific gap in its
+own doc comment rather than half-porting a rate limiter for one route only.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Two places where the TypeScript source's own seed data was incomplete
@@ -200,15 +284,18 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (140 more tables), Phase 5 (remaining seed data -- identity proofing,
-licensing, VAT rules, chart of accounts, navigation, etc.), Phase 7's
-reusable Eloquent organisation-scope trait/global scope, the rest of Phase 8
+Phase 4 (129 more tables), Phase 5 (remaining seed data -- identity proofing,
+licensing, chart of accounts, navigation, etc.), Phase 7's reusable Eloquent
+organisation-scope trait/global scope, the rest of Phase 8
 (employees/positions/departments, organisation-defined custom roles, access
-requests/reviews, the administration-dashboard aggregate), and Phases 9
-through 15 in full (invoices/VAT, accounting/commercial, compliance/audit,
-portals/licensing/governance, documents/integrations/offline/reports, the
-legacy D1 importer, and deployment documentation) are all outstanding. This
-is genuinely a multi-week engineering effort at the pace of careful,
-verified, per-field-checked porting demonstrated in this session's Phase
-3/4/6/7/8 slice -- continuing it means repeating this same rigor across the
-remaining ~140 tables and ~170 routes, phase by phase, as originally scoped.
+requests/reviews, the administration-dashboard aggregate), the rest of
+Phase 9 (`cancelInvoice`, `explainInvoiceVat`'s full computation, transaction
+timeline, standalone VAT-rule evaluate/propose/approve routes -- see the
+Phase 9 verification section above), and Phases 10 through 15 in full
+(accounting/commercial, compliance/audit, portals/licensing/governance,
+documents/integrations/offline/reports, the legacy D1 importer, and
+deployment documentation) are all outstanding. This is genuinely a
+multi-week engineering effort at the pace of careful, verified,
+per-field-checked porting demonstrated in this session's Phase 3/4/6/7/8/9
+slice -- continuing it means repeating this same rigor across the remaining
+~129 tables and ~165 routes, phase by phase, as originally scoped.

@@ -8,6 +8,7 @@ use App\Http\Controllers\Identity\MembershipController;
 use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
+use App\Http\Controllers\Invoice\InvoiceController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -48,5 +49,14 @@ Route::middleware('auth')->group(function () {
 
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
             ->middleware('password.confirm');
+
+        // Phase 9: invoice certification and VAT. Kept 1:1 with the source's
+        // app/api/v1/invoices/** shape -- see InvoiceController's own doc
+        // comment for what is and isn't ported yet (cancellation, transaction
+        // timeline, VAT explanation and the standalone VAT-rule evaluate route
+        // are deferred, tracked in docs/MIGRATION_MATRIX.md).
+        Route::get('/invoices', [InvoiceController::class, 'index']);
+        Route::post('/invoices', [InvoiceController::class, 'store']);
+        Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
     });
 });
