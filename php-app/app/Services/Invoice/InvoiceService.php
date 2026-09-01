@@ -20,6 +20,7 @@ use App\Models\VatRule;
 use App\Models\VatTransaction;
 use App\Services\Audit\AuditService;
 use App\Support\Access\TenantScope;
+use App\Support\Invoice\VatRuleResolver;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -612,15 +613,10 @@ class InvoiceService
         ];
     }
 
-    /** Ported from lib/data/vat-rule-repository.ts's getApplicableVatRule -- fails closed, never assumes a default rate. */
+    /** Ported from lib/data/vat-rule-repository.ts's getApplicableVatRule -- fails closed, never assumes a default rate. Delegates to VatRuleResolver, single-sourced with VatRuleService::evaluate rather than duplicated (see that class's own doc comment). */
     private function applicableVatRule(string $taxCategory, string $isoDate): ?VatRule
     {
-        return VatRule::where('tax_category', $taxCategory)->where('country', 'NA')->where('status', 'APPROVED')
-            ->where('effective_from', '<=', $isoDate)
-            ->where(function ($q) use ($isoDate) {
-                $q->whereNull('effective_to')->orWhere('effective_to', '>', $isoDate);
-            })
-            ->orderByDesc('effective_from')->first();
+        return VatRuleResolver::applicable($taxCategory, $isoDate);
     }
 
     /** Ported from submitInvoice's inline supplier/customer resolution query -- the dynamic BUYER/SELLER capability grant, never a static role. */

@@ -23,6 +23,7 @@ use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
+use App\Http\Controllers\VatRule\VatRuleController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -75,6 +76,17 @@ Route::middleware('auth')->group(function () {
             ->middleware('password.confirm');
         Route::get('/invoices/{id}/vat-explanation', [InvoiceController::class, 'vatExplanation']);
         Route::get('/invoices/{id}/transaction-timeline', [InvoiceController::class, 'transactionTimeline']);
+
+        // The standalone VAT-rule evaluate/propose/approve routes -- the
+        // last narrow gap Phase 9 (invoices and VAT) deferred. Kept 1:1
+        // with the source's app/api/v1/vat-rules/** shape; propose/approve
+        // are step-up gated exactly like invoice cancellation above.
+        Route::get('/vat-rules', [VatRuleController::class, 'index']);
+        Route::post('/vat-rules', [VatRuleController::class, 'store'])
+            ->middleware('password.confirm');
+        Route::get('/vat-rules/evaluate', [VatRuleController::class, 'evaluate']);
+        Route::post('/vat-rules/{id}/approval', [VatRuleController::class, 'approve'])
+            ->middleware('password.confirm');
 
         // Phase 10 (slice 1 of Accounting/commercial): business parties and
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
