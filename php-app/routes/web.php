@@ -23,6 +23,7 @@ use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
+use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use Illuminate\Support\Facades\Route;
 
@@ -225,5 +226,21 @@ Route::middleware('auth')->group(function () {
         Route::get('/refunds/{id}/checks', [RefundController::class, 'checks']);
         Route::post('/refunds/{id}/transition', [RefundController::class, 'transition']);
         Route::post('/refunds/{id}/disputes', [RefundController::class, 'dispute']);
+
+        // Phase 12 (portals/licensing/governance), slice 1: Licensing &
+        // Entitlements (lib/data/control-plane-repository.ts's
+        // getEntitlementsSnapshot/getUsageSnapshot/changeLicenseState/
+        // upgradeLicense). Kept 1:1 with the source's
+        // app/api/v1/licensing/** shape; state/upgrade are step-up gated.
+        // assertEntitledOperation and the rest of control-plane-
+        // repository.ts (portal navigation, organisation administration/
+        // employees, the workflow engine, access governance) remain
+        // deferred -- see docs/MIGRATION_MATRIX.md.
+        Route::get('/licensing/entitlements', [LicensingController::class, 'entitlements']);
+        Route::get('/licensing/usage', [LicensingController::class, 'usage']);
+        Route::post('/licensing/state', [LicensingController::class, 'state'])
+            ->middleware('password.confirm');
+        Route::post('/licensing/upgrade', [LicensingController::class, 'upgrade'])
+            ->middleware('password.confirm');
     });
 });
