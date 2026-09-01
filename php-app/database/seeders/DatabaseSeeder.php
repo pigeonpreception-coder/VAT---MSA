@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             TaxRuleSetSeeder::class,
             LicensePlanSeeder::class,
             OrganisationAdministratorRoleSeeder::class,
+            NavigationSeeder::class,
             DemoSeeder::class,
         ]);
     }

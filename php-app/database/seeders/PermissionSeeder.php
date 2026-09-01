@@ -10,14 +10,21 @@ use Illuminate\Support\Facades\DB;
  * IDENTITY/BUSINESS/COMPLIANCE/PLATFORM/CONTROL_PLANE_SEED_STATEMENTS) --
  * (code, resource, action, description, classification) copied verbatim.
  *
- * NOTE -- a second genuine source gap, same shape as RoleSeeder's: 11
+ * NOTE -- a second genuine source gap, same shape as RoleSeeder's: 12
  * permission codes are granted by lib/domain/access.ts's ROLE_PERMISSIONS
  * (taxpayers:suspend, registrations:approve, invoices:cancel, vat-rules:read,
  * vat-rules:manage, cases:override-sod, obligations:manage, payments:record,
- * security:manage, accounting:close-period, documents:manage) but were never
- * seeded into access_permissions in the source either. Completed below,
- * marked distinctly, with reasonable resource/action/classification values
- * following the seeded rows' own pattern -- not verified source data.
+ * security:manage, accounting:close-period, documents:manage, exceptions:read)
+ * but were never seeded into access_permissions in the source either.
+ * Completed below, marked distinctly, with reasonable resource/action/
+ * classification values following the seeded rows' own pattern -- not
+ * verified source data. `exceptions:read` was found by Phase 12's portal-
+ * navigation slice, not the original 11-code audit: navigation_items.
+ * required_permission also references it (nitem-reconciliation), and it is
+ * the first place in this whole migration where a ROLE_PERMISSIONS-only
+ * code actually has to resolve against the real access_permissions
+ * catalogue (an organisation-defined custom role's permission FK) --
+ * previously it only ever flowed through the unconstrained static role map.
  */
 class PermissionSeeder extends Seeder
 {
@@ -110,6 +117,7 @@ class PermissionSeeder extends Seeder
             ['security:manage', 'SECURITY', 'MANAGE', 'Manage security incidents and detection posture', 'SECURITY'],
             ['accounting:close-period', 'ACCOUNTING', 'CLOSE_PERIOD', 'Close an accounting period and block further postings', 'CONFIDENTIAL'],
             ['documents:manage', 'DOCUMENT', 'MANAGE', 'Record scan verdicts and manage retention holds on documents', 'CONFIDENTIAL'],
+            ['exceptions:read', 'RECONCILIATION_EXCEPTION', 'READ', 'Read authorised VAT reconciliation exceptions', 'RESTRICTED'],
         ];
 
         foreach ($permissions as [$code, $resource, $action, $description, $classification]) {

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Access\DynamicPermissions;
 use App\Support\Access\Permissions;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -64,10 +65,17 @@ class User extends Authenticatable
         return $this->taxpayer_id === null && in_array($this->role, Permissions::NATIONAL_SCOPE_ROLES, true);
     }
 
-    /** Module 1's hasPermission -- static role permissions only; dynamic (tenant-granted) permissions are resolved separately once organisation-role grants are migrated (Phase 7/8). */
+    /**
+     * Module 1's hasPermission: static role permissions OR the tenant-
+     * granted dynamic permissions an organisation-defined custom role
+     * assigns (`App\Support\Access\DynamicPermissions`, closed in Phase 12
+     * slice 2's portal-navigation work once `organisation_roles`/
+     * `user_role_assignments` existed to resolve it from).
+     */
     public function hasAppPermission(string $permission): bool
     {
-        return Permissions::roleHas($this->role, $permission);
+        return Permissions::roleHas($this->role, $permission)
+            || in_array($permission, DynamicPermissions::forUser($this), true);
     }
 
     public function isActive(): bool

@@ -24,6 +24,7 @@ use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
+use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use Illuminate\Support\Facades\Route;
@@ -253,10 +254,9 @@ Route::middleware('auth')->group(function () {
         // own ADMIN_WRITE gate hard-requires it. Every GET list route in
         // the source bundles its data inside getAdministrationSnapshot
         // (the dashboard aggregate, deferred) except listCapabilityGrants,
-        // the one standalone read ported here. Portal navigation, the
-        // workflow engine, and the rest of Access governance
-        // (certifyQuarterlyAccess and beyond) remain deferred -- see
-        // docs/MIGRATION_MATRIX.md.
+        // the one standalone read ported here. The workflow engine and the
+        // rest of Access governance (certifyQuarterlyAccess and beyond)
+        // remain deferred -- see docs/MIGRATION_MATRIX.md.
         Route::post('/organisations/employees', [OrganisationAdminController::class, 'storeEmployee'])
             ->middleware('password.confirm');
         Route::post('/organisations/employees/{id}/activation', [OrganisationAdminController::class, 'activateEmployee'])
@@ -273,5 +273,17 @@ Route::middleware('auth')->group(function () {
             ->middleware('password.confirm');
         Route::post('/access-reviews', [OrganisationAdminController::class, 'storeAccessReview'])
             ->middleware('password.confirm');
+
+        // Phase 12 slice 3: portal navigation (getEffectiveNavigation/
+        // getNavigationChildren/getNavigationItemActions/
+        // saveNavigationPreference). Closes out control-plane-repository.ts's
+        // last self-contained sub-domain -- only the workflow engine and
+        // the rest of Access governance remain. SavePreference is
+        // deliberately not step-up gated, matching the source (a UI
+        // preference isn't a privileged action).
+        Route::get('/navigation/workspace', [NavigationController::class, 'workspace']);
+        Route::get('/navigation/children', [NavigationController::class, 'children']);
+        Route::get('/navigation/actions', [NavigationController::class, 'actions']);
+        Route::post('/navigation/preferences', [NavigationController::class, 'storePreference']);
     });
 });
