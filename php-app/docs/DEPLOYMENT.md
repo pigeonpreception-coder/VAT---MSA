@@ -49,6 +49,11 @@ exists anywhere in `php-app/`). The substitutions:
   `fileinfo`) plus `pdo_sqlite` **only** if the Phase 14 legacy importer
   (`php artisan legacy:import-d1`, see below) will ever be run on this
   host -- nothing else in the application touches SQLite.
+- **`opcache` enabled** on every environment reachable by real traffic
+  -- see "Performance: OPcache" below. Not required for the application
+  to function at all (this migration's own local dev/test verification
+  ran without it), but its absence is a severe, measured throughput
+  problem under any real concurrency, not a minor tuning knob.
 
 ## First-time setup
 
@@ -80,6 +85,79 @@ in this codebase chains all of the above **including** `DemoSeeder` --
 appropriate for a demo/staging environment, not for a real production
 database. Run the seeders above individually, in that order, for a real
 deployment.)
+
+## Performance: OPcache and framework caching
+
+Red team finding RT-004 (`docs/RED_TEAM_ASSESSMENT_2026-09-02.md`,
+2026-09-02): this migration's local dev/test verification ran without
+PHP's OPcache extension enabled at all (`php -m | grep opcache` returned
+empty). Measured via `curl` timing against a fully static, DB-free page
+(`GET /login`): **~500ms sustained per request, ~23 seconds on a cold
+start**. Every PHP file in the request's autoload/require chain was being
+re-parsed and re-compiled from source on every single request -- with
+Laravel's own framework code being large, this is severely
+throughput-constrained (a single-digit number of requests per second per
+worker before saturating). This was root-caused to the *environment*
+(OPcache disabled), not the application code, and was never verified
+against this application's actual target production PHP-FPM
+configuration -- confirm the following there before a real rollout, not
+just in whatever environment this document was last checked against.
+
+**Required `php.ini` directives** on any host serving real traffic:
+
+```ini
+opcache.enable=1
+opcache.enable_cli=0
+; With a deploy pipeline that resets/reloads PHP-FPM on every release
+; (see "Releasing a new version" below), disable timestamp checking
+; entirely for maximum throughput -- stale bytecode is impossible if
+; every deploy already resets it:
+opcache.validate_timestamps=0
+; If a deploy pipeline does NOT reliably reset PHP-FPM on every release,
+; use this safer alternative instead of validate_timestamps=0:
+;   opcache.validate_timestamps=1
+;   opcache.revalidate_freq=0
+opcache.memory_consumption=256
+opcache.max_accelerated_files=20000
+```
+
+Confirm it took effect: `php -m | grep -i opcache`, or
+`var_dump(opcache_get_status())` from an authenticated diagnostic route
+-- this migration's own confirmation that it was *disabled* used exactly
+these two checks.
+
+**`opcache.validate_timestamps=0` is only safe if every release resets
+or reloads PHP-FPM** (see the deploy steps below) -- without that,
+`validate_timestamps=0` would serve stale bytecode indefinitely after a
+deploy, silently running old code. If the deploy pipeline cannot
+guarantee that reset, use `validate_timestamps=1` with
+`revalidate_freq=0` instead (checks file mtimes on every request --
+slightly slower than `=0`, but never serves genuinely stale code).
+
+### Releasing a new version
+
+Beyond the OPcache reset itself, run Laravel's own release-caching
+commands on every deploy -- compounds with OPcache, standard Laravel
+production practice, not yet formalized anywhere in this repository
+before this section:
+
+```bash
+composer install --no-dev --optimize-autoloader
+npm run build
+php artisan migrate --force        # never migrate:fresh -- see "Database" below
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+```
+
+then reset/reload PHP-FPM (`systemctl reload php8.2-fpm`, or the
+container/platform's own equivalent) so OPcache picks up the new code
+immediately rather than waiting on `validate_timestamps`. Run
+`php artisan config:clear`/`route:clear`/`view:clear` first if any of
+the cached artifacts from a *previous* release are still on disk and
+the new release's `.env`/routes/views changed shape -- a stale
+`config:cache` in particular silently ignores `.env` changes until
+cleared.
 
 ## Environment variables
 
@@ -207,10 +285,12 @@ record. As of this document: every application-code phase (3 through
 13) is COMPLETE for its own actual scope -- every export from the
 original source's `lib/data/**` and `lib/api/**` now has a ported PHP
 counterpart. Known, documented gaps that are not silently pretended
-complete: no password-reset flow (Phase 6), no full TOTP step-up parity
-(Phase 6 note above), platform-config values not yet wired to any real
-downstream consumer (Phase 13's "Platform config & change-management"
-section), and no real object-storage driver configured yet (this
-document's "Storage" section). None of these block a pilot/demo
-deployment; all are called out here so a real production rollout
-doesn't discover them by surprise.
+complete: no full TOTP step-up parity (Phase 6 note above), platform-config
+values not yet wired to any real downstream consumer (Phase 13's
+"Platform config & change-management" section), and no real
+object-storage driver configured yet (this document's "Storage"
+section). (Self-service password reset -- previously listed here as a
+gap -- was closed 2026-09-02 per red team finding RT-005; see
+`docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.) None of these block a
+pilot/demo deployment; all are called out here so a real production
+rollout doesn't discover them by surprise.

@@ -379,6 +379,18 @@ status-code change is implied for either branch (both already correctly deny acc
 
 ### RT-004 — Severe request latency caused by disabled PHP OPcache (deployment configuration, not application code)
 
+> **Status: FIXED (2026-09-02).** Added a dedicated "Performance: OPcache and framework
+> caching" section to `docs/DEPLOYMENT.md`, with the required `php.ini` directives
+> (`opcache.enable=1`, memory/file-count sizing, and an explicit `validate_timestamps=0` vs
+> `=1`+`revalidate_freq=0` decision tied to whether the deploy pipeline resets PHP-FPM), the two
+> commands used to confirm it took effect, and a new "Releasing a new version" section
+> formalizing `config:cache`/`route:cache`/`view:cache` plus the PHP-FPM reset/reload step —
+> none of which existed anywhere in this repository before. As this finding's own report entry
+> always said, this is a deployment-configuration task, not an application-code change — no
+> `php-app/app` file was touched. Also corrected a now-stale line in `docs/DEPLOYMENT.md`'s
+> "What is not done yet" section that still listed the password-reset gap RT-005 had already
+> closed.
+
 | | |
 |---|---|
 | **Severity** | **High** (performance/availability risk under real load) — but classified as a **deployment/infrastructure configuration** finding, not an application code defect |
@@ -646,15 +658,20 @@ report is not one-sided:
 | RT-001 | Authenticated content viewable via back-navigation after logout (bfcache) | High — **FIXED** |
 | RT-002 | Stack trace leak on cross-tenant authorization failure (debug-mode dependent) | Medium — **FIXED** |
 | RT-003 | Account-suspension status disclosed via differential login message | Low/Info — **FIXED** |
-| RT-004 | OPcache disabled — severe per-request latency | High (config, not code) |
+| RT-004 | OPcache disabled — severe per-request latency | High (config, not code) — **FIXED** |
 | RT-005 | No self-service password-reset flow | Medium — **FIXED** |
 
 **Overall assessment:** the application's core transactional integrity controls
 (idempotency, tenant isolation, permission gating) held up well under adversarial testing
-within the surface this UI-only assessment could reach. The confirmed findings are real but
+within the surface this UI-only assessment could reach. The confirmed findings were real but
 narrow: one systemic-but-cheap-to-fix session-caching gap (RT-001), one debug-mode-contingent
 information leak (RT-002), one low-severity oracle (RT-003), one environment-configuration
-performance risk that must be verified against actual production config (RT-004), and one
-missing self-service flow (RT-005). The larger, unresolved risk is not a discovered defect but
-a **coverage gap**: the majority of this system's business logic has no UI yet and could not
-be exercised by a black-box browser tester at all.
+performance risk (RT-004), and one missing self-service flow (RT-005). **All five are now
+fixed** (2026-09-02) — code changes for RT-001/RT-002/RT-003/RT-005, each with dedicated
+regression tests and, where UI-reachable, a live browser repro of the original steps proving
+the fix; a `docs/DEPLOYMENT.md` configuration section for RT-004, which is inherently a
+deployment-environment task, not a code change — **its actual production `php.ini` still needs
+independent confirmation**, since this assessment never had server access to verify it there.
+The larger, unresolved risk is not a discovered defect but a **coverage gap**: the majority of
+this system's business logic has no UI yet and could not be exercised by a black-box browser
+tester at all — this assessment should be re-run once that UI exists.
