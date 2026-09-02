@@ -19,6 +19,7 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\ComplianceSnapshotController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
@@ -209,6 +210,10 @@ Route::middleware('auth')->group(function () {
         // DocumentService's doc comment for what's deliberately deferred.
         Route::post('/documents', [DocumentController::class, 'store']);
         Route::post('/documents/{id}/scan-result', [DocumentController::class, 'scanResult']);
+
+        // Phase 11's own fixed-list dashboard aggregate, closing out the
+        // phase's one remaining gap.
+        Route::get('/compliance', [ComplianceSnapshotController::class, 'show']);
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
