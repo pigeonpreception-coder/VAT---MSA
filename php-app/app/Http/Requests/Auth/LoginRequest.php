@@ -51,8 +51,18 @@ class LoginRequest extends FormRequest
         if (! $user->isActive()) {
             Auth::logout();
 
+            // Red team finding RT-003 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md):
+            // this branch is only reachable once Auth::attempt() above has
+            // already confirmed the submitted password is correct, so a
+            // suspension-specific message here let anyone who already held
+            // valid credentials for a suspended account confirm that fact
+            // (CWE-203, observable discrepancy) -- a wrong password against
+            // the same suspended account fell into the generic branch
+            // instead, making the two cases distinguishable. Use the same
+            // generic message as a wrong password so both denial paths are
+            // indistinguishable from the login response.
             throw ValidationException::withMessages([
-                'email' => 'This account has been suspended.',
+                'email' => 'These credentials do not match our records.',
             ]);
         }
 

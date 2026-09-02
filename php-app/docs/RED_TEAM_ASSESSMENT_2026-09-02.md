@@ -178,6 +178,23 @@ middleware, so they should not pick up the change).
 
 ### RT-002 — Unhandled framework exception leaks a full stack trace on a cross-tenant authorization failure (debug-mode dependent)
 
+> **Status: FIXED (2026-09-02).** A render callback for
+> `Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException` is now registered in
+> `bootstrap/app.php`, returning clean JSON (`{code: 'FORBIDDEN', message}`) for
+> JSON-expecting requests and a new on-brand `resources/views/errors/403.blade.php` view for
+> everything else — for **every** `AuthorizationException` in the app (`TenantScope::
+> requireTaxpayer()` and every controller's `$this->authorize()` gate denial alike, since both
+> throw the same underlying class), not just the narrowly-scoped fix originally proposed.
+> Note: the callback is type-hinted against `AccessDeniedHttpException`, not
+> `AuthorizationException` itself — Laravel's own `Handler::prepareException()` already
+> converts a status-less `AuthorizationException` to `AccessDeniedHttpException` *before*
+> render callbacks are consulted, so a closure hinted to the original class silently never
+> matches (discovered when an early version of this fix showed "Undefined variable $message"
+> from Laravel's own default `errors.403` view convention firing instead of this callback).
+> Verified: 2 new dedicated tests plus the full 275-test suite pass with zero regressions,
+> confirmed with this environment's actual `APP_DEBUG=true` (the exact condition that
+> previously leaked).
+
 | | |
 |---|---|
 | **Severity** | **Medium** (High if `APP_DEBUG=true` were ever active in production; the app's deployment docs already mandate `APP_DEBUG=false` in production, which is why this is scored Medium and not High) |
@@ -264,6 +281,14 @@ successful-request behavior changes.
 ---
 
 ### RT-003 — Differential login error messages disclose account-suspension status (password oracle)
+
+> **Status: FIXED (2026-09-02).** `LoginRequest::authenticate()`'s suspended-account branch
+> now throws the same generic `'These credentials do not match our records.'` message as a
+> wrong password, instead of `'This account has been suspended.'`. The suspended-account deny
+> decision itself is unchanged — only the message text. Verified: 4 new tests, including a
+> direct regression test asserting a correct-password/suspended attempt and a
+> wrong-password attempt against the same account now produce byte-identical error text; full
+> 275-test suite passes with zero regressions.
 
 | | |
 |---|---|
@@ -587,8 +612,8 @@ report is not one-sided:
 | ID | Title | Severity |
 |---|---|---|
 | RT-001 | Authenticated content viewable via back-navigation after logout (bfcache) | High — **FIXED** |
-| RT-002 | Stack trace leak on cross-tenant authorization failure (debug-mode dependent) | Medium |
-| RT-003 | Account-suspension status disclosed via differential login message | Low/Info |
+| RT-002 | Stack trace leak on cross-tenant authorization failure (debug-mode dependent) | Medium — **FIXED** |
+| RT-003 | Account-suspension status disclosed via differential login message | Low/Info — **FIXED** |
 | RT-004 | OPcache disabled — severe per-request latency | High (config, not code) |
 | RT-005 | No self-service password-reset flow | Medium |
 
