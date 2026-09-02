@@ -32,9 +32,12 @@
                         <input id="password" type="password" name="password"
                                class="form-control @error('password') is-invalid @enderror" required autocomplete="current-password">
                     </div>
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" name="remember" id="remember" class="form-check-input">
-                        <label for="remember" class="form-check-label">Remember me</label>
+                    <div class="mb-3 d-flex justify-content-between align-items-center">
+                        <div class="form-check">
+                            <input type="checkbox" name="remember" id="remember" class="form-check-input">
+                            <label for="remember" class="form-check-label">Remember me</label>
+                        </div>
+                        <a href="{{ route('password.request') }}" class="small">Forgot password?</a>
                     </div>
                     <button type="submit" class="btn btn-primary w-100">Sign in</button>
                 </form>

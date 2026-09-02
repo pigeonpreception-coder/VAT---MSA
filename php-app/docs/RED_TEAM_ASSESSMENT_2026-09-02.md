@@ -474,6 +474,38 @@ OPcache reset (e.g. via `opcache_reset()` on deploy, or `validate_timestamps=1` 
 
 ### RT-005 — No self-service password-reset / account-recovery flow exists
 
+> **Status: FIXED (2026-09-02).** Added a full self-service password-reset flow:
+> `ForgotPasswordController`/`ResetPasswordController`, `ForgotPasswordRequest`/
+> `ResetPasswordRequest`, and `resources/views/auth/{forgot-password,reset-password}.blade.php`,
+> wired at `/forgot-password` and `/reset-password/{token}` (routes named to match Laravel's
+> own convention, `password.reset` specifically, since the default `ResetPassword` notification
+> builds its email link from that name). Uses Laravel's built-in `password_reset_tokens` table
+> (already present in this app's own users migration — the checklist item below asking to
+> confirm this turned out to already be satisfied) and the `Password` facade, not a hand-rolled
+> token scheme. A "Forgot password?" link was added to the login page.
+>
+> Preserves the account-enumeration safety this assessment's other findings established as a
+> priority: the request endpoint returns byte-identical confirmation text regardless of whether
+> the email exists (rate-limited, mirroring `LoginRequest`'s own throttle pattern), and the
+> reset-submission endpoint collapses invalid-token, expired-token, and unknown-email outcomes
+> into one generic message rather than exposing Laravel's own `INVALID_USER` distinction, which
+> would otherwise have been a second RT-003-shaped oracle introduced by this very fix. New
+> passwords require 10+ characters with mixed case and a number
+> (`Illuminate\Validation\Rules\Password`). No `AuditService::append()` call was added — this
+> app's existing login/logout/confirm-password flows emit no audit event either, since that
+> service requires an authenticated `User` actor a not-yet-authenticated reset request never
+> has; inventing a fictitious "system actor" pattern found nowhere else in the codebase was
+> judged worse than the gap.
+>
+> Verified: 9 new tests (full request→email→reset→login cycle, enumeration-safety on both
+> endpoints, rate limiting, expired/invalid token rejection, single-use token replay rejection,
+> weak-password rejection, guest-only route guarding) plus the full 284-test suite, zero
+> regressions. Also verified live end-to-end in the browser: submitted a real request against
+> the demo account, read the actual logged email (`MAIL_MAILER=log`) — correctly branded
+> "VAT-MSA", containing a working link — followed it, reset the password, and logged in with
+> the new password to a real authenticated Dashboard. The demo account's password was reverted
+> to its documented default afterward.
+
 | | |
 |---|---|
 | **Severity** | **Medium** |
@@ -615,7 +647,7 @@ report is not one-sided:
 | RT-002 | Stack trace leak on cross-tenant authorization failure (debug-mode dependent) | Medium — **FIXED** |
 | RT-003 | Account-suspension status disclosed via differential login message | Low/Info — **FIXED** |
 | RT-004 | OPcache disabled — severe per-request latency | High (config, not code) |
-| RT-005 | No self-service password-reset flow | Medium |
+| RT-005 | No self-service password-reset flow | Medium — **FIXED** |
 
 **Overall assessment:** the application's core transactional integrity controls
 (idempotency, tenant isolation, permission gating) held up well under adversarial testing
