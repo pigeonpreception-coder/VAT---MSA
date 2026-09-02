@@ -46,7 +46,7 @@ below for the specific commands.
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE -- every one of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- including `VAT_RETURN`- and `DOCUMENT`-sourced citations, see "VAT_RETURN evidence citation" and "DOCUMENT evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below), and now `getComplianceSnapshot` (see "Compliance dashboard snapshot" below) -- the phase's last remaining gap. Nothing outstanding in this phase's own scope. |
 | 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
-| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- Module 22's own Documents & Records slice is COMPLETE: `uploadDocument`/`completeDocumentScan` (pulled forward in Phase 11 to unblock `DOCUMENT`-sourced evidence citation, see "DOCUMENT evidence citation" below) plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below. The platform/developer-portal snapshot reads are COMPLETE: `getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below. The offline sync command is now also COMPLETE: `receiveOfflineBatch` -- see "Offline sync commands" below. Everything else in `platform-repository.ts` (report exports, data products/analytics, platform config/change-management) and the legacy D1 importer and deployment documentation remain NOT STARTED. |
+| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- Module 22's own Documents & Records slice is COMPLETE: `uploadDocument`/`completeDocumentScan` (pulled forward in Phase 11 to unblock `DOCUMENT`-sourced evidence citation, see "DOCUMENT evidence citation" below) plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below. The platform/developer-portal snapshot reads are COMPLETE: `getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below. The offline sync command is COMPLETE: `receiveOfflineBatch` -- see "Offline sync commands" below. Report exports are now also COMPLETE: `runInlineReport`/`publishReportRun`/`requestReportExport`/`approveReportExport`/`cancelReportExport`/`getReportExport`/`downloadReportExport` -- see "Report exports" below. Everything else in `platform-repository.ts` (data products/analytics, platform config/change-management) and the legacy D1 importer and deployment documentation remain NOT STARTED. |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -1623,6 +1623,105 @@ a malformed payload failing validation with the expected error codes.
 197 tests total, 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
+## Report exports (Phase 13, fourth slice)
+
+Ports `platform-repository.ts`'s `runInlineReport`/`publishReportRun`/
+`requestReportExport`/`approveReportExport`/`cancelReportExport`/
+`getReportExport`/`downloadReportExport` (Module 7 Phases A-C), via
+`lib/domain/platform.ts`'s `validateReportParameters`/
+`validateExportCommand`/`validateExportCancellation`. Still genuinely
+separate sub-modules of that same source file, still NOT STARTED: data
+products/analytics, platform config/change-management.
+
+New: `App\Domain\Platform\ReportValidator`, `App\Services\Platform\
+ReportExportService` (all 7 methods), `App\Http\Controllers\Platform\
+ReportController`; `POST /api/v1/reports/{code}/runs`, `POST /api/v1/
+reports/runs/{id}/publication`, `POST /api/v1/reports/runs/{id}/exports`,
+`GET /api/v1/reports/exports/{id}`, `POST /api/v1/reports/exports/{id}/
+approval`, `POST /api/v1/reports/exports/{id}/cancellation`, `GET
+/api/v1/reports/exports/{id}/download` -- kept 1:1 with the source's own
+`app/api/v1/reports/**` route shapes. No Eloquent model for
+`report_definitions`/`report_runs`/`report_exports` yet -- `DB::table()`
+throughout, matching Platform snapshots' and Offline sync's own
+established style; `document_metadata` (which does have a model) is
+still written via `DB::table()` in `requestExport()`, matching that
+command's own single mixed-table transaction shape rather than mixing an
+Eloquent write into an otherwise-`DB::table()` command.
+
+**The audience-tier guardrail** (`requireAudienceAccess`) is a genuine
+per-tier dispatch, not one generic gate: `NAMRA_OPERATIONS` requires
+national scope; `EXECUTIVE` requires national scope AND `reports:executive`;
+`AUDITOR_LEGAL` requires `audit:read` OR `cases:manage`; `PRACTITIONER`
+requires at least one `delegations` row with `status='ACTIVE'` for the
+actor, and scopes the report to exactly those delegated taxpayers;
+`TAXPAYER`/`OPEN_DATA` need no extra check (already correctly scoped by
+the actor's own resolved organisation, or a result-shaping concern
+handled inside `computeReportResult` itself). `CASE_EVIDENCE_SUMMARY`'s
+own cross-tenant `case_id` refusal is preserved faithfully but, like
+`PlatformSnapshotService::getSnapshot`'s own `$scoped` branch, is not
+reachable by any role seeded today -- every role holding
+`audit:read`/`cases:manage` is also a `NATIONAL_SCOPE_ROLES` member
+(verified across the full `Permissions::ROLE_PERMISSIONS` map), so
+`TenantScope::isNational($actor)` is always true before that comparison
+is ever reached.
+
+**`publishReportRun`'s reconciliation gate**: `computeReportResult` is
+re-run against the run's own persisted `scope_snapshot` (never a scope
+re-derived from whoever happens to call publish -- a PRACTITIONER-tier
+run's delegated-taxpayer set is resolved once, at run time) and compared
+to the stored `result_summary` via `AuditService::canonicalJson` (a
+sorted-key JSON comparison, the same helper `CommandLedger::requestHash`
+and `OfflineSyncService`'s own batch-hash comparison already use); a
+divergence refuses publication with `409`, forcing a fresh run before
+the figure can become official.
+
+**The step-up requirement on `requestExport`/`approveExport` is
+data-conditional, not route-wide** -- unlike every other step-up-gated
+command in this migration (state/upgrade, taxpayer suspension,
+registration decisions, membership assignment, invoice cancellation),
+which are unconditionally gated and so simply wear the route-level
+`password.confirm` middleware, these two only require a fresh step-up
+when the report's own classification is sensitive
+(`TAX_CONFIDENTIAL`/`RESTRICTED`) or the export's own
+`requires_step_up` flag is set. New `App\Support\Access\StepUp::isFresh()`
+mirrors Laravel's own `Illuminate\Auth\Middleware\RequirePassword::
+shouldConfirmPassword` freshness check exactly (same
+`auth.password_confirmed_at` session key, same `auth.password_timeout`
+config), evaluated inline by the controller instead of gating the whole
+route.
+
+**Faithful quirk, not a bug**: `publishReportRun`'s idempotent-replay
+path returns the raw persisted `report_runs` row, while its fresh-publish
+path hand-builds an enriched response (decoded `result_summary`, a
+computed `envelope`, ISO-formatted timestamps) -- a genuine shape
+difference the source itself has (SQLite's TEXT-native storage happens
+to make the two paths format-identical there; MySQL's TIMESTAMP columns
+do not round-trip as ISO text), reproduced rather than papered over by
+forcing the two paths into one shape the source never gives them.
+`requestExport`/`approveExport`/`cancelExport` do not have this
+asymmetry -- their own success paths always return the raw persisted row
+regardless of replay.
+
+Verified by a new `tests/Feature/Platform/ReportExportTest.php` (24
+tests): permission gating and an unknown/unimplemented report code;
+`SALES_VAT_SUMMARY`'s own-organisation aggregation; `COMPLIANCE_CASELOAD`'s
+national-scope guardrail; `REVENUE_COMPLIANCE_TRENDS`'s national-scope
++`reports:executive` guardrail; `CASE_EVIDENCE_SUMMARY`'s
+audit-authority guardrail, missing/unknown `case_id` handling, and its
+own faithful-but-unreachable cross-tenant check; `PORTFOLIO_EXCEPTIONS`'
+active-delegation guardrail and delegated-taxpayer scoping;
+`NATIONAL_VAT_AGGREGATE`'s minimum-cell suppression; publish's
+reconciliation gate (success, conflict-on-changed-data, requester/national
+-only, idempotent replay); export request (auto-approved when
+non-sensitive, step-up-gated and `PENDING_APPROVAL` when sensitive,
+requester/national-only); export approval (national-only, no
+self-approval, step-up-gated); export cancellation (releases the
+quarantined document, only while `PENDING_APPROVAL`, reason-length
+validation); and export access/download (requester/national-only,
+refused unapproved or expired, exact byte-for-byte content on success).
+221 tests total, 0 regressions, run against real MySQL, plus a clean
+`migrate:fresh --seed` cycle.
+
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
 Opens Phase 12 -- previously entirely `NOT STARTED`. `lib/data/control-
@@ -2395,14 +2494,12 @@ module" above) each keep their existing manual tenant checks fully
 correct and untouched; this was always about which models this specific
 automatic-scope mechanism can safely sit on top of, never a security gap
 in those models themselves, so no further action is owed there beyond
-the documented reasoning. Phase 13 now has three slices closed: Module
+the documented reasoning. Phase 13 now has four slices closed: Module
 22's own Documents & Records (see "Document module" above), the
 platform/developer-portal snapshot reads (see "Platform snapshots"
-above), and the offline-sync command (see "Offline sync commands"
-above). Still outstanding in `platform-repository.ts`: report exports
-(`runInlineReport`/`publishReportRun`/`requestReportExport`/
-`approveReportExport`/`cancelReportExport`/`getReportExport`/
-`downloadReportExport`), data products/analytics
+above), the offline-sync command (see "Offline sync commands" above),
+and report exports (see "Report exports" above). Still outstanding in
+`platform-repository.ts`: data products/analytics
 (`listDataProducts`/`runAnalyticsModel`/`publishDataProduct`/
 `queryApprovedMetrics`/`listAnomalyCandidates`), and platform
 config/change-management (`requestPlatformChange`/`decidePlatformChange`/
@@ -2428,8 +2525,8 @@ snapshot & portals" above. This is genuinely a multi-week engineering
 effort at the pace of careful, verified, per-field-checked porting
 demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12/13 slices --
 continuing it means repeating this same rigor across the remaining
-~106 routes (the schema itself is now essentially done, and Phase 13
-has its first three slices closed), phase by phase (or sub-slice by
+~99 routes (the schema itself is now essentially done, and Phase 13
+has its first four slices closed), phase by phase (or sub-slice by
 sub-slice, as Phases 10, 11 and 12 all demonstrated), as originally
 scoped. Given the genuine scale each remaining module represents
 (`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports,
@@ -2437,8 +2534,8 @@ was comparable in size to the whole of Phase 10's `business-
 repository.ts`, which itself took 6 separate sub-slices to close out --
 Phase 12 took 6, counting the two small files closed out alongside its
 own final slice; `platform-repository.ts`'s own remaining sub-modules
-beyond documents, platform snapshots and offline sync are comparable
-again; Phases 4,
+beyond documents, platform snapshots, offline sync and report exports
+are comparable again; Phases 4,
 5, 7, 8, 9, 10, 11 and 12 are now all entirely done), continuing
 to completion is realistically a
 multi-session effort, not a single

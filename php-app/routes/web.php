@@ -33,6 +33,7 @@ use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
+use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowController;
@@ -235,6 +236,19 @@ Route::middleware('auth')->group(function () {
         // App\Services\Platform\OfflineSyncService's own doc comment for
         // what else in platform-repository.ts remains out of this slice.
         Route::post('/offline/batches', [OfflineSyncController::class, 'store']);
+
+        // Module 7 Phases A-C's report-run/report-export commands (Phase 13,
+        // fourth slice) -- kept 1:1 with the source's own
+        // app/api/v1/reports/** route shapes. See
+        // App\Services\Platform\ReportExportService's own doc comment for
+        // what else in platform-repository.ts remains out of this slice.
+        Route::post('/reports/{code}/runs', [ReportController::class, 'run']);
+        Route::post('/reports/runs/{id}/publication', [ReportController::class, 'publish']);
+        Route::post('/reports/runs/{id}/exports', [ReportController::class, 'requestExport']);
+        Route::get('/reports/exports/{id}', [ReportController::class, 'showExport']);
+        Route::post('/reports/exports/{id}/approval', [ReportController::class, 'approveExport']);
+        Route::post('/reports/exports/{id}/cancellation', [ReportController::class, 'cancelExport']);
+        Route::get('/reports/exports/{id}/download', [ReportController::class, 'downloadExport']);
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
