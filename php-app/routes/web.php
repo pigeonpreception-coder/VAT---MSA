@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Identity\BranchController;
+use App\Http\Controllers\Identity\IdentityFoundationController;
 use App\Http\Controllers\Identity\MembershipController;
 use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
@@ -58,6 +59,16 @@ Route::middleware('auth')->group(function () {
         Route::post('/registration-applications', [RegistrationApplicationController::class, 'store']);
         Route::post('/registration-applications/{id}/decision', [RegistrationApplicationController::class, 'decision'])
             ->middleware('password.confirm');
+
+        // getIdentityFoundationSnapshot -- Module 1's own dashboard
+        // aggregate (organisations + registrations + identity providers +
+        // scope-wide access counts + the ITAS integration status). The
+        // source consumes this directly from server-component pages
+        // (app/organisations/page.tsx, app/portal/{namra,namra-admin}/
+        // page.tsx), not through an app/api/v1/** route file -- exposed as
+        // one here anyway, matching every other snapshot in this migration.
+        // Closes out Phase 8's own last deferred piece.
+        Route::get('/identity', [IdentityFoundationController::class, 'show']);
 
         Route::get('/organisations', [OrganisationController::class, 'index']);
         // Registered before the /organisations/{id} wildcard below --

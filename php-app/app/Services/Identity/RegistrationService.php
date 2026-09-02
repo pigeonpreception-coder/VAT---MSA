@@ -16,18 +16,56 @@ use App\Models\Taxpayer;
 use App\Models\TaxpayerIdentifier;
 use App\Models\User;
 use App\Services\Audit\AuditService;
+use App\Support\Access\TenantScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Ported from lib/data/identity-repository.ts's submitRegistrationApplication
- * and decideRegistrationApplication. A taxpayer/organisation does not exist
- * until an APPROVE decision materializes it -- see decide() below.
+ * Ported from lib/data/identity-repository.ts's submitRegistrationApplication,
+ * decideRegistrationApplication, and listRegistrationApplications. A
+ * taxpayer/organisation does not exist until an APPROVE decision
+ * materializes it -- see decide() below.
  */
 class RegistrationService
 {
     public function __construct(private readonly ItasIdentityPort $itas) {}
+
+    /**
+     * Ported from lib/data/identity-repository.ts's
+     * listRegistrationApplications -- extracted out of
+     * RegistrationApplicationController::index() (a pure refactor, no
+     * behaviour change) so App\Services\Identity\
+     * IdentityFoundationSnapshotService's own `registrations` field can
+     * reuse the identical query instead of duplicating it, the same
+     * precedent App\Support\Licensing\LicenseResolver already established.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function list(User $user): array
+    {
+        $query = RegistrationApplication::query()->with('verifications');
+        if (! TenantScope::isNational($user)) {
+            $query->where('submitted_by', $user->id);
+        }
+
+        return $query->orderByDesc('submitted_at')->limit(100)->get()->map(fn (RegistrationApplication $application) => [
+            'id' => $application->id,
+            'vat_number' => $application->vat_number,
+            'tin' => $application->tin,
+            'company_registration_number' => $application->company_registration_number,
+            'legal_name' => $application->legal_name,
+            'trading_name' => $application->trading_name,
+            'taxpayer_type' => $application->taxpayer_type,
+            'return_frequency' => $application->return_frequency,
+            'email' => $application->email,
+            'status' => $application->status,
+            'verification_source' => $application->verification_source,
+            'verification_status' => $application->verifications->sortByDesc('checked_at')->first()?->status,
+            'submitted_by' => $application->submitted_by,
+            'submitted_at' => $application->submitted_at,
+        ])->values()->all();
+    }
 
     public function submit(array $registration, User $actor, string $idempotencyKey, string $correlationId): RegistrationApplication
     {
