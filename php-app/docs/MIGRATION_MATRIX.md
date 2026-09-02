@@ -46,7 +46,7 @@ below for the specific commands.
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE -- every one of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- including `VAT_RETURN`- and `DOCUMENT`-sourced citations, see "VAT_RETURN evidence citation" and "DOCUMENT evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below), and now `getComplianceSnapshot` (see "Compliance dashboard snapshot" below) -- the phase's last remaining gap. Nothing outstanding in this phase's own scope. |
 | 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
-| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- Module 22's own Documents & Records slice is COMPLETE: `uploadDocument`/`completeDocumentScan` (pulled forward in Phase 11 to unblock `DOCUMENT`-sourced evidence citation, see "DOCUMENT evidence citation" below) plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below. The platform/developer-portal snapshot reads are now also COMPLETE: `getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below. Everything else in `platform-repository.ts` (offline sync commands, report exports, data products/analytics, platform config/change-management) and the legacy D1 importer and deployment documentation remain NOT STARTED. |
+| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- Module 22's own Documents & Records slice is COMPLETE: `uploadDocument`/`completeDocumentScan` (pulled forward in Phase 11 to unblock `DOCUMENT`-sourced evidence citation, see "DOCUMENT evidence citation" below) plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below. The platform/developer-portal snapshot reads are COMPLETE: `getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below. The offline sync command is now also COMPLETE: `receiveOfflineBatch` -- see "Offline sync commands" below. Everything else in `platform-repository.ts` (report exports, data products/analytics, platform config/change-management) and the legacy D1 importer and deployment documentation remain NOT STARTED. |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -1553,6 +1553,76 @@ unlinked `DEVELOPER_PARTNER`, then the organisation's real API client
 and webhook once linked. 186 tests total, 0 regressions, run against
 real MySQL, plus a clean `migrate:fresh --seed` cycle.
 
+## Offline sync commands (Phase 13, third slice)
+
+Ports `platform-repository.ts`'s `receiveOfflineBatch` (via
+`lib/domain/platform.ts`'s `validateOfflineBatch`) -- Module 22's
+offline-invoicing sync-batch intake, the counterpart to the read-only
+`offline_devices`/`offline_sync_batches` rows "Platform snapshots" above
+already exposes for reading. Still genuinely separate sub-modules of that
+same source file, still NOT STARTED: report exports, data products/
+analytics, platform config/change-management -- the same "smallest
+coherent next slice" discipline as the prior two slices.
+
+New: `App\Domain\Platform\OfflineSyncValidator` (device_id/batch_id/
+sequence-range/timestamp/hash/document-count/signature validation, a
+direct port of `validateOfflineBatch`), `App\Services\Platform\
+OfflineSyncService::receive()`, `App\Http\Controllers\Platform\
+OfflineSyncController`; `POST /api/v1/offline/batches`, kept 1:1 with the
+source's `app/api/v1/offline/batches/route.ts` shape. No Eloquent model
+for `offline_devices`/`offline_sync_batches` yet -- `DB::table()`
+throughout, matching "Platform snapshots"'s own established style.
+
+The device lookup accepts either the device's own id or its
+`device_code` (`WHERE d.id=? OR d.device_code=?`, matching the source
+exactly); a device outside the actor's own taxpayer scope (checked via
+`TenantScope::isNational`/`taxpayer_id`, joined off `organisations`) is a
+`403`, an unenrolled device a `404`. A replayed `batch_id` for the same
+device returns the prior batch unchanged when the content hash matches,
+or `409`s when it doesn't -- the same idempotency shape
+`App\Support\Business\CommandLedger` already gives every command, applied
+here by hand since this command's identity key is `(offline_device_id,
+client_batch_id)`, not an `Idempotency-Key` header.
+
+**Faithful-port note, not a bug**: the source has never actually wired up
+real device-signature verification. `receiveOfflineBatch`'s own
+`$rejection` starts as `SIGNATURE_VERIFIER_NOT_CONFIGURED` and is only
+ever overridden by the device-trust (`status`/`enrolment_status`/
+`public_key_reference`) / sequence-continuity / hash-chain-continuity
+checks below it -- so a batch that clears every one of those three still
+falls through to that same default and is written with
+`status='REJECTED'` regardless. There is no path in the source that ever
+accepts a batch today. Reproduced exactly as the source has it (this
+migration's established "reproduce source quirks faithfully" convention,
+already applied to `getPlatformSnapshot`'s `$scoped` branch and the
+`service_components` ordering above), not "fixed" by inventing a
+signature verifier the source itself never built.
+
+The source's own `enforceRateLimits`/`readBoundedJson`/
+`emitStructuredSecurityLog` calls around `handleOfflineBatch` are NOT
+ported here -- the same orthogonal-concern deferral
+`App\Http\Controllers\Document\DocumentController`'s doc comment already
+documents for rate limiting on the Document module, extended here to the
+request-body-size bound and structured security logging; this
+migration's rate-limiting/request-size/security-logging story is not yet
+decided anywhere else in the codebase either, so it is not silently
+bundled into this slice.
+
+Verified by a new `tests/Feature/Platform/OfflineSyncTest.php` (11
+tests): permission gating (`403` without `offline:sync`); an unknown
+device (`404`); a device outside the actor's taxpayer scope (`403`) and a
+national-scope actor reaching any taxpayer's device regardless; a batch
+that passes every other check still being written `REJECTED` with
+`SIGNATURE_VERIFIER_NOT_CONFIGURED` (the faithful-port behaviour above);
+each of the other three rejection reasons
+(`DEVICE_TRUST_NOT_ESTABLISHED`/`SEQUENCE_GAP_OR_REPLAY`/
+`HASH_CHAIN_MISMATCH`) individually triggered; an identical-content
+replay returning the prior batch without a second insert; a
+different-content replay of the same `batch_id` conflicting (`409`); and
+a malformed payload failing validation with the expected error codes.
+197 tests total, 0 regressions, run against real MySQL, plus a clean
+`migrate:fresh --seed` cycle.
+
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
 Opens Phase 12 -- previously entirely `NOT STARTED`. `lib/data/control-
@@ -2325,11 +2395,11 @@ module" above) each keep their existing manual tenant checks fully
 correct and untouched; this was always about which models this specific
 automatic-scope mechanism can safely sit on top of, never a security gap
 in those models themselves, so no further action is owed there beyond
-the documented reasoning. Phase 13 now has two slices closed: Module
-22's own Documents & Records (see "Document module" above) and the
+the documented reasoning. Phase 13 now has three slices closed: Module
+22's own Documents & Records (see "Document module" above), the
 platform/developer-portal snapshot reads (see "Platform snapshots"
-above). Still outstanding in `platform-repository.ts`: the offline-sync
-commands (`receiveOfflineBatch`), report exports
+above), and the offline-sync command (see "Offline sync commands"
+above). Still outstanding in `platform-repository.ts`: report exports
 (`runInlineReport`/`publishReportRun`/`requestReportExport`/
 `approveReportExport`/`cancelReportExport`/`getReportExport`/
 `downloadReportExport`), data products/analytics
@@ -2358,8 +2428,8 @@ snapshot & portals" above. This is genuinely a multi-week engineering
 effort at the pace of careful, verified, per-field-checked porting
 demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12/13 slices --
 continuing it means repeating this same rigor across the remaining
-~107 routes (the schema itself is now essentially done, and Phase 13
-has its first two slices closed), phase by phase (or sub-slice by
+~106 routes (the schema itself is now essentially done, and Phase 13
+has its first three slices closed), phase by phase (or sub-slice by
 sub-slice, as Phases 10, 11 and 12 all demonstrated), as originally
 scoped. Given the genuine scale each remaining module represents
 (`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports,
@@ -2367,7 +2437,8 @@ was comparable in size to the whole of Phase 10's `business-
 repository.ts`, which itself took 6 separate sub-slices to close out --
 Phase 12 took 6, counting the two small files closed out alongside its
 own final slice; `platform-repository.ts`'s own remaining sub-modules
-beyond documents and platform snapshots are comparable again; Phases 4,
+beyond documents, platform snapshots and offline sync are comparable
+again; Phases 4,
 5, 7, 8, 9, 10, 11 and 12 are now all entirely done), continuing
 to completion is realistically a
 multi-session effort, not a single

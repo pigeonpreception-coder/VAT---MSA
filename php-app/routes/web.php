@@ -31,6 +31,7 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
+use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
@@ -227,6 +228,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/platform', [PlatformSnapshotController::class, 'show']);
         Route::get('/platform/document-custody', [PlatformSnapshotController::class, 'documentCustody']);
         Route::get('/platform/developer-portal', [PlatformSnapshotController::class, 'developerPortal']);
+
+        // Module 22's offline-invoicing sync-batch intake (Phase 13, third
+        // slice) -- kept 1:1 with the source's
+        // app/api/v1/offline/batches/route.ts shape. See
+        // App\Services\Platform\OfflineSyncService's own doc comment for
+        // what else in platform-repository.ts remains out of this slice.
+        Route::post('/offline/batches', [OfflineSyncController::class, 'store']);
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
