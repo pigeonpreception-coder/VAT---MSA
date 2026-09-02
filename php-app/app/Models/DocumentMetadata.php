@@ -2,15 +2,25 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\BelongsToOrganisation;
-
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * Excluded from App\Models\Concerns\BelongsToOrganisation (see
+ * docs/MIGRATION_MATRIX.md's "Organisation-scope trait retrofit"):
+ * App\Services\Document\DocumentService's own read paths
+ * (getDocumentVersionHistory/download, both reachable by a taxpayer-
+ * scoped `documents:read` actor) fetch a document unscoped by id, then
+ * call OrganisationResolver::resolve() to distinguish a genuine 404 from
+ * a 403 outside the actor's authorised scope -- the identical
+ * fetch-then-check shape that disqualified AuditCase/RefundClaim/etc.
+ * The automatic scope would collapse that distinction into an
+ * always-404.
+ */
 class DocumentMetadata extends Model
 {
-    use BelongsToOrganisation, HasUuids;
+    use HasUuids;
 
     // Set explicitly rather than relying on Eloquent's own pluralisation
     // of "DocumentMetadata" (an uncountable noun -- "metadata" has no

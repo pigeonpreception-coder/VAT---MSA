@@ -204,12 +204,17 @@ Route::middleware('auth')->group(function () {
         Route::get('/audit-cases/{id}/notes', [AuditCaseController::class, 'notes']);
         Route::post('/audit-cases/{id}/notes', [AuditCaseController::class, 'addNote']);
 
-        // Module 22's minimal Upload -> Quarantine -> ScanDecision slice,
-        // pulled forward to close this phase's own DOCUMENT-sourced
-        // evidence citation gap -- see App\Services\Document\
-        // DocumentService's doc comment for what's deliberately deferred.
+        // Module 22's Documents & Records slice: the Upload -> Quarantine ->
+        // ScanDecision chain pulled forward in Phase 11, plus Phase 13's own
+        // supersede/versions/retention-hold/download -- see
+        // App\Services\Document\DocumentService's doc comment for the rest
+        // of Module 22 that remains deliberately out of this slice.
         Route::post('/documents', [DocumentController::class, 'store']);
         Route::post('/documents/{id}/scan-result', [DocumentController::class, 'scanResult']);
+        Route::post('/documents/{id}/supersession', [DocumentController::class, 'supersede']);
+        Route::get('/documents/{id}/versions', [DocumentController::class, 'versions']);
+        Route::post('/documents/{id}/retention-hold', [DocumentController::class, 'retentionHold']);
+        Route::get('/documents/{id}/download', [DocumentController::class, 'download']);
 
         // Phase 11's own fixed-list dashboard aggregate, closing out the
         // phase's one remaining gap.

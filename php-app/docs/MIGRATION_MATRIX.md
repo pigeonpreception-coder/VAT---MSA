@@ -46,7 +46,7 @@ below for the specific commands.
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE -- every one of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- including `VAT_RETURN`- and `DOCUMENT`-sourced citations, see "VAT_RETURN evidence citation" and "DOCUMENT evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below), and now `getComplianceSnapshot` (see "Compliance dashboard snapshot" below) -- the phase's last remaining gap. Nothing outstanding in this phase's own scope. |
 | 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
-| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | NOT STARTED, except a minimal slice of Module 22 (`document_metadata` + `uploadDocument`/`completeDocumentScan`) pulled forward to unblock Phase 11 -- see "DOCUMENT evidence citation" below. Supersession/version chains, retention holds as their own standalone command, download URLs, the platform/developer-portal snapshots, offline sync, integrations, and report exports are all still NOT STARTED. |
+| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- Module 22's own Documents & Records slice is now COMPLETE: `uploadDocument`/`completeDocumentScan` (pulled forward in Phase 11 to unblock `DOCUMENT`-sourced evidence citation, see "DOCUMENT evidence citation" below) plus this phase's own `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below. Everything else in `platform-repository.ts` (the platform/developer-portal snapshots, offline sync, integrations, report exports, data products/analytics) and the legacy D1 importer and deployment documentation remain NOT STARTED. |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -1354,11 +1354,15 @@ filter (`NULL IN (...)` is never true in SQL), a real functional
 regression, not just an HTTP status code change.
 
 The organisation-scope trait now covers 44 models (42 from the original
-retrofit plus these two); 8 models are permanently excluded with a
+retrofit plus these two); 8 models were permanently excluded here with a
 documented reason each (`RefundClaim`, `VatReturnVersion`, `ApprovalTask`,
 `VatPeriod`, `AuditCase`, `OrganisationCapability`, `CommunicationThread`,
-`Communication`) -- their existing manual tenant checks are untouched and
-remain fully correct; this was never about a security gap in those
+`Communication`) -- a 9th, `DocumentMetadata`, was excluded for the
+identical reason once "Document module" below built the first taxpayer-
+reachable unscoped read against it, making the running total 43 covered
+models and 9 exclusions. Every excluded model's existing manual tenant
+checks are untouched and remain fully correct; this was never about a
+security gap in those
 models, only about which ones this specific automatic-scope mechanism can
 safely sit on top of.
 
@@ -1405,6 +1409,81 @@ run twice leaves row counts unchanged) and by the full test suite (174
 tests, 0 regressions -- `DemoSeeder` is not exercised by the test suite
 itself, so this is confirmed by direct row-count inspection after a real
 `migrate:fresh --seed`, not by test coverage).
+
+## Document module (closes out Module 22, opens Phase 13)
+
+Ports the rest of `platform-repository.ts`'s document-specific commands
+-- `supersedeDocument`, `getDocumentVersionHistory`,
+`setDocumentRetentionHold`, `downloadDocument` -- completing Module 22's
+own Documents & Records slice in full, on top of `uploadDocument`/
+`completeDocumentScan` (pulled forward in Phase 11). Everything else in
+`platform-repository.ts` (platform/developer-portal snapshots, offline
+sync, integrations, report exports, data products/analytics) remains
+genuinely separate sub-modules, still NOT STARTED -- this slice is scoped
+to exactly the document-specific functions, matching the "smallest
+coherent first slice of a large module" discipline this migration has
+used throughout.
+
+New: `App\Domain\Document\DocumentValidator::hold()` (the third and last
+of `lib/domain/platform.ts`'s document-domain functions, alongside the
+already-ported `safeFileName`/`scanResult`); four new methods on
+`App\Services\Document\DocumentService` (`supersede`/`versionHistory`/
+`setRetentionHold`/`download`); four new `DocumentController` actions and
+routes (`POST .../supersession`, `GET .../versions`,
+`POST .../retention-hold`, `GET .../download`). `present()` is extended
+to include `legal_hold`/`retained_until`/`supersedes_document_id`/
+`uploaded_by`/`scanned_by` -- fields the new commands' responses need
+that Phase 11's original narrower curation didn't.
+
+**A real finding from this pass, caught before it shipped, not after**:
+`App\Models\DocumentMetadata` had been given the organisation-scope
+trait during the Phase 7 retrofit (a defensible choice at the time --
+nothing read it unscoped by a taxpayer-facing caller yet). This slice's
+own `versionHistory`/`download` reproduce the source's exact
+fetch-then-check shape (`DocumentMetadata::find($id)` unscoped, then
+`OrganisationResolver::resolve()` to distinguish a genuine 404 from a
+403 outside scope) -- both reachable by a taxpayer-scoped
+`documents:read` actor, the identical danger shape that already
+disqualified `AuditCase`/`RefundClaim`/etc. `DocumentMetadata` was
+reverted from the trait as a 9th exclusion before writing a single test
+against the new endpoints, rather than discovering the bug via a failing
+`403`-expecting test the way the original six were found -- the pattern
+itself is now recognised on sight, not just caught by tests. See
+"Organisation-scope trait retrofit" above for the other eight.
+
+Retention holds cascade both directions, matching the source's own
+comment on this exact function: Module 4's `SET_LEGAL_HOLD`/
+`RELEASE_LEGAL_HOLD` evidence-custody action (already built in "DOCUMENT
+evidence citation" above) already cascaded evidence-hold changes onto
+`document_metadata.legal_hold`; this direct path cascades the other way,
+onto every `audit_evidence` row citing the document, so the two hold
+paths can never disagree. Supersession keeps `document_metadata` rows as
+their own version chain (via `supersedes_document_id`), the same pattern
+`audit_evidence.previous_version_id`/`vat_return_versions.parent_version_id`
+already use -- no separate Version table. Download refuses anything not
+currently `ACTIVE` or `SUPERSEDED` (the "no download before a clean
+scan" principle), and is logged through the same audit-events hash chain
+as every other command in this file, not a bespoke access-log table.
+
+The source's own `enforceRateLimits` calls on every one of these
+handlers are, as with the original upload/scan-result pair, deliberately
+not ported -- an orthogonal concern with no decided story anywhere else
+in this migration either.
+
+Verified by 7 new tests in `tests/Feature/Document/DocumentTest.php`
+(now 15 total for the whole document module): superseding an `ACTIVE`
+document quarantines the replacement and flips the original to
+`SUPERSEDED`; only a clean, active document can be superseded (`409`
+otherwise); version history walks the full chain oldest-first when
+queried from *any* version in it, not just the newest; a taxpayer
+outside the document's organisation is refused `403`; a retention hold
+requires `documents:manage` (national scope) and cascades onto every
+`audit_evidence` row citing the document, both applying and releasing;
+download is refused before a clean scan and for a permanently-rejected
+(infected) document, and returns the exact original bytes with the
+correct `Content-Type`/`Content-Disposition` once available. 181 tests
+total, 0 regressions, run against real MySQL, plus a clean
+`migrate:fresh --seed` cycle.
 
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
@@ -2169,28 +2248,31 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-The organisation-scope trait's own eight permanently-excluded models
+The organisation-scope trait's own nine permanently-excluded models
 (`RefundClaim`/`VatReturnVersion`/`ApprovalTask`/`VatPeriod`/`AuditCase`/
-`OrganisationCapability`/`CommunicationThread`/`Communication` -- see
-"Organisation-scope trait retrofit" and "Organisation-scope trait: the
-nullable-column exclusions" above) each keep their existing manual
-tenant checks fully correct and untouched; this was always about which
-models this specific automatic-scope mechanism can safely sit on top of,
-never a security gap in those models themselves, so no further action is
-owed there beyond the documented reasoning. Phases 13 through 15 in full
-(documents/integrations/offline/reports beyond the minimal Module 22
-slice already pulled forward, the legacy D1 importer, and deployment
-documentation) remain outstanding. Phase 4 is now COMPLETE for its actual
-scope (154 of 155 tables -- see "Remaining schema conversion" above;
-`positions` stays deliberately excluded, the source never writes to it
-either). Phase 5 is now COMPLETE for its actual scope too (see "Demo seed
-gaps for already-shipped features" above). Phase 7 is now COMPLETE for
-its actual scope as well -- the trait exists, is proven correct, and is
-now applied to 44 models across Phases 8-12 (see "Organisation-scope
-trait", "Organisation-scope trait retrofit" and "Organisation-scope
-trait: the nullable-column exclusions" above); the eight explicitly
-excluded models are a closed, documented list, not an open item. Phases
-8, 9, 10,
+`OrganisationCapability`/`CommunicationThread`/`Communication`/
+`DocumentMetadata` -- see "Organisation-scope trait retrofit",
+"Organisation-scope trait: the nullable-column exclusions" and "Document
+module" above) each keep their existing manual tenant checks fully
+correct and untouched; this was always about which models this specific
+automatic-scope mechanism can safely sit on top of, never a security gap
+in those models themselves, so no further action is owed there beyond
+the documented reasoning. Phase 13 now has a real, if narrow, foothold:
+Module 22's own Documents & Records slice is complete (see "Document
+module" above), but everything else in `platform-repository.ts`
+(platform/developer-portal snapshots, offline sync, integrations, report
+exports, data products/analytics) and Phases 14-15 in full (the legacy
+D1 importer and deployment documentation) remain outstanding. Phase 4 is
+now COMPLETE for its actual scope (154 of 155 tables -- see "Remaining
+schema conversion" above; `positions` stays deliberately excluded, the
+source never writes to it either). Phase 5 is now COMPLETE for its
+actual scope too (see "Demo seed gaps for already-shipped features"
+above). Phase 7 is now COMPLETE for its actual scope as well -- the
+trait exists, is proven correct, and is now applied to 43 models across
+Phases 8-12 (see "Organisation-scope trait", "Organisation-scope trait
+retrofit" and "Organisation-scope trait: the nullable-column exclusions"
+above); the nine explicitly excluded models are a closed, documented
+list, not an open item. Phases 8, 9, 10,
 11 and 12 (organisations/taxpayers/administration, invoices/VAT,
 accounting/commercial, compliance/audits/disputes/refunds/risk, and
 portals/licensing/governance) are now all fully COMPLETE -- see "Identity
@@ -2198,17 +2280,19 @@ foundation snapshot", "Standalone VAT-rule routes", "Supplier
 verification", "Compliance dashboard snapshot" and "Administration
 snapshot & portals" above. This is genuinely a multi-week engineering
 effort at the pace of careful, verified, per-field-checked porting
-demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12 slices --
-continuing it means repeating this same rigor across the remaining ~115
-routes (the schema itself is now essentially done), phase by phase (or
-sub-slice by sub-slice, as Phases 10, 11 and 12 all demonstrated), as
-originally scoped. Given the genuine scale each remaining module
-represents (`control-plane-repository.ts` alone, at ~1,200 lines and ~30
-exports, was comparable in size to the whole of Phase 10's `business-
-repository.ts`, which itself took 6 separate sub-slices to close out --
-Phase 12 took 6, counting the two small files closed out alongside its
-own final slice; Phases 4, 5, 7, 8, 9, 10, 11 and 12 are now all entirely
-done), continuing
+demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12/13 slices --
+continuing it means repeating this same rigor across the remaining
+~110 routes (the schema itself is now essentially done, and Phase 13
+has its first slice closed), phase by phase (or sub-slice by sub-slice,
+as Phases 10, 11 and 12 all demonstrated), as originally scoped. Given
+the genuine scale each remaining module represents (`control-plane-
+repository.ts` alone, at ~1,200 lines and ~30 exports, was comparable in
+size to the whole of Phase 10's `business-repository.ts`, which itself
+took 6 separate sub-slices to close out -- Phase 12 took 6, counting the
+two small files closed out alongside its own final slice;
+`platform-repository.ts`'s own remaining sub-modules beyond documents
+are comparable again; Phases 4, 5, 7, 8, 9, 10, 11 and 12 are now all
+entirely done), continuing
 to completion is realistically a
 multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far

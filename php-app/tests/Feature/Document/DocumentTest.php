@@ -14,13 +14,14 @@ use Tests\TestCase;
 
 /**
  * Covers App\Services\Document\DocumentService (ported from
- * lib/data/platform-repository.ts's uploadDocument/completeDocumentScan) --
- * the minimal Module 22 Upload -> Quarantine -> ScanDecision slice pulled
- * forward as the real prerequisite for closing Phase 11's own
- * `DOCUMENT`-sourced evidence citation gap. See
+ * lib/data/platform-repository.ts's document commands) -- Module 22's
+ * Documents & Records slice, now closed out in full: the Upload ->
+ * Quarantine -> ScanDecision chain pulled forward in Phase 11 as the real
+ * prerequisite for `DOCUMENT`-sourced evidence citation, plus this Phase
+ * 13 pass's own supersede/versionHistory/retentionHold/download. See
  * tests/Feature/Compliance/ComplianceCaseTest.php for the evidence-citation
- * side of that gap (addEvidence/recordEvidenceCustodyEvent's DOCUMENT
- * branches).
+ * side of the earlier gap (addEvidence/recordEvidenceCustodyEvent's
+ * DOCUMENT branches).
  */
 class DocumentTest extends TestCase
 {
@@ -295,5 +296,177 @@ class DocumentTest extends TestCase
             ['schema_version' => '1.0.0', 'action' => 'RELEASE_LEGAL_HOLD', 'notes' => 'Litigation concluded, hold no longer required.'], ['Idempotency-Key' => 'test-idem-doc-release-0008']);
         $release->assertStatus(200)->assertJsonPath('resource.legal_hold', false);
         $this->assertDatabaseHas('document_metadata', ['id' => $documentId, 'legal_hold' => false]);
+    }
+
+    /** Uploads a document and drives it straight to ACTIVE via a CLEAN scan -- the shape most of the new commands below need as their starting point. */
+    private function activeDocument(User $owner, User $admin, string $ownerResourceId): string
+    {
+        $id = $this->actingAs($owner)->post('/api/v1/documents', [
+            'owner_domain' => 'EXPENSE', 'owner_resource_id' => $ownerResourceId, 'classification' => 'INTERNAL',
+            'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
+        ])->json('document.id');
+        $this->actingAs($admin)->postJson("/api/v1/documents/{$id}/scan-result",
+            ['schema_version' => '1.0.0', 'outcome' => 'CLEAN'], ['Idempotency-Key' => 'test-idem-active-'.Str::random(20)])->assertStatus(200);
+
+        return $id;
+    }
+
+    public function test_superseding_an_active_document_quarantines_the_replacement_and_flips_the_original(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0009');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $admin = $this->systemAdmin();
+        $originalId = $this->activeDocument($owner, $admin, 'expense-0009');
+        $newBytes = "%PDF-1.4\n%corrected\n%%EOF";
+
+        $supersede = $this->actingAs($owner)->post("/api/v1/documents/{$originalId}/supersession", [
+            'file' => $this->fakeUpload($newBytes, 'application/pdf', 'corrected.pdf'),
+        ]);
+
+        $supersede->assertStatus(201)
+            ->assertJsonPath('document.status', 'QUARANTINED')
+            ->assertJsonPath('document.scan_status', 'PENDING_EXTERNAL_SCANNER')
+            ->assertJsonPath('document.supersedes_document_id', $originalId)
+            ->assertJsonPath('document.owner_domain', 'EXPENSE')
+            ->assertJsonPath('document.owner_resource_id', 'expense-0009')
+            ->assertJsonPath('document.checksum_sha256', hash('sha256', $newBytes));
+        $newId = $supersede->json('document.id');
+
+        $this->assertDatabaseHas('document_metadata', ['id' => $originalId, 'status' => 'SUPERSEDED']);
+        $this->assertDatabaseHas('outbox_events', ['aggregate_id' => $newId, 'event_type' => 'DocumentSuperseded']);
+        $this->assertDatabaseHas('audit_events', ['action' => 'DOCUMENT_SUPERSEDED', 'resource_id' => $newId]);
+    }
+
+    public function test_only_a_clean_active_document_can_be_superseded(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0010');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $quarantinedId = $this->actingAs($owner)->post('/api/v1/documents', [
+            'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0010', 'classification' => 'INTERNAL',
+            'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
+        ])->json('document.id');
+
+        $conflict = $this->actingAs($owner)->post("/api/v1/documents/{$quarantinedId}/supersession", [
+            'file' => $this->fakeUpload("%PDF-1.4\n%replacement\n%%EOF", 'application/pdf'),
+        ]);
+
+        $conflict->assertStatus(409);
+        $this->assertDatabaseHas('document_metadata', ['id' => $quarantinedId, 'status' => 'QUARANTINED']);
+    }
+
+    public function test_version_history_walks_the_full_supersession_chain_oldest_first(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0011');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $admin = $this->systemAdmin();
+        $v1 = $this->activeDocument($owner, $admin, 'expense-0011');
+
+        $v2 = $this->actingAs($owner)->post("/api/v1/documents/{$v1}/supersession", [
+            'file' => $this->fakeUpload("%PDF-1.4\n%v2\n%%EOF", 'application/pdf'),
+        ])->json('document.id');
+        $this->actingAs($admin)->postJson("/api/v1/documents/{$v2}/scan-result",
+            ['schema_version' => '1.0.0', 'outcome' => 'CLEAN'], ['Idempotency-Key' => 'test-idem-v2-clean-0011'])->assertStatus(200);
+
+        $v3 = $this->actingAs($owner)->post("/api/v1/documents/{$v2}/supersession", [
+            'file' => $this->fakeUpload("%PDF-1.4\n%v3\n%%EOF", 'application/pdf'),
+        ])->json('document.id');
+
+        // Querying from ANY version in the chain (not just the newest) returns the complete history.
+        $history = $this->actingAs($owner)->getJson("/api/v1/documents/{$v1}/versions");
+        $history->assertStatus(200)->assertJsonPath('document_id', $v1);
+        $ids = collect($history->json('versions'))->pluck('id')->all();
+        $this->assertSame([$v1, $v2, $v3], $ids);
+        $this->assertSame(['SUPERSEDED', 'SUPERSEDED', 'QUARANTINED'], collect($history->json('versions'))->pluck('status')->all());
+    }
+
+    public function test_a_taxpayer_outside_the_documents_organisation_cannot_view_its_version_history(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0012');
+        $stranger = $this->makeTaxpayer('VAT-DOC-0013');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $strangerOwner = $this->taxpayerOwner($stranger['taxpayer']->id, 'stranger@doctest.test');
+        $admin = $this->systemAdmin();
+        $documentId = $this->activeDocument($owner, $admin, 'expense-0012');
+
+        $this->actingAs($strangerOwner)->getJson("/api/v1/documents/{$documentId}/versions")->assertStatus(403);
+    }
+
+    public function test_setting_a_retention_hold_requires_national_scope_and_cascades_to_cited_evidence(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0014');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $admin = $this->systemAdmin();
+        $auditor = $this->namraAuditor();
+        $documentId = $this->activeDocument($owner, $admin, 'expense-0014');
+
+        // The uploading taxpayer holds documents:upload but not documents:manage.
+        $denied = $this->actingAs($owner)->postJson("/api/v1/documents/{$documentId}/retention-hold",
+            ['schema_version' => '1.0.0', 'action' => 'APPLY', 'notes' => 'Attempting a hold without permission.'],
+            ['Idempotency-Key' => 'test-idem-hold-denied-0014']);
+        $denied->assertStatus(403);
+
+        $caseId = $this->actingAs($auditor)->postJson('/api/v1/audit-cases', [
+            'schema_version' => '1.0.0', 'taxpayer_id' => $tp['taxpayer']->id, 'case_type' => 'VAT_AUDIT',
+            'title' => 'Retention-hold cascade check', 'opening_reason' => 'Verifying the direct hold path stays in sync with evidence custody.', 'risk_tier' => 'MEDIUM',
+        ], ['Idempotency-Key' => 'test-idem-hold-case-0014'])->json('resource.id');
+        $evidenceId = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/evidence", [
+            'schema_version' => '1.0.0', 'source_resource_type' => 'DOCUMENT', 'source_resource_id' => $documentId, 'description' => 'Cited for the hold-cascade test.',
+        ], ['Idempotency-Key' => 'test-idem-hold-evidence-0014'])->json('resource.id');
+
+        $apply = $this->actingAs($admin)->postJson("/api/v1/documents/{$documentId}/retention-hold",
+            ['schema_version' => '1.0.0', 'action' => 'APPLY', 'notes' => 'Preserving pending a compliance review.', 'retained_until' => '2027-06-30'],
+            ['Idempotency-Key' => 'test-idem-hold-apply-0014']);
+        $apply->assertStatus(200)->assertJsonPath('document.legal_hold', true);
+        $this->assertDatabaseHas('document_metadata', ['id' => $documentId, 'legal_hold' => true]);
+        $this->assertDatabaseHas('audit_evidence', ['id' => $evidenceId, 'legal_hold' => true]);
+        $this->assertDatabaseHas('outbox_events', ['aggregate_id' => $documentId, 'event_type' => 'DocumentRetentionHoldApplied']);
+
+        $release = $this->actingAs($admin)->postJson("/api/v1/documents/{$documentId}/retention-hold",
+            ['schema_version' => '1.0.0', 'action' => 'RELEASE', 'notes' => 'Compliance review concluded.'],
+            ['Idempotency-Key' => 'test-idem-hold-release-0014']);
+        $release->assertStatus(200)->assertJsonPath('document.legal_hold', false);
+        $this->assertDatabaseHas('document_metadata', ['id' => $documentId, 'legal_hold' => false]);
+        $this->assertDatabaseHas('audit_evidence', ['id' => $evidenceId, 'legal_hold' => false]);
+    }
+
+    public function test_download_is_refused_before_a_clean_scan_and_succeeds_after_with_the_original_bytes(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0015');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $admin = $this->systemAdmin();
+        $bytes = $this->minimalPdfBytes();
+
+        $quarantinedId = $this->actingAs($owner)->post('/api/v1/documents', [
+            'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0015', 'classification' => 'INTERNAL',
+            'file' => $this->fakeUpload($bytes, 'application/pdf', 'evidence.pdf'),
+        ])->json('document.id');
+
+        $tooSoon = $this->actingAs($owner)->get("/api/v1/documents/{$quarantinedId}/download");
+        $tooSoon->assertStatus(409);
+
+        $this->actingAs($admin)->postJson("/api/v1/documents/{$quarantinedId}/scan-result",
+            ['schema_version' => '1.0.0', 'outcome' => 'CLEAN'], ['Idempotency-Key' => 'test-idem-download-clean-0015'])->assertStatus(200);
+
+        $download = $this->actingAs($owner)->get("/api/v1/documents/{$quarantinedId}/download");
+        $download->assertStatus(200)
+            ->assertHeader('content-type', 'application/pdf')
+            ->assertHeader('content-disposition', 'attachment; filename="evidence.pdf"');
+        $this->assertSame($bytes, $download->getContent());
+        $this->assertDatabaseHas('audit_events', ['action' => 'DOCUMENT_DOWNLOADED', 'resource_id' => $quarantinedId]);
+    }
+
+    public function test_download_is_permanently_refused_for_an_infected_document(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-0016');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $admin = $this->systemAdmin();
+        $infectedId = $this->actingAs($owner)->post('/api/v1/documents', [
+            'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0016', 'classification' => 'INTERNAL',
+            'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
+        ])->json('document.id');
+        $this->actingAs($admin)->postJson("/api/v1/documents/{$infectedId}/scan-result",
+            ['schema_version' => '1.0.0', 'outcome' => 'INFECTED'], ['Idempotency-Key' => 'test-idem-download-infected-0016'])->assertStatus(200);
+
+        $this->actingAs($owner)->get("/api/v1/documents/{$infectedId}/download")->assertStatus(409);
     }
 }
