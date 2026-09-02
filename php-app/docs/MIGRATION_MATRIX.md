@@ -40,7 +40,7 @@ below for the specific commands.
 | 4 | Convert database schema to MySQL migrations | COMPLETE for its actual scope -- 154 of 155 tables (`positions` deliberately excluded, since the source itself never writes to it -- confirmed by a full-repo grep; see below). Everything already tracked in earlier phase slices, plus the remaining ~43 tables belonging to genuinely not-yet-built modules (Developer Portal, SaaS marketplace, offline-invoicing sync, reports/analytics/data-products, security operations, platform config/change-management, MFA/step-up auth, `payment_instructions`, `bank_imports`, `import_records`, `user_invitations`) -- see "Remaining schema conversion" below for the full breakdown and the fidelity checks this pass caught. Migrations only, deliberately -- no Eloquent models or services were added for tables no command reads or writes yet, matching this migration's `consent_grants`/`delegations` precedent; each table gets its model/service when its own owning phase actually builds that feature. |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, IdentityProviderSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
-| 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
+| 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. A reusable Eloquent global-scope trait (`App\Models\Concerns\BelongsToOrganisation` / `App\Models\Scopes\OrganisationScope`) is now also available as a defense-in-depth backstop on top of every service's own manual scoping -- see "Organisation-scope trait" below. |
 | 8 | Organisations, taxpayers, administration | COMPLETE -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, membership assignment, `getIdentityFoundationSnapshot` (see "Identity foundation snapshot" below), and (Phase 12, see "Organisation administration & employees" and "Access governance" below) employees (including `terminateEmployee`'s own workflow-task reassignment, closed out once Phase 12 slice 5 built the tables it needed), organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), capability grants, and access requests. The `positions` table is not built -- never written by the source itself, so genuinely nothing to port. |
 | 9 | Invoices and VAT | COMPLETE -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion"). Also COMPLETE (see "VAT-return-generation prerequisite"): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. Also now COMPLETE (see "Standalone VAT-rule routes" below): `listVatRules`/`proposeVatRule`/`approveVatRule`/`evaluateVatRule` -- `lib/data/vat-rule-repository.ts`'s remaining exports, the last narrow gap this phase had. |
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
@@ -1184,6 +1184,68 @@ order, from empty) followed by `php artisan db:seed` and the full
 existing test suite (169 tests, 0 regressions -- expected, since this
 batch touches no table any shipped service reads or writes).
 
+## Organisation-scope trait (closes out Phase 7's last deferred item)
+
+Builds the reusable Eloquent global-scope trait Phase 7's own status row
+had flagged as a natural follow-up, not a security gap
+(SECURITY_GAP_ASSESSMENT.md Section 3 found none in the original): every
+organisation-scoped service built across Phases 8-12 already gets tenant
+isolation right by hand, resolving the actor's own organisation via
+`App\Support\Business\OrganisationResolver` (or an inline
+`TenantScope::isNational` branch) and adding its own
+`->where('organisation_id', ...)` to every query. This trait is a
+defense-in-depth backstop on top of that, not a replacement for it: a
+model that opts in can never accidentally leak a cross-tenant row through
+a query some future change forgets to scope by hand.
+
+New: `App\Models\Scopes\OrganisationScope` (an `Illuminate\Database\
+Eloquent\Scope` implementation) and `App\Models\Concerns\
+BelongsToOrganisation` (the opt-in trait; Eloquent auto-discovers its
+`bootBelongsToOrganisation()` on any model that uses it). Behaviour,
+matching every existing service's own manual branch exactly:
+- No authenticated actor (artisan commands, seeders, and the many
+  existing tests that build fixtures with direct `Model::create()` calls
+  outside a request) -- no filter, since fixture setup routinely spans
+  multiple organisations and there is no actor to scope against.
+- A national-scope actor (`TenantScope::isNational`) -- no filter.
+- A taxpayer-scoped actor -- filtered to the one organisation their own
+  `taxpayer_id` resolves to (`organisations.taxpayer_id` is `UNIQUE`, so
+  always at most one row), via a subquery.
+- An actor with neither (`taxpayer_id` null and not a national role --
+  not a shape any seeded role produces today, e.g. the platform-technical
+  `SUPER_ADMIN`/`INFRASTRUCTURE_ADMIN` roles) -- matches nothing, rather
+  than silently leaking every tenant's rows to an actor this scope cannot
+  place. A `withoutOrganisationScope()` query-builder macro is the escape
+  hatch for the rare deliberate cross-boundary query.
+
+Piloted on `App\Models\BusinessParty`: `App\Services\Business\
+BusinessPartyService` already filters every one of its own queries by
+`organisation_id` from `OrganisationResolver::resolve()`, so this trait's
+own filter is provably redundant with the existing manual logic in both
+the national and taxpayer-scoped branches -- the safest possible first
+adopter, not a behaviour change. Deliberately not retrofitted onto the
+other ~25 organisation-scoped models built across Phases 8-12 in this
+same pass -- that is a broad, mechanical follow-up with its own
+regression surface across five phases' worth of already-shipped, tested
+code, better done as its own deliberate sweep than folded silently into
+introducing the trait itself.
+
+Verified two ways: the full existing `BusinessPartyAndQuotationTest`
+suite (12 tests) still passes unchanged, confirming zero behaviour change
+against real service code; and a new, dedicated
+`tests/Feature/Access/OrganisationScopeTest.php` (5 tests) proves the
+trait's own automatic filtering directly, with **no manual
+`->where('organisation_id', ...)` of its own** -- the one thing the
+service-level tests structurally cannot exercise, since every one of
+their queries already adds that filter by hand: an unscoped query with no
+authenticated actor returns rows from both of two seeded organisations
+unfiltered; a taxpayer-scoped owner's unscoped query returns only their
+own organisation's row; a national-scope actor's unscoped query returns
+both; `withoutOrganisationScope()` bypasses the filter on demand; and a
+`SUPER_ADMIN` actor (`taxpayer_id` null, not a national-scope role) gets
+zero rows rather than every tenant's. 174 tests total, 0 regressions, run
+against real MySQL.
+
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
 Opens Phase 12 -- previously entirely `NOT STARTED`. `lib/data/control-
@@ -1947,17 +2009,22 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 5 (remaining seed data -- identity proofing, etc.), Phase 7's
-reusable Eloquent organisation-scope trait/global scope, and Phases 13
-through 15 in full (documents/integrations/offline/reports beyond the
-minimal Module 22 slice already pulled forward, the legacy D1 importer,
-and deployment documentation) are all outstanding. Phase 4 is now
-COMPLETE for its actual scope (154 of 155 tables -- see "Remaining schema
-conversion" above; `positions` stays deliberately excluded, the source
-never writes to it either). Phases 8, 9, 10, 11 and 12
-(organisations/taxpayers/administration, invoices/VAT, accounting/
-commercial, compliance/audits/disputes/refunds/risk, and portals/
-licensing/governance) are now all fully COMPLETE -- see "Identity
+Phase 5 (remaining seed data -- identity proofing, etc.), retrofitting
+Phase 7's organisation-scope trait onto the ~25 other organisation-scoped
+models beyond its `BusinessParty` pilot (a deliberate, separately-scoped
+sweep, not folded into introducing the trait itself -- see "Organisation-
+scope trait" above), and Phases 13 through 15 in full (documents/
+integrations/offline/reports beyond the minimal Module 22 slice already
+pulled forward, the legacy D1 importer, and deployment documentation) are
+all outstanding. Phase 4 is now COMPLETE for its actual scope (154 of 155
+tables -- see "Remaining schema conversion" above; `positions` stays
+deliberately excluded, the source never writes to it either). Phase 7 is
+now COMPLETE for its actual scope too (the trait exists and is proven
+correct -- see "Organisation-scope trait" above; broader adoption is the
+one open item, tracked here rather than silently dropped). Phases 8, 9,
+10, 11 and 12 (organisations/taxpayers/administration, invoices/VAT,
+accounting/commercial, compliance/audits/disputes/refunds/risk, and
+portals/licensing/governance) are now all fully COMPLETE -- see "Identity
 foundation snapshot", "Standalone VAT-rule routes", "Supplier
 verification", "Compliance dashboard snapshot" and "Administration
 snapshot & portals" above. This is genuinely a multi-week engineering
@@ -1971,7 +2038,7 @@ represents (`control-plane-repository.ts` alone, at ~1,200 lines and ~30
 exports, was comparable in size to the whole of Phase 10's `business-
 repository.ts`, which itself took 6 separate sub-slices to close out --
 Phase 12 took 6, counting the two small files closed out alongside its
-own final slice; Phases 4, 8, 9, 10, 11 and 12 are now all entirely
+own final slice; Phases 4, 7, 8, 9, 10, 11 and 12 are now all entirely
 done), continuing
 to completion is realistically a
 multi-session effort, not a single
