@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
+use App\Http\Controllers\Administration\AdministrationController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\DashboardController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
+use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
@@ -59,11 +61,16 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/organisations', [OrganisationController::class, 'index']);
         // Registered before the /organisations/{id} wildcard below --
-        // Laravel matches routes in registration order, and the literal
-        // "capabilities" segment would otherwise be swallowed by {id} and
-        // 404 inside OrganisationController::show (found the hard way via
-        // OrganisationAdminTest's listing assertion).
+        // Laravel matches routes in registration order, and each of these
+        // literal segments would otherwise be swallowed by {id} and 404
+        // inside OrganisationController::show (found the hard way, for
+        // "capabilities", via OrganisationAdminTest's own listing
+        // assertion -- the same fix applied proactively here for
+        // employees/roles/administrators too).
         Route::get('/organisations/capabilities', [OrganisationAdminController::class, 'capabilities']);
+        Route::get('/organisations/employees', [OrganisationAdminController::class, 'listEmployees']);
+        Route::get('/organisations/roles', [OrganisationAdminController::class, 'listRoles']);
+        Route::get('/organisations/administrators', [OrganisationAdminController::class, 'listAdministrators']);
         Route::get('/organisations/{id}', [OrganisationController::class, 'show']);
 
         Route::get('/organisations/{organisation}/branches', [BranchController::class, 'index']);
@@ -244,6 +251,7 @@ Route::middleware('auth')->group(function () {
         // app/api/v1/licensing/** shape; state/upgrade are step-up gated.
         Route::get('/licensing/entitlements', [LicensingController::class, 'entitlements']);
         Route::get('/licensing/usage', [LicensingController::class, 'usage']);
+        Route::get('/licensing/license', [LicensingController::class, 'license']);
         Route::post('/licensing/state', [LicensingController::class, 'state'])
             ->middleware('password.confirm');
         Route::post('/licensing/upgrade', [LicensingController::class, 'upgrade'])
@@ -273,6 +281,7 @@ Route::middleware('auth')->group(function () {
         // /organisations/{id} wildcard -- see that route's comment.
         Route::post('/organisations/capabilities', [OrganisationAdminController::class, 'storeCapability'])
             ->middleware('password.confirm');
+        Route::get('/access-reviews', [AccessGovernanceController::class, 'listAccessReviews']);
         Route::post('/access-reviews', [OrganisationAdminController::class, 'storeAccessReview'])
             ->middleware('password.confirm');
 
@@ -287,17 +296,20 @@ Route::middleware('auth')->group(function () {
         Route::get('/navigation/children', [NavigationController::class, 'children']);
         Route::get('/navigation/actions', [NavigationController::class, 'actions']);
         Route::post('/navigation/preferences', [NavigationController::class, 'storePreference']);
+        // searchWorkspace -- a genuinely separate Workspace & Navigation
+        // route (/api/v1/search in the source), not part of any other
+        // Phase 12 slice. See docs/MIGRATION_MATRIX.md.
+        Route::get('/search', [NavigationController::class, 'search']);
 
         // Phase 12 slice 4: the rest of Access governance (requestRoleAccess/
         // decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/
         // offboardUser). openQuarterlyAccessReview itself was already ported
-        // in slice 2 -- see the /access-reviews route above. GET
-        // /access-requests bundles into getAdministrationSnapshot (the
-        // dashboard aggregate, deferred), so only its POST half is here.
-        // Only the initial access *request* is not step-up gated (matching
-        // the source -- it needs access-governance:read, not :manage, and
-        // no requireStepUp call); every decide/certify/revoke/offboard
+        // in slice 2 -- see the /access-reviews route above. Only the
+        // initial access *request* is not step-up gated (matching the
+        // source -- it needs access-governance:read, not :manage, and no
+        // requireStepUp call); every decide/certify/revoke/offboard
         // command is.
+        Route::get('/access-requests', [AccessGovernanceController::class, 'listAccessRequests']);
         Route::post('/access-requests', [AccessGovernanceController::class, 'storeAccessRequest']);
         Route::post('/access-requests/{id}/decision', [AccessGovernanceController::class, 'decideAccessRequest'])
             ->middleware('password.confirm');
@@ -311,13 +323,10 @@ Route::middleware('auth')->group(function () {
         // Phase 12 slice 5: the workflow engine (Module 8 Phase C --
         // createWorkflowDraft/publishWorkflowVersion/assignWorkflow/
         // decideWorkflowTask/testWorkflowVersion/createDelegation/
-        // listDelegations/revokeDelegation). Closes out
-        // control-plane-repository.ts's last self-contained sub-domain --
-        // only the getAdministrationSnapshot dashboard aggregate remains
-        // in Phase 12. GET /workflows bundles into that aggregate
-        // (deferred); GET /workflows/delegations is a genuinely
-        // standalone read. Test is not step-up gated (a dry-run has no
-        // side effects); every other write command is.
+        // listDelegations/revokeDelegation). GET /workflows/delegations
+        // is a genuinely standalone read. Test is not step-up gated (a
+        // dry-run has no side effects); every other write command is.
+        Route::get('/workflows', [WorkflowController::class, 'listWorkflows']);
         Route::post('/workflows', [WorkflowController::class, 'storeWorkflow'])
             ->middleware('password.confirm');
         Route::post('/workflows/versions/{id}/publication', [WorkflowController::class, 'publishVersion'])
@@ -332,5 +341,18 @@ Route::middleware('auth')->group(function () {
             ->middleware('password.confirm');
         Route::post('/workflows/delegations/{id}/revocation', [WorkflowController::class, 'revokeDelegation'])
             ->middleware('password.confirm');
+
+        // getAdministrationSnapshot's own full, unsliced route -- the
+        // fixed-list dashboard aggregate every other GET-list route
+        // across all five of Phase 12's sub-domain slices above bundles
+        // into instead of a dedicated query of its own. Closes out
+        // control-plane-repository.ts entirely -- see
+        // docs/MIGRATION_MATRIX.md.
+        Route::get('/administration', [AdministrationController::class, 'show']);
+
+        // lib/portals.ts's getAvailablePortals -- a genuinely separate
+        // file from control-plane-repository.ts, found and closed out
+        // alongside it. See PortalDefinitions' own doc comment.
+        Route::get('/portals', [PortalController::class, 'index']);
     });
 });

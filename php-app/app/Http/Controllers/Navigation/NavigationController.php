@@ -9,13 +9,14 @@ use Illuminate\Http\Request;
 
 /**
  * Ported from app/api/v1/navigation/{workspace,children,actions,
- * preferences}/route.ts -- Phase 12's portal-navigation slice, the last of
- * `control-plane-repository.ts`'s five sub-domains besides the workflow
- * engine and the rest of Access governance. Every route here requires only
- * the coarse `workspace:read` permission -- the source deliberately gates
- * fine-grained per-item visibility *inside* NavigationService itself
- * (`rowAllowed`), not at the route layer, so a route guard here would be
- * redundant with (and could drift from) the row-level check.
+ * preferences}/route.ts and app/api/v1/search/route.ts -- Phase 12's
+ * Workspace & Navigation domain. workspace/children/actions/preferences
+ * require only the coarse `workspace:read` permission -- the source
+ * deliberately gates fine-grained per-item visibility *inside*
+ * NavigationService itself (`rowAllowed`), not at the route layer, so a
+ * route guard here would be redundant with (and could drift from) the
+ * row-level check. `search` requires `search:read` instead, matching the
+ * source's own separate route.
  */
 class NavigationController extends Controller
 {
@@ -63,5 +64,13 @@ class NavigationController extends Controller
         );
 
         return response()->json(['preference' => $preference]);
+    }
+
+    public function search(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'search:read');
+        $query = (string) $request->query('q', '');
+
+        return response()->json(['query' => $query, 'results' => $this->navigation->searchWorkspace($request->user(), $query, $request->query('organisation_id'))]);
     }
 }

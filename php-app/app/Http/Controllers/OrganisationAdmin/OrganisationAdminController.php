@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\OrganisationAdmin;
 
 use App\Http\Controllers\Controller;
+use App\Services\Administration\AdministrationSnapshotService;
 use App\Services\OrganisationAdmin\OrganisationAdminService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,17 +12,26 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Ported from app/api/v1/organisations/{employees,administrators,roles,
  * capabilities}/** and app/api/v1/access-reviews/route.ts's POST handler
- * -- Phase 12 slice 2 (organisation administration/employees). Every GET
- * list route in the source bundles its data inside `getAdministrationSnapshot`
- * (the fixed-list dashboard aggregate, deferred -- see
- * docs/MIGRATION_MATRIX.md); `listCapabilityGrants` is the one exception,
- * a genuinely standalone read, and the only GET route ported here.
- * Every write command is step-up gated via the same 'password.confirm'
- * middleware every other sensitive command in this migration uses.
+ * -- Phase 12 slice 2 (organisation administration/employees).
+ * `listCapabilityGrants` was always a genuinely standalone read; every
+ * other GET list route here (employees/roles/administrators) slices
+ * `getAdministrationSnapshot` (Phase 12's own closing slice -- see
+ * docs/MIGRATION_MATRIX.md) down to its own fields, exactly matching the
+ * source's own route shape. Every write command is step-up gated via the
+ * same 'password.confirm' middleware every other sensitive command in
+ * this migration uses.
  */
 class OrganisationAdminController extends Controller
 {
-    public function __construct(private readonly OrganisationAdminService $admin) {}
+    public function __construct(private readonly OrganisationAdminService $admin, private readonly AdministrationSnapshotService $snapshot) {}
+
+    public function listEmployees(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'employees:read');
+        $snapshot = $this->snapshot->getAdministrationSnapshot($request->user(), $request->query('organisation_id'));
+
+        return response()->json(['organisation' => $snapshot['organisation'], 'employees' => $snapshot['employees']]);
+    }
 
     public function storeEmployee(Request $request): JsonResponse
     {
@@ -48,12 +58,28 @@ class OrganisationAdminController extends Controller
         return response()->json(['employee' => $employee]);
     }
 
+    public function listAdministrators(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'administration:read');
+        $snapshot = $this->snapshot->getAdministrationSnapshot($request->user(), $request->query('organisation_id'));
+
+        return response()->json(['organisation' => $snapshot['organisation'], 'administrators' => $snapshot['administrators']]);
+    }
+
     public function storeAdministrator(Request $request): JsonResponse
     {
         $this->authorize('permission', 'administration:manage');
         $administrator = $this->admin->appointAdministrator((array) $request->json()->all(), $request->user(), $request->query('organisation_id'));
 
         return response()->json(['administrator' => $administrator], Response::HTTP_CREATED);
+    }
+
+    public function listRoles(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'roles:read');
+        $snapshot = $this->snapshot->getAdministrationSnapshot($request->user(), $request->query('organisation_id'));
+
+        return response()->json(['organisation' => $snapshot['organisation'], 'roles' => $snapshot['roles']]);
     }
 
     public function storeRole(Request $request): JsonResponse

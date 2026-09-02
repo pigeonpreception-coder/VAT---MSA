@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Workflow;
 
 use App\Http\Controllers\Controller;
+use App\Services\Administration\AdministrationSnapshotService;
 use App\Services\Workflow\WorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,15 +12,22 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Ported from app/api/v1/workflows/**, app/api/v1/workflow-tasks/[id]/
  * decision/route.ts -- Phase 12's workflow-engine slice (Module 8 Phase
- * C), the last of `control-plane-repository.ts`'s sub-domains besides
- * the `getAdministrationSnapshot` dashboard aggregate. GET /workflows
- * bundles into that aggregate (deferred), so only its POST half is
- * ported here; GET /workflows/delegations is a genuinely standalone
- * read and is ported directly.
+ * C). GET /workflows slices `getAdministrationSnapshot` (Phase 12's own
+ * closing slice) down to its own fields, exactly matching the source;
+ * GET /workflows/delegations is a genuinely standalone read and is
+ * ported directly.
  */
 class WorkflowController extends Controller
 {
-    public function __construct(private readonly WorkflowService $workflows) {}
+    public function __construct(private readonly WorkflowService $workflows, private readonly AdministrationSnapshotService $snapshot) {}
+
+    public function listWorkflows(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'workflows:read');
+        $snapshot = $this->snapshot->getAdministrationSnapshot($request->user(), $request->query('organisation_id'));
+
+        return response()->json(['organisation' => $snapshot['organisation'], 'workflows' => $snapshot['workflows'], 'tasks' => $snapshot['tasks']]);
+    }
 
     public function storeWorkflow(Request $request): JsonResponse
     {

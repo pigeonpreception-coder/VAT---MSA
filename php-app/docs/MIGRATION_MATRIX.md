@@ -41,11 +41,11 @@ below for the specific commands.
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
-| 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, membership assignment, and now (Phase 12 slice 2, see "Organisation administration & employees" below) employees, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), and capability grants. NOT covered yet: the `positions` table (never written by the source itself), workflow-task reassignment on offboarding (needs the still-unbuilt workflow tables), access *requests* (as opposed to the quarterly reviews this slice does cover), and the `GetIdentityFoundationSnapshot`/administration-dashboard aggregate query -- deferred, not silently dropped. |
+| 8 | Organisations, taxpayers, administration | COMPLETE for its actual scope (see below) -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, membership assignment, and now (Phase 12, see "Organisation administration & employees" and "Access governance" below) employees, organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), capability grants, and access requests. NOT covered yet: the `positions` table (never written by the source itself) and `identity-repository.ts`'s own `getIdentityFoundationSnapshot` dashboard aggregate -- deferred, not silently dropped. `terminateEmployee`'s workflow-task reassignment on offboarding was deferred in Phase 12 slice 2 specifically because the workflow tables didn't exist yet; Phase 12 slice 5 has since built them, so this one narrow piece of already-shipped code is now genuinely unblocked but not yet revisited -- a real, small follow-up, not confused with the table dependency that originally blocked it. |
 | 9 | Invoices and VAT | COMPLETE -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion"). Also COMPLETE (see "VAT-return-generation prerequisite"): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. Also now COMPLETE (see "Standalone VAT-rule routes" below): `listVatRules`/`proposeVatRule`/`approveVatRule`/`evaluateVatRule` -- `lib/data/vat-rule-repository.ts`'s remaining exports, the last narrow gap this phase had. |
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- now including `VAT_RETURN`-sourced citations, see "VAT_RETURN evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: `DOCUMENT`-sourced evidence citation (still blocked on the unbuilt `document_metadata` table and its Module 22 quarantine/scan pipeline) and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
-| 12 | Portals/licensing/governance | PARTIAL -- all 5 sub-domains of `control-plane-repository.ts`'s ~30 functions now COMPLETE for their actual scope; only the `getAdministrationSnapshot` dashboard aggregate remains. Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate, ported now that real callers need it) and `openQuarterlyAccessReview` (pulled forward from Access governance as `assertEntitledOperation`'s own genuine `ADMIN_WRITE` prerequisite) -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser -- the rest of Access governance, alongside slice 2's own `openQuarterlyAccessReview`. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C) -- the last self-contained sub-domain. NOT covered: `getAdministrationSnapshot` (every GET-list route across all five slices bundles into it) and `searchWorkspace` (`/api/v1/search`, a small, genuinely separate Workspace & Navigation route -- deferred, not silently dropped). |
+| 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
 | 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | NOT STARTED |
 
 ## Verification performed (this session, not claimed without evidence)
@@ -1483,6 +1483,99 @@ layer only auto-formats a genuine `DateTimeInterface` value for the
 database driver, not a plain string, even one already validated as a
 well-formed timestamp.
 
+## Administration snapshot & portals (closing out Phase 12: portals/licensing/governance)
+
+The last two functions in `control-plane-repository.ts` --
+`getAdministrationSnapshot` and `searchWorkspace` -- plus `lib/portals.ts`'s
+`getAvailablePortals`, a genuinely separate file discovered and closed out
+alongside them since it is still squarely inside Phase 12's own "portals"
+scope (confirmed by grepping every `.ts` file under `lib/` and `app/api/`
+for any other unported function referencing `control-plane-repository.ts`,
+`lib/domain/portals.ts`, or `lib/portals.ts` -- none found). No new tables
+this slice -- all three functions are pure reads against tables every
+earlier Phase 12 slice already built.
+
+`getAdministrationSnapshot`: `App\Services\Administration\
+AdministrationSnapshotService`, a ten-way aggregate read (the source's own
+`Promise.all`, run sequentially here) reused by seven different routes
+across four different controllers -- `AdministrationController::show`
+(the one route returning the full, unsliced payload) and six existing
+controllers' own new GET methods (`OrganisationAdminController::
+listEmployees/listRoles/listAdministrators`, `LicensingController::
+license`, `AccessGovernanceController::listAccessRequests/
+listAccessReviews`, `WorkflowController::listWorkflows`), each slicing the
+same snapshot down to its own fields, exactly matching the source's own
+per-route shape. `security_events_30d`/`failed_logins_30d` are
+deliberately unfiltered by organisation in both the source and this port
+-- `security_events` genuinely has no `organisation_id` column at all (a
+platform-wide table), not a scoping bug to "fix".
+
+`searchWorkspace`: added to `NavigationService` (the same file
+`getEffectiveNavigation`/`getNavigationChildren` already live in --
+Workspace & Navigation is one domain in the source, and `searchWorkspace`
+is the one function from it this migration had not yet reached), with its
+own `NavigationController::search` route. Each of its three sections
+(employees, invoices, organisation roles) only runs -- and only ever
+surfaces matches from -- a table the actor already holds real read access
+to, reproducing the source's own per-section `hasPermission` guards
+exactly; `%`/`_` are stripped from the search term before building the
+`LIKE` pattern so a search string cannot inject its own SQL wildcards.
+
+`getAvailablePortals`: `App\Domain\Portal\PortalDefinitions` (the static,
+code-defined six-portal catalogue, matching this migration's own verified
+source-inventory count from day one) and `App\Services\Portal\
+PortalService`, with `PortalController::index`. Deliberately filters an
+organisation's held capabilities on their own `effective_from`/
+`effective_to` window -- stricter than, and a genuinely different function
+from, `NavigationService::accessContext()`'s own simpler organisation-
+capability lookup; reproduced exactly as the source's own separate
+`capabilitySet` helper does it, not reconciled into one shared
+implementation the source itself never had.
+
+A 6-test PHPUnit feature suite (`tests/Feature/Administration/
+AdministrationSnapshotTest.php`, `tests/Feature/Navigation/
+NavigationTest.php`'s two new search tests, and `tests/Feature/Portal/
+PortalTest.php`, run against real MySQL) confirms:
+
+- **The full snapshot genuinely aggregates every sub-domain from real,
+  independently-seeded rows** -- one each of an employee, an organisation
+  role with a real `GROUP_CONCAT`-joined permission list, a published
+  workflow with a pending task, an access request, an access review, an
+  administrator, and an open segregation-of-duties violation, each read
+  back through its own real join, not asserted from the write path alone.
+- **Every one of the six slice routes returns *only* its own fields** --
+  verified by asserting the exact top-level JSON key set on each
+  response, not merely that the expected keys are present among others.
+- **Each slice route is gated by its own specific permission, not a
+  shared one** -- a role holding none of employees:read/roles:read/
+  administration:read/access-governance:read/workflows:read is refused
+  every one of the seven routes with a real `403`.
+- **Search is genuinely permission-filtered per section, not per-route**
+  -- a role holding `invoices:read` but neither `employees:read` nor
+  `roles:read` sees only Invoice results even though all three sections
+  are queried against real seeded rows; a query below the two-character
+  minimum returns no results at all, and the route itself still requires
+  `search:read`.
+- **Portal visibility genuinely depends on both role and the
+  organisation's own held capability, not role alone** -- a
+  `TAXPAYER_OWNER` whose organisation holds `SELLER` but not `BUYER` sees
+  the `seller` portal (capability-gated) but not `buyer`, despite being
+  listed in both portals' own `roles`, while still seeing the
+  capability-free `developer` portal; a `PILOT_ADMIN` sees all six
+  unconditionally.
+
+**A genuine SQL-compatibility bug was caught and fixed by this
+verification process, not shipped**: the roles aggregate's
+`GROUP_CONCAT`/`GROUP BY r.id` query failed outright against this
+environment's real MariaDB with `'r.name' isn't in GROUP BY`
+(`ONLY_FULL_GROUP_BY` is enabled) -- MariaDB did not reliably infer
+`r.name`/`r.description`/etc.'s functional dependency on `r.id` (the
+table's own primary key) through the table alias used here, even though
+that inference is exactly what the SQL standard's own primary-key
+exception is supposed to permit. Fixed by listing every selected `r.*`
+column explicitly in the `GROUP BY` clause -- portable regardless of how
+aggressively a given MySQL/MariaDB build infers functional dependency.
+
 ## Source-fidelity findings (genuine gaps in the original, not introduced here)
 
 Three genuine gaps in the TypeScript source itself, discovered while
@@ -1571,36 +1664,34 @@ against it.
 Phase 4 (46 more tables), Phase 5 (remaining seed data -- identity
 proofing, etc.), Phase 7's reusable Eloquent organisation-scope trait/
 global scope, the rest of Phase 8 (the `positions` table itself -- never
-written anywhere in the source, so genuinely nothing to port -- and the
-`GetIdentityFoundationSnapshot`/administration-dashboard aggregate, now
-overlapping with Phase 12's own `getAdministrationSnapshot` gap below),
-the rest of Phase 11 (`DOCUMENT`-sourced evidence citation, genuinely
-blocked on the still-unbuilt `document_metadata` table and its Module 22
-quarantine/scan pipeline -- not a scoping choice -- and the compliance
-dashboard snapshot aggregate; see the Phase 11 verification sections
-above), the rest of Phase 12 (just `getAdministrationSnapshot` and
-`searchWorkspace` now -- see "Licensing & Entitlements", "Organisation
-administration & employees", "Portal navigation", "Access governance" and
-"Workflow engine" above for all five sub-domain slices, now done), and
-Phases 13 through 15 in full (documents/integrations/offline/reports, the
-legacy D1 importer, and deployment documentation) are all outstanding.
-Phases 9 and 10 (invoices/VAT and accounting/commercial) are now both
-fully COMPLETE -- see "Standalone VAT-rule routes" and "Supplier
-verification" above. This is genuinely a multi-week engineering effort at
-the pace of careful, verified, per-field-checked porting demonstrated in
-this session's Phase 3/4/6/7/8/9/10/11/12 slices -- continuing it means
-repeating this same rigor across the remaining ~46 tables and ~120 routes,
-phase by phase (or sub-slice by sub-slice, as Phases 10, 11 and 12 all
-demonstrate), as originally scoped. Given the genuine scale each remaining
-module represents (`control-plane-repository.ts` alone, at ~1,200 lines
-and ~30 exports, is comparable in size to the whole of Phase 10's
-`business-repository.ts`, which itself took 6 separate sub-slices to
-close out; Phases 9 and 10 are now both entirely done, Phase 11 is
-complete down to one narrow deferred surface genuinely blocked on Module
-22's document pipeline, and Phase 12 now has all five of its sub-domains
-done, leaving only the `getAdministrationSnapshot` aggregate that bundles
-across several of them and the small separate `searchWorkspace` route),
-continuing to completion is realistically a
+written anywhere in the source, so genuinely nothing to port -- and
+`identity-repository.ts`'s own `getIdentityFoundationSnapshot`, a
+genuinely separate dashboard aggregate from Phase 12's own
+`getAdministrationSnapshot`, now closed -- these two were previously
+mis-noted as overlapping; they are not the same function, and only the
+Phase 8 one remains), the rest of Phase 11 (`DOCUMENT`-sourced evidence
+citation, genuinely blocked on the still-unbuilt `document_metadata`
+table and its Module 22 quarantine/scan pipeline -- not a scoping choice
+-- and the compliance dashboard snapshot aggregate; see the Phase 11
+verification sections above), and Phases 13 through 15 in full
+(documents/integrations/offline/reports, the legacy D1 importer, and
+deployment documentation) are all outstanding. Phases 9, 10 and 12
+(invoices/VAT, accounting/commercial, and portals/licensing/governance)
+are now all fully COMPLETE -- see "Standalone VAT-rule routes", "Supplier
+verification" and "Administration snapshot & portals" above. This is
+genuinely a multi-week engineering effort at the pace of careful, verified,
+per-field-checked porting demonstrated in this session's Phase
+3/4/6/7/8/9/10/11/12 slices -- continuing it means repeating this same
+rigor across the remaining ~46 tables and ~115 routes, phase by phase (or
+sub-slice by sub-slice, as Phases 10, 11 and 12 all demonstrated), as
+originally scoped. Given the genuine scale each remaining module represents
+(`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports, was
+comparable in size to the whole of Phase 10's `business-repository.ts`,
+which itself took 6 separate sub-slices to close out -- Phase 12 took 6,
+counting the two small files closed out alongside its own final slice;
+Phases 9, 10 and 12 are now all entirely done, and Phase 11 is complete
+down to one narrow deferred surface genuinely blocked on Module 22's
+document pipeline), continuing to completion is realistically a
 multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far
 that effort has gotten at each point.

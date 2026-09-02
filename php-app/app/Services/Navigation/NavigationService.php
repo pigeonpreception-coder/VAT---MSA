@@ -10,16 +10,18 @@ use App\Models\NavigationPreference;
 use App\Models\NavigationWorkspace;
 use App\Models\User;
 use App\Support\Licensing\LicenseResolver;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Ported from lib/data/control-plane-repository.ts's getEffectiveNavigation/
- * getNavigationChildren/getNavigationItemActions/saveNavigationPreference --
- * Phase 12's portal-navigation slice, the last of `control-plane-
- * repository.ts`'s five sub-domains besides the workflow engine and the
- * rest of Access governance. `getNavigationAccessContext`/
- * `navigationRowAllowed` (the source's own two shared internal helpers)
- * are `accessContext()`/`rowAllowed()` below.
+ * getNavigationChildren/getNavigationItemActions/saveNavigationPreference/
+ * searchWorkspace -- Phase 12's Workspace & Navigation domain.
+ * `getNavigationAccessContext`/`navigationRowAllowed` (the source's own
+ * two shared internal helpers) are `accessContext()`/`rowAllowed()`
+ * below. `searchWorkspace` closes out the very last function left in
+ * `control-plane-repository.ts` besides `getAdministrationSnapshot`
+ * itself (see docs/MIGRATION_MATRIX.md).
  */
 class NavigationService
 {
@@ -240,5 +242,61 @@ class NavigationService
             'userId' => $actor->id, 'organisationId' => $organisation->id,
             'preferenceType' => $preference['preferenceType'], 'value' => json_decode($preference['value'], true),
         ];
+    }
+
+    /**
+     * A permission-filtered search across employees, invoices, and
+     * organisation roles -- each section only runs (and only ever
+     * surfaces matches from) a table the actor already holds real read
+     * access to, matching the source's own per-section `hasPermission`
+     * guards exactly. `%`/`_` are stripped from the term before building
+     * the `LIKE` pattern so a search string can't inject its own SQL
+     * wildcards. The `search:read` check here is intentionally redundant
+     * with the route's own `Gate::authorize('permission', 'search:read')`
+     * -- reproduced faithfully because the source itself double-checks it
+     * inside the function, not because this port invented the redundancy.
+     *
+     * @return list<array{type: string, id: string, title: string, subtitle: string, href: string}>
+     */
+    public function searchWorkspace(User $actor, string $query, ?string $requestedOrganisationId): array
+    {
+        $organisation = LicenseResolver::resolveOrganisation($actor, $requestedOrganisationId);
+        if (! $actor->hasAppPermission('search:read')) {
+            throw new AuthorizationException('Workspace search is not authorised.');
+        }
+        $term = mb_substr(trim($query), 0, 80);
+        if (mb_strlen($term) < 2) {
+            return [];
+        }
+        $like = '%'.str_replace(['%', '_'], '', $term).'%';
+
+        $results = [];
+        if ($actor->hasAppPermission('employees:read')) {
+            $rows = DB::table('employees')->where('organisation_id', $organisation->id)
+                ->where(fn ($q) => $q->where('full_name', 'like', $like)->orWhere('email', 'like', $like)->orWhere('employee_number', 'like', $like))
+                ->limit(15)->get(['id', 'full_name', 'email', 'employee_number']);
+            foreach ($rows as $row) {
+                $results[] = ['type' => 'Employee', 'id' => $row->id, 'title' => $row->full_name, 'subtitle' => "{$row->employee_number} \u{00B7} {$row->email}", 'href' => '/administration#employees'];
+            }
+        }
+        if ($actor->hasAppPermission('invoices:read')) {
+            $rows = DB::table('invoices')
+                ->where(fn ($q) => $q->where('supplier_taxpayer_id', $organisation->taxpayer_id)->orWhere('customer_taxpayer_id', $organisation->taxpayer_id))
+                ->where(fn ($q) => $q->where('invoice_number', 'like', $like)->orWhere('supplier_name', 'like', $like)->orWhere('customer_name', 'like', $like))
+                ->limit(15)->get(['id', 'invoice_number', 'supplier_name', 'customer_name']);
+            foreach ($rows as $row) {
+                $results[] = ['type' => 'Invoice', 'id' => $row->id, 'title' => $row->invoice_number, 'subtitle' => "{$row->supplier_name} \u{2192} {$row->customer_name}", 'href' => "/invoices/{$row->id}"];
+            }
+        }
+        if ($actor->hasAppPermission('roles:read')) {
+            $rows = DB::table('organisation_roles')->where('organisation_id', $organisation->id)
+                ->where(fn ($q) => $q->where('name', 'like', $like)->orWhere('description', 'like', $like))
+                ->limit(15)->get(['id', 'name', 'description']);
+            foreach ($rows as $row) {
+                $results[] = ['type' => 'Role', 'id' => $row->id, 'title' => $row->name, 'subtitle' => $row->description, 'href' => '/administration#roles'];
+            }
+        }
+
+        return array_slice($results, 0, 30);
     }
 }

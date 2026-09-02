@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Navigation;
 
+use App\Models\Employee;
 use App\Models\LicensePlanEntitlement;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
@@ -19,6 +20,7 @@ use Database\Seeders\OrganisationAdministratorRoleSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -245,5 +247,71 @@ class NavigationTest extends TestCase
         // custom role never touched stays denied.
         $stillDenied = $this->actingAs($viewer)->getJson('/api/v1/navigation/actions?item_key=security');
         $stillDenied->assertStatus(200)->assertJsonPath('allowed', false);
+    }
+
+    public function test_search_is_permission_filtered_per_section_and_ignores_short_queries(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-NAV-0008');
+        $role = OrganisationRole::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $ctx['organisation']->id, 'name' => 'Reconciliation Reviewer Widget',
+            'description' => 'A findable custom role.', 'version' => 1, 'branch_scope' => '[]', 'approval_limit_cents' => null,
+            'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $employee = Employee::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $ctx['organisation']->id, 'user_id' => null, 'employee_number' => 'EMP-WIDGET-01',
+            'full_name' => 'Widget Employee', 'email' => 'widget-employee@test.test', 'position_id' => null, 'job_title_id' => null,
+            'department_id' => null, 'business_unit_id' => null, 'branch_id' => null, 'manager_employee_id' => null, 'status' => 'ACTIVE',
+            'invited_at' => now(), 'activated_at' => now(), 'terminated_at' => null, 'last_activity_at' => null, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('invoices')->insert([
+            'id' => (string) Str::uuid(), 'invoice_number' => 'INV-WIDGET-01', 'document_type' => 'TAX_INVOICE', 'source_system' => 'test',
+            'source_document_id' => (string) Str::uuid(), 'supplier_taxpayer_id' => $ctx['taxpayer']->id, 'supplier_name' => 'Widget Supplier',
+            'supplier_vat_number' => 'VAT-NAV-0008', 'customer_taxpayer_id' => null, 'customer_name' => 'Widget Customer', 'customer_vat_number' => null,
+            'issue_date' => now()->toDateString(), 'currency' => 'NAD', 'line_net_cents' => 10000, 'tax_cents' => 1500, 'total_cents' => 11500,
+            'status' => 'CERTIFIED', 'risk_level' => 'LOW', 'payload_hash' => hash('sha256', 'widget'), 'transaction_id' => (string) Str::uuid(),
+            'certificate_id' => (string) Str::uuid(), 'verification_token' => (string) Str::uuid(), 'created_at' => now(), 'certified_at' => now(),
+        ]);
+
+        // TAXPAYER_OWNER holds employees:read/invoices:read/roles:read --
+        // every section runs and finds its own match.
+        $full = $this->actingAs($ctx['owner'])->getJson('/api/v1/search?q=Widget');
+        $full->assertStatus(200)->assertJsonPath('query', 'Widget');
+        $types = collect($full->json('results'))->pluck('type')->all();
+        $this->assertContains('Employee', $types);
+        $this->assertContains('Invoice', $types);
+        $this->assertContains('Role', $types);
+        $this->assertSame($employee->id, collect($full->json('results'))->firstWhere('type', 'Employee')['id']);
+
+        // TAXPAYER_VIEWER holds none of employees:read/invoices:read is
+        // present but roles:read is not -- confirmed against
+        // Permissions::ROLE_PERMISSIONS['TAXPAYER_VIEWER'] (has
+        // invoices:read, lacks roles:read) -- so only the Invoice section
+        // ever runs for this role.
+        $viewer = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Viewer', 'email' => 'viewer-0008@test.test', 'password' => bcrypt('password'),
+            'role' => 'TAXPAYER_VIEWER', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE',
+        ]);
+        $scoped = $this->actingAs($viewer)->getJson('/api/v1/search?q=Widget');
+        $scoped->assertStatus(200);
+        $scopedTypes = collect($scoped->json('results'))->pluck('type')->all();
+        $this->assertContains('Invoice', $scopedTypes);
+        $this->assertNotContains('Employee', $scopedTypes);
+        $this->assertNotContains('Role', $scopedTypes);
+
+        // A single-character query is below the minimum and returns no results at all.
+        $short = $this->actingAs($ctx['owner'])->getJson('/api/v1/search?q=W');
+        $short->assertStatus(200)->assertJsonCount(0, 'results');
+    }
+
+    public function test_search_requires_search_read_permission_at_the_route_level(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-NAV-0009');
+        // No built-in role actually lacks search:read (every one of the 22
+        // grants it via WORKSPACE_READ), so this is exercised via a
+        // suspended user instead, matching the same pattern already used
+        // for workspace:read denial.
+        $ctx['owner']->update(['status' => 'SUSPENDED']);
+
+        $this->actingAs($ctx['owner'])->getJson('/api/v1/search?q=Widget')->assertStatus(403);
     }
 }
