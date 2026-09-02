@@ -8,16 +8,27 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
+    {{-- WCAG 2.1 SC 2.4.1 "Bypass Blocks" -- lets keyboard/screen-reader users
+         skip the repeated nav on every page. Visually hidden until focused. --}}
+    <a class="visually-hidden-focusable skip-link" href="#main-content">Skip to main content</a>
+
     @auth
-        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark" aria-label="Primary">
             <div class="container-fluid">
                 <a class="navbar-brand" href="{{ route('dashboard') }}">VAT-MSA</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <div class="collapse navbar-collapse" id="navMain">
                     <ul class="navbar-nav me-auto">
-                        <li class="nav-item"><a class="nav-link" href="{{ route('dashboard') }}">Dashboard</a></li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('dashboard') }}" @if (request()->routeIs('dashboard')) aria-current="page" @endif>Dashboard</a>
+                        </li>
+                        @can('permission', 'invoices:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}
@@ -32,9 +43,9 @@
         </nav>
     @endauth
 
-    <main class="container-fluid py-4">
+    <main id="main-content" class="container-fluid py-4" tabindex="-1">
         @if (session('status'))
-            <div class="alert alert-success">{{ session('status') }}</div>
+            <div class="alert alert-success" role="alert">{{ session('status') }}</div>
         @endif
 
         @yield('content')

@@ -13,9 +13,9 @@
         <h1 class="h3 mb-1">VAT transaction control centre</h1>
         <p class="text-muted mb-0">Live certification, ledger, reconciliation and compliance position for the controlled pilot.</p>
     </div>
-    @can('permission', 'invoices:submit')
-        <a href="#" class="btn btn-primary align-self-center">+ Submit invoice</a>
-    @endcan
+    {{-- "+ Submit invoice" (invoices:submit) is deliberately not linked yet --
+         the certification form is the next UI slice; a button with no real
+         destination would be a dead link, not a shortcut. --}}
 </div>
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
@@ -68,19 +68,24 @@
                     <div class="text-muted small">Latest certified invoice activity</div>
                 </div>
                 @can('permission', 'invoices:read')
-                    <a href="#" class="btn btn-sm btn-outline-secondary">View all</a>
+                    <a href="{{ route('invoices.index') }}" class="btn btn-sm btn-outline-secondary">View all</a>
                 @endcan
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
+                    <caption class="visually-hidden">The six most recently certified invoices</caption>
                     <thead>
-                        <tr><th>Invoice</th><th>Supplier</th><th>Customer</th><th class="text-end">VAT</th><th>Status</th><th>Risk</th></tr>
+                        <tr><th scope="col">Invoice</th><th scope="col">Supplier</th><th scope="col">Customer</th><th scope="col" class="text-end">VAT</th><th scope="col">Status</th><th scope="col">Risk</th></tr>
                     </thead>
                     <tbody>
                         @forelse ($snapshot['recent_invoices'] as $invoice)
                             <tr>
                                 <td>
-                                    <strong>{{ $invoice['invoiceNumber'] }}</strong>
+                                    @can('permission', 'invoices:read')
+                                        <a href="{{ route('invoices.show', $invoice['id']) }}"><strong>{{ $invoice['invoiceNumber'] }}</strong></a>
+                                    @else
+                                        <strong>{{ $invoice['invoiceNumber'] }}</strong>
+                                    @endcan
                                     <div class="text-muted small font-monospace">{{ $invoice['id'] }}</div>
                                 </td>
                                 <td>
@@ -89,8 +94,8 @@
                                 </td>
                                 <td>{{ $invoice['customerName'] }}</td>
                                 <td class="text-end">{{ $invoice['currency'] }} {{ number_format($invoice['taxCents'] / 100, 2) }}</td>
-                                <td><span class="badge bg-light text-dark border">{{ $invoice['status'] }}</span></td>
-                                <td><span class="badge bg-light text-dark border">{{ $invoice['riskLevel'] }}</span></td>
+                                <td><x-status-badge :value="$invoice['status']" type="status" /></td>
+                                <td><x-status-badge :value="$invoice['riskLevel']" type="risk" /></td>
                             </tr>
                         @empty
                             <tr><td colspan="6" class="text-center text-muted py-4">No certified documents yet.</td></tr>

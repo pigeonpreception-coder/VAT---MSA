@@ -12,6 +12,7 @@ use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
+use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\ExpenseController;
@@ -53,6 +54,13 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
+    // Real Blade UI, alongside the JSON API surface below -- see
+    // InvoiceViewController's own doc comment. Registered before the
+    // /api/v1/invoices/** JSON routes' own /invoices path so there is no
+    // ambiguity: this is a genuinely different URL (no api/v1 prefix).
+    Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
+    Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

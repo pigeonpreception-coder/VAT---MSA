@@ -1954,11 +1954,125 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
-Still NOT STARTED: every other module's own screens (invoices,
-compliance/audit cases, refunds, accounting, business parties,
-quotations, expenses, inventory, projects, licensing, portals,
-documents, reports, analytics, platform config, the workflow engine) --
-each its own comparable slice of this new initiative.
+Still NOT STARTED (invoices closed out just below): compliance/audit
+cases, refunds, accounting, business parties, quotations, expenses,
+inventory, projects, licensing, portals, documents, reports, analytics,
+platform config, the workflow engine -- each its own comparable slice
+of this new initiative.
+
+### Accessibility baseline: WCAG 2.1 Level AA
+
+Adopted explicitly as this initiative's own concrete standard --
+**WCAG 2.1 AA** is the substance underneath every framework a "meets
+international standards" request actually means for web UI: US
+ADA/Section 508 enforcement, the EU's EN 301 549 (required under the
+Accessibility Act), and ISO/IEC 40500 (WCAG adopted verbatim as an ISO
+standard) all point back to it. Applied to the shared layout
+(`resources/views/layouts/app.blade.php`, every page inherits it) and
+the new invoices screens, then verified programmatically, not just
+asserted:
+
+- **Skip link** (WCAG 2.4.1 Bypass Blocks): a "Skip to main content"
+  link, visually hidden until focused (Bootstrap's own
+  `visually-hidden-focusable`), landing on `<main id="main-content"
+  tabindex="-1">`. Verified structurally: it is genuinely the first
+  focusable element in the DOM (`document.querySelectorAll('a[href],
+  button, input, select, textarea, [tabindex]')[0]`), with
+  `display:block`/`visibility:visible`/`tabIndex:0` -- not excluded from
+  the tab sequence. (The Browser pane's synthetic Tab keypress did not
+  reliably move `document.activeElement` in this sandboxed environment;
+  the DOM-order/computed-style check above is the actual verification,
+  since the pattern itself is pure standard HTML/CSS with no custom JS
+  intercepting Tab.)
+- **Colour contrast** (WCAG 1.4.3, 4.5:1 for normal text): the new
+  `<x-status-badge>` component maps every status/risk value to
+  Bootstrap 5.3's `text-bg-*` utilities, which auto-select a
+  contrast-safe text colour (rather than hand-pairing e.g. `bg-light
+  text-dark`). Computed in-browser for all 6 variants actually used
+  (success/info/warning/danger/secondary/light): ratios of 4.53, 10.72,
+  12.88, 4.53, 4.69 and 19.92 -- every one clears 4.5:1.
+  Real-instance-verified too (rendered `Matched`/`Low`/`Certified`
+  badges on a live certified invoice page), not just the synthetic
+  component check.
+- **Semantic tables**: every data table gets a real `<caption
+  class="visually-hidden">` (not a floating heading) and `<th
+  scope="col">` (never a bare `<th>`) -- verified both by direct markup
+  inspection and by confirming assistive-tech-equivalent text
+  extraction picks the caption up as part of the table's own content.
+- **Responsive reflow** (WCAG 1.4.10, down to 320px CSS width without
+  horizontal scrolling except genuinely wide content in its own
+  scroll region): verified at an actual 320px viewport on the
+  dashboard, invoices list and invoice detail pages --
+  `document.body.scrollWidth` never exceeds `document.documentElement.
+  clientWidth` on any of the three, even with the wide invoice-lines/
+  ledger tables present (those scroll within their own
+  `.table-responsive` container, never the page).
+- **Live region for dynamic filtering** (WCAG 4.1.3, a genuine
+  improvement over the source, not just parity): the invoices list's
+  client-side search/status filter count (`N documents`) carries
+  `aria-live="polite"`, so a screen-reader user hears the updated count
+  as they filter -- the source's own `InvoiceTable.tsx` has no
+  equivalent announcement.
+- **Real `<label>` elements** (not `aria-label` alone) for the search
+  and status-filter controls, `role="alert"` on flash messages,
+  `aria-current="page"` on the active nav item, and `aria-label` on the
+  navbar's icon-only toggle button.
+
+Not attempted: an automated axe-core/Lighthouse CI scan -- no such
+tooling is wired into this project, and adding one is a separate,
+larger initiative of its own. Every check above was performed directly
+against the rendered page (computed styles, DOM structure, viewport
+geometry), which is real, evidence-based verification, just not an
+automated regression gate yet.
+
+### Invoices module (list + detail)
+
+Ports the source's own `app/invoices/page.tsx` +
+`app/invoices/InvoiceTable.tsx` + `app/invoices/[id]/page.tsx` -- list
+and detail, read-only (the certification form, `app/invoices/new/`, is
+a separate, larger next slice: a real multi-line VAT-aware form, not a
+read screen).
+
+New: `App\Http\Controllers\Invoice\InvoiceViewController` (`index`/
+`show`), reusing `InvoiceService::list()`/`find()` directly -- no
+second, parallel query path alongside the JSON `InvoiceController` that
+already serves `/api/v1/invoices`. Routes `GET /invoices` and `GET
+/invoices/{id}` (named `invoices.index`/`invoices.show`), registered
+outside the `api/v1` prefix, matching `DashboardController`'s own
+precedent of a dedicated Blade route alongside its JSON sibling.
+`resources/views/invoices/index.blade.php` reproduces
+`InvoiceTable.tsx`'s client-side search/status filter as small
+vanilla-JS progressive enhancement over a fully server-rendered table
+(works with JS disabled too -- shows the complete, unfiltered list
+rather than nothing). `resources/views/invoices/show.blade.php`
+reproduces the source's document-record/certification-receipt/
+correction-lineage/invoice-lines/VAT-ledger-postings layout in full,
+including the `?created=1` post-certification success banner.
+
+The dashboard's own "View all"/invoice-number links -- `href="#"` since
+the dashboard slice above shipped before this one existed -- now point
+at real routes; its status/risk badges were retrofitted onto the same
+`<x-status-badge>` component for visual consistency. The dashboard's
+"+ Submit invoice" button is deliberately still not linked (removed
+rather than left as `href="#"`) -- the certification form doesn't exist
+yet, and a button with no real destination is a dead link, not a
+shortcut; it returns once that next slice ships.
+
+Verified by a new `tests/Feature/Invoice/InvoiceViewTest.php` (9
+tests, reusing `InvoiceLifecycleTest`'s own "certify via the real
+`POST /api/v1/invoices` command, not a raw DB row" convention, since a
+document-record view genuinely depends on the certificate/ledger side
+effects only a real certification produces): authentication and
+`invoices:read` permission gates on both routes; the list renders a
+certified invoice with a working link to its detail page and correct
+accessible-table markup; the list is scoped to the actor's own
+taxpayer; the detail page renders the full certification record
+(document record, certification receipt, invoice lines, VAT ledger
+postings); and both a cross-tenant and an unknown invoice id 404
+correctly. Also verified visually and structurally over a real HTTP
+session per the accessibility section above. 265 tests total, 0
+regressions, run against real MySQL, plus a clean `migrate:fresh --seed`
+cycle.
 
 ## Legacy D1 importer (Phase 14)
 
