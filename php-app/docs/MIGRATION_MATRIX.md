@@ -46,7 +46,7 @@ below for the specific commands.
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE -- every one of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- including `VAT_RETURN`- and `DOCUMENT`-sourced citations, see "VAT_RETURN evidence citation" and "DOCUMENT evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below), and now `getComplianceSnapshot` (see "Compliance dashboard snapshot" below) -- the phase's last remaining gap. Nothing outstanding in this phase's own scope. |
 | 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
-| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- Module 22's own Documents & Records slice is COMPLETE: `uploadDocument`/`completeDocumentScan` (pulled forward in Phase 11 to unblock `DOCUMENT`-sourced evidence citation, see "DOCUMENT evidence citation" below) plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below. The platform/developer-portal snapshot reads are COMPLETE: `getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below. The offline sync command is COMPLETE: `receiveOfflineBatch` -- see "Offline sync commands" below. Report exports are COMPLETE: `runInlineReport`/`publishReportRun`/`requestReportExport`/`approveReportExport`/`cancelReportExport`/`getReportExport`/`downloadReportExport` -- see "Report exports" below. Data products & analytics are now also COMPLETE: `listDataProducts`/`runAnalyticsModel`/`publishDataProduct`/`queryApprovedMetrics`/`listAnomalyCandidates` -- see "Data products & analytics" below. Everything else in `platform-repository.ts` (platform config/change-management) and the legacy D1 importer and deployment documentation remain NOT STARTED. |
+| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- `platform-repository.ts` is now entirely COMPLETE: Module 22's own Documents & Records slice (`uploadDocument`/`completeDocumentScan`, pulled forward in Phase 11, plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below), the platform/developer-portal snapshot reads (`getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below), the offline sync command (`receiveOfflineBatch` -- see "Offline sync commands" below), report exports (`runInlineReport`/`publishReportRun`/`requestReportExport`/`approveReportExport`/`cancelReportExport`/`getReportExport`/`downloadReportExport` -- see "Report exports" below), data products & analytics (`listDataProducts`/`runAnalyticsModel`/`publishDataProduct`/`queryApprovedMetrics`/`listAnomalyCandidates` -- see "Data products & analytics" below), and platform config/change-management (`getPlatformConfig`/`listPlatformChangeRequests`/`requestPlatformChange`/`decidePlatformChange`/`provisionPlatformStaff` -- see "Platform config & change-management" below). Only Phases 14-15 (the legacy D1 importer and deployment documentation) remain NOT STARTED. |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -1800,6 +1800,90 @@ queryable via `GET /analytics/anomalies`); and `queryApprovedMetrics`'
 232 tests total, 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
+## Platform config & change-management (Phase 13, sixth and final slice)
+
+Ports `platform-repository.ts`'s `getPlatformConfig`/
+`listPlatformChangeRequests`/`requestPlatformChange`/
+`decidePlatformChange`/`provisionPlatformStaff` (Module 8 Phase A), via
+`lib/domain/platform.ts`'s `validatePlatformChangeRequest`/
+`validatePlatformChangeDecision`/`validateProvisionStaff`. **This closes
+out `platform-repository.ts` entirely** -- every export from that source
+file now has a PHP counterpart. Only Phases 14-15 (the legacy D1
+importer and deployment documentation) remain outstanding in this whole
+migration.
+
+New: `App\Domain\Platform\PlatformChangeValidator` (plus its
+`PLATFORM_STAFF_ROLES` constant), `App\Services\Platform\
+PlatformChangeService` (all 5 methods), `App\Http\Controllers\Platform\
+PlatformConfigController`; `GET /api/v1/platform/config`, `GET
+/api/v1/platform/change-requests`, `POST /api/v1/platform/change-requests`,
+`POST /api/v1/platform/change-requests/{id}/decision`, `POST
+/api/v1/platform/staff` -- kept 1:1 with the source's own
+`app/api/v1/platform/**` route shapes. No Eloquent model for
+`feature_flags`/`platform_config`/`access_policies`/`change_requests` --
+`DB::table()` throughout, matching every other Phase 13 slice.
+`provisionStaff()` is the one exception: it writes directly to
+`users`/`identity_links` (both of which do have models elsewhere) via
+`DB::table()` too, the same "one mixed-table transaction, not a mixed
+Eloquent/`DB::table()` write" posture `ReportExportService::
+requestExport()` already established.
+
+**A documented 2026-08-26 audit found zero code anywhere for
+FeatureFlag/PlatformConfig/AccessPolicy/ChangeRequest**, despite an
+architecture matrix's "VERIFIED FOUNDATION" label on this domain row.
+Definitions (which flags/config keys/policies exist) are deliberately
+seed-only -- the same posture already established for
+`report_definitions` and `data_products`/`metrics`: deciding a new
+governed knob should exist at all is a deploy-time/governance action,
+out of scope for a runtime command. Only the *value* of an existing
+definition is runtime-changeable, and only through a real maker-checker
+gate: `requestChange()` stages a proposed value as a `PENDING`
+`change_requests` row (snapshotting the previous value so the diff is
+always reconstructable); `decideChange()` applies or rejects it,
+refusing self-decision the same way every other maker-checker command in
+this codebase does. These seeded config values are illustrative/
+documentary today -- changing a row here does not yet feed back into any
+other module's own hardcoded constants (the step-up window, export size
+cap, minimum-cell suppression threshold, rate-limit defaults are all
+still the real hardcoded values those other modules enforce); wiring
+every consumer to read live from `platform_config` is a larger,
+cross-module change deliberately left for when a second consumer
+actually needs it -- reproduced exactly as the source's own comment on
+this states, not silently pretended-complete.
+
+**`provisionPlatformStaff` and the `users.password` column**: the
+source's own account here is federated-identity-only (an
+`identity_links` row at `PLATFORM_AUTHENTICATED` assurance, no local
+password concept at all), but this schema's `users.password` is
+`NOT NULL` (the identity-core migration's own design decision: local
+Laravel auth must work independently of `identity_links`). A random,
+nobody-knows-it `Hash::make(Str::random(40))` satisfies the column
+without granting any real local-login capability for the provisioned
+account -- pairing this with a real password-reset/invite flow so a
+provisioned staff member can actually sign in is a documented follow-up,
+not silently dropped. Unlike the report-export commands'
+data-conditional step-up (`App\Support\Access\StepUp`), `provisionStaff`
+is **unconditionally** step-up gated -- the same posture
+`InvoiceService::cancel()` already established for a comparably
+privileged action -- so its route simply wears the `password.confirm`
+middleware.
+
+Verified by a new `tests/Feature/Platform/PlatformChangeTest.php` (12
+tests): `platform:read`-gated config reads (`ACTIVE`-only rows,
+`RETIRED` excluded) and change-request listing (filterable by status);
+`requestChange`'s `platform:manage` gate, unknown-target and invalid-
+proposed-value-shape refusal, previous-value snapshotting, and
+idempotent replay; `decideChange`'s `platform:manage` gate, unknown/
+already-decided refusal, self-decision refusal, and -- for all three
+target types (`FEATURE_FLAG`/`PLATFORM_CONFIG`/`ACCESS_POLICY`) -- a
+real approval applying the change and bumping `version`, plus a
+rejection leaving the target untouched; and `provisionStaff`'s
+`platform:manage` + step-up gate (`423` without a fresh confirmation),
+duplicate-identity/email and invalid-role refusal, and a real success
+(no `taxpayer_id`, a real `identity_links` row) with idempotent replay.
+244 tests total, 0 regressions, run against real MySQL, plus a clean
+`migrate:fresh --seed` cycle.
+
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
 Opens Phase 12 -- previously entirely `NOT STARTED`. `lib/data/control-
@@ -2572,17 +2656,17 @@ module" above) each keep their existing manual tenant checks fully
 correct and untouched; this was always about which models this specific
 automatic-scope mechanism can safely sit on top of, never a security gap
 in those models themselves, so no further action is owed there beyond
-the documented reasoning. Phase 13 now has five slices closed: Module
-22's own Documents & Records (see "Document module" above), the
-platform/developer-portal snapshot reads (see "Platform snapshots"
-above), the offline-sync command (see "Offline sync commands" above),
-report exports (see "Report exports" above), and data products &
-analytics (see "Data products & analytics" above). `platform-
-repository.ts` now has exactly one sub-module left, still outstanding:
-platform config/change-management (`requestPlatformChange`/
-`decidePlatformChange`/`listPlatformChangeRequests`/`getPlatformConfig`/
-`provisionPlatformStaff`). Phases 14-15 in full (the legacy D1 importer
-and deployment documentation) remain outstanding too.
+the documented reasoning. Phase 13 is now COMPLETE for its actual scope,
+all six slices closed: Module 22's own Documents & Records (see
+"Document module" above), the platform/developer-portal snapshot reads
+(see "Platform snapshots" above), the offline-sync command (see
+"Offline sync commands" above), report exports (see "Report exports"
+above), data products & analytics (see "Data products & analytics"
+above), and platform config/change-management (see "Platform config &
+change-management" above) -- `platform-repository.ts` is now entirely
+ported, every export has a PHP counterpart. Phases 14-15 in full (the
+legacy D1 importer and deployment documentation) remain the only
+outstanding work in this entire migration.
 Phase 4 is now COMPLETE for its actual scope (154 of 155 tables -- see
 "Remaining schema conversion" above; `positions` stays deliberately
 excluded, the source never writes to it either). Phase 5 is now COMPLETE
@@ -2602,18 +2686,18 @@ snapshot & portals" above. This is genuinely a multi-week engineering
 effort at the pace of careful, verified, per-field-checked porting
 demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12/13 slices --
 continuing it means repeating this same rigor across the remaining
-~94 routes (the schema itself is now essentially done, and Phase 13
-has its first five slices closed), phase by phase (or sub-slice by
-sub-slice, as Phases 10, 11 and 12 all demonstrated), as originally
-scoped. Given the genuine scale each remaining module represents
+~89 routes (the schema itself is now essentially done, and Phase 13 is
+now entirely done), phase by phase (or sub-slice by sub-slice, as
+Phases 10, 11, 12 and 13 all demonstrated), as originally scoped. Given
+the genuine scale each remaining module represents
 (`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports,
 was comparable in size to the whole of Phase 10's `business-
 repository.ts`, which itself took 6 separate sub-slices to close out --
 Phase 12 took 6, counting the two small files closed out alongside its
-own final slice; `platform-repository.ts`'s own one remaining
-sub-module (platform config/change-management) is comparable again;
-Phases 4,
-5, 7, 8, 9, 10, 11 and 12 are now all entirely done), continuing
+own final slice, and Phase 13 took 6 sub-slices across
+`platform-repository.ts`'s own six genuinely distinct sub-modules;
+Phases 4, 5, 7, 8, 9, 10, 11, 12 and 13 are now all entirely done),
+continuing
 to completion is realistically a
 multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far

@@ -33,6 +33,7 @@ use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\OfflineSyncController;
+use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Portal\PortalController;
@@ -261,6 +262,19 @@ Route::middleware('auth')->group(function () {
         Route::post('/analytics/data-products/{id}/publications', [DataProductController::class, 'publish']);
         Route::get('/analytics/metrics', [DataProductController::class, 'metrics']);
         Route::get('/analytics/anomalies', [DataProductController::class, 'anomalies']);
+
+        // Module 8 Phase A's platform config/change-management commands
+        // (Phase 13, sixth and final slice) -- closes out
+        // platform-repository.ts entirely. Kept 1:1 with the source's own
+        // app/api/v1/platform/** route shapes. provisionStaff is
+        // unconditionally step-up gated (password.confirm), unlike the
+        // report-export commands' data-conditional step-up.
+        Route::get('/platform/config', [PlatformConfigController::class, 'config']);
+        Route::get('/platform/change-requests', [PlatformConfigController::class, 'changeRequests']);
+        Route::post('/platform/change-requests', [PlatformConfigController::class, 'requestChange']);
+        Route::post('/platform/change-requests/{id}/decision', [PlatformConfigController::class, 'decideChange']);
+        Route::post('/platform/staff', [PlatformConfigController::class, 'provisionStaff'])
+            ->middleware('password.confirm');
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
