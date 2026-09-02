@@ -15,6 +15,7 @@ use Database\Seeders\OrganisationAdministratorRoleSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -157,6 +158,125 @@ class OrganisationAdminTest extends TestCase
             ->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/organisations/employees/{$selfEmployeeId}/termination", ['reason' => 'Attempting to self-offboard.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_OFFBOARD_DENIED');
+    }
+
+    public function test_terminating_an_employee_reassigns_their_pending_workflow_tasks_to_the_primary_administrator(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-0007');
+        $this->openReview($ctx['owner']);
+
+        $primaryUser = User::create(['id' => (string) Str::uuid(), 'name' => 'Primary Admin', 'email' => 'primary-0007@test.test', 'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE']);
+        $terminatedUser = User::create(['id' => (string) Str::uuid(), 'name' => 'Outgoing Employee', 'email' => 'outgoing-0007@test.test', 'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE']);
+        $bystanderUser = User::create(['id' => (string) Str::uuid(), 'name' => 'Bystander', 'email' => 'bystander-0007@test.test', 'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE']);
+
+        $employeeIds = [];
+        foreach ([['EMP-PRIMARY-0007', $primaryUser], ['EMP-OUTGOING-0007', $terminatedUser]] as [$number, $user]) {
+            $invite = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+                ->postJson('/api/v1/organisations/employees', ['employee_number' => $number, 'full_name' => $user->name, 'email' => strtolower($number).'@test.test']);
+            $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+                ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/activation", ['user_id' => $user->id])
+                ->assertStatus(200);
+            $employeeIds[$user->id] = $invite->json('employee.id');
+        }
+        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson('/api/v1/organisations/administrators', ['user_id' => $primaryUser->id, 'administrator_role_code' => 'PRIMARY', 'is_primary' => true, 'approval_reference' => 'Board resolution 2026-09-01.'])
+            ->assertStatus(201);
+
+        // A real workflow instance with two PENDING tasks assigned to the
+        // outgoing employee, plus a third assigned to an unrelated
+        // bystander who must be left untouched.
+        $versionId = (string) Str::uuid();
+        DB::table('workflows')->insert([
+            'id' => (string) Str::uuid(), 'organisation_id' => $ctx['organisation']->id, 'name' => 'Reassignment Test Workflow',
+            'domain_action' => 'EXPENSE', 'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $workflowId = DB::table('workflows')->where('name', 'Reassignment Test Workflow')->value('id');
+        DB::table('workflow_versions')->insert([
+            'id' => $versionId, 'workflow_id' => $workflowId, 'organisation_id' => $ctx['organisation']->id, 'version_number' => 1,
+            'status' => 'PUBLISHED', 'definition_hash' => hash('sha256', 'reassignment-test'), 'definition' => '{}', 'effective_from' => now(),
+            'published_by' => $ctx['owner']->id, 'approved_by' => $ctx['owner']->id, 'published_at' => now(), 'retired_at' => null, 'created_at' => now(),
+        ]);
+        $instanceIds = [];
+        foreach (['exp-1', 'exp-2', 'exp-3'] as $resourceId) {
+            $instanceId = (string) Str::uuid();
+            DB::table('workflow_instances')->insert([
+                'id' => $instanceId, 'organisation_id' => $ctx['organisation']->id, 'workflow_version_id' => $versionId,
+                'resource_type' => 'EXPENSE', 'resource_id' => $resourceId, 'initiated_by' => $ctx['owner']->id, 'status' => 'IN_PROGRESS',
+                'current_node_key' => 'approve', 'context_snapshot' => '{}', 'started_at' => now(), 'completed_at' => null,
+            ]);
+            $instanceIds[] = $instanceId;
+        }
+        // Two PENDING tasks for the outgoing employee...
+        foreach ([$instanceIds[0], $instanceIds[1]] as $instanceId) {
+            DB::table('workflow_assignments')->insert([
+                'id' => (string) Str::uuid(), 'workflow_instance_id' => $instanceId, 'node_key' => 'approve', 'assigned_user_id' => $terminatedUser->id,
+                'assigned_role_id' => null, 'status' => 'PENDING', 'due_at' => null, 'assigned_at' => now(),
+            ]);
+        }
+        // ...one already-decided task for the outgoing employee, which must NOT be reassigned...
+        DB::table('workflow_assignments')->insert([
+            'id' => (string) Str::uuid(), 'workflow_instance_id' => $instanceIds[0], 'node_key' => 'second-approve', 'assigned_user_id' => $terminatedUser->id,
+            'assigned_role_id' => null, 'status' => 'APPROVED', 'due_at' => null, 'assigned_at' => now(),
+        ]);
+        // ...and one PENDING task for an unrelated bystander, which must be left alone.
+        $bystanderAssignmentId = (string) Str::uuid();
+        DB::table('workflow_assignments')->insert([
+            'id' => $bystanderAssignmentId, 'workflow_instance_id' => $instanceIds[2], 'node_key' => 'approve', 'assigned_user_id' => $bystanderUser->id,
+            'assigned_role_id' => null, 'status' => 'PENDING', 'due_at' => null, 'assigned_at' => now(),
+        ]);
+
+        $terminate = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson("/api/v1/organisations/employees/{$employeeIds[$terminatedUser->id]}/termination", ['reason' => 'Resigned, tasks must move to the primary administrator.']);
+        $terminate->assertStatus(200)->assertJsonPath('employee.status', 'TERMINATED')->assertJsonPath('employee.tasks_reassigned_to', $primaryUser->id);
+
+        $this->assertDatabaseHas('workflow_assignments', ['workflow_instance_id' => $instanceIds[0], 'node_key' => 'approve', 'assigned_user_id' => $primaryUser->id, 'status' => 'PENDING']);
+        $this->assertDatabaseHas('workflow_assignments', ['workflow_instance_id' => $instanceIds[1], 'node_key' => 'approve', 'assigned_user_id' => $primaryUser->id, 'status' => 'PENDING']);
+        // The already-decided task keeps its original assignee -- only PENDING tasks move.
+        $this->assertDatabaseHas('workflow_assignments', ['workflow_instance_id' => $instanceIds[0], 'node_key' => 'second-approve', 'assigned_user_id' => $terminatedUser->id, 'status' => 'APPROVED']);
+        // The bystander's own task is completely untouched.
+        $this->assertDatabaseHas('workflow_assignments', ['id' => $bystanderAssignmentId, 'assigned_user_id' => $bystanderUser->id]);
+    }
+
+    public function test_terminating_an_employee_with_no_other_active_primary_administrator_leaves_tasks_unreassigned(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-0008');
+        $this->openReview($ctx['owner']);
+
+        $terminatedUser = User::create(['id' => (string) Str::uuid(), 'name' => 'Sole Employee', 'email' => 'sole-0008@test.test', 'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE']);
+        $invite = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-SOLE-0008', 'full_name' => $terminatedUser->name, 'email' => 'sole-emp-0008@test.test']);
+        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/activation", ['user_id' => $terminatedUser->id])
+            ->assertStatus(200);
+
+        $versionId = (string) Str::uuid();
+        DB::table('workflows')->insert([
+            'id' => (string) Str::uuid(), 'organisation_id' => $ctx['organisation']->id, 'name' => 'No Primary Test Workflow',
+            'domain_action' => 'EXPENSE', 'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $workflowId = DB::table('workflows')->where('name', 'No Primary Test Workflow')->value('id');
+        DB::table('workflow_versions')->insert([
+            'id' => $versionId, 'workflow_id' => $workflowId, 'organisation_id' => $ctx['organisation']->id, 'version_number' => 1,
+            'status' => 'PUBLISHED', 'definition_hash' => hash('sha256', 'no-primary-test'), 'definition' => '{}', 'effective_from' => now(),
+            'published_by' => $ctx['owner']->id, 'approved_by' => $ctx['owner']->id, 'published_at' => now(), 'retired_at' => null, 'created_at' => now(),
+        ]);
+        $instanceId = (string) Str::uuid();
+        DB::table('workflow_instances')->insert([
+            'id' => $instanceId, 'organisation_id' => $ctx['organisation']->id, 'workflow_version_id' => $versionId,
+            'resource_type' => 'EXPENSE', 'resource_id' => 'exp-solo', 'initiated_by' => $ctx['owner']->id, 'status' => 'IN_PROGRESS',
+            'current_node_key' => 'approve', 'context_snapshot' => '{}', 'started_at' => now(), 'completed_at' => null,
+        ]);
+        $assignmentId = (string) Str::uuid();
+        DB::table('workflow_assignments')->insert([
+            'id' => $assignmentId, 'workflow_instance_id' => $instanceId, 'node_key' => 'approve', 'assigned_user_id' => $terminatedUser->id,
+            'assigned_role_id' => null, 'status' => 'PENDING', 'due_at' => null, 'assigned_at' => now(),
+        ]);
+
+        // No organisation_administrators row exists at all -- no primary to reassign to.
+        $terminate = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/termination", ['reason' => 'Last employee standing, no primary admin exists.']);
+        $terminate->assertStatus(200)->assertJsonPath('employee.tasks_reassigned_to', null);
+        $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'assigned_user_id' => $terminatedUser->id, 'status' => 'PENDING']);
     }
 
     public function test_appointing_an_administrator_requires_an_active_employee_and_demotes_the_prior_primary(): void

@@ -135,9 +135,11 @@ class OrganisationAdminService
      * Historical records (the employee row, past ledger/audit entries) are
      * always preserved -- only status flips and access is revoked.
      * Workflow-task reassignment to the organisation's primary
-     * administrator (the source's own final step) is deliberately not
-     * ported: it needs `workflow_assignments`/`workflow_instances`, both
-     * still deferred to the workflow-engine slice of this same phase.
+     * administrator (the source's own final step) needed `workflow_
+     * assignments`/`workflow_instances`, both deferred until Phase 12
+     * slice 5 (the workflow engine); those tables now exist, so it is
+     * ported here rather than left as a permanent gap in already-shipped
+     * code.
      *
      * @return array<string, mixed>
      */
@@ -157,7 +159,17 @@ class OrganisationAdminService
         $reason = OrganisationAdminValidator::offboardingReason($reasonInput);
         $now = now();
 
-        DB::transaction(function () use ($employee, $organisation, $license, $actor, $reason, $now) {
+        // Excludes the terminated employee's own user_id: they may
+        // themselves be the current primary administrator being
+        // terminated, and tasks must never be "reassigned" to the very
+        // user losing access -- matches the source's own `user_id<>?`
+        // guard exactly.
+        $primaryUserId = DB::table('organisation_administrators')
+            ->where('organisation_id', $organisation->id)->where('is_primary', true)->where('status', 'ACTIVE')
+            ->where('user_id', '<>', $employee->user_id ?? '__none__')
+            ->value('user_id');
+
+        DB::transaction(function () use ($employee, $organisation, $license, $actor, $reason, $now, $primaryUserId) {
             Employee::where('id', $employee->id)->where('organisation_id', $organisation->id)
                 ->update(['status' => 'TERMINATED', 'terminated_at' => $now, 'updated_at' => $now]);
             DB::table('license_usage')->where('organisation_license_id', $license['id'])->where('metric_key', 'USER_SEATS')
@@ -171,10 +183,16 @@ class OrganisationAdminService
                 DB::table('user_capability_assignments')->where('organisation_id', $organisation->id)->where('user_id', $employee->user_id)->where('status', 'ACTIVE')
                     ->update(['status' => 'REVOKED', 'effective_to' => $now]);
                 User::where('id', $employee->user_id)->update(['status' => 'SUSPENDED']);
+                if ($primaryUserId) {
+                    DB::table('workflow_assignments')
+                        ->where('assigned_user_id', $employee->user_id)->where('status', 'PENDING')
+                        ->whereIn('workflow_instance_id', DB::table('workflow_instances')->where('organisation_id', $organisation->id)->select('id'))
+                        ->update(['assigned_user_id' => $primaryUserId]);
+                }
             }
         });
 
-        return ['id' => $employee->id, 'status' => 'TERMINATED', 'historical_records_preserved' => true];
+        return ['id' => $employee->id, 'status' => 'TERMINATED', 'historical_records_preserved' => true, 'tasks_reassigned_to' => $primaryUserId];
     }
 
     /**
