@@ -6,10 +6,13 @@ use App\Models\Branch;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\OrganisationMembership;
+use App\Models\SodRule;
 use App\Models\Taxpayer;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 /**
  * A minimal local/staging fixture mirroring db/runtime.ts's own dev-only
@@ -137,6 +140,54 @@ class DemoSeeder extends Seeder
                 'taxpayer_id' => null,
                 'status' => 'ACTIVE',
                 'email_verified_at' => now(),
+            ],
+        );
+
+        // Phase 5 gap: sod_rules/consent_grants/delegations are all
+        // confirmed (via a full-repo grep, same as document_metadata's own
+        // "no command creates a row here" precedent) to be seed-only,
+        // read-only governance data -- but each is now read by an
+        // already-shipped feature (WorkflowService::decideTask's own SoD-
+        // violation logging; ComplianceSnapshotService::getSnapshot's
+        // consents/delegations arrays) that silently never exercises that
+        // path without a seeded row. Matches the source's own demo seed
+        // data (sod-no-self-approval/sod-no-create-approve-execute/
+        // consent-0001/delegation-0001 for org-0001), with dates kept
+        // relative to "now" rather than the source's fixed 2026-08 dates so
+        // they still read as current whenever this seeder actually runs.
+        SodRule::updateOrCreate(
+            ['organisation_id' => $organisation->id, 'code' => 'NO_SELF_APPROVAL'],
+            [
+                'name' => 'No self approval', 'action_set' => json_encode(['CREATE', 'APPROVE']),
+                'scope' => 'ALL_PROTECTED_WORKFLOWS', 'mandatory' => true, 'status' => 'ACTIVE',
+                'effective_from' => now()->subMonth(), 'created_at' => now()->subMonth(),
+            ],
+        );
+        SodRule::updateOrCreate(
+            ['organisation_id' => $organisation->id, 'code' => 'NO_CREATE_APPROVE_EXECUTE'],
+            [
+                'name' => 'Separate create approve and execute', 'action_set' => json_encode(['CREATE', 'APPROVE', 'EXECUTE']),
+                'scope' => 'PAYMENT_AND_TAX_SENSITIVE', 'mandatory' => true, 'status' => 'ACTIVE',
+                'effective_from' => now()->subMonth(), 'created_at' => now()->subMonth(),
+            ],
+        );
+
+        DB::table('consent_grants')->updateOrInsert(
+            ['organisation_id' => $organisation->id, 'grantee_id' => 'TAXPAYER_ACCOUNTANT'],
+            [
+                'id' => (string) Str::uuid(), 'taxpayer_id' => $taxpayer->id, 'granted_by' => $owner->id,
+                'grantee_type' => 'ROLE', 'purpose' => 'VAT return preparation',
+                'data_categories' => json_encode(['INVOICES', 'VAT_LEDGER', 'RETURNS']), 'legal_basis' => 'TAXPAYER_INSTRUCTION',
+                'status' => 'ACTIVE', 'valid_from' => now()->subMonth(), 'valid_to' => now()->addMonths(6),
+                'revoked_at' => null, 'created_at' => now()->subMonth(),
+            ],
+        );
+        DB::table('delegations')->updateOrInsert(
+            ['organisation_id' => $organisation->id, 'delegator_user_id' => $owner->id, 'delegate_user_id' => $admin->id],
+            [
+                'id' => (string) Str::uuid(), 'taxpayer_id' => $taxpayer->id, 'scopes' => json_encode(['returns:read', 'audit:read']),
+                'status' => 'ACTIVE', 'valid_from' => now()->subMonth(), 'valid_to' => now()->addMonths(3),
+                'approved_by' => $owner->id, 'approved_at' => now()->subMonth(), 'created_at' => now()->subMonth(),
             ],
         );
 

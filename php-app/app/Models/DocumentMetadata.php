@@ -2,13 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganisation;
+
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class DocumentMetadata extends Model
 {
-    use HasUuids;
+    use BelongsToOrganisation, HasUuids;
 
     // Set explicitly rather than relying on Eloquent's own pluralisation
     // of "DocumentMetadata" (an uncountable noun -- "metadata" has no

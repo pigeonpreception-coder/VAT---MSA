@@ -38,7 +38,7 @@ below for the specific commands.
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
 | 4 | Convert database schema to MySQL migrations | COMPLETE for its actual scope -- 154 of 155 tables (`positions` deliberately excluded, since the source itself never writes to it -- confirmed by a full-repo grep; see below). Everything already tracked in earlier phase slices, plus the remaining ~43 tables belonging to genuinely not-yet-built modules (Developer Portal, SaaS marketplace, offline-invoicing sync, reports/analytics/data-products, security operations, platform config/change-management, MFA/step-up auth, `payment_instructions`, `bank_imports`, `import_records`, `user_invitations`) -- see "Remaining schema conversion" below for the full breakdown and the fidelity checks this pass caught. Migrations only, deliberately -- no Eloquent models or services were added for tables no command reads or writes yet, matching this migration's `consent_grants`/`delegations` precedent; each table gets its model/service when its own owning phase actually builds that feature. |
-| 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, IdentityProviderSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
+| 5 | Convert seed data | COMPLETE for its actual scope -- RoleSeeder, PermissionSeeder, IdentityProviderSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; three genuine gaps found and completed (the two RBAC-seed gaps, see "Source-fidelity findings" below; and `sod_rules`/`consent_grants`/`delegations` -- see "Demo seed gaps for already-shipped features" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. A reusable Eloquent global-scope trait (`App\Models\Concerns\BelongsToOrganisation` / `App\Models\Scopes\OrganisationScope`) is now also available as a defense-in-depth backstop on top of every service's own manual scoping -- see "Organisation-scope trait" below. |
 | 8 | Organisations, taxpayers, administration | COMPLETE -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, membership assignment, `getIdentityFoundationSnapshot` (see "Identity foundation snapshot" below), and (Phase 12, see "Organisation administration & employees" and "Access governance" below) employees (including `terminateEmployee`'s own workflow-task reassignment, closed out once Phase 12 slice 5 built the tables it needed), organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), capability grants, and access requests. The `positions` table is not built -- never written by the source itself, so genuinely nothing to port. |
@@ -1223,12 +1223,9 @@ BusinessPartyService` already filters every one of its own queries by
 `organisation_id` from `OrganisationResolver::resolve()`, so this trait's
 own filter is provably redundant with the existing manual logic in both
 the national and taxpayer-scoped branches -- the safest possible first
-adopter, not a behaviour change. Deliberately not retrofitted onto the
-other ~25 organisation-scoped models built across Phases 8-12 in this
-same pass -- that is a broad, mechanical follow-up with its own
-regression surface across five phases' worth of already-shipped, tested
-code, better done as its own deliberate sweep than folded silently into
-introducing the trait itself.
+adopter, not a behaviour change. The broader retrofit onto the rest of
+Phases 8-12's organisation-scoped models is its own separate pass -- see
+"Organisation-scope trait retrofit" below.
 
 Verified two ways: the full existing `BusinessPartyAndQuotationTest`
 suite (12 tests) still passes unchanged, confirming zero behaviour change
@@ -1245,6 +1242,109 @@ both; `withoutOrganisationScope()` bypasses the filter on demand; and a
 `SUPER_ADMIN` actor (`taxpayer_id` null, not a national-scope role) gets
 zero rows rather than every tenant's. 174 tests total, 0 regressions, run
 against real MySQL.
+
+## Organisation-scope trait retrofit (the broader sweep Phase 7 deferred)
+
+Applies `App\Models\Concerns\BelongsToOrganisation` to every remaining
+organisation-scoped Eloquent model across Phases 8-12 -- 42 models total
+now carry it, including the `BusinessParty` pilot. Mechanical in shape
+(one `use` trait line, one import, per model) but **not** mechanical in
+verification: applying a global scope changes real query behaviour for
+any model whose owning service does not already pre-filter every read by
+`organisation_id`, and this pass found genuine cases of exactly that.
+
+**Six models were excluded after the retrofit surfaced real, behaviour-
+changing regressions -- caught by the existing test suite, not shipped**:
+`RefundClaim`, `VatReturnVersion`, `ApprovalTask`, and `VatPeriod` each
+have a read path (`RefundService`/`VatLifecycleService`) that fetches a
+record **unscoped by id first**, then calls `TenantScope::
+requireTaxpayer()` (or the same check inlined) specifically so a
+cross-tenant request gets a `403` (exists, wrong tenant) rather than a
+`404` (genuinely absent) -- the global scope collapsed that distinction
+into an always-`404`, since the row becomes invisible before the manual
+check ever runs. `AuditCaseService::timeline`/`evidence`/`notes` do the
+identical thing with the same inlined check against `AuditCase`. Caught
+by `VatReturnLifecycleTest`'s and `RefundClaimTest`'s own
+"a different taxpayer cannot read or act on another taxpayer's
+X" tests expecting `403`, which started receiving `404` instead. `Organisation
+Capability` is a different failure shape entirely: `App\Support\Business\
+TransactionClassifier` (used by `SupplierVerificationService::verify`)
+deliberately looks up a **different** organisation's active `SELLER`/
+`BUYER` capability as part of verifying a counterparty's VAT number --
+its own doc comment already states "a cross-tenant, public-posture
+lookup by design, not a privilege boundary." The global scope silently
+made every such lookup return nothing, so `verifySupplier` always reported
+`can_act_as_seller: false` for a real, active supplier -- caught by
+`SupplierVerificationTest`.
+
+Given four of those six were only found because the exact right test
+existed, this pass did not stop at "the suite is green" for the rest:
+every remaining candidate model was checked directly against its owning
+service's source for the same two danger shapes --
+(1) an unscoped `Model::find($id)`/`::where('id', ...)->first()` followed
+by a manual tenant-boundary check (whether via the named
+`TenantScope::requireTaxpayer()` helper or an inlined equivalent), and
+(2) a deliberate cross-organisation lookup for verification/authorisation
+purposes -- via a full grep of `app/Services/` for both `TenantScope::
+requireTaxpayer` (10 call sites, all traced to source model) and
+`ModelName::find(`/`ModelName::where('id', ...)` for every remaining
+candidate. Every match was either already correctly pre-scoped by
+`organisation_id` (the `BusinessParty`-style safe pattern), operating on a
+record the same request just created within the same method (safe by
+construction, not by scope), gated behind a national-scope-only
+permission check that makes the trait's own national branch a no-op
+regardless, or -- for several workflow-engine tables -- read exclusively
+through `DB::table()` query-builder joins rather than the Eloquent model
+class at all, on which a model-level global scope has no effect either
+way.
+
+Four org-scoped models with a **nullable** `organisation_id` column
+(`CommunicationThread`, `Communication`, `NavigationPreference`,
+`SodRule`) were excluded from this pass entirely, kept for a separate,
+more careful follow-up: a `NULL` row's interaction with the scope's own
+`whereIn` subquery needs its own deliberate reasoning, not inherited from
+this batch's NOT-NULL analysis.
+
+Verified by the full test suite after every revert (not just once at the
+end) -- 174 tests, 0 regressions, run against real MySQL, plus a clean
+`migrate:fresh --seed` cycle.
+
+## Demo seed gaps for already-shipped features (closes out Phase 5)
+
+A full-repo grep for every table `db/runtime.ts` seeds found two more
+genuinely seed-only, no-command tables (matching the `consent_grants`/
+`delegations`/`navigation_permissions` precedent from "DOCUMENT evidence
+citation" and "Compliance dashboard snapshot" above) -- but these two are
+now read by **already-shipped** PHP features, so leaving them unseeded
+silently degrades real functionality rather than just leaving a
+not-yet-built feature quiet:
+
+- **`sod_rules`**: `App\Services\Workflow\WorkflowService::decideTask`
+  already ports the full self-approval segregation-of-duties check
+  (`SodRule::where(...)->where('code', 'NO_SELF_APPROVAL')->...->first()`,
+  gated `if ($rule) { ...write a sod_violations row + outbox event... }`)
+  -- the migration's own doc comment even flagged this exact gap when the
+  table was built in Phase 12 slice 5 ("confirmed by grepping... no
+  application command ever creates a row here") without ever actually
+  seeding it. Without a seeded rule, a self-approval attempt still
+  correctly throws, but the SoD-violation audit trail silently never
+  gets written.
+- **`consent_grants`/`delegations`**: now read by
+  `App\Services\Compliance\ComplianceSnapshotService::getSnapshot`
+  (closed out in "Compliance dashboard snapshot" above), which returns an
+  always-empty `consents`/`delegations` array for the demo organisation
+  without a seeded row, unlike the source's own demo dataset.
+
+`DemoSeeder` now seeds one row of each (`sod-no-self-approval`/
+`sod-no-create-approve-execute`, one consent grant, one delegation) for
+its own demo organisation, matching the source's own demo data shape but
+with dates kept relative to "now" (`now()->subMonth()`/`addMonths(N)`)
+rather than the source's fixed 2026-08 dates, so they still read as
+current whenever this seeder actually runs. Verified idempotent (`db:seed`
+run twice leaves row counts unchanged) and by the full test suite (174
+tests, 0 regressions -- `DemoSeeder` is not exercised by the test suite
+itself, so this is confirmed by direct row-count inspection after a real
+`migrate:fresh --seed`, not by test coverage).
 
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
@@ -2009,27 +2109,35 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 5 (remaining seed data -- identity proofing, etc.), retrofitting
-Phase 7's organisation-scope trait onto the ~25 other organisation-scoped
-models beyond its `BusinessParty` pilot (a deliberate, separately-scoped
-sweep, not folded into introducing the trait itself -- see "Organisation-
-scope trait" above), and Phases 13 through 15 in full (documents/
+The organisation-scope trait's own remaining nullable-`organisation_id`
+follow-up (`CommunicationThread`/`Communication`/`NavigationPreference`/
+`SodRule` -- see "Organisation-scope trait retrofit" above), the six
+models that pass's own verification explicitly excluded as unsafe for
+this specific automatic-scope mechanism (`RefundClaim`/
+`VatReturnVersion`/`ApprovalTask`/`VatPeriod`/`AuditCase`/
+`OrganisationCapability` -- their existing manual tenant checks remain
+fully correct and untouched; this is about the *trait*, not a security
+gap in those models), and Phases 13 through 15 in full (documents/
 integrations/offline/reports beyond the minimal Module 22 slice already
 pulled forward, the legacy D1 importer, and deployment documentation) are
 all outstanding. Phase 4 is now COMPLETE for its actual scope (154 of 155
 tables -- see "Remaining schema conversion" above; `positions` stays
-deliberately excluded, the source never writes to it either). Phase 7 is
-now COMPLETE for its actual scope too (the trait exists and is proven
-correct -- see "Organisation-scope trait" above; broader adoption is the
-one open item, tracked here rather than silently dropped). Phases 8, 9,
-10, 11 and 12 (organisations/taxpayers/administration, invoices/VAT,
+deliberately excluded, the source never writes to it either). Phase 5 is
+now COMPLETE for its actual scope too (see "Demo seed gaps for already-
+shipped features" above). Phase 7 is now COMPLETE for its actual scope as
+well -- the trait exists, is proven correct, and is now applied to 42
+models across Phases 8-12 (see "Organisation-scope trait" and
+"Organisation-scope trait retrofit" above); the handful of explicitly
+excluded models and the smaller nullable-column follow-up are the only
+open items, tracked here rather than silently dropped. Phases 8, 9, 10,
+11 and 12 (organisations/taxpayers/administration, invoices/VAT,
 accounting/commercial, compliance/audits/disputes/refunds/risk, and
 portals/licensing/governance) are now all fully COMPLETE -- see "Identity
 foundation snapshot", "Standalone VAT-rule routes", "Supplier
 verification", "Compliance dashboard snapshot" and "Administration
 snapshot & portals" above. This is genuinely a multi-week engineering
 effort at the pace of careful, verified, per-field-checked porting
-demonstrated in this session's Phase 3/4/6/7/8/9/10/11/12 slices --
+demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12 slices --
 continuing it means repeating this same rigor across the remaining ~115
 routes (the schema itself is now essentially done), phase by phase (or
 sub-slice by sub-slice, as Phases 10, 11 and 12 all demonstrated), as
@@ -2038,7 +2146,7 @@ represents (`control-plane-repository.ts` alone, at ~1,200 lines and ~30
 exports, was comparable in size to the whole of Phase 10's `business-
 repository.ts`, which itself took 6 separate sub-slices to close out --
 Phase 12 took 6, counting the two small files closed out alongside its
-own final slice; Phases 4, 7, 8, 9, 10, 11 and 12 are now all entirely
+own final slice; Phases 4, 5, 7, 8, 9, 10, 11 and 12 are now all entirely
 done), continuing
 to completion is realistically a
 multi-session effort, not a single

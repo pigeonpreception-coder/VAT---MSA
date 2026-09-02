@@ -2,13 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToOrganisation;
+
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LicenseUsage extends Model
 {
-    use HasUuids;
+    use BelongsToOrganisation, HasUuids;
 
     // db/runtime.ts's table is singular (`license_usage`, not the
     // pluralised `license_usages` Eloquent would infer from the class name).
