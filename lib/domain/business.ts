@@ -147,8 +147,8 @@ export type QuotationRejectionSubmission = {
   reason: string;
 };
 
-export type QuotationLifecycleAction = "EDIT" | "ACCEPT" | "REJECT" | "EXPIRE" | "CONVERT";
-export type QuotationLifecycleStatus = "ISSUED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "CONVERTED";
+export type QuotationLifecycleAction = "SEND" | "EDIT" | "ACCEPT" | "REJECT" | "EXPIRE" | "CONVERT";
+export type QuotationLifecycleStatus = "DRAFT" | "ISSUED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "CONVERTED";
 
 export type QuotationLifecycleEvaluation = {
   allowed: boolean;
@@ -284,6 +284,54 @@ export function normalizeAndValidateBusinessPartyDeactivation(payload: unknown):
   return { schema_version: "1.0.0", reason };
 }
 
+const PARTY_STATUSES = new Set(["ACTIVE", "INACTIVE"]);
+const MAX_PARTY_SEARCH_LIMIT = 200;
+const DEFAULT_PARTY_SEARCH_LIMIT = 50;
+
+export type PartySearchQuery = {
+  relationship: BusinessPartyRelationship | null;
+  q: string | null;
+  status: "ACTIVE" | "INACTIVE" | null;
+  limit: number;
+  offset: number;
+};
+
+/** Module 5 Phase A SearchCustomers/SearchSuppliers: one search over the shared business_parties model, filtered by relationship — mirrors Module 3 Phase B's normalizeWorkQueueQuery (bounded limit, explicit offset, designed in rather than retrofitted). */
+export function normalizePartySearchQuery(params: URLSearchParams): PartySearchQuery {
+  const messages: BusinessValidationMessage[] = [];
+
+  const relationshipRaw = params.get("relationship");
+  const relationship = relationshipRaw ? (relationshipRaw.trim().toUpperCase() as BusinessPartyRelationship) : null;
+  if (relationship && !PARTY_RELATIONSHIPS.has(relationship)) messages.push({ code: "RELATIONSHIP_INVALID", path: "/relationship", message: "relationship must be CUSTOMER or SUPPLIER." });
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as PartySearchQuery["status"]) : null;
+  if (status && !PARTY_STATUSES.has(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: "status must be ACTIVE or INACTIVE." });
+
+  const qRaw = textValue(params.get("q"));
+  if (qRaw.length > 200) messages.push({ code: "QUERY_TOO_LONG", path: "/q", message: "q must not exceed 200 characters." });
+  const q = qRaw || null;
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_PARTY_SEARCH_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_PARTY_SEARCH_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_PARTY_SEARCH_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { relationship, q, status, limit, offset };
+}
+
 export function normalizeAndValidateQuotation(payload: unknown): NormalizedQuotation {
   const input = record(payload);
   const messages: BusinessValidationMessage[] = [];
@@ -348,24 +396,44 @@ export function normalizeAndValidateQuotationRejection(payload: unknown): Quotat
   return { schema_version: "1.0.0", reason };
 }
 
+/**
+ * Module 5 Phase B added DRAFT/SEND: a quotation is now created as DRAFT
+ * (previously it landed directly in ISSUED, with no draft→send transition
+ * the playbook's own action list implies). Every other transition below is
+ * unchanged from before this phase — ACCEPT/REJECT/EXPIRE/CONVERT still
+ * require ISSUED, and the overdue-blocks-everything-but-EXPIRE rule still
+ * applies once a quotation has actually been sent.
+ */
 export function evaluateQuotationLifecycle(input: {
   status: string;
   action: QuotationLifecycleAction;
   validUntil: string;
   today: string;
 }): QuotationLifecycleEvaluation {
-  const targetStatus: Record<QuotationLifecycleAction, QuotationLifecycleStatus> = {
-    EDIT: "ISSUED",
-    ACCEPT: "ACCEPTED",
-    REJECT: "REJECTED",
-    EXPIRE: "EXPIRED",
-    CONVERT: "CONVERTED",
-  };
+  if (input.action === "SEND") {
+    return input.status === "DRAFT"
+      ? { allowed: true, targetStatus: "ISSUED", reason: "A draft quotation may be sent to the customer." }
+      : { allowed: false, targetStatus: "ISSUED", reason: `Only a draft quotation can be sent; current status is ${input.status}.` };
+  }
   if (input.action === "CONVERT") {
     return input.status === "ACCEPTED"
       ? { allowed: true, targetStatus: "CONVERTED", reason: "Accepted quotation may be converted." }
       : { allowed: false, targetStatus: "CONVERTED", reason: `Only an accepted quotation can be converted; current status is ${input.status}.` };
   }
+  if (input.action === "EDIT") {
+    if (input.status !== "DRAFT" && input.status !== "ISSUED") {
+      return { allowed: false, targetStatus: input.status as QuotationLifecycleStatus, reason: `A quotation can only be edited while draft or issued; current status is ${input.status}.` };
+    }
+    if (input.status === "ISSUED" && input.validUntil < input.today) {
+      return { allowed: false, targetStatus: "ISSUED", reason: "The quotation validity period has ended; expire it instead." };
+    }
+    return { allowed: true, targetStatus: input.status as QuotationLifecycleStatus, reason: `The ${input.status.toLowerCase()} quotation may be edited.` };
+  }
+  const targetStatus: Record<"ACCEPT" | "REJECT" | "EXPIRE", QuotationLifecycleStatus> = {
+    ACCEPT: "ACCEPTED",
+    REJECT: "REJECTED",
+    EXPIRE: "EXPIRED",
+  };
   if (input.status !== "ISSUED") {
     return { allowed: false, targetStatus: targetStatus[input.action], reason: `Only an issued quotation can be ${input.action.toLowerCase()}ed; current status is ${input.status}.` };
   }
@@ -379,6 +447,52 @@ export function evaluateQuotationLifecycle(input: {
     return { allowed: false, targetStatus: targetStatus[input.action], reason: "The quotation validity period has ended; expire it instead." };
   }
   return { allowed: true, targetStatus: targetStatus[input.action], reason: `The issued quotation may be ${input.action.toLowerCase()}ed.` };
+}
+
+const QUOTATION_STATUSES = new Set<QuotationLifecycleStatus>(["DRAFT", "ISSUED", "ACCEPTED", "REJECTED", "EXPIRED", "CONVERTED"]);
+const MAX_QUOTATION_SEARCH_LIMIT = 200;
+const DEFAULT_QUOTATION_SEARCH_LIMIT = 50;
+
+export type QuotationSearchQuery = {
+  status: QuotationLifecycleStatus | null;
+  customerPartyId: string | null;
+  q: string | null;
+  limit: number;
+  offset: number;
+};
+
+/** Module 5 Phase B SearchQuotes, the same bounded/paginated shape as Phase A's normalizePartySearchQuery. */
+export function normalizeQuotationSearchQuery(params: URLSearchParams): QuotationSearchQuery {
+  const messages: BusinessValidationMessage[] = [];
+
+  const statusRaw = params.get("status");
+  const status = statusRaw ? (statusRaw.trim().toUpperCase() as QuotationLifecycleStatus) : null;
+  if (status && !QUOTATION_STATUSES.has(status)) messages.push({ code: "STATUS_INVALID", path: "/status", message: `status must be one of: ${[...QUOTATION_STATUSES].join(", ")}.` });
+
+  const customerPartyId = idField(params.get("customer_party_id") ?? undefined, "/customer_party_id", "Customer party", messages, true) ?? null;
+
+  const qRaw = textValue(params.get("q"));
+  if (qRaw.length > 200) messages.push({ code: "QUERY_TOO_LONG", path: "/q", message: "q must not exceed 200 characters." });
+  const q = qRaw || null;
+
+  const limitRaw = params.get("limit");
+  let limit = DEFAULT_QUOTATION_SEARCH_LIMIT;
+  if (limitRaw !== null) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_QUOTATION_SEARCH_LIMIT) messages.push({ code: "LIMIT_INVALID", path: "/limit", message: `limit must be an integer between 1 and ${MAX_QUOTATION_SEARCH_LIMIT}.` });
+    else limit = parsed;
+  }
+
+  const offsetRaw = params.get("offset");
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = Number(offsetRaw);
+    if (!Number.isInteger(parsed) || parsed < 0) messages.push({ code: "OFFSET_INVALID", path: "/offset", message: "offset must be a non-negative integer." });
+    else offset = parsed;
+  }
+
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { status, customerPartyId, q, limit, offset };
 }
 
 export function normalizeAndValidateJournal(payload: unknown): JournalSubmission {
@@ -439,47 +553,86 @@ export function normalizeAndValidateExpense(payload: unknown): ExpenseSubmission
   return { schema_version: "1.0.0", category_id: categoryId, ...(supplierPartyId ? { supplier_party_id: supplierPartyId } : {}), ...(projectId ? { project_id: projectId } : {}), ...(branchId ? { branch_id: branchId } : {}), expense_number: expenseNumber, expense_date: expenseDate, description, currency, net_cents: netCents, tax_cents: taxCents, total_cents: totalCents };
 }
 
-export function normalizeAndValidateExpenseDecision(payload: unknown): ExpenseDecisionSubmission {
+export type ExpenseCategorySubmission = {
+  schema_version: "1.0.0";
+  code: string;
+  name: string;
+  default_tax_category: "STANDARD" | "ZERO_RATED" | "EXEMPT" | "OUT_OF_SCOPE";
+  requires_receipt: boolean;
+};
+
+/** Module 5 Phase E CreateExpenseCategory. expense_categories was previously seed-only, like chart_of_accounts before Phase C's CreateAccount — same fix, same reasoning. */
+export function normalizeAndValidateExpenseCategory(payload: unknown): ExpenseCategorySubmission {
   const input = record(payload);
   const messages: BusinessValidationMessage[] = [];
   schemaVersion(input, messages);
-  const decision = textValue(input.decision).toUpperCase() as ExpenseDecisionSubmission["decision"];
-  if (!new Set(["APPROVE", "REJECT"]).has(decision)) messages.push({ code: "DECISION_INVALID", path: "/decision", message: "Decision must be APPROVE or REJECT." });
-  const reason = textField(input.reason, "/reason", "Decision reason", 5, 500, messages);
-  if (input.emergency_override === true) messages.push({ code: "EMERGENCY_OVERRIDE_DISABLED", path: "/emergency_override", message: "Emergency segregation-of-duties override is disabled." });
+  const code = textField(input.code, "/code", "Category code", 1, 20, messages).toUpperCase();
+  if (code && !/^[A-Z0-9][A-Z0-9._-]{0,19}$/.test(code)) messages.push({ code: "CODE_INVALID", path: "/code", message: "Category code contains unsupported characters." });
+  const name = textField(input.name, "/name", "Category name", 2, 200, messages);
+  const defaultTaxCategory = textValue(input.default_tax_category).toUpperCase() as ExpenseCategorySubmission["default_tax_category"];
+  if (!TAX_CATEGORIES.has(defaultTaxCategory)) messages.push({ code: "TAX_CATEGORY_INVALID", path: "/default_tax_category", message: "Select a supported default tax category." });
+  const requiresReceipt = input.requires_receipt === undefined ? true : Boolean(input.requires_receipt);
   if (messages.length) throw new BusinessValidationError(messages);
-  return { schema_version: "1.0.0", decision, reason };
+  return { schema_version: "1.0.0", code, name, default_tax_category: defaultTaxCategory, requires_receipt: requiresReceipt };
 }
 
-export function normalizeAndValidateExpenseReceiptLink(payload: unknown): ExpenseReceiptLinkSubmission {
+export type ExpenseRejectionSubmission = { schema_version: "1.0.0"; reason: string };
+
+export function normalizeAndValidateExpenseRejection(payload: unknown): ExpenseRejectionSubmission {
   const input = record(payload);
   const messages: BusinessValidationMessage[] = [];
   schemaVersion(input, messages);
-  const receiptDocumentId = idField(input.receipt_document_id, "/receipt_document_id", "Receipt document", messages) ?? "";
+  const reason = textField(input.reason, "/reason", "Rejection reason", 5, 500, messages);
   if (messages.length) throw new BusinessValidationError(messages);
-  return { schema_version: "1.0.0", receipt_document_id: receiptDocumentId };
+  return { schema_version: "1.0.0", reason };
 }
 
-export function evaluateExpenseDecision(input: {
-  status: string;
-  createdBy: string;
-  actorId: string;
-  decision: "APPROVE" | "REJECT";
-  receiptRequired: boolean;
-  receiptDocumentId: string | null;
-  receiptScanStatus: string | null;
-  receiptStatus: string | null;
-}): ExpenseDecisionEvaluation {
-  const targetStatus = input.decision === "APPROVE" ? "APPROVED" : "REJECTED";
-  if (input.status !== "DRAFT") return { allowed: false, targetStatus, reason: `Only a draft expense may be decided; current status is ${input.status}.` };
-  if (input.createdBy === input.actorId) return { allowed: false, targetStatus, reason: "The expense creator cannot approve or reject their own expense." };
-  if (input.decision === "APPROVE" && input.receiptRequired && !input.receiptDocumentId) {
-    return { allowed: false, targetStatus, reason: "A clean receipt is required before this expense can be approved." };
+export type ProjectBudgetApprovalSubmission = { schema_version: "1.0.0"; approved_amount_cents: number; notes?: string };
+
+/** Module 5 Phase E ApproveBudget. approved_amount_cents is deliberately independent of the originally proposed amount — an approver may approve less (or more, e.g. a pre-approved overrun) than what was proposed. */
+export function normalizeAndValidateProjectBudgetApproval(payload: unknown): ProjectBudgetApprovalSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const approvedAmountCents = integerField(input.approved_amount_cents, "/approved_amount_cents", "Approved amount cents", messages);
+  const notes = optionalText(input.notes, "/notes", "Notes", 1_000, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", approved_amount_cents: approvedAmountCents, ...(notes ? { notes } : {}) };
+}
+
+export type ProjectCostSubmission =
+  | { schema_version: "1.0.0"; cost_type: "EXPENSE"; source_id: string }
+  | { schema_version: "1.0.0"; cost_type: "MANUAL"; source_id: string; amount_cents: number; currency: string; description: string; occurred_at: string };
+
+const PROJECT_COST_TYPES = new Set(["EXPENSE", "MANUAL"]);
+
+/**
+ * Module 5 Phase E PostCost. project_costs.UNIQUE(project_id, cost_type,
+ * source_id) is the schema's own hint at the intended design: EXPENSE costs
+ * cite an approved expense already tagged to this project (amount/currency/
+ * date derived from that expense, never re-entered — the repository layer
+ * resolves and validates it), so the same expense can never be posted as a
+ * cost twice. MANUAL costs are for expenditure this system has no other
+ * record of (e.g. an external invoice), so the caller supplies everything.
+ */
+export function normalizeAndValidateProjectCost(payload: unknown): ProjectCostSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const costType = textValue(input.cost_type).toUpperCase();
+  if (!PROJECT_COST_TYPES.has(costType)) messages.push({ code: "COST_TYPE_INVALID", path: "/cost_type", message: "cost_type must be EXPENSE or MANUAL." });
+  if (costType === "MANUAL") {
+    const sourceId = textField(input.source_id, "/source_id", "Source reference", 2, 100, messages);
+    const amountCents = integerField(input.amount_cents, "/amount_cents", "Amount cents", messages, 1);
+    const currency = currencyField(input.currency, messages);
+    const description = textField(input.description, "/description", "Description", 2, 500, messages);
+    const occurredAt = dateField(input.occurred_at ?? new Date().toISOString().slice(0, 10), "/occurred_at", "Occurred at", messages);
+    if (messages.length) throw new BusinessValidationError(messages);
+    return { schema_version: "1.0.0", cost_type: "MANUAL", source_id: sourceId, amount_cents: amountCents, currency, description, occurred_at: occurredAt };
   }
-  if (input.decision === "APPROVE" && input.receiptDocumentId && (input.receiptScanStatus !== "CLEAN" || input.receiptStatus !== "AVAILABLE")) {
-    return { allowed: false, targetStatus, reason: "The linked receipt must have CLEAN scan status and be AVAILABLE before approval." };
-  }
-  return { allowed: true, targetStatus, reason: `The independent reviewer may ${input.decision.toLowerCase()} this draft expense.` };
+  const sourceId = idField(input.source_id, "/source_id", "Source expense", messages) ?? "";
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", cost_type: "EXPENSE", source_id: sourceId };
 }
 
 export function normalizeAndValidateStockMovement(payload: unknown): StockMovementSubmission {
@@ -500,6 +653,150 @@ export function normalizeAndValidateStockMovement(payload: unknown): StockMoveme
   if (!ISO_PATTERN.test(occurredAt) || Number.isNaN(Date.parse(occurredAt))) messages.push({ code: "TIMESTAMP_INVALID", path: "/occurred_at", message: "occurred_at must be an ISO UTC timestamp." });
   if (messages.length) throw new BusinessValidationError(messages);
   return { schema_version: "1.0.0", warehouse_id: warehouseId, product_id: productId, movement_type: movementType, quantity_micros: quantityMicros, unit_cost_cents: unitCostCents, reference_type: referenceType, reference_id: referenceId, reason, occurred_at: occurredAt };
+}
+
+export type ProductSubmission = {
+  schema_version: "1.0.0";
+  sku: string;
+  name: string;
+  description?: string;
+  unit_code: string;
+  tax_category: "STANDARD" | "ZERO_RATED" | "EXEMPT" | "OUT_OF_SCOPE";
+  tax_rate_bps: number;
+  sales_price_cents: number;
+  cost_price_cents: number;
+};
+
+/** Module 5 Phase D CreateProduct: unsticks the previously seed-only `products` table, mirroring Phase C's CreateAccount fix for chart_of_accounts. */
+export function normalizeAndValidateProduct(payload: unknown): ProductSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const sku = textField(input.sku, "/sku", "SKU", 1, 40, messages).toUpperCase();
+  if (sku && !CODE_PATTERN.test(sku)) messages.push({ code: "CODE_INVALID", path: "/sku", message: "SKU contains unsupported characters." });
+  const name = textField(input.name, "/name", "Product name", 2, 200, messages);
+  const description = optionalText(input.description, "/description", "Description", 2_000, messages);
+  const unitCode = textField(input.unit_code, "/unit_code", "Unit code", 1, 12, messages).toUpperCase();
+  const taxCategory = textValue(input.tax_category).toUpperCase() as ProductSubmission["tax_category"];
+  if (!TAX_CATEGORIES.has(taxCategory)) messages.push({ code: "TAX_CATEGORY_INVALID", path: "/tax_category", message: "Select a supported tax category." });
+  const taxRateBps = integerField(input.tax_rate_bps, "/tax_rate_bps", "Tax rate basis points", messages);
+  if (taxRateBps > 10_000) messages.push({ code: "TAX_RATE_INVALID", path: "/tax_rate_bps", message: "Tax rate cannot exceed 10000 basis points." });
+  if (taxCategory !== "STANDARD" && taxRateBps !== 0) messages.push({ code: "TAX_RATE_CATEGORY_MISMATCH", path: "/tax_rate_bps", message: "Only standard-rated products may have a non-zero tax rate." });
+  const salesPriceCents = integerField(input.sales_price_cents, "/sales_price_cents", "Sales price cents", messages);
+  const costPriceCents = integerField(input.cost_price_cents, "/cost_price_cents", "Cost price cents", messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", sku, name, ...(description ? { description } : {}), unit_code: unitCode, tax_category: taxCategory, tax_rate_bps: taxRateBps, sales_price_cents: salesPriceCents, cost_price_cents: costPriceCents };
+}
+
+export type WarehouseSubmission = {
+  schema_version: "1.0.0";
+  branch_id?: string;
+  code: string;
+  name: string;
+  address: string;
+};
+
+/** Module 5 Phase D CreateWarehouse: unsticks the previously seed-only `warehouses` table. */
+export function normalizeAndValidateWarehouse(payload: unknown): WarehouseSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const branchId = idField(input.branch_id, "/branch_id", "Branch", messages, true);
+  const code = textField(input.code, "/code", "Warehouse code", 1, 20, messages).toUpperCase();
+  if (code && !/^[A-Z0-9][A-Z0-9._-]{0,19}$/.test(code)) messages.push({ code: "CODE_INVALID", path: "/code", message: "Warehouse code contains unsupported characters." });
+  const name = textField(input.name, "/name", "Warehouse name", 2, 200, messages);
+  const address = textField(input.address, "/address", "Address", 2, 1_000, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", ...(branchId ? { branch_id: branchId } : {}), code, name, address };
+}
+
+export type StockTransferSubmission = {
+  schema_version: "1.0.0";
+  from_warehouse_id: string;
+  to_warehouse_id: string;
+  product_id: string;
+  quantity_micros: number;
+  reason: string;
+  occurred_at: string;
+};
+
+/**
+ * Module 5 Phase D TransferStock. Unlike RecordStockMovement, this does not
+ * take a caller-supplied unit_cost_cents: a transfer moves the same
+ * physical stock between warehouses, so the repository derives cost from
+ * the source warehouse's own current average cost rather than letting the
+ * caller fabricate a new one.
+ */
+export function normalizeAndValidateStockTransfer(payload: unknown): StockTransferSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const fromWarehouseId = idField(input.from_warehouse_id, "/from_warehouse_id", "Source warehouse", messages) ?? "";
+  const toWarehouseId = idField(input.to_warehouse_id, "/to_warehouse_id", "Destination warehouse", messages) ?? "";
+  if (fromWarehouseId && toWarehouseId && fromWarehouseId === toWarehouseId) {
+    messages.push({ code: "TRANSFER_SAME_WAREHOUSE", path: "/to_warehouse_id", message: "Source and destination warehouse must be different." });
+  }
+  const productId = idField(input.product_id, "/product_id", "Product", messages) ?? "";
+  const quantityMicros = integerField(input.quantity_micros, "/quantity_micros", "Quantity micros", messages, 1);
+  const reason = textField(input.reason, "/reason", "Reason", 2, 500, messages);
+  const occurredAt = textValue(input.occurred_at) || new Date().toISOString();
+  if (!ISO_PATTERN.test(occurredAt) || Number.isNaN(Date.parse(occurredAt))) messages.push({ code: "TIMESTAMP_INVALID", path: "/occurred_at", message: "occurred_at must be an ISO UTC timestamp." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", from_warehouse_id: fromWarehouseId, to_warehouse_id: toWarehouseId, product_id: productId, quantity_micros: quantityMicros, reason, occurred_at: occurredAt };
+}
+
+export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+
+export type AccountSubmission = {
+  schema_version: "1.0.0";
+  code: string;
+  name: string;
+  account_type: AccountType;
+  currency: string;
+  control_type?: string;
+};
+
+const ACCOUNT_TYPES = new Set<AccountType>(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
+
+/** Module 5 Phase C CreateAccount. control_type (e.g. BANK, PAYABLE, COST_OF_SALES — see the seeded chart of accounts) is a free-text sub-classification, not a fixed enum: chart_of_accounts.control_type carries no CHECK constraint, so this stays as open as the schema it feeds. */
+export function normalizeAndValidateAccount(payload: unknown): AccountSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const code = textField(input.code, "/code", "Account code", 1, 20, messages).toUpperCase();
+  if (code && !/^[A-Z0-9][A-Z0-9._-]{0,19}$/.test(code)) messages.push({ code: "CODE_INVALID", path: "/code", message: "Account code contains unsupported characters." });
+  const name = textField(input.name, "/name", "Account name", 2, 200, messages);
+  const accountType = textValue(input.account_type).toUpperCase() as AccountType;
+  if (!ACCOUNT_TYPES.has(accountType)) messages.push({ code: "ACCOUNT_TYPE_INVALID", path: "/account_type", message: `account_type must be one of: ${[...ACCOUNT_TYPES].join(", ")}.` });
+  const currency = currencyField(input.currency, messages);
+  const controlType = optionalText(input.control_type, "/control_type", "Control type", 40, messages)?.toUpperCase();
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", code, name, account_type: accountType, currency, ...(controlType ? { control_type: controlType } : {}) };
+}
+
+export type JournalReversalSubmission = { schema_version: "1.0.0"; reason: string };
+
+export function normalizeAndValidateJournalReversal(payload: unknown): JournalReversalSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const reason = textField(input.reason, "/reason", "Reversal reason", 10, 500, messages);
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", reason };
+}
+
+export type PeriodCloseSubmission = { schema_version: "1.0.0"; period_code: string };
+
+const PERIOD_CODE_PATTERN = /^\d{4}-\d{2}$/;
+
+export function normalizeAndValidatePeriodClose(payload: unknown): PeriodCloseSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const periodCode = textValue(input.period_code);
+  if (!PERIOD_CODE_PATTERN.test(periodCode)) messages.push({ code: "PERIOD_CODE_INVALID", path: "/period_code", message: "period_code must use YYYY-MM." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", period_code: periodCode };
 }
 
 export function normalizeAndValidateProject(payload: unknown): ProjectSubmission {

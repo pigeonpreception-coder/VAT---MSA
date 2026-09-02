@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   ControlPlaneValidationError,
+  assertLicenseStateTransition,
   assertWorkflowDecision,
   evaluateEntitlement,
   hasRecentStepUp,
+  normalizeAccessRevocation,
+  normalizeAdministratorAppointment,
+  normalizeCapabilityGrant,
+  normalizeEmployeeActivation,
+  normalizeLicenseStateChange,
+  normalizeLicenseUpgrade,
+  normalizeNavigationChildrenQuery,
+  normalizeNavigationPreference,
+  normalizeOffboarding,
   normalizeOrganisationRole,
   normalizeWorkflowDefinition,
   quarterlyAccessReviewWindow,
@@ -73,5 +83,184 @@ describe("organisation access and workflow safety", () => {
     expect(quarterlyAccessReviewWindow(new Date("2026-08-10T12:00:00Z"))).toEqual({
       key: "2026-Q3", periodStart: "2026-07-01", dueAt: "2026-09-30T23:59:59.000Z",
     });
+  });
+});
+
+describe("licence lifecycle (Activate/Suspend/Renew/Upgrade)", () => {
+  it("normalizes a well-formed state-change action and reason", () => {
+    expect(normalizeLicenseStateChange({ action: "activate", reason: "Payment received, lifting the grace-period hold." })).toEqual({
+      action: "ACTIVATE",
+      reason: "Payment received, lifting the grace-period hold.",
+    });
+  });
+
+  it("rejects an unsupported action", () => {
+    expect(() => normalizeLicenseStateChange({ action: "CANCEL", reason: "Not a supported action here." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeLicenseStateChange({ action: "SUSPEND", reason: "no" })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("allows ACTIVATE from TRIAL, GRACE_PERIOD, PENDING_RENEWAL and SUSPENDED", () => {
+    for (const state of ["TRIAL", "GRACE_PERIOD", "PENDING_RENEWAL", "SUSPENDED"] as const) {
+      expect(() => assertLicenseStateTransition("ACTIVATE", state)).not.toThrow();
+    }
+  });
+
+  it("denies ACTIVATE from the terminal EXPIRED and CANCELLED states", () => {
+    for (const state of ["EXPIRED", "CANCELLED"] as const) {
+      expect(() => assertLicenseStateTransition("ACTIVATE", state)).toThrowError(ControlPlaneValidationError);
+    }
+  });
+
+  it("allows SUSPEND from any non-terminal state but denies it once already terminal", () => {
+    expect(() => assertLicenseStateTransition("SUSPEND", "ACTIVE")).not.toThrow();
+    expect(() => assertLicenseStateTransition("SUSPEND", "EXPIRED")).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("allows RENEW even from EXPIRED, unlike ACTIVATE and SUSPEND", () => {
+    expect(() => assertLicenseStateTransition("RENEW", "EXPIRED")).not.toThrow();
+    expect(() => assertLicenseStateTransition("RENEW", "CANCELLED")).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("normalizes and uppercases a licence plan code for Upgrade", () => {
+    expect(normalizeLicenseUpgrade({ license_plan_code: "growth-plus" })).toEqual({ licensePlanCode: "GROWTH-PLUS" });
+  });
+
+  it("rejects a malformed licence plan code", () => {
+    expect(() => normalizeLicenseUpgrade({ license_plan_code: "a" })).toThrowError(ControlPlaneValidationError);
+    expect(() => normalizeLicenseUpgrade({ license_plan_code: "" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("administrator appointment (AppointAdministrator)", () => {
+  it("normalizes a well-formed appointment, defaulting is_primary to false", () => {
+    expect(normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "finance", approval_reference: "Board resolution 2026-08-01." })).toEqual({
+      userId: "usr-1",
+      administratorRoleCode: "FINANCE",
+      isPrimary: false,
+      approvalReference: "Board resolution 2026-08-01.",
+    });
+  });
+
+  it("accepts an explicit is_primary flag", () => {
+    expect(normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "PRIMARY", is_primary: true, approval_reference: "Primary admin succession." }).isPrimary).toBe(true);
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeAdministratorAppointment({ administrator_role_code: "FINANCE", approval_reference: "Board resolution 2026-08-01." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a malformed administrator role code", () => {
+    expect(() => normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "finance scope!", approval_reference: "Board resolution 2026-08-01." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects an approval reference outside the 5 to 240 character bound", () => {
+    expect(() => normalizeAdministratorAppointment({ user_id: "usr-1", administrator_role_code: "FINANCE", approval_reference: "no" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("employee activation (INVITED -> ACTIVE)", () => {
+  it("normalizes a well-formed activation", () => {
+    expect(normalizeEmployeeActivation({ user_id: "usr-2" })).toEqual({ userId: "usr-2" });
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeEmployeeActivation({})).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("capability grant (Organisation Authorization GrantCapability)", () => {
+  it("normalizes a well-formed grant, uppercasing the capability", () => {
+    expect(normalizeCapabilityGrant({ user_id: "usr-3", capability: "buyer" })).toEqual({ userId: "usr-3", capability: "BUYER" });
+    expect(normalizeCapabilityGrant({ user_id: "usr-3", capability: "seller" }).capability).toBe("SELLER");
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeCapabilityGrant({ capability: "BUYER" })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a capability outside BUYER/SELLER", () => {
+    expect(() => normalizeCapabilityGrant({ user_id: "usr-3", capability: "ADMIN" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("navigation children query (GetChildren)", () => {
+  it("normalizes a well-formed workspace query", () => {
+    expect(normalizeNavigationChildrenQuery("workspace", "ws-1")).toEqual({ parentType: "workspace", parentId: "ws-1" });
+  });
+
+  it("normalizes a well-formed folder query, lowercasing parent_type", () => {
+    expect(normalizeNavigationChildrenQuery("FOLDER", "fld-1")).toEqual({ parentType: "folder", parentId: "fld-1" });
+  });
+
+  it("rejects an unsupported parent_type", () => {
+    expect(() => normalizeNavigationChildrenQuery("item", "itm-1")).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a missing parent_id", () => {
+    expect(() => normalizeNavigationChildrenQuery("workspace", null)).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("navigation preference (SavePreference)", () => {
+  it("normalizes a well-formed preference, serializing the value to JSON", () => {
+    expect(normalizeNavigationPreference({ preference_type: "sidebar_collapsed", value: true })).toEqual({
+      preferenceType: "sidebar_collapsed",
+      value: "true",
+    });
+    expect(normalizeNavigationPreference({ preference_type: "recent_items", value: ["a", "b"] }).value).toBe('["a","b"]');
+  });
+
+  it("rejects a malformed preference_type", () => {
+    expect(() => normalizeNavigationPreference({ preference_type: "Has Spaces", value: 1 })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a missing value", () => {
+    expect(() => normalizeNavigationPreference({ preference_type: "sidebar_collapsed" })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects an oversized value", () => {
+    expect(() => normalizeNavigationPreference({ preference_type: "big", value: "x".repeat(9_000) })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("access grant revocation (Access Governance RevokeAccess)", () => {
+  it("normalizes a well-formed revocation, uppercasing grant_type", () => {
+    expect(normalizeAccessRevocation({ grant_type: "role", grant_id: "ura-1", reason: "Role no longer required for this position." })).toEqual({
+      grantType: "ROLE",
+      grantId: "ura-1",
+      reason: "Role no longer required for this position.",
+    });
+  });
+
+  it("rejects a grant_type outside ROLE/CAPABILITY", () => {
+    expect(() => normalizeAccessRevocation({ grant_type: "MEMBERSHIP", grant_id: "ura-1", reason: "Role no longer required for this position." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a missing grant_id", () => {
+    expect(() => normalizeAccessRevocation({ grant_type: "CAPABILITY", reason: "Role no longer required for this position." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeAccessRevocation({ grant_type: "ROLE", grant_id: "ura-1", reason: "no" })).toThrowError(ControlPlaneValidationError);
+  });
+});
+
+describe("offboarding (Access Governance Offboard)", () => {
+  it("normalizes a well-formed offboarding", () => {
+    expect(normalizeOffboarding({ user_id: "usr-4", reason: "Access-only exit following a security incident review." })).toEqual({
+      userId: "usr-4",
+      reason: "Access-only exit following a security incident review.",
+    });
+  });
+
+  it("rejects a missing user id", () => {
+    expect(() => normalizeOffboarding({ reason: "Access-only exit following a security incident review." })).toThrowError(ControlPlaneValidationError);
+  });
+
+  it("rejects a reason outside the 5 to 240 character bound", () => {
+    expect(() => normalizeOffboarding({ user_id: "usr-4", reason: "no" })).toThrowError(ControlPlaneValidationError);
   });
 });

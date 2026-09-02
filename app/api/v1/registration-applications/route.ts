@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { identityJson, identityProblem } from "@/lib/api/identity";
+import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
 import { listRegistrationApplications, submitRegistrationApplication } from "@/lib/data/identity-repository";
 import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
@@ -21,13 +22,10 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    await requireLicensedPermission(user, "registrations:read", { operationClass: "READ" });
-    return Response.json({ registrations: await listRegistrationApplications(user) }, {
-      headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" },
-    });
+    requirePermission(user, "registrations:read");
+    return identityJson({ registrations: await listRegistrationApplications(user) }, context);
   } catch (error) {
-    if (error instanceof AccessDeniedError) return problem(error.status, error.status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED", error.status === 401 ? "Unauthorized" : "Forbidden", error.message, context.correlationId);
-    return problem(500, "INTERNAL_ERROR", "Internal error", "The registration list is temporarily unavailable.", context.correlationId);
+    return identityProblem(error, context);
   }
 }
 

@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    await requireLicensedPermission(actor, "workflows:decide", { requestedOrganisationId: organisationIdFrom(request) });
+    requirePermission(actor, "workflows:decide");
     await requireStepUp(request, actor);
     return controlPlaneJson({ decision: await decideWorkflowTask(actor, (await contextValue.params).id, await readBoundedJson(request, 16_384), organisationIdFrom(request)) }, context);
   } catch (error) { return controlPlaneProblem(error, context); }

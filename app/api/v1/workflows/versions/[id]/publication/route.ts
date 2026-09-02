@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    await requireLicensedPermission(actor, "workflows:manage", { requestedOrganisationId: organisationIdFrom(request) });
+    requirePermission(actor, "workflows:manage");
     await requireStepUp(request, actor);
     return controlPlaneJson({ workflowVersion: await publishWorkflowVersion(actor, (await contextValue.params).id, organisationIdFrom(request)) }, context);
   } catch (error) { return controlPlaneProblem(error, context); }

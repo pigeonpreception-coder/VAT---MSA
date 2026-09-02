@@ -1,7 +1,7 @@
-import { handleBusinessGet, handleBusinessPost } from "@/lib/api/business";
+import { handleBusinessPost, handleQuotationSearch } from "@/lib/api/business";
 
 export async function GET(request: Request) {
-  return handleBusinessGet(request, "commercial:read", "quotations");
+  return handleQuotationSearch(request);
 }
 
 export async function POST(request: Request) {

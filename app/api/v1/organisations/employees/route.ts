@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    await requireLicensedPermission(actor, "employees:manage", { requestedOrganisationId: organisationIdFrom(request) });
+    requirePermission(actor, "employees:manage");
     await requireStepUp(request, actor);
     const employee = await inviteEmployee(actor, await readBoundedJson(request, 32_768), organisationIdFrom(request));
     return controlPlaneJson({ employee }, context, 201);

@@ -1,52 +1,30 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError } from "@/lib/auth";
-import { hasRecentStepUp } from "@/lib/domain/control-plane";
-import { sha256Hex } from "@/lib/domain/invoice";
+import { hasFreshStepUp } from "@/lib/data/mfa-repository";
 import type { UserContext } from "@/lib/domain/types";
 import { STEP_UP_WINDOW_MS, verifySignedStepUpEvidence } from "@/lib/security/step-up-evidence";
 
-const EVIDENCE_HEADER = "x-vat-msa-step-up-evidence";
-
+/**
+ * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #2 —
+ * CRITICAL): this previously read two request headers
+ * (x-vat-msa-auth-assurance / x-vat-msa-reauthenticated-at) supplied
+ * verbatim by the *caller* and trusted them outright — no application
+ * code anywhere ever set those headers on a genuine step-up event, only
+ * test fixtures did, so every one of the ~28 "step-up gated" commands
+ * (taxpayer suspension, invoice cancellation, identity linking, platform
+ * staff provisioning, VAT-rule approval, etc.) was effectively ungated.
+ * requireStepUp is now async and checks a real, server-written
+ * step_up_events row (see lib/data/mfa-repository.ts's confirmStepUp,
+ * which requires a genuine RFC 6238 TOTP code) instead. The
+ * development-only local-confirmation escape hatch is unchanged and
+ * still fenced by both isDevelopmentIdentity and NODE_ENV!=="production".
+ */
 export async function requireStepUp(request: Request, actor: UserContext): Promise<void> {
-  const signedEvidence = request.headers.get(EVIDENCE_HEADER);
-  if (signedEvidence) {
-    const secret = process.env.VAT_MSA_STEP_UP_HMAC_SECRET ?? "";
-    const issuer = process.env.VAT_MSA_STEP_UP_ISSUER ?? "";
-    const sessionId = request.headers.get("x-vat-msa-session-id") ?? "";
-    const requestUrl = new URL(request.url);
-    let verified: Awaited<ReturnType<typeof verifySignedStepUpEvidence>>;
-    try {
-      verified = await verifySignedStepUpEvidence(signedEvidence, {
-        actorId: actor.userId,
-        audience: `${request.method.toUpperCase()} ${requestUrl.pathname}`,
-        issuer,
-        origin: requestUrl.origin,
-        sessionId,
-        secret,
-      });
-    } catch (error) {
-      throw new AccessDeniedError(error instanceof Error ? error.message : "The step-up authentication evidence is invalid.");
-    }
-    const digest = await sha256Hex(signedEvidence);
-    try {
-      const db = await ensureDatabase();
-      await db.prepare(`INSERT INTO step_up_evidence_uses
-        (evidence_digest,actor_id,issued_at,expires_at,used_at) VALUES (?,?,?,?,?)`)
-        .bind(digest, actor.userId, new Date(verified.issuedAtMs).toISOString(), new Date(verified.expiresAtMs).toISOString(), new Date().toISOString()).run();
-      return;
-    } catch {
-      throw new AccessDeniedError("The step-up authentication evidence has already been used or could not be recorded.");
-    }
-  }
+  const localConfirmation = actor.isDevelopmentIdentity
+    && process.env.NODE_ENV !== "production"
+    && request.headers.get("x-vat-msa-local-step-up") === "confirmed";
 
-  if (process.env.NODE_ENV === "production") {
-    throw new AccessDeniedError("Signed, single-use step-up authentication evidence is required for this privileged change.");
-  }
-
-  const assurance = request.headers.get("x-vat-msa-auth-assurance");
-  const reauthenticatedAt = request.headers.get("x-vat-msa-reauthenticated-at");
-  const localConfirmation = actor.isDevelopmentIdentity && request.headers.get("x-vat-msa-local-step-up") === "confirmed";
-  if (!localConfirmation && !hasRecentStepUp({ assurance, reauthenticatedAt, maxAgeMs: STEP_UP_WINDOW_MS })) {
-    throw new AccessDeniedError("A fresh multi-factor step-up authentication is required for this privileged change.");
+  if (!localConfirmation && !(await hasFreshStepUp(actor.userId))) {
+    throw new AccessDeniedError("A fresh multi-factor step-up authentication is required for this privileged change. Confirm step-up via POST /api/v1/identity/step-up first.");
   }
 }

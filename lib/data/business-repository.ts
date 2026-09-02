@@ -3,17 +3,29 @@ import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import {
   evaluateExpenseDecision,
   evaluateQuotationLifecycle,
+  normalizeAndValidateAccount,
   normalizeAndValidateBusinessParty,
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
-  normalizeAndValidateExpenseDecision,
-  normalizeAndValidateExpenseReceiptLink,
+  normalizeAndValidateExpenseCategory,
+  normalizeAndValidateExpenseRejection,
   normalizeAndValidateJournal,
+  normalizeAndValidateJournalReversal,
+  normalizePartySearchQuery,
+  normalizeAndValidatePeriodClose,
+  normalizeAndValidateProduct,
   normalizeAndValidateProject,
+  normalizeAndValidateProjectBudgetApproval,
+  normalizeAndValidateProjectCost,
   normalizeAndValidateQuotation,
   normalizeAndValidateQuotationConversion,
   normalizeAndValidateQuotationRejection,
   normalizeAndValidateStockMovement,
+  normalizeAndValidateStockTransfer,
+  normalizeAndValidateWarehouse,
+  normalizeQuotationSearchQuery,
+  type AccountSubmission,
+  type AccountType,
   type BusinessPartyDeactivationSubmission,
   type BusinessPartyRelationship,
   type BusinessPartySubmission,
@@ -28,6 +40,7 @@ import {
   type QuotationConversionSubmission,
   type StockMovementSubmission,
 } from "@/lib/domain/business";
+import { classifyTransaction } from "./identity-repository";
 import { centsToDecimal, sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   evaluateCounterpartyTrust,
@@ -243,7 +256,7 @@ async function quotationRevisionRecord(
     quotationId: string;
     organisationId: string;
     revisionNumber: number;
-    action: "ISSUE" | "EDIT";
+    action: "CREATE" | "EDIT" | "SEND";
     status: string;
     snapshot: Record<string, unknown>;
     previousHash: string | null;
@@ -379,6 +392,50 @@ export async function getBusinessPlatformSnapshot(user: UserContext, requestedOr
   return { organisation, metrics: metrics ?? {}, parties: parties.results, products: products.results, quotations: quotations.results, accounts: accounts.results, journals: journals.results, expenses: expenses.results, balances: balances.results, projects: projects.results, imports: imports.results, categories: categories.results, warehouses: warehouses.results };
 }
 
+/**
+ * Module 5 Phase A SearchCustomers/SearchSuppliers. One search over the
+ * shared business_parties model — SearchCustomers is this with
+ * relationship=CUSTOMER, SearchSuppliers is relationship=SUPPLIER; there is
+ * no separate Customer/Supplier table to search independently. Distinct
+ * from getBusinessPlatformSnapshot's fixed "parties" list (still used
+ * as-is by existing dashboard pages) — this is a genuinely filterable,
+ * paginated query with a real totalCount, the same shape Module 3 Phase B's
+ * GetWorkQueue established.
+ */
+export async function searchBusinessParties(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const query = normalizePartySearchQuery(params);
+
+  const conditions: string[] = ["p.organisation_id = ?"];
+  const values: unknown[] = [organisation.id];
+  if (query.status) {
+    conditions.push("p.status = ?");
+    values.push(query.status);
+  }
+  if (query.relationship) {
+    conditions.push("EXISTS (SELECT 1 FROM party_relationships r2 WHERE r2.party_id=p.id AND r2.relationship=? AND r2.status='ACTIVE')");
+    values.push(query.relationship);
+  }
+  if (query.q) {
+    conditions.push("(p.display_name LIKE ? OR p.legal_name LIKE ? OR p.vat_number LIKE ? OR p.tin LIKE ?)");
+    const like = `%${query.q}%`;
+    values.push(like, like, like, like);
+  }
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+  const [items, count] = await Promise.all([
+    db.prepare(`SELECT p.*, GROUP_CONCAT(r.relationship, ',') AS relationships FROM business_parties p
+      LEFT JOIN party_relationships r ON r.party_id=p.id AND r.organisation_id=p.organisation_id AND r.status='ACTIVE'
+      ${whereClause}
+      GROUP BY p.id ORDER BY p.display_name
+      LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, string | null>>(),
+    db.prepare(`SELECT COUNT(DISTINCT p.id) AS n FROM business_parties p ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+
+  return { organisation_id: organisation.id, parties: items.results, total_count: count?.n ?? 0, limit: query.limit, offset: query.offset };
+}
+
 export async function getQuotationForEdit(id: string, actor: UserContext, requestedOrganisationId?: string | null) {
   const db = await ensureDatabase();
   const organisation = await resolveOrganisation(actor, requestedOrganisationId);
@@ -391,6 +448,46 @@ export async function getQuotationForEdit(id: string, actor: UserContext, reques
     net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines
     WHERE quotation_id=? ORDER BY line_number`).bind(id).all<Record<string, string | number | null>>();
   return { organisation, quotation, lines: lines.results };
+}
+
+/**
+ * Module 5 Phase B SearchQuotes. The same bounded/paginated, real-total_count
+ * shape Phase A's searchBusinessParties established — distinct from
+ * getBusinessPlatformSnapshot's fixed "quotations" list (still used as-is
+ * by existing dashboard pages).
+ */
+export async function searchQuotations(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const query = normalizeQuotationSearchQuery(params);
+
+  const conditions: string[] = ["q.organisation_id = ?"];
+  const values: unknown[] = [organisation.id];
+  if (query.status) {
+    conditions.push("q.status = ?");
+    values.push(query.status);
+  }
+  if (query.customerPartyId) {
+    conditions.push("q.customer_party_id = ?");
+    values.push(query.customerPartyId);
+  }
+  if (query.q) {
+    conditions.push("(q.quotation_number LIKE ? OR p.display_name LIKE ?)");
+    const like = `%${query.q}%`;
+    values.push(like, like);
+  }
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+  const [items, count] = await Promise.all([
+    db.prepare(`SELECT q.*, p.display_name AS customer_name FROM quotations q
+      JOIN business_parties p ON p.id=q.customer_party_id AND p.organisation_id=q.organisation_id
+      ${whereClause}
+      ORDER BY q.issue_date DESC, q.created_at DESC
+      LIMIT ? OFFSET ?`).bind(...values, query.limit, query.offset).all<Record<string, string | number | null>>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM quotations q JOIN business_parties p ON p.id=q.customer_party_id AND p.organisation_id=q.organisation_id ${whereClause}`).bind(...values).first<{ n: number }>(),
+  ]);
+
+  return { organisation_id: organisation.id, quotations: items.results, total_count: count?.n ?? 0, limit: query.limit, offset: query.offset };
 }
 
 export async function createBusinessParty(
@@ -650,6 +747,68 @@ export async function deactivateBusinessParty(
   return getBusinessParty(db, id, organisation.id);
 }
 
+/**
+ * Module 5 Phase A VerifySupplier. "Against Module 1's taxpayer adapter,
+ * not a fresh identity concept" per the playbook: this calls
+ * classifyTransaction (lib/data/identity-repository.ts), the exact same
+ * cross-tenant VAT-number resolution invoice certification and Module 1's
+ * ClassifyTransaction pre-flight check already use, rather than a second
+ * supplier-specific lookup. Unlike most commands in this file, this always
+ * re-checks live and writes a brand-new snapshot row rather than returning
+ * stored data on a replayed key — the same deliberate departure Module 4's
+ * evaluateRisk took, since "was this supplier valid as of today" cannot be
+ * answered from a cached result. The replay check here only prevents a
+ * literal retry from writing a second redundant audit/outbox pair.
+ */
+export async function verifySupplier(partyId: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const party = await db.prepare("SELECT id,vat_number FROM business_parties WHERE id=? AND organisation_id=?").bind(partyId, organisation.id).first<{ id: string; vat_number: string | null }>();
+  if (!party) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  const relationship = await db.prepare("SELECT id FROM party_relationships WHERE party_id=? AND organisation_id=? AND relationship='SUPPLIER' AND status='ACTIVE'").bind(partyId, organisation.id).first<{ id: string }>();
+  if (!relationship) throw new BusinessResourceError("This business party is not an active supplier.", 409);
+  if (!party.vat_number) throw new BusinessResourceError("This supplier has no VAT number recorded to verify against the national taxpayer register.", 409);
+
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, party_id: partyId, vat_number: party.vat_number }));
+  const prior = await priorCommand(db, actor.userId, "VERIFY_SUPPLIER", idempotencyKey, requestHash);
+  const classification = await classifyTransaction(party.vat_number);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO party_verification_snapshots
+      (id,organisation_id,party_id,vat_number,taxpayer_active,organisation_active,can_act_as_seller,capabilities,verified_by,verified_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+      id, organisation.id, partyId, classification.vatNumber, classification.taxpayerActive ? 1 : 0, classification.organisationActive ? 1 : 0,
+      classification.canActAsSeller ? 1 : 0, JSON.stringify(classification.capabilities), actor.userId, now,
+    ),
+  ];
+  if (!prior) {
+    const audit = await auditEnvelope(db, actor, "SUPPLIER_VERIFIED", "BUSINESS_PARTY", partyId, {
+      organisationId: organisation.id, vatNumber: classification.vatNumber, taxpayerActive: classification.taxpayerActive, canActAsSeller: classification.canActAsSeller, correlationId,
+    }, now);
+    statements.push(
+      commandRecord(db, actor.userId, "VERIFY_SUPPLIER", idempotencyKey, requestHash, "PARTY_VERIFICATION_SNAPSHOT", id, now),
+      outboxRecord(db, "PARTY_VERIFICATION_SNAPSHOT", id, "SupplierVerified", organisation.id, { snapshot_id: id, party_id: partyId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+      auditRecord(db, actor, audit, now),
+    );
+  }
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM party_verification_snapshots WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase A: the verification history for one supplier, most recent first. */
+export async function getSupplierVerificationHistory(partyId: string, actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const party = await getBusinessParty(db, partyId, organisation.id);
+  if (!party) throw new BusinessResourceError("Business party was not found in the authorised organisation.", 404);
+  const snapshots = await db.prepare("SELECT * FROM party_verification_snapshots WHERE party_id=? AND organisation_id=? ORDER BY verified_at DESC")
+    .bind(partyId, organisation.id).all<Record<string, unknown>>();
+  return { party, snapshots: snapshots.results };
+}
+
 export async function createQuotation(payload: QuotationSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
   const quotation = normalizeAndValidateQuotation(payload);
@@ -665,14 +824,14 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   if (duplicate) throw new RepositoryConflictError(`Quotation number already exists as ${duplicate.id}.`);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const audit = await auditEnvelope(db, actor, "QUOTATION_ISSUED", "QUOTATION", id, { organisationId: organisation.id, quotationNumber: quotation.quotation_number, totalCents: quotation.total_cents, correlationId }, now);
+  const audit = await auditEnvelope(db, actor, "QUOTATION_CREATED", "QUOTATION", id, { organisationId: organisation.id, quotationNumber: quotation.quotation_number, totalCents: quotation.total_cents, correlationId }, now);
   const revision = await quotationRevisionRecord(db, {
     quotationId: id,
     organisationId: organisation.id,
     revisionNumber: 1,
-    action: "ISSUE",
-    status: "ISSUED",
-    snapshot: quotationSnapshot(quotation, "ISSUED"),
+    action: "CREATE",
+    status: "DRAFT",
+    snapshot: quotationSnapshot(quotation, "DRAFT"),
     previousHash: null,
     actorId: actor.userId,
     now,
@@ -680,17 +839,63 @@ export async function createQuotation(payload: QuotationSubmission, actor: UserC
   const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO quotations
       (id,organisation_id,branch_id,customer_party_id,quotation_number,currency,issue_date,valid_until,status,subtotal_cents,tax_cents,total_cents,notes,created_by,approved_by,accepted_at,converted_invoice_id,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?)`).bind(id, organisation.id, quotation.branch_id ?? null, quotation.customer_party_id, quotation.quotation_number, quotation.currency, quotation.issue_date, quotation.valid_until, "ISSUED", quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, actor.userId, now, now),
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?)`).bind(id, organisation.id, quotation.branch_id ?? null, quotation.customer_party_id, quotation.quotation_number, quotation.currency, quotation.issue_date, quotation.valid_until, "DRAFT", quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, actor.userId, now, now),
   ];
   for (const line of quotation.lines) statements.push(db.prepare(`INSERT INTO quotation_lines
     (id,quotation_id,line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), id, line.line_number, line.product_id ?? null, line.description, line.quantity_micros, line.unit_code, line.unit_price_cents, line.net_amount_cents, line.tax_category, line.tax_rate_bps, line.tax_amount_cents));
   statements.push(revision.statement);
   statements.push(commandRecord(db, actor.userId, "CREATE_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now));
-  statements.push(outboxRecord(db, "QUOTATION", id, "QuotationIssued", organisation.id, { quotation_id: id, organisation_id: organisation.id, total_cents: quotation.total_cents, correlation_id: correlationId }, now));
+  statements.push(outboxRecord(db, "QUOTATION", id, "QuotationCreated", organisation.id, { quotation_id: id, organisation_id: organisation.id, total_cents: quotation.total_cents, correlation_id: correlationId }, now));
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM quotations WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase B SendQuotation: DRAFT -> ISSUED, the new explicit
+ * transition the playbook's Create/Edit/Send/Accept/... sequence implies.
+ * Previously CreateQuotation landed directly in ISSUED with no draft
+ * state at all.
+ */
+export async function sendQuotation(id: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, quotation_id: id, action: "SEND" }));
+  const prior = await priorCommand(db, actor.userId, "SEND_QUOTATION", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<QuotationRecord>();
+  if (!existing) throw new BusinessResourceError("Quotation was not found in the authorised organisation.", 404);
+  const transition = evaluateQuotationLifecycle({ status: existing.status, action: "SEND", validUntil: existing.valid_until, today: new Date().toISOString().slice(0, 10) });
+  if (!transition.allowed) throw new RepositoryConflictError(transition.reason);
+
+  const lines = await db.prepare(`SELECT line_number,product_id,description,quantity_micros,unit_code,unit_price_cents,
+    net_amount_cents,tax_category,tax_rate_bps,tax_amount_cents FROM quotation_lines WHERE quotation_id=? ORDER BY line_number`)
+    .bind(id).all<QuotationLineRecord>();
+  const priorRevision = await db.prepare(`SELECT revision_number,snapshot_hash FROM quotation_revisions
+    WHERE quotation_id=? ORDER BY revision_number DESC LIMIT 1`).bind(id).first<{ revision_number: number; snapshot_hash: string }>();
+  const now = new Date().toISOString();
+  const revision = await quotationRevisionRecord(db, {
+    quotationId: id,
+    organisationId: organisation.id,
+    revisionNumber: (priorRevision?.revision_number ?? 0) + 1,
+    action: "SEND",
+    status: "ISSUED",
+    snapshot: storedQuotationSnapshot({ ...existing, status: "ISSUED" }, lines.results),
+    previousHash: priorRevision?.snapshot_hash ?? null,
+    actorId: actor.userId,
+    now,
+  });
+  const audit = await auditEnvelope(db, actor, "QUOTATION_SENT", "QUOTATION", id, { organisationId: organisation.id, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE quotations SET status='ISSUED',updated_at=? WHERE id=? AND organisation_id=? AND status='DRAFT'").bind(now, id, organisation.id),
+    revision.statement,
+    commandRecord(db, actor.userId, "SEND_QUOTATION", idempotencyKey, requestHash, "QUOTATION", id, now),
+    outboxRecord(db, "QUOTATION", id, "QuotationSent", organisation.id, { quotation_id: id, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM quotations WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
 }
 
 export async function updateQuotation(
@@ -731,7 +936,7 @@ export async function updateQuotation(
       quotationId: id,
       organisationId: organisation.id,
       revisionNumber: 1,
-      action: "ISSUE",
+      action: "CREATE",
       status: existing.status,
       snapshot: storedQuotationSnapshot(existing, existingLines.results),
       previousHash: null,
@@ -747,8 +952,8 @@ export async function updateQuotation(
     organisationId: organisation.id,
     revisionNumber,
     action: "EDIT",
-    status: "ISSUED",
-    snapshot: quotationSnapshot(quotation, "ISSUED"),
+    status: existing.status,
+    snapshot: quotationSnapshot(quotation, existing.status),
     previousHash,
     actorId: actor.userId,
     now,
@@ -760,10 +965,14 @@ export async function updateQuotation(
     totalCents: quotation.total_cents,
     correlationId,
   }, now);
+  // Edit is legal from DRAFT or ISSUED (see evaluateQuotationLifecycle) — the
+  // WHERE clause pins the update to whichever status the transition check
+  // above already confirmed, matching that same-actor-race-safety pattern
+  // used everywhere else status-gated UPDATEs appear in this file.
   statements.push(db.prepare(`UPDATE quotations SET branch_id=?,customer_party_id=?,currency=?,issue_date=?,valid_until=?,
-    subtotal_cents=?,tax_cents=?,total_cents=?,notes=?,updated_at=? WHERE id=? AND organisation_id=? AND status='ISSUED'`).bind(
+    subtotal_cents=?,tax_cents=?,total_cents=?,notes=?,updated_at=? WHERE id=? AND organisation_id=? AND status=?`).bind(
     quotation.branch_id ?? null, quotation.customer_party_id, quotation.currency, quotation.issue_date, quotation.valid_until,
-    quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, now, id, organisation.id,
+    quotation.subtotal_cents, quotation.tax_cents, quotation.total_cents, quotation.notes ?? null, now, id, organisation.id, existing.status,
   ));
   statements.push(db.prepare("DELETE FROM quotation_lines WHERE quotation_id=?").bind(id));
   for (const line of quotation.lines) statements.push(db.prepare(`INSERT INTO quotation_lines
@@ -957,6 +1166,19 @@ export async function convertQuotationToInvoice(
   return invoice;
 }
 
+/**
+ * Module 5 Phase C: accounting periods are implicit and open by default —
+ * there is no separate CreateAccountingPeriod command in the playbook, only
+ * ClosePeriod — so a period only exists as a row once it's been explicitly
+ * closed. Posting (including a reversal) into a period that has been closed
+ * is refused; this is the one piece of real teeth ClosePeriod has.
+ */
+async function assertPeriodOpen(db: D1Database, organisationId: string, date: string) {
+  const periodCode = date.slice(0, 7);
+  const period = await db.prepare("SELECT status FROM accounting_periods WHERE organisation_id=? AND period_code=?").bind(organisationId, periodCode).first<{ status: string }>();
+  if (period?.status === "CLOSED") throw new RepositoryConflictError(`Accounting period ${periodCode} is closed to new postings.`);
+}
+
 export async function postJournal(payload: JournalSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
   const journal = normalizeAndValidateJournal(payload);
@@ -965,6 +1187,7 @@ export async function postJournal(payload: JournalSubmission, actor: UserContext
   const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, journal }));
   const prior = await priorCommand(db, actor.userId, "POST_JOURNAL", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM journal_entries WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  await assertPeriodOpen(db, organisation.id, journal.journal_date);
   for (const line of journal.lines) {
     await requireOwnedReference(db, "chart_of_accounts", line.account_id, organisation.id, "Account");
     await requireOwnedReference(db, "branches", line.branch_id, organisation.id, "Branch");
@@ -984,6 +1207,218 @@ export async function postJournal(payload: JournalSubmission, actor: UserContext
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM journal_entries WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase C CreateAccount. Pre-checks the (organisation_id, code) uniqueness for a clean 409 message, backed by the table's own UNIQUE constraint as the real guarantee — the same pre-check-plus-constraint pattern used for business party VAT/TIN duplicates. */
+export async function createAccount(payload: AccountSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const account = normalizeAndValidateAccount(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, account }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_ACCOUNT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM chart_of_accounts WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,name FROM chart_of_accounts WHERE organisation_id=? AND code=?").bind(organisation.id, account.code).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`Account code ${account.code} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "ACCOUNT_CREATED", "ACCOUNT", id, { organisationId: organisation.id, code: account.code, accountType: account.account_type, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO chart_of_accounts (id,organisation_id,code,name,account_type,currency,control_type,status,created_at)
+      VALUES (?,?,?,?,?,?,?,'ACTIVE',?)`).bind(id, organisation.id, account.code, account.name, account.account_type, account.currency, account.control_type ?? null, now),
+    commandRecord(db, actor.userId, "CREATE_ACCOUNT", idempotencyKey, requestHash, "ACCOUNT", id, now),
+    outboxRecord(db, "ACCOUNT", id, "AccountCreated", organisation.id, { account_id: id, organisation_id: organisation.id, code: account.code, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM chart_of_accounts WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase C ReverseJournalEntry. A posted journal is never edited or
+ * deleted — a reversal is a brand-new, equal-and-opposite entry (every
+ * line's debit/credit swapped) posted as of today, with the original
+ * flipped to status='REVERSED' as a traceability marker only. Both entries
+ * remain in journal_lines and both count toward TrialBalance/Statements —
+ * their opposite amounts net to zero naturally, which is what makes this a
+ * real reversal rather than a deletion in disguise. A journal already
+ * reversed once cannot be reversed again (checked via
+ * reverses_journal_entry_id, not a second status value), and the reversal
+ * itself is subject to the same closed-period check as any other posting.
+ */
+export async function reverseJournalEntry(journalEntryId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateJournalReversal(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const original = await db.prepare("SELECT * FROM journal_entries WHERE id=? AND organisation_id=?").bind(journalEntryId, organisation.id).first<Record<string, string>>();
+  if (!original) throw new BusinessResourceError("Journal entry was not found in the authorised organisation.", 404);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, journal_entry_id: journalEntryId, input }));
+  const prior = await priorCommand(db, actor.userId, "REVERSE_JOURNAL_ENTRY", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM journal_entries WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (original.status !== "POSTED") throw new RepositoryConflictError(`Only a posted journal entry can be reversed; ${journalEntryId} is currently ${original.status}.`);
+  const alreadyReversed = await db.prepare("SELECT id FROM journal_entries WHERE reverses_journal_entry_id=?").bind(journalEntryId).first<{ id: string }>();
+  if (alreadyReversed) throw new RepositoryConflictError(`This journal entry was already reversed as ${alreadyReversed.id}.`);
+  const now = new Date().toISOString();
+  const journalDate = now.slice(0, 10);
+  await assertPeriodOpen(db, organisation.id, journalDate);
+  const originalLines = await db.prepare("SELECT * FROM journal_lines WHERE journal_entry_id=? ORDER BY line_number").bind(journalEntryId).all<Record<string, string | number | null>>();
+  const id = crypto.randomUUID();
+  const journalNumber = `${original.journal_number}-REV`;
+  const audit = await auditEnvelope(db, actor, "JOURNAL_REVERSED", "JOURNAL", id, { organisationId: organisation.id, reversesJournalEntryId: journalEntryId, reason: input.reason, correlationId }, now);
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`INSERT INTO journal_entries
+      (id,organisation_id,journal_number,journal_date,reference,description,currency,status,source_type,source_id,created_by,posted_by,created_at,posted_at,reverses_journal_entry_id)
+      VALUES (?,?,?,?,?,?,?,'POSTED','ADJUSTMENT',?,?,?,?,?,?)`)
+      .bind(id, organisation.id, journalNumber, journalDate, original.journal_number, `Reversal of ${original.journal_number}: ${input.reason}`, original.currency, journalEntryId, actor.userId, actor.userId, now, now, journalEntryId),
+    db.prepare("UPDATE journal_entries SET status='REVERSED' WHERE id=?").bind(journalEntryId),
+    commandRecord(db, actor.userId, "REVERSE_JOURNAL_ENTRY", idempotencyKey, requestHash, "JOURNAL", id, now),
+    outboxRecord(db, "JOURNAL", id, "JournalReversed", organisation.id, { journal_id: id, reverses_journal_entry_id: journalEntryId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ];
+  originalLines.results.forEach((line, index) => statements.push(db.prepare(`INSERT INTO journal_lines
+    (id,journal_entry_id,line_number,account_id,branch_id,project_id,description,debit_cents,credit_cents,tax_code)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+    crypto.randomUUID(), id, index + 1, line.account_id, line.branch_id, line.project_id,
+    `Reversal: ${line.description}`, line.credit_cents, line.debit_cents, line.tax_code,
+  )));
+  await db.batch(statements);
+  return db.prepare("SELECT * FROM journal_entries WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase C ClosePeriod. Idempotent on an already-closed period —
+ * re-closing is a no-op success, not an error, matching this codebase's
+ * established idempotent-on-already-satisfied pattern (e.g.
+ * markObligationSatisfied). A period only gains a row once it's actually
+ * closed; there is no separate "create/open a period" command, so an
+ * un-closed period simply has no row and postings proceed unchecked.
+ */
+export async function closeAccountingPeriod(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidatePeriodClose(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, input }));
+  const prior = await priorCommand(db, actor.userId, "CLOSE_ACCOUNTING_PERIOD", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM accounting_periods WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const [year, month] = input.period_code.split("-").map(Number);
+  const periodStart = `${input.period_code}-01`;
+  const periodEndDate = new Date(Date.UTC(year, month, 0));
+  const periodEnd = periodEndDate.toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  if (periodEnd > today) throw new RepositoryConflictError("A period cannot be closed before it has ended.");
+  const existing = await db.prepare("SELECT * FROM accounting_periods WHERE organisation_id=? AND period_code=?").bind(organisation.id, input.period_code).first<Record<string, unknown>>();
+  if (existing?.status === "CLOSED") return existing;
+  const now = new Date().toISOString();
+  const id = (existing?.id as string | undefined) ?? crypto.randomUUID();
+  const audit = await auditEnvelope(db, actor, "ACCOUNTING_PERIOD_CLOSED", "ACCOUNTING_PERIOD", id, { organisationId: organisation.id, periodCode: input.period_code, correlationId }, now);
+  await db.batch([
+    existing
+      ? db.prepare("UPDATE accounting_periods SET status='CLOSED', closed_by=?, closed_at=? WHERE id=?").bind(actor.userId, now, id)
+      : db.prepare(`INSERT INTO accounting_periods (id,organisation_id,period_code,period_start,period_end,status,closed_by,closed_at,created_at)
+          VALUES (?,?,?,?,?,'CLOSED',?,?,?)`).bind(id, organisation.id, input.period_code, periodStart, periodEnd, actor.userId, now, now),
+    commandRecord(db, actor.userId, "CLOSE_ACCOUNTING_PERIOD", idempotencyKey, requestHash, "ACCOUNTING_PERIOD", id, now),
+    outboxRecord(db, "ACCOUNTING_PERIOD", id, "AccountingPeriodClosed", organisation.id, { period_id: id, period_code: input.period_code, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM accounting_periods WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase C TrialBalance. Sums every journal_lines row regardless of
+ * its parent journal_entries.status — a REVERSED original's lines are real
+ * historical postings, and the reversal's opposite lines net them to zero
+ * arithmetically; excluding REVERSED entries would double-count the
+ * reversal's own correcting effect. as_of bounds journal_date, not
+ * created_at, matching how a trial balance is normally read "as of" a date.
+ */
+export async function getTrialBalance(actor: UserContext, requestedOrganisationId?: string | null, asOf?: string) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const asOfDate = asOf ?? new Date().toISOString().slice(0, 10);
+  const rows = await db.prepare(`SELECT a.id AS account_id, a.code, a.name, a.account_type,
+      COALESCE(SUM(l.debit_cents),0) AS total_debit_cents, COALESCE(SUM(l.credit_cents),0) AS total_credit_cents
+    FROM chart_of_accounts a
+    LEFT JOIN journal_lines l ON l.account_id=a.id
+    LEFT JOIN journal_entries j ON j.id=l.journal_entry_id AND j.journal_date<=?
+    WHERE a.organisation_id=? AND a.status='ACTIVE'
+    GROUP BY a.id ORDER BY a.code`).bind(asOfDate, organisation.id).all<{
+    account_id: string; code: string; name: string; account_type: AccountType; total_debit_cents: number; total_credit_cents: number;
+  }>();
+  const accounts = rows.results.map((row) => ({ ...row, balance_cents: row.total_debit_cents - row.total_credit_cents }));
+  const totalDebitCents = accounts.reduce((sum, row) => sum + row.total_debit_cents, 0);
+  const totalCreditCents = accounts.reduce((sum, row) => sum + row.total_credit_cents, 0);
+  return { organisation_id: organisation.id, as_of: asOfDate, accounts, total_debit_cents: totalDebitCents, total_credit_cents: totalCreditCents, balanced: totalDebitCents === totalCreditCents };
+}
+
+/**
+ * Module 5 Phase C Statements. A deliberately simplified pair of reports,
+ * proportionate to this module's "lighter CRUD standard" watch-out — not a
+ * full general-ledger closing cycle:
+ *  - Income statement: revenue minus expense, summed over [from, to] by
+ *    journal_date.
+ *  - Balance sheet: asset/liability/equity account balances as of `to`,
+ *    plus the same-range net income folded in as a computed "retained
+ *    earnings" line — there is no period-end closing journal that actually
+ *    zeroes revenue/expense into equity, so this stays a live computed
+ *    view rather than a posted closing entry. `balanced` should always be
+ *    true given the underlying double-entry invariant; it's surfaced
+ *    explicitly so a caller can see the check was made, not just assume it.
+ */
+export async function getFinancialStatements(actor: UserContext, requestedOrganisationId: string | null | undefined, from: string, to: string) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const rows = await db.prepare(`SELECT a.account_type, COALESCE(SUM(l.debit_cents),0) AS total_debit_cents, COALESCE(SUM(l.credit_cents),0) AS total_credit_cents
+    FROM chart_of_accounts a
+    LEFT JOIN journal_lines l ON l.account_id=a.id
+    LEFT JOIN journal_entries j ON j.id=l.journal_entry_id AND j.journal_date BETWEEN ? AND ?
+    WHERE a.organisation_id=? AND a.status='ACTIVE'
+    GROUP BY a.account_type`).bind(from, to, organisation.id).all<{ account_type: AccountType; total_debit_cents: number; total_credit_cents: number }>();
+  const byType = Object.fromEntries(rows.results.map((row) => [row.account_type, row]));
+  const revenueCents = (byType.REVENUE?.total_credit_cents ?? 0) - (byType.REVENUE?.total_debit_cents ?? 0);
+  const expenseCents = (byType.EXPENSE?.total_debit_cents ?? 0) - (byType.EXPENSE?.total_credit_cents ?? 0);
+  const netIncomeCents = revenueCents - expenseCents;
+  const assetCents = (byType.ASSET?.total_debit_cents ?? 0) - (byType.ASSET?.total_credit_cents ?? 0);
+  const liabilityCents = (byType.LIABILITY?.total_credit_cents ?? 0) - (byType.LIABILITY?.total_debit_cents ?? 0);
+  const equityCents = (byType.EQUITY?.total_credit_cents ?? 0) - (byType.EQUITY?.total_debit_cents ?? 0);
+  return {
+    organisation_id: organisation.id,
+    from,
+    to,
+    income_statement: { revenue_cents: revenueCents, expense_cents: expenseCents, net_income_cents: netIncomeCents },
+    balance_sheet: {
+      assets_cents: assetCents,
+      liabilities_cents: liabilityCents,
+      equity_cents: equityCents,
+      retained_earnings_cents: netIncomeCents,
+      total_liabilities_and_equity_cents: liabilityCents + equityCents + netIncomeCents,
+      balanced: assetCents === liabilityCents + equityCents + netIncomeCents,
+    },
+  };
+}
+
+/** Module 5 Phase E CreateExpenseCategory. expense_categories was previously seed-only, mirroring chart_of_accounts before Phase C's CreateAccount — same fix, same reasoning. */
+export async function createExpenseCategory(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const category = normalizeAndValidateExpenseCategory(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, category }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_EXPENSE_CATEGORY", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expense_categories WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,name FROM expense_categories WHERE organisation_id=? AND code=?").bind(organisation.id, category.code).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`Category code ${category.code} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_CATEGORY_CREATED", "EXPENSE_CATEGORY", id, { organisationId: organisation.id, code: category.code, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO expense_categories (id,organisation_id,code,name,default_tax_category,requires_receipt,status,created_at)
+      VALUES (?,?,?,?,?,?,'ACTIVE',?)`).bind(id, organisation.id, category.code, category.name, category.default_tax_category, category.requires_receipt ? 1 : 0, now),
+    commandRecord(db, actor.userId, "CREATE_EXPENSE_CATEGORY", idempotencyKey, requestHash, "EXPENSE_CATEGORY", id, now),
+    outboxRecord(db, "EXPENSE_CATEGORY", id, "ExpenseCategoryCreated", organisation.id, { category_id: id, organisation_id: organisation.id, code: category.code, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expense_categories WHERE id=?").bind(id).first<Record<string, unknown>>();
 }
 
 export async function createExpense(payload: ExpenseSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
@@ -1012,132 +1447,144 @@ export async function createExpense(payload: ExpenseSubmission, actor: UserConte
   return db.prepare("SELECT * FROM expenses WHERE id=?").bind(id).first<Record<string, unknown>>();
 }
 
-export async function decideExpense(
-  id: string,
-  payload: ExpenseDecisionSubmission,
-  actor: UserContext,
-  idempotencyKey: string,
-  correlationId: string,
-  requestedOrganisationId?: string | null,
-) {
-  validateIdempotencyKey(idempotencyKey);
-  const decision = normalizeAndValidateExpenseDecision(payload);
-  const db = await ensureDatabase();
-  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
-  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: id, decision }));
-  const prior = await priorCommand(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash);
-  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
-  const expense = await db.prepare(`SELECT e.id,e.organisation_id,e.expense_number,e.status,e.total_cents,e.created_by,
-      c.requires_receipt,e.receipt_document_id,d.scan_status AS receipt_scan_status,d.status AS receipt_status
-      FROM expenses e JOIN expense_categories c ON c.id=e.category_id
-      LEFT JOIN document_metadata d ON d.id=e.receipt_document_id AND d.organisation_id=e.organisation_id
-      WHERE e.id=? AND e.organisation_id=?`)
-    .bind(id, organisation.id).first<ExpenseRecord>();
+type ExpenseRow = { id: string; organisation_id: string; status: string; created_by: string; total_cents: number };
+
+async function loadExpenseForTransition(db: D1Database, expenseId: string, organisationId: string): Promise<ExpenseRow> {
+  const expense = await db.prepare("SELECT id,organisation_id,status,created_by,total_cents FROM expenses WHERE id=? AND organisation_id=?").bind(expenseId, organisationId).first<ExpenseRow>();
   if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
-  const policy = evaluateExpenseDecision({
-    status: expense.status,
-    createdBy: expense.created_by,
-    actorId: actor.userId,
-    decision: decision.decision,
-    receiptRequired: expense.requires_receipt === 1,
-    receiptDocumentId: expense.receipt_document_id,
-    receiptScanStatus: expense.receipt_scan_status,
-    receiptStatus: expense.receipt_status,
-  });
-  if (!policy.allowed) throw new RepositoryConflictError(policy.reason);
-  const now = new Date().toISOString();
-  const eventType = decision.decision === "APPROVE" ? "ExpenseApproved" : "ExpenseRejected";
-  const audit = await auditEnvelope(db, actor, `EXPENSE_${decision.decision}D`, "EXPENSE", id, {
-    organisationId: organisation.id,
-    expenseNumber: expense.expense_number,
-    totalCents: expense.total_cents,
-    reason: decision.reason,
-    correlationId,
-  }, now);
-  try {
-    await db.batch([
-      db.prepare(`INSERT INTO expense_decisions
-        (id,expense_id,organisation_id,decision,reason,decided_by,decided_at) VALUES (?,?,?,?,?,?,?)`)
-        .bind(crypto.randomUUID(), id, organisation.id, decision.decision, decision.reason, actor.userId, now),
-      commandRecord(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash, "EXPENSE", id, now),
-      outboxRecord(db, "EXPENSE", id, eventType, organisation.id, {
-        expense_id: id,
-        organisation_id: organisation.id,
-        decision: decision.decision,
-        total_cents: expense.total_cents,
-        correlation_id: correlationId,
-      }, now),
-      auditRecord(db, actor, audit, now),
-    ]);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("EXPENSE_")) {
-      throw new RepositoryConflictError("The expense is no longer eligible for this independent decision.");
-    }
-    throw error;
-  }
-  return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
+  return expense;
 }
 
-export async function linkExpenseReceipt(
-  id: string,
-  payload: ExpenseReceiptLinkSubmission,
-  actor: UserContext,
-  idempotencyKey: string,
-  correlationId: string,
-  requestedOrganisationId?: string | null,
-) {
+/** Module 5 Phase E SubmitExpense: DRAFT -> SUBMITTED, the maker-checker gate's starting line. */
+export async function submitExpense(expenseId: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
   validateIdempotencyKey(idempotencyKey);
-  const link = normalizeAndValidateExpenseReceiptLink(payload);
   const db = await ensureDatabase();
   const organisation = await resolveOrganisation(actor, requestedOrganisationId);
-  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: id, link }));
-  const prior = await priorCommand(db, actor.userId, "LINK_EXPENSE_RECEIPT", idempotencyKey, requestHash);
+  const expense = await loadExpenseForTransition(db, expenseId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, action: "SUBMIT" }));
+  const prior = await priorCommand(db, actor.userId, "SUBMIT_EXPENSE", idempotencyKey, requestHash);
   if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
-
-  const expense = await db.prepare("SELECT id,status,receipt_document_id FROM expenses WHERE id=? AND organisation_id=?")
-    .bind(id, organisation.id).first<{ id: string; status: string; receipt_document_id: string | null }>();
-  if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
-  if (expense.status !== "DRAFT") throw new RepositoryConflictError("Receipt evidence can only be linked while an expense is in DRAFT status.");
-  if (expense.receipt_document_id) throw new RepositoryConflictError("The expense already has immutable linked receipt evidence.");
-
-  const document = await db.prepare(`SELECT id,file_name,checksum_sha256,scan_status,status FROM document_metadata
-      WHERE id=? AND organisation_id=? AND owner_domain='EXPENSE' AND owner_resource_id=?`)
-    .bind(link.receipt_document_id, organisation.id, id)
-    .first<{ id: string; file_name: string; checksum_sha256: string; scan_status: string; status: string }>();
-  if (!document) throw new BusinessResourceError("Receipt document was not found in the authorised expense scope.", 404);
-  if (document.scan_status !== "CLEAN" || document.status !== "AVAILABLE") {
-    throw new RepositoryConflictError("Quarantined, pending, rejected or otherwise unavailable receipt evidence cannot be linked to an expense.");
-  }
-
+  if (expense.status !== "DRAFT") throw new RepositoryConflictError(`Only a draft expense can be submitted; ${expenseId} is currently ${expense.status}.`);
   const now = new Date().toISOString();
-  const audit = await auditEnvelope(db, actor, "EXPENSE_RECEIPT_LINKED", "EXPENSE", id, {
-    organisationId: organisation.id,
-    receiptDocumentId: document.id,
-    checksumSha256: document.checksum_sha256,
-    correlationId,
-  }, now);
-  try {
-    await db.batch([
-      db.prepare(`INSERT INTO expense_receipt_links
-        (id,expense_id,organisation_id,document_id,linked_by,linked_at) VALUES (?,?,?,?,?,?)`)
-        .bind(crypto.randomUUID(), id, organisation.id, document.id, actor.userId, now),
-      commandRecord(db, actor.userId, "LINK_EXPENSE_RECEIPT", idempotencyKey, requestHash, "EXPENSE", id, now),
-      outboxRecord(db, "EXPENSE", id, "ExpenseReceiptLinked", organisation.id, {
-        expense_id: id,
-        organisation_id: organisation.id,
-        receipt_document_id: document.id,
-        checksum_sha256: document.checksum_sha256,
-        correlation_id: correlationId,
-      }, now),
-      auditRecord(db, actor, audit, now),
-    ]);
-  } catch (error) {
-    if (error instanceof Error && (error.message.includes("EXPENSE_RECEIPT") || error.message.includes("expense_receipt_links"))) {
-      throw new RepositoryConflictError("The receipt is no longer eligible to be linked to this draft expense.");
-    }
-    throw error;
+  const audit = await auditEnvelope(db, actor, "EXPENSE_SUBMITTED", "EXPENSE", expenseId, { organisationId: organisation.id, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE expenses SET status='SUBMITTED' WHERE id=?").bind(expenseId),
+    commandRecord(db, actor.userId, "SUBMIT_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseSubmitted", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E ApproveExpense/RejectExpense share this: maker-checker
+ * separation denies the expense's own creator from reviewing it, the same
+ * "cannot review your own request" rule Module 3's reviewRefund already
+ * established — enforced by an actor check, not a separate permission
+ * tier, matching this module's lighter CRUD standard.
+ */
+function assertNotSelfReview(actor: UserContext, createdBy: string, action: string) {
+  if (actor.userId === createdBy) throw new AccessDeniedError(`Maker-checker separation prevents ${action} an expense you created yourself.`);
+}
+
+export async function approveExpense(expenseId: string, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const expense = await loadExpenseForTransition(db, expenseId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, action: "APPROVE" }));
+  const prior = await priorCommand(db, actor.userId, "APPROVE_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (expense.status !== "SUBMITTED") throw new RepositoryConflictError(`Only a submitted expense can be approved; ${expenseId} is currently ${expense.status}.`);
+  assertNotSelfReview(actor, expense.created_by, "approving");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_APPROVED", "EXPENSE", expenseId, { organisationId: organisation.id, totalCents: expense.total_cents, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE expenses SET status='APPROVED', approved_by=?, approved_at=? WHERE id=?").bind(actor.userId, now, expenseId),
+    commandRecord(db, actor.userId, "APPROVE_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseApproved", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+export async function rejectExpense(expenseId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateExpenseRejection(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const expense = await loadExpenseForTransition(db, expenseId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, input }));
+  const prior = await priorCommand(db, actor.userId, "REJECT_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  if (expense.status !== "SUBMITTED") throw new RepositoryConflictError(`Only a submitted expense can be rejected; ${expenseId} is currently ${expense.status}.`);
+  assertNotSelfReview(actor, expense.created_by, "rejecting");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_REJECTED", "EXPENSE", expenseId, { organisationId: organisation.id, reason: input.reason, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE expenses SET status='REJECTED', approved_by=?, approved_at=?, rejection_reason=? WHERE id=?").bind(actor.userId, now, input.reason, expenseId),
+    commandRecord(db, actor.userId, "REJECT_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseRejected", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, reason: input.reason, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase E ExpenseReport: totals by status and by category over [from, to], plus the matching line items. */
+export async function getExpenseReport(actor: UserContext, requestedOrganisationId: string | null | undefined, from: string, to: string) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const [byStatus, byCategory, items] = await Promise.all([
+    db.prepare(`SELECT status, COUNT(*) AS count, COALESCE(SUM(total_cents),0) AS total_cents FROM expenses
+      WHERE organisation_id=? AND expense_date BETWEEN ? AND ? GROUP BY status`).bind(organisation.id, from, to).all<{ status: string; count: number; total_cents: number }>(),
+    db.prepare(`SELECT c.id AS category_id, c.name AS category_name, COUNT(*) AS count, COALESCE(SUM(e.total_cents),0) AS total_cents
+      FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+      WHERE e.organisation_id=? AND e.expense_date BETWEEN ? AND ? GROUP BY c.id ORDER BY total_cents DESC`).bind(organisation.id, from, to).all<{ category_id: string; category_name: string; count: number; total_cents: number }>(),
+    db.prepare(`SELECT e.*, c.name AS category_name FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+      WHERE e.organisation_id=? AND e.expense_date BETWEEN ? AND ? ORDER BY e.expense_date DESC LIMIT 500`).bind(organisation.id, from, to).all<Record<string, unknown>>(),
+  ]);
+  const totalCents = byStatus.results.reduce((sum, row) => sum + row.total_cents, 0);
+  return { organisation_id: organisation.id, from, to, total_cents: totalCents, by_status: byStatus.results, by_category: byCategory.results, items: items.results };
+}
+
+/**
+ * Shared by RecordStockMovement and TransferStock. A 2026-08-25
+ * investigation (prompted by TransferStock's new second-write-to-an-
+ * existing-balance-row path, which no prior test had ever exercised) found
+ * the previous `INSERT ... ON CONFLICT DO UPDATE` upsert crashed with a
+ * false "CHECK constraint failed: quantity_micros >= 0" on its UPDATE
+ * branch whenever the delta was negative, even against a healthy existing
+ * balance — reproduced in isolation against the exact SQLite engine this
+ * suite runs on: it evaluates the table's CHECK constraint against the
+ * `excluded` pseudo-row's raw pre-update column values, not the resolved
+ * post-update row. This was a real, pre-existing bug in already-shipped
+ * `recordStockMovement`, not something new — it had simply never been
+ * exercised by a second write to the same (warehouse, product) balance row.
+ * Computing the new quantity/average cost in JS and issuing a plain INSERT
+ * (new row) or UPDATE (existing row) sidesteps that engine behavior
+ * entirely; both callers already fetch the current balance to run their own
+ * non-negative check before calling this, so no extra query is added.
+ */
+function inventoryBalanceStatement(
+  db: D1Database,
+  organisationId: string,
+  warehouseId: string,
+  productId: string,
+  quantityDelta: number,
+  unitCostCents: number,
+  existing: { quantity_micros: number; average_cost_cents: number } | null,
+  now: string,
+): D1PreparedStatement {
+  if (!existing) {
+    return db.prepare(`INSERT INTO inventory_balances (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
+      VALUES (?,?,?,?,?,?,1,?)`).bind(crypto.randomUUID(), organisationId, warehouseId, productId, quantityDelta, unitCostCents, now);
   }
-  return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(id, organisation.id).first<Record<string, unknown>>();
+  const newQuantity = existing.quantity_micros + quantityDelta;
+  const newAverageCostCents = quantityDelta > 0 && newQuantity > 0
+    ? Math.round((existing.quantity_micros * existing.average_cost_cents + quantityDelta * unitCostCents) / newQuantity)
+    : existing.average_cost_cents;
+  return db.prepare(`UPDATE inventory_balances SET quantity_micros=?,average_cost_cents=?,version=version+1,updated_at=?
+    WHERE warehouse_id=? AND product_id=?`).bind(newQuantity, newAverageCostCents, now, warehouseId, productId);
 }
 
 export async function recordStockMovement(payload: StockMovementSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
@@ -1150,19 +1597,13 @@ export async function recordStockMovement(payload: StockMovementSubmission, acto
   if (prior) return db.prepare("SELECT * FROM stock_movements WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
   await requireOwnedReference(db, "warehouses", movement.warehouse_id, organisation.id, "Warehouse");
   await requireOwnedReference(db, "products", movement.product_id, organisation.id, "Product");
-  const balance = await db.prepare("SELECT quantity_micros FROM inventory_balances WHERE warehouse_id=? AND product_id=?").bind(movement.warehouse_id, movement.product_id).first<{ quantity_micros: number }>();
+  const balance = await db.prepare("SELECT quantity_micros,average_cost_cents FROM inventory_balances WHERE warehouse_id=? AND product_id=?").bind(movement.warehouse_id, movement.product_id).first<{ quantity_micros: number; average_cost_cents: number }>();
   if ((balance?.quantity_micros ?? 0) + movement.quantity_micros < 0) throw new RepositoryConflictError("The movement would make on-hand inventory negative.");
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const audit = await auditEnvelope(db, actor, "STOCK_MOVEMENT_RECORDED", "STOCK_MOVEMENT", id, { organisationId: organisation.id, productId: movement.product_id, quantityMicros: movement.quantity_micros, correlationId }, now);
   await db.batch([
-    db.prepare(`INSERT INTO inventory_balances (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
-      VALUES (?,?,?,?,?,?,1,?) ON CONFLICT(warehouse_id,product_id) DO UPDATE SET
-      average_cost_cents=CASE WHEN excluded.quantity_micros>0 AND inventory_balances.quantity_micros+excluded.quantity_micros>0
-        THEN CAST(ROUND((inventory_balances.quantity_micros*inventory_balances.average_cost_cents+excluded.quantity_micros*excluded.average_cost_cents)*1.0/(inventory_balances.quantity_micros+excluded.quantity_micros)) AS INTEGER)
-        ELSE inventory_balances.average_cost_cents END,
-      quantity_micros=inventory_balances.quantity_micros+excluded.quantity_micros,
-      version=inventory_balances.version+1,updated_at=excluded.updated_at`).bind(crypto.randomUUID(), organisation.id, movement.warehouse_id, movement.product_id, movement.quantity_micros, movement.unit_cost_cents, now),
+    inventoryBalanceStatement(db, organisation.id, movement.warehouse_id, movement.product_id, movement.quantity_micros, movement.unit_cost_cents, balance ?? null, now),
     db.prepare(`INSERT INTO stock_movements
       (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, organisation.id, movement.warehouse_id, movement.product_id, movement.movement_type, movement.quantity_micros, movement.unit_cost_cents, movement.reference_type, movement.reference_id, movement.reason, movement.occurred_at, actor.userId),
@@ -1171,6 +1612,177 @@ export async function recordStockMovement(payload: StockMovementSubmission, acto
     auditRecord(db, actor, audit, now),
   ]);
   return db.prepare("SELECT * FROM stock_movements WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase D CreateProduct: unsticks the previously seed-only `products` table, mirroring Phase C's CreateAccount fix for chart_of_accounts. */
+export async function createProduct(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const product = normalizeAndValidateProduct(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, product }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_PRODUCT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM products WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const existing = await db.prepare("SELECT id,name FROM products WHERE organisation_id=? AND sku=?").bind(organisation.id, product.sku).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`SKU ${product.sku} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "PRODUCT_CREATED", "PRODUCT", id, { organisationId: organisation.id, sku: product.sku, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO products (id,organisation_id,sku,name,description,unit_code,tax_category,tax_rate_bps,sales_price_cents,cost_price_cents,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)`).bind(id, organisation.id, product.sku, product.name, product.description ?? null, product.unit_code, product.tax_category, product.tax_rate_bps, product.sales_price_cents, product.cost_price_cents, now, now),
+    commandRecord(db, actor.userId, "CREATE_PRODUCT", idempotencyKey, requestHash, "PRODUCT", id, now),
+    outboxRecord(db, "PRODUCT", id, "ProductCreated", organisation.id, { product_id: id, organisation_id: organisation.id, sku: product.sku, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM products WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/** Module 5 Phase D CreateWarehouse: unsticks the previously seed-only `warehouses` table. */
+export async function createWarehouse(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const warehouse = normalizeAndValidateWarehouse(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, warehouse }));
+  const prior = await priorCommand(db, actor.userId, "CREATE_WAREHOUSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM warehouses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  await requireOwnedReference(db, "branches", warehouse.branch_id, organisation.id, "Branch");
+  const existing = await db.prepare("SELECT id,name FROM warehouses WHERE organisation_id=? AND code=?").bind(organisation.id, warehouse.code).first<{ id: string; name: string }>();
+  if (existing) throw new RepositoryConflictError(`Warehouse code ${warehouse.code} is already in use (${existing.name}, ${existing.id}).`);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "WAREHOUSE_CREATED", "WAREHOUSE", id, { organisationId: organisation.id, code: warehouse.code, correlationId }, now);
+  await db.batch([
+    db.prepare(`INSERT INTO warehouses (id,organisation_id,branch_id,code,name,address,status,created_at)
+      VALUES (?,?,?,?,?,?,'ACTIVE',?)`).bind(id, organisation.id, warehouse.branch_id ?? null, warehouse.code, warehouse.name, warehouse.address, now),
+    commandRecord(db, actor.userId, "CREATE_WAREHOUSE", idempotencyKey, requestHash, "WAREHOUSE", id, now),
+    outboxRecord(db, "WAREHOUSE", id, "WarehouseCreated", organisation.id, { warehouse_id: id, organisation_id: organisation.id, code: warehouse.code, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM warehouses WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase D TransferStock: the one real atomicity gap a 2026-08-25
+ * audit found. Previously a "transfer" needed a caller to issue two
+ * separate, unlinked RecordStockMovement calls themselves, with nothing
+ * tying them together or protecting against a partial failure. Both legs
+ * post in one db.batch, sharing a single transfer id via reference_id
+ * (TRANSFER_OUT and TRANSFER_IN reference_type keep the two stock_movements
+ * rows distinct under that table's own UNIQUE(organisation_id,
+ * reference_type, reference_id) constraint). The destination leg's cost is
+ * read from the source warehouse's own current average_cost_cents rather
+ * than caller-supplied — a transfer moves the same physical stock, so it
+ * must preserve cost basis, not let the caller fabricate a new one.
+ */
+export async function transferStock(payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const transfer = normalizeAndValidateStockTransfer(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, transfer }));
+  const prior = await priorCommand(db, actor.userId, "TRANSFER_STOCK", idempotencyKey, requestHash);
+  if (prior) {
+    const movements = await db.prepare("SELECT * FROM stock_movements WHERE organisation_id=? AND reference_id=? ORDER BY movement_type")
+      .bind(organisation.id, prior).all<Record<string, unknown>>();
+    return { id: prior, movements: movements.results };
+  }
+  await requireOwnedReference(db, "warehouses", transfer.from_warehouse_id, organisation.id, "Source warehouse");
+  await requireOwnedReference(db, "warehouses", transfer.to_warehouse_id, organisation.id, "Destination warehouse");
+  await requireOwnedReference(db, "products", transfer.product_id, organisation.id, "Product");
+  const sourceBalance = await db.prepare("SELECT quantity_micros,average_cost_cents FROM inventory_balances WHERE warehouse_id=? AND product_id=?")
+    .bind(transfer.from_warehouse_id, transfer.product_id).first<{ quantity_micros: number; average_cost_cents: number }>();
+  if ((sourceBalance?.quantity_micros ?? 0) - transfer.quantity_micros < 0) throw new RepositoryConflictError("The transfer would make on-hand inventory negative at the source warehouse.");
+  const unitCostCents = sourceBalance?.average_cost_cents ?? 0;
+  const destinationBalance = await db.prepare("SELECT quantity_micros,average_cost_cents FROM inventory_balances WHERE warehouse_id=? AND product_id=?")
+    .bind(transfer.to_warehouse_id, transfer.product_id).first<{ quantity_micros: number; average_cost_cents: number }>();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "STOCK_TRANSFERRED", "STOCK_TRANSFER", id, {
+    organisationId: organisation.id, productId: transfer.product_id, fromWarehouseId: transfer.from_warehouse_id,
+    toWarehouseId: transfer.to_warehouse_id, quantityMicros: transfer.quantity_micros, correlationId,
+  }, now);
+  const outMovementId = crypto.randomUUID();
+  const inMovementId = crypto.randomUUID();
+  await db.batch([
+    inventoryBalanceStatement(db, organisation.id, transfer.from_warehouse_id, transfer.product_id, -transfer.quantity_micros, unitCostCents, sourceBalance ?? null, now),
+    inventoryBalanceStatement(db, organisation.id, transfer.to_warehouse_id, transfer.product_id, transfer.quantity_micros, unitCostCents, destinationBalance ?? null, now),
+    db.prepare(`INSERT INTO stock_movements (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
+      VALUES (?,?,?,?,'TRANSFER_OUT',?,?,?,?,?,?,?)`).bind(outMovementId, organisation.id, transfer.from_warehouse_id, transfer.product_id, -transfer.quantity_micros, unitCostCents, "TRANSFER_OUT", id, transfer.reason, transfer.occurred_at, actor.userId),
+    db.prepare(`INSERT INTO stock_movements (id,organisation_id,warehouse_id,product_id,movement_type,quantity_micros,unit_cost_cents,reference_type,reference_id,reason,occurred_at,actor_id)
+      VALUES (?,?,?,?,'TRANSFER_IN',?,?,?,?,?,?,?)`).bind(inMovementId, organisation.id, transfer.to_warehouse_id, transfer.product_id, transfer.quantity_micros, unitCostCents, "TRANSFER_IN", id, transfer.reason, transfer.occurred_at, actor.userId),
+    commandRecord(db, actor.userId, "TRANSFER_STOCK", idempotencyKey, requestHash, "STOCK_TRANSFER", id, now),
+    outboxRecord(db, "STOCK_TRANSFER", id, "StockTransferred", organisation.id, { stock_transfer_id: id, organisation_id: organisation.id, product_id: transfer.product_id, quantity_micros: transfer.quantity_micros, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  const movements = await db.prepare("SELECT * FROM stock_movements WHERE organisation_id=? AND reference_id=? ORDER BY movement_type")
+    .bind(organisation.id, id).all<Record<string, unknown>>();
+  return { id, from_warehouse_id: transfer.from_warehouse_id, to_warehouse_id: transfer.to_warehouse_id, product_id: transfer.product_id, quantity_micros: transfer.quantity_micros, unit_cost_cents: unitCostCents, movements: movements.results };
+}
+
+type InventoryBalanceRow = { product_id: string; sku: string; product_name: string; warehouse_id: string; warehouse_code: string; warehouse_name: string; quantity_micros: number; average_cost_cents: number };
+
+async function queryInventoryBalances(db: D1Database, organisationId: string, params: URLSearchParams): Promise<InventoryBalanceRow[]> {
+  const productId = params.get("product_id")?.trim() || null;
+  const warehouseId = params.get("warehouse_id")?.trim() || null;
+  const conditions: string[] = ["b.organisation_id = ?"];
+  const values: unknown[] = [organisationId];
+  if (productId) { conditions.push("b.product_id = ?"); values.push(productId); }
+  if (warehouseId) { conditions.push("b.warehouse_id = ?"); values.push(warehouseId); }
+  const rows = await db.prepare(`SELECT b.product_id,p.sku,p.name AS product_name,b.warehouse_id,w.code AS warehouse_code,w.name AS warehouse_name,
+    b.quantity_micros,b.average_cost_cents
+    FROM inventory_balances b JOIN products p ON p.id=b.product_id JOIN warehouses w ON w.id=b.warehouse_id
+    WHERE ${conditions.join(" AND ")} ORDER BY p.name,w.name`).bind(...values).all<InventoryBalanceRow>();
+  return rows.results;
+}
+
+/**
+ * Module 5 Phase D GetAvailability: an aggregated on-hand-quantity read.
+ * getBusinessPlatformSnapshot's "balances" section already surfaces
+ * inventory_balances, but only as a raw per-(warehouse,product) list with
+ * no per-product total across warehouses — that aggregation is the actual
+ * gap this closes.
+ */
+export async function getInventoryAvailability(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const rows = await queryInventoryBalances(db, organisation.id, params);
+  const byProduct = new Map<string, { product_id: string; sku: string; name: string; total_quantity_micros: number; by_warehouse: Array<{ warehouse_id: string; code: string; name: string; quantity_micros: number }> }>();
+  for (const row of rows) {
+    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, { product_id: row.product_id, sku: row.sku, name: row.product_name, total_quantity_micros: 0, by_warehouse: [] });
+    const entry = byProduct.get(row.product_id)!;
+    entry.total_quantity_micros += row.quantity_micros;
+    entry.by_warehouse.push({ warehouse_id: row.warehouse_id, code: row.warehouse_code, name: row.warehouse_name, quantity_micros: row.quantity_micros });
+  }
+  return { organisation_id: organisation.id, products: [...byProduct.values()] };
+}
+
+/**
+ * Module 5 Phase D Valuation: on-hand quantity valued at each balance's own
+ * weighted-average cost, aggregated per product and as an organisation-wide
+ * grand total — the other half of the "raw list only, no aggregated total"
+ * gap GetAvailability closes for quantity.
+ */
+export async function getInventoryValuation(actor: UserContext, requestedOrganisationId: string | null | undefined, params: URLSearchParams) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const rows = await queryInventoryBalances(db, organisation.id, params);
+  const byProduct = new Map<string, {
+    product_id: string; sku: string; name: string; total_quantity_micros: number; total_value_cents: number;
+    by_warehouse: Array<{ warehouse_id: string; code: string; name: string; quantity_micros: number; average_cost_cents: number; value_cents: number }>;
+  }>();
+  let grandTotalValueCents = 0;
+  for (const row of rows) {
+    const valueCents = Math.round((row.quantity_micros * row.average_cost_cents) / 1_000_000);
+    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, { product_id: row.product_id, sku: row.sku, name: row.product_name, total_quantity_micros: 0, total_value_cents: 0, by_warehouse: [] });
+    const entry = byProduct.get(row.product_id)!;
+    entry.total_quantity_micros += row.quantity_micros;
+    entry.total_value_cents += valueCents;
+    entry.by_warehouse.push({ warehouse_id: row.warehouse_id, code: row.warehouse_code, name: row.warehouse_name, quantity_micros: row.quantity_micros, average_cost_cents: row.average_cost_cents, value_cents: valueCents });
+    grandTotalValueCents += valueCents;
+  }
+  return { organisation_id: organisation.id, total_value_cents: grandTotalValueCents, products: [...byProduct.values()] };
 }
 
 export async function createProject(payload: ProjectSubmission, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
@@ -1197,4 +1809,133 @@ export async function createProject(payload: ProjectSubmission, actor: UserConte
   statements.push(auditRecord(db, actor, audit, now));
   await db.batch(statements);
   return db.prepare("SELECT * FROM projects WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+type ProjectRow = { id: string; organisation_id: string; manager_user_id: string | null; currency: string };
+
+async function loadProject(db: D1Database, projectId: string, organisationId: string): Promise<ProjectRow> {
+  const project = await db.prepare("SELECT id,organisation_id,manager_user_id,currency FROM projects WHERE id=? AND organisation_id=?").bind(projectId, organisationId).first<ProjectRow>();
+  if (!project) throw new BusinessResourceError("Project was not found in the authorised organisation.", 404);
+  return project;
+}
+
+/**
+ * Module 5 Phase E ApproveBudget. Acts on the project's one 'TOTAL' budget
+ * row — the only category CreateProject ever inserts, so this doesn't
+ * invent a multi-category budget-management surface the rest of the
+ * codebase has no other support for. Maker-checker: the project's own
+ * manager (set to whoever called CreateProject) cannot approve their own
+ * project's budget, the same self-review rule Expense's Approve/Reject use.
+ */
+export async function approveProjectBudget(projectId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateProjectBudgetApproval(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const project = await loadProject(db, projectId, organisation.id);
+  const budget = await db.prepare("SELECT * FROM project_budgets WHERE project_id=? AND category='TOTAL'").bind(projectId).first<{ id: string; status: string }>();
+  if (!budget) throw new BusinessResourceError("This project has no proposed budget to approve.", 404);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, project_id: projectId, input }));
+  const prior = await priorCommand(db, actor.userId, "APPROVE_PROJECT_BUDGET", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM project_budgets WHERE id=?").bind(prior).first<Record<string, unknown>>();
+  if (budget.status !== "PROPOSED") throw new RepositoryConflictError(`Only a proposed budget can be approved; this project's budget is currently ${budget.status}.`);
+  if (project.manager_user_id && actor.userId === project.manager_user_id) throw new AccessDeniedError("Maker-checker separation prevents the project's own manager from approving its budget.");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "PROJECT_BUDGET_APPROVED", "PROJECT_BUDGET", budget.id, { organisationId: organisation.id, projectId, approvedAmountCents: input.approved_amount_cents, correlationId }, now);
+  await db.batch([
+    db.prepare("UPDATE project_budgets SET status='APPROVED', approved_amount_cents=?, approved_by=?, approved_at=? WHERE id=?").bind(input.approved_amount_cents, actor.userId, now, budget.id),
+    commandRecord(db, actor.userId, "APPROVE_PROJECT_BUDGET", idempotencyKey, requestHash, "PROJECT_BUDGET", budget.id, now),
+    outboxRecord(db, "PROJECT_BUDGET", budget.id, "ProjectBudgetApproved", organisation.id, { project_budget_id: budget.id, project_id: projectId, organisation_id: organisation.id, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM project_budgets WHERE id=?").bind(budget.id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E PostCost. project_costs.UNIQUE(project_id, cost_type,
+ * source_id) is what actually prevents the same EXPENSE from ever being
+ * posted as a cost twice — this function's own pre-check exists only for a
+ * clean 409 message ahead of that constraint, the same pre-check-plus-
+ * constraint pattern used throughout this file.
+ */
+export async function postProjectCost(projectId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const input = normalizeAndValidateProjectCost(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  await loadProject(db, projectId, organisation.id);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, project_id: projectId, input }));
+  const prior = await priorCommand(db, actor.userId, "POST_PROJECT_COST", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM project_costs WHERE id=? AND project_id=?").bind(prior, projectId).first<Record<string, unknown>>();
+
+  let amountCents: number;
+  let currency: string;
+  let occurredAt: string;
+  let description: string | null;
+  if (input.cost_type === "EXPENSE") {
+    const expense = await db.prepare("SELECT id,status,total_cents,currency,expense_date,description,project_id FROM expenses WHERE id=? AND organisation_id=?")
+      .bind(input.source_id, organisation.id).first<{ id: string; status: string; total_cents: number; currency: string; expense_date: string; description: string; project_id: string | null }>();
+    if (!expense) throw new BusinessResourceError("The cited expense was not found in the authorised organisation.", 404);
+    if (expense.status !== "APPROVED") throw new RepositoryConflictError("Only an approved expense can be posted as a project cost.");
+    if (expense.project_id !== projectId) throw new RepositoryConflictError("This expense is not tagged to the project it's being posted against.");
+    const alreadyPosted = await db.prepare("SELECT id FROM project_costs WHERE project_id=? AND cost_type='EXPENSE' AND source_id=?").bind(projectId, input.source_id).first<{ id: string }>();
+    if (alreadyPosted) throw new RepositoryConflictError(`This expense was already posted as project cost ${alreadyPosted.id}.`);
+    amountCents = expense.total_cents;
+    currency = expense.currency;
+    occurredAt = expense.expense_date;
+    description = expense.description;
+  } else {
+    amountCents = input.amount_cents;
+    currency = input.currency;
+    occurredAt = input.occurred_at;
+    description = input.description;
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "PROJECT_COST_POSTED", "PROJECT_COST", id, { organisationId: organisation.id, projectId, costType: input.cost_type, amountCents, correlationId }, now);
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO project_costs (id,project_id,cost_type,source_id,amount_cents,currency,description,occurred_at,created_by,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, projectId, input.cost_type, input.source_id, amountCents, currency, description, occurredAt, actor.userId, now),
+      commandRecord(db, actor.userId, "POST_PROJECT_COST", idempotencyKey, requestHash, "PROJECT_COST", id, now),
+      outboxRecord(db, "PROJECT_COST", id, "ProjectCostPosted", organisation.id, { project_cost_id: id, project_id: projectId, cost_type: input.cost_type, correlation_id: correlationId }, now),
+      auditRecord(db, actor, audit, now),
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/unique constraint failed/i.test(message)) throw error;
+    throw new RepositoryConflictError("This source was already posted as a project cost — supersession is not supported, only a single posting per source.");
+  }
+  return db.prepare("SELECT * FROM project_costs WHERE id=?").bind(id).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E ProfitabilityReport. Cost and budget were already
+ * available (getBusinessPlatformSnapshot's dashboard rollup computed
+ * both); revenue is new here, reusing Module 5 Phase C's accounting
+ * infrastructure rather than inventing a second revenue concept — REVENUE-
+ * type journal_lines already carry project_id, so this sums exactly the
+ * postings an accountant tagged to this project, nothing re-derived.
+ */
+export async function getProjectProfitability(projectId: string, actor: UserContext, requestedOrganisationId?: string | null) {
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const project = await loadProject(db, projectId, organisation.id);
+  const [budget, costs, revenue] = await Promise.all([
+    db.prepare("SELECT * FROM project_budgets WHERE project_id=? AND category='TOTAL'").bind(projectId).first<Record<string, unknown>>(),
+    db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS total_cents FROM project_costs WHERE project_id=?").bind(projectId).first<{ total_cents: number }>(),
+    db.prepare(`SELECT COALESCE(SUM(l.credit_cents),0) - COALESCE(SUM(l.debit_cents),0) AS net_cents
+      FROM journal_lines l JOIN chart_of_accounts a ON a.id=l.account_id WHERE l.project_id=? AND a.account_type='REVENUE'`).bind(projectId).first<{ net_cents: number }>(),
+  ]);
+  const costCents = costs?.total_cents ?? 0;
+  const revenueCents = revenue?.net_cents ?? 0;
+  return {
+    project_id: projectId,
+    currency: project.currency,
+    budget,
+    revenue_cents: revenueCents,
+    cost_cents: costCents,
+    profit_cents: revenueCents - costCents,
+  };
 }

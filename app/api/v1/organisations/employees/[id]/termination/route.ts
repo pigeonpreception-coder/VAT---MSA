@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    await requireLicensedPermission(actor, "employees:manage", { requestedOrganisationId: organisationIdFrom(request) });
+    requirePermission(actor, "employees:manage");
     await requireStepUp(request, actor);
     const payload = await readBoundedJson<{ reason?: string }>(request, 8_192);
     const result = await terminateEmployee(actor, (await contextValue.params).id, String(payload.reason ?? ""), organisationIdFrom(request));

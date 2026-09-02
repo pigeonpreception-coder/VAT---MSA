@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateAndValidateInvoice, decimalToScaled, InvoiceValidationError, scoreInvoice, stableStringify, type AppliedTaxRule } from "@/lib/domain/invoice";
+import { calculateAndValidateInvoice, decimalToScaled, InvoiceValidationError, normalizeInvoiceCancellation, scoreInvoice, stableStringify } from "@/lib/domain/invoice";
 import type { InvoiceSubmission } from "@/lib/domain/types";
 
 function invoice(overrides: Partial<InvoiceSubmission> = {}): InvoiceSubmission {
@@ -129,5 +129,22 @@ describe("VAT invoice rules", () => {
       totals: { line_net_amount: "999.99", tax_exclusive_amount: "999.99", tax_amount: "150.00", tax_inclusive_amount: "1149.99", payable_amount: "1149.99" },
     }));
     expect(result).toMatchObject({ lineNetCents: 99_999, taxCents: 15_000, totalCents: 114_999 });
+  });
+});
+
+describe("invoice cancellation validation (CancelInvoice)", () => {
+  it("accepts a well-formed cancellation reason", () => {
+    expect(normalizeInvoiceCancellation({ reason: "Submitted against the wrong taxpayer in error." })).toEqual({
+      reason: "Submitted against the wrong taxpayer in error.",
+    });
+  });
+
+  it("rejects a reason outside the 10 to 240 character bound", () => {
+    expect(() => normalizeInvoiceCancellation({ reason: "too short" })).toThrow(InvoiceValidationError);
+    expect(() => normalizeInvoiceCancellation({ reason: "x".repeat(241) })).toThrow(InvoiceValidationError);
+  });
+
+  it("rejects a missing body", () => {
+    expect(() => normalizeInvoiceCancellation(null)).toThrow(InvoiceValidationError);
   });
 });

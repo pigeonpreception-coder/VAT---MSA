@@ -1,7 +1,7 @@
-import { handleBusinessGet, handleBusinessPost } from "@/lib/api/business";
+import { handleBusinessPost, handlePartySearch } from "@/lib/api/business";
 
 export async function GET(request: Request) {
-  return handleBusinessGet(request, "parties:manage", "parties");
+  return handlePartySearch(request);
 }
 
 export async function POST(request: Request) {

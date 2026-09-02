@@ -1,8 +1,7 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import type { InvoiceSubmission } from "@/lib/domain/types";
-import { listInvoices, RepositoryConflictError, submitInvoice } from "@/lib/data/repository";
-import { requireLicensedPermission } from "@/lib/data/licensing-repository";
+import { explainInvoiceVat, listInvoices, RepositoryConflictError, submitInvoice } from "@/lib/data/repository";
 import {
   emitStructuredSecurityLog,
   enforceInvoiceRateLimits,
@@ -51,6 +50,8 @@ export async function POST(request: Request) {
     const invoice = await submitInvoice(payload, user, idempotencyKey, context);
     const verificationUrl = new URL(`/verify/${invoice.verificationToken}`, request.url).toString();
     emitStructuredSecurityLog({ level: "INFO", event: "INVOICE_SUBMISSION", correlationId: context.correlationId, actorId, outcome: "CERTIFIED", durationMs: Date.now() - startedAt });
+    const explanation = await explainInvoiceVat(invoice.id, user);
+    const vatRulesApplied = Array.from(new Map((explanation?.lines ?? []).map((line) => [line.vatRuleId, { tax_category: line.taxCategory, vat_rule_id: line.vatRuleId, vat_rule_version: line.vatRuleVersion }])).values());
     return Response.json({
       invoice_id: invoice.id,
       document_type: invoice.documentType,
@@ -60,10 +61,8 @@ export async function POST(request: Request) {
       processing_status: invoice.status,
       correction: invoice.correction,
       certified_at: invoice.certifiedAt,
-      rule_set_id: invoice.taxRuleSetId,
-      rule_set_version: invoice.taxRuleSetVersion,
-      legal_authority_reference: invoice.taxLegalAuthorityReference,
-      invoice_hash: invoice.certificationHash,
+      vat_rules_applied: vatRulesApplied,
+      invoice_hash: invoice.payloadHash,
       signature: invoice.signature,
       verification_url: verificationUrl,
       qr_payload: verificationUrl,

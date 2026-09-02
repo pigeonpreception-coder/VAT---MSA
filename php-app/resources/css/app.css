@@ -1,0 +1,14 @@
+@import "bootstrap/dist/css/bootstrap.min.css";
+
+:root {
+    --vatmsa-brand: #0b5ed7;
+}
+
+body {
+    min-height: 100vh;
+    background-color: #f5f7fa;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}

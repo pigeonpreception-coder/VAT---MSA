@@ -2,6 +2,23 @@ import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { ensureDatabase } from "@/db/runtime";
 import type { UserContext } from "./domain/types";
 
+// Pure RBAC/ABAC policy (AccessDeniedError, permission resolution, scope
+// checks, the GetUserAccess query) lives in lib/domain/access.ts so it stays
+// unit-testable without pulling in app/chatgpt-auth.ts's next/headers
+// dependency. Re-exported here so existing `@/lib/auth` imports are
+// unaffected.
+export {
+  AccessDeniedError,
+  resolveEffectivePermissions,
+  hasPermission,
+  requirePermission,
+  isNationalScope,
+  requireTaxpayerScope,
+  getUserAccess,
+  type EffectiveAccess,
+} from "./domain/access";
+import { AccessDeniedError } from "./domain/access";
+
 type UserRow = {
   id: string;
   external_user_id: string;
@@ -14,16 +31,6 @@ type UserRow = {
 
 type MembershipRow = { organisation_id: string };
 type CodeRow = { code: string };
-
-export class AccessDeniedError extends Error {
-  readonly status: number;
-
-  constructor(message: string, status = 403) {
-    super(message);
-    this.name = "AccessDeniedError";
-    this.status = status;
-  }
-}
 
 async function buildUserContext(db: D1Database, row: UserRow, isDevelopmentIdentity: boolean): Promise<UserContext> {
   const membership = await db
@@ -91,75 +98,3 @@ export async function getCurrentUser(): Promise<UserContext> {
   return buildUserContext(db, row, true);
 }
 
-const ROLE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
-  PILOT_ADMIN: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "registrations:submit", "organisations:manage", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "returns:generate", "returns:approve", "returns:submit", "vat-adjustments:manage", "reconciliation:manage", "compliance:read", "cases:manage", "disputes:manage", "refunds:read", "refunds:request", "refunds:review", "risk:read", "risk:review", "communications:manage", "consents:manage", "integrations:read", "integrations:manage", "developer:read", "developer:manage", "offline:read", "offline:sync", "reports:read", "reports:run", "platform:read", "payments:read", "audit:read", "security:read", "commercial:read", "parties:manage", "quotations:manage", "accounting:read", "accounting:post", "expenses:read", "expenses:manage", "expenses:approve", "inventory:read", "inventory:manage", "projects:read", "projects:manage", "imports:read", "imports:manage", "documents:read", "documents:upload"]),
-  TAXPAYER_OWNER: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "registrations:submit", "organisations:manage", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "returns:generate", "returns:approve", "returns:submit", "vat-adjustments:manage", "compliance:read", "disputes:manage", "refunds:read", "refunds:request", "consents:manage", "integrations:read", "integrations:manage", "developer:read", "developer:manage", "offline:read", "offline:sync", "reports:read", "reports:run", "commercial:read", "parties:manage", "quotations:manage", "accounting:read", "accounting:post", "expenses:read", "expenses:manage", "expenses:approve", "inventory:read", "inventory:manage", "projects:read", "projects:manage", "imports:read", "imports:manage", "documents:read", "documents:upload"]),
-  TAXPAYER_ADMIN: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "organisations:manage", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "returns:generate", "returns:approve", "returns:submit", "vat-adjustments:manage", "compliance:read", "disputes:manage", "refunds:read", "refunds:request", "consents:manage", "integrations:read", "integrations:manage", "developer:read", "developer:manage", "offline:read", "offline:sync", "reports:read", "reports:run", "commercial:read", "parties:manage", "quotations:manage", "accounting:read", "expenses:read", "expenses:manage", "expenses:approve", "inventory:read", "inventory:manage", "projects:read", "projects:manage", "imports:read", "imports:manage", "documents:read", "documents:upload"]),
-  TAXPAYER_ACCOUNTANT: new Set(["dashboard:read", "identity:read", "taxpayers:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "returns:generate", "returns:submit", "vat-adjustments:manage", "commercial:read", "parties:manage", "accounting:read", "accounting:post", "expenses:read", "expenses:manage", "projects:read", "imports:read", "imports:manage", "documents:read", "documents:upload"]),
-  TAXPAYER_STAFF: new Set(["dashboard:read", "identity:read", "invoices:read", "invoices:submit", "exceptions:read", "commercial:read", "parties:manage", "quotations:manage", "expenses:read", "expenses:manage", "inventory:read", "inventory:manage", "projects:read", "documents:read", "documents:upload"]),
-  TAXPAYER_VIEWER: new Set(["dashboard:read", "identity:read", "invoices:read", "returns:read", "commercial:read", "accounting:read", "expenses:read", "inventory:read", "projects:read", "imports:read", "documents:read"]),
-  SELLER_ADMIN: new Set(["dashboard:read", "identity:read", "invoices:read", "invoices:submit", "exceptions:read", "returns:read", "commercial:read", "parties:manage", "quotations:manage", "inventory:read", "inventory:manage", "projects:read", "projects:manage"]),
-  SELLER_OPERATOR: new Set(["dashboard:read", "identity:read", "invoices:read", "invoices:submit", "exceptions:read", "commercial:read", "parties:manage", "quotations:manage", "inventory:read", "inventory:manage", "projects:read"]),
-  SELLER_VIEWER: new Set(["dashboard:read", "identity:read", "invoices:read", "returns:read", "commercial:read", "inventory:read", "projects:read"]),
-  BUYER_ADMIN: new Set(["dashboard:read", "identity:read", "invoices:read", "exceptions:read", "returns:read", "parties:manage", "expenses:read", "expenses:manage", "imports:read", "imports:manage", "documents:read", "documents:upload"]),
-  BUYER_USER: new Set(["dashboard:read", "identity:read", "invoices:read", "exceptions:read", "parties:manage", "expenses:read", "expenses:manage", "imports:read", "documents:read", "documents:upload"]),
-  NAMRA_COMPLIANCE_OFFICER: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read", "reconciliation:manage", "compliance:read", "cases:manage", "disputes:manage", "refunds:read", "risk:read", "risk:review", "communications:manage", "integrations:read", "reports:read", "reports:run", "platform:read", "payments:read"]),
-  NAMRA_AUDITOR: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read", "audit:read", "reconciliation:manage", "compliance:read", "cases:manage", "disputes:manage", "refunds:read", "risk:read", "risk:review"]),
-  NAMRA_REFUND_OFFICER: new Set(["dashboard:read", "taxpayers:read", "returns:read", "compliance:read", "refunds:read", "refunds:review", "risk:read", "communications:manage"]),
-  NAMRA_SUPERVISOR: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "invoices:read", "exceptions:read", "returns:read", "reconciliation:manage", "compliance:read", "cases:manage", "disputes:manage", "refunds:read", "refunds:review", "risk:read", "risk:review", "communications:manage", "integrations:read", "integrations:manage", "reports:read", "reports:run", "platform:read", "payments:read", "audit:read"]),
-  NAMRA_SYSTEM_ADMIN: new Set(["dashboard:read", "identity:read", "taxpayers:read", "registrations:read", "organisations:manage", "administration:read", "administration:manage"]),
-  SUPER_ADMIN: new Set(["dashboard:read", "platform:read", "platform:manage", "integrations:read", "integrations:manage", "security:read"]),
-  INFRASTRUCTURE_ADMIN: new Set(["dashboard:read", "platform:read", "platform:manage", "integrations:read", "security:read"]),
-  DEVELOPER_PARTNER: new Set(["dashboard:read", "developer:read", "developer:manage", "integrations:read"]),
-  INTERNAL_AUDITOR: new Set(["dashboard:read", "audit:read"]),
-  SECURITY_ANALYST: new Set(["dashboard:read", "security:read", "audit:read"]),
-};
-
-const WORKSPACE_READ = ["workspace:read", "search:read", "licensing:read"];
-const AUTHORITY_GOVERNANCE = ["authority-governance:read", "authority-governance:manage"];
-const ORGANISATION_CONTROL = [
-  ...WORKSPACE_READ,
-  "licensing:request",
-  "administration:read",
-  "administration:manage",
-  "employees:read",
-  "employees:manage",
-  "roles:read",
-  "roles:manage",
-  "workflows:read",
-  "workflows:manage",
-  "workflows:decide",
-  "access-governance:read",
-  "access-governance:manage",
-];
-const CONTROL_PLANE_PERMISSIONS: Record<string, ReadonlySet<string>> = {
-  PILOT_ADMIN: new Set([...ORGANISATION_CONTROL, ...AUTHORITY_GOVERNANCE]),
-  TAXPAYER_OWNER: new Set(ORGANISATION_CONTROL),
-  TAXPAYER_ADMIN: new Set(ORGANISATION_CONTROL),
-  TAXPAYER_ACCOUNTANT: new Set([...WORKSPACE_READ, "employees:read", "roles:read", "workflows:read", "workflows:decide", "access-governance:read"]),
-  TAXPAYER_STAFF: new Set(["workspace:read", "search:read"]),
-  TAXPAYER_VIEWER: new Set(["workspace:read", "search:read"]),
-  NAMRA_SYSTEM_ADMIN: new Set([...ORGANISATION_CONTROL, ...AUTHORITY_GOVERNANCE]),
-};
-
-export function hasPermission(user: UserContext, permission: string): boolean {
-  return (ROLE_PERMISSIONS[user.role]?.has(permission) ?? false)
-    || (CONTROL_PLANE_PERMISSIONS[user.role]?.has(permission) ?? false)
-    || user.dynamicPermissions.includes(permission);
-}
-
-export function requirePermission(user: UserContext, permission: string): void {
-  if (!hasPermission(user, permission)) {
-    throw new AccessDeniedError(`Role ${user.role} does not have ${permission} permission.`);
-  }
-}
-
-export function isNationalScope(user: UserContext): boolean {
-  return user.taxpayerId === null && ["PILOT_ADMIN", "NAMRA_COMPLIANCE_OFFICER", "NAMRA_AUDITOR", "NAMRA_REFUND_OFFICER", "NAMRA_SUPERVISOR", "NAMRA_SYSTEM_ADMIN", "INTERNAL_AUDITOR", "SECURITY_ANALYST"].includes(user.role);
-}
-
-export function requireTaxpayerScope(user: UserContext, taxpayerId: string): void {
-  if (!isNationalScope(user) && user.taxpayerId !== taxpayerId) {
-    throw new AccessDeniedError("The requested record is outside your authorised taxpayer scope.");
-  }
-}

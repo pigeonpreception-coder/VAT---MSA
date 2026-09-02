@@ -17,6 +17,8 @@ const SCHEMA_STATEMENTS = [
     identifier_type TEXT NOT NULL, identifier_value TEXT NOT NULL,
     country TEXT NOT NULL DEFAULT 'NA', status TEXT NOT NULL, source TEXT NOT NULL,
     verified_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    version INTEGER NOT NULL DEFAULT 1, effective_from TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    effective_to TEXT, previous_version_id TEXT REFERENCES taxpayer_identifiers(id),
     UNIQUE (identifier_type, identifier_value, country)
   )`,
   `CREATE TABLE IF NOT EXISTS invoices (
@@ -30,7 +32,8 @@ const SCHEMA_STATEMENTS = [
     total_cents INTEGER NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL,
     payload_hash TEXT NOT NULL, transaction_id TEXT NOT NULL, certificate_id TEXT NOT NULL UNIQUE,
     verification_token TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, certified_at TEXT NOT NULL,
-    UNIQUE (supplier_taxpayer_id, source_system, source_document_id)
+    UNIQUE (supplier_taxpayer_id, source_system, source_document_id),
+    UNIQUE (supplier_taxpayer_id, invoice_number)
   )`,
   `CREATE TABLE IF NOT EXISTS app_users (
     id TEXT PRIMARY KEY, external_user_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE,
@@ -50,6 +53,26 @@ const SCHEMA_STATEMENTS = [
     email_at_link TEXT, assurance_level TEXT NOT NULL, status TEXT NOT NULL,
     linked_at TEXT NOT NULL, last_authenticated_at TEXT,
     UNIQUE (provider_id, subject)
+  )`,
+  // Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #2): a real,
+  // server-verified TOTP (RFC 6238) credential and step-up event log,
+  // replacing the previous client-asserted x-vat-msa-auth-assurance /
+  // x-vat-msa-reauthenticated-at request headers, which requireStepUp
+  // trusted verbatim from the caller with no server-side backing at all.
+  `CREATE TABLE IF NOT EXISTS mfa_totp_credentials (
+    user_id TEXT PRIMARY KEY REFERENCES app_users(id), secret_base32 TEXT NOT NULL,
+    status TEXT NOT NULL, last_used_counter INTEGER, created_at TEXT NOT NULL, verified_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS step_up_events (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_users(id),
+    method TEXT NOT NULL, verified_at TEXT NOT NULL, expires_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS user_invitations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    email TEXT NOT NULL, role_code TEXT NOT NULL REFERENCES access_roles(code),
+    claim_token TEXT NOT NULL UNIQUE, status TEXT NOT NULL,
+    invited_by TEXT NOT NULL REFERENCES app_users(id), invited_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL, claimed_at TEXT, claimed_by_user_id TEXT REFERENCES app_users(id)
   )`,
   `CREATE TABLE IF NOT EXISTS organisations (
     id TEXT PRIMARY KEY, taxpayer_id TEXT NOT NULL UNIQUE REFERENCES taxpayers(id),
@@ -213,6 +236,13 @@ const SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (organisation_id, party_id, relationship)
   )`,
+  `CREATE TABLE IF NOT EXISTS party_verification_snapshots (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    party_id TEXT NOT NULL REFERENCES business_parties(id), vat_number TEXT NOT NULL,
+    taxpayer_active INTEGER NOT NULL, organisation_active INTEGER NOT NULL,
+    can_act_as_seller INTEGER NOT NULL, capabilities TEXT NOT NULL,
+    verified_by TEXT NOT NULL REFERENCES app_users(id), verified_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     sku TEXT NOT NULL, name TEXT NOT NULL, description TEXT, unit_code TEXT NOT NULL,
@@ -283,7 +313,15 @@ const SCHEMA_STATEMENTS = [
     description TEXT NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
     source_type TEXT NOT NULL, source_id TEXT, created_by TEXT NOT NULL REFERENCES app_users(id),
     posted_by TEXT REFERENCES app_users(id), created_at TEXT NOT NULL, posted_at TEXT,
+    reverses_journal_entry_id TEXT REFERENCES journal_entries(id),
     UNIQUE (organisation_id, journal_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS accounting_periods (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    period_code TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+    status TEXT NOT NULL, closed_by TEXT REFERENCES app_users(id), closed_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, period_code)
   )`,
   `CREATE TABLE IF NOT EXISTS journal_lines (
     id TEXT PRIMARY KEY, journal_entry_id TEXT NOT NULL REFERENCES journal_entries(id),
@@ -301,7 +339,7 @@ const SCHEMA_STATEMENTS = [
     currency TEXT NOT NULL, net_cents INTEGER NOT NULL, tax_cents INTEGER NOT NULL,
     total_cents INTEGER NOT NULL, status TEXT NOT NULL, receipt_document_id TEXT,
     created_by TEXT NOT NULL REFERENCES app_users(id), approved_by TEXT REFERENCES app_users(id),
-    created_at TEXT NOT NULL, approved_at TEXT, UNIQUE (organisation_id, expense_number)
+    created_at TEXT NOT NULL, approved_at TEXT, rejection_reason TEXT, UNIQUE (organisation_id, expense_number)
   )`,
   `CREATE TABLE IF NOT EXISTS expense_decisions (
     id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES expenses(id),
@@ -333,7 +371,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS project_costs (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), cost_type TEXT NOT NULL,
     source_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL,
-    occurred_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    description TEXT, occurred_at TEXT NOT NULL, created_by TEXT REFERENCES app_users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (project_id, cost_type, source_id)
   )`,
   `CREATE TABLE IF NOT EXISTS import_records (
@@ -350,7 +389,9 @@ const SCHEMA_STATEMENTS = [
     file_name TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
     checksum_sha256 TEXT NOT NULL, classification TEXT NOT NULL, scan_status TEXT NOT NULL,
     status TEXT NOT NULL, uploaded_by TEXT NOT NULL REFERENCES app_users(id), uploaded_at TEXT NOT NULL,
-    retained_until TEXT, legal_hold INTEGER NOT NULL DEFAULT 0
+    retained_until TEXT, legal_hold INTEGER NOT NULL DEFAULT 0,
+    scanned_by TEXT REFERENCES app_users(id), scanned_at TEXT,
+    supersedes_document_id TEXT REFERENCES document_metadata(id)
   )`,
   `CREATE TABLE IF NOT EXISTS expense_receipt_links (
     id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES expenses(id),
@@ -463,9 +504,19 @@ const SCHEMA_STATEMENTS = [
     source_reference TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (taxpayer_id, obligation_type, period_code)
   )`,
+  `CREATE TABLE IF NOT EXISTS communication_threads (
+    id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id),
+    related_resource_type TEXT NOT NULL, related_resource_id TEXT NOT NULL,
+    subject TEXT NOT NULL, classification TEXT NOT NULL, status TEXT NOT NULL,
+    opened_by TEXT NOT NULL REFERENCES app_users(id), opened_at TEXT NOT NULL,
+    closed_by TEXT REFERENCES app_users(id), closed_at TEXT, closure_reason TEXT,
+    UNIQUE (related_resource_type, related_resource_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS communications (
     id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id),
-    taxpayer_id TEXT REFERENCES taxpayers(id), channel TEXT NOT NULL, direction TEXT NOT NULL,
+    taxpayer_id TEXT REFERENCES taxpayers(id), thread_id TEXT REFERENCES communication_threads(id),
+    channel TEXT NOT NULL, direction TEXT NOT NULL,
     subject TEXT NOT NULL, content_summary TEXT NOT NULL, classification TEXT NOT NULL,
     related_resource_type TEXT, related_resource_id TEXT, external_reference TEXT,
     status TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES app_users(id), occurred_at TEXT NOT NULL
@@ -474,7 +525,17 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, user_id TEXT REFERENCES app_users(id), taxpayer_id TEXT REFERENCES taxpayers(id),
     notification_type TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL,
     severity TEXT NOT NULL, status TEXT NOT NULL, action_url TEXT,
-    created_at TEXT NOT NULL, read_at TEXT
+    created_at TEXT NOT NULL, read_at TEXT,
+    cancelled_by TEXT REFERENCES app_users(id), cancelled_at TEXT, cancellation_reason TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id TEXT PRIMARY KEY, notification_id TEXT NOT NULL REFERENCES notifications(id),
+    channel TEXT NOT NULL, status TEXT NOT NULL, attempted_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS notification_preferences (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES app_users(id),
+    channel TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (user_id, channel)
   )`,
   `CREATE TABLE IF NOT EXISTS audit_cases (
     id TEXT PRIMARY KEY, case_number TEXT NOT NULL UNIQUE,
@@ -482,7 +543,13 @@ const SCHEMA_STATEMENTS = [
     case_type TEXT NOT NULL, title TEXT NOT NULL, opening_reason TEXT NOT NULL,
     risk_tier TEXT NOT NULL, status TEXT NOT NULL,
     assigned_officer_id TEXT REFERENCES app_users(id), opened_by TEXT NOT NULL REFERENCES app_users(id),
-    opened_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT
+    opened_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT,
+    suspended_from_status TEXT, appeal_reference TEXT, appeal_linked_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_case_transitions (
+    id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
+    action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES app_users(id), reason TEXT NOT NULL, occurred_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS audit_evidence (
     id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
@@ -490,7 +557,17 @@ const SCHEMA_STATEMENTS = [
     document_id TEXT REFERENCES document_metadata(id), checksum_sha256 TEXT NOT NULL,
     description TEXT NOT NULL, status TEXT NOT NULL,
     added_by TEXT NOT NULL REFERENCES app_users(id), added_at TEXT NOT NULL,
-    UNIQUE (audit_case_id, source_resource_type, source_resource_id)
+    previous_version_id TEXT REFERENCES audit_evidence(id), legal_hold INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_evidence_custody_events (
+    id TEXT PRIMARY KEY, audit_evidence_id TEXT NOT NULL REFERENCES audit_evidence(id),
+    action TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES app_users(id), notes TEXT,
+    integrity_verified INTEGER, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_case_notes (
+    id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
+    author_id TEXT NOT NULL REFERENCES app_users(id), body TEXT NOT NULL,
+    supersedes_note_id TEXT REFERENCES audit_case_notes(id), created_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS audit_findings (
     id TEXT PRIMARY KEY, audit_case_id TEXT NOT NULL REFERENCES audit_cases(id),
@@ -516,6 +593,7 @@ const SCHEMA_STATEMENTS = [
     severity TEXT NOT NULL, rationale TEXT NOT NULL, rule_version TEXT NOT NULL,
     decision_effect TEXT NOT NULL, status TEXT NOT NULL, detected_at TEXT NOT NULL,
     reviewed_by TEXT REFERENCES app_users(id), reviewed_at TEXT,
+    assigned_officer_id TEXT REFERENCES app_users(id), escalated_case_id TEXT REFERENCES audit_cases(id),
     UNIQUE (subject_type, subject_id, indicator_code, rule_version)
   )`,
   `CREATE TABLE IF NOT EXISTS refund_claims (
@@ -525,13 +603,19 @@ const SCHEMA_STATEMENTS = [
     amount_cents INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
     evidence_status TEXT NOT NULL, risk_tier TEXT NOT NULL,
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
-    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, payment_instruction_id TEXT
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT, payment_instruction_id TEXT,
+    resume_status TEXT, offset_amount_cents INTEGER NOT NULL DEFAULT 0,
+    net_payable_cents INTEGER, dispute_reason TEXT,
+    claim_snapshot TEXT, claim_snapshot_hash TEXT
   )`,
-  `CREATE TABLE IF NOT EXISTS refund_reviews (
+  `CREATE TABLE IF NOT EXISTS refund_claim_transitions (
     id TEXT PRIMARY KEY, refund_claim_id TEXT NOT NULL REFERENCES refund_claims(id),
-    stage TEXT NOT NULL, decision TEXT NOT NULL, findings TEXT NOT NULL,
-    reviewer_id TEXT NOT NULL REFERENCES app_users(id), reviewed_at TEXT NOT NULL,
-    UNIQUE (refund_claim_id, stage)
+    action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES app_users(id), findings TEXT NOT NULL, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS refund_claim_checks (
+    id TEXT PRIMARY KEY, refund_claim_id TEXT NOT NULL REFERENCES refund_claims(id),
+    check_code TEXT NOT NULL, status TEXT NOT NULL, rationale TEXT NOT NULL, evaluated_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS integration_connections (
     id TEXT PRIMARY KEY, organisation_id TEXT REFERENCES organisations(id), provider_key TEXT NOT NULL,
@@ -541,11 +625,31 @@ const SCHEMA_STATEMENTS = [
     last_health_check_at TEXT, last_health_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (provider_key, organisation_id)
   )`,
+  // Module 10 Phase D: developer_account_id links each client back to the DeveloperAccount
+  // that owns it (get-or-created by CreateClient — no separate "create account" verb is named).
   `CREATE TABLE IF NOT EXISTS api_clients (
-    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id), name TEXT NOT NULL,
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    developer_account_id TEXT REFERENCES developer_accounts(id), name TEXT NOT NULL,
     client_key TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL, credential_reference TEXT NOT NULL,
     status TEXT NOT NULL, rate_limit_profile TEXT NOT NULL, last_rotated_at TEXT,
     expires_at TEXT, created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS developer_accounts (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    owner_user_id TEXT NOT NULL REFERENCES app_users(id), display_name TEXT NOT NULL,
+    status TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (organisation_id, owner_user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS credential_refs (
+    id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id),
+    credential_reference TEXT NOT NULL, status TEXT NOT NULL,
+    issued_by TEXT NOT NULL REFERENCES app_users(id), issued_at TEXT NOT NULL,
+    revoked_by TEXT REFERENCES app_users(id), revoked_at TEXT, revocation_reason TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS test_runs (
+    id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id),
+    checks TEXT NOT NULL, outcome TEXT NOT NULL,
+    run_by TEXT NOT NULL REFERENCES app_users(id), run_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
     id TEXT PRIMARY KEY, api_client_id TEXT NOT NULL REFERENCES api_clients(id), event_types TEXT NOT NULL,
@@ -566,6 +670,29 @@ const SCHEMA_STATEMENTS = [
     records_written INTEGER NOT NULL DEFAULT 0, error_count INTEGER NOT NULL DEFAULT 0,
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
     started_at TEXT, completed_at TEXT, last_error TEXT
+  )`,
+  // Module 10 Phase C: SaaS provider onboarding (SaaSProvider/Application/EnvironmentApproval).
+  `CREATE TABLE IF NOT EXISTS saas_providers (
+    id TEXT PRIMARY KEY, provider_key TEXT NOT NULL UNIQUE, legal_name TEXT NOT NULL,
+    contact_email TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL,
+    registered_by TEXT NOT NULL REFERENCES app_users(id), registered_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS saas_applications (
+    id TEXT PRIMARY KEY, saas_provider_id TEXT NOT NULL REFERENCES saas_providers(id),
+    name TEXT NOT NULL, description TEXT NOT NULL, requested_capabilities TEXT NOT NULL,
+    endpoint_reference TEXT NOT NULL, status TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES app_users(id), created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS saas_conformance_runs (
+    id TEXT PRIMARY KEY, saas_application_id TEXT NOT NULL REFERENCES saas_applications(id),
+    environment TEXT NOT NULL, test_suite_version TEXT NOT NULL, checks TEXT NOT NULL,
+    outcome TEXT NOT NULL, submitted_by TEXT NOT NULL REFERENCES app_users(id), submitted_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS saas_environment_approvals (
+    id TEXT PRIMARY KEY, saas_application_id TEXT NOT NULL REFERENCES saas_applications(id),
+    environment TEXT NOT NULL, status TEXT NOT NULL,
+    conformance_run_id TEXT NOT NULL REFERENCES saas_conformance_runs(id), updated_at TEXT NOT NULL,
+    UNIQUE (saas_application_id, environment)
   )`,
   `CREATE TABLE IF NOT EXISTS bank_imports (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
@@ -615,7 +742,8 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS report_definitions (
     id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, audience TEXT NOT NULL,
     description TEXT NOT NULL, classification TEXT NOT NULL, query_version TEXT NOT NULL,
-    status TEXT NOT NULL, created_at TEXT NOT NULL
+    status TEXT NOT NULL, created_at TEXT NOT NULL,
+    freshness_tier TEXT NOT NULL DEFAULT 'DAILY', guardrail TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE TABLE IF NOT EXISTS report_runs (
     id TEXT PRIMARY KEY, report_definition_id TEXT NOT NULL REFERENCES report_definitions(id),
@@ -623,7 +751,71 @@ const SCHEMA_STATEMENTS = [
     parameters TEXT NOT NULL, status TEXT NOT NULL, row_count INTEGER, result_summary TEXT,
     output_document_id TEXT REFERENCES document_metadata(id),
     requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
-    completed_at TEXT, expires_at TEXT, error_code TEXT
+    completed_at TEXT, expires_at TEXT, error_code TEXT,
+    scope_snapshot TEXT, published_by TEXT REFERENCES app_users(id), published_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS report_exports (
+    id TEXT PRIMARY KEY, report_run_id TEXT NOT NULL REFERENCES report_runs(id),
+    document_id TEXT NOT NULL REFERENCES document_metadata(id),
+    status TEXT NOT NULL, requires_step_up INTEGER NOT NULL, watermark TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    approved_by TEXT REFERENCES app_users(id), approved_at TEXT,
+    cancelled_by TEXT REFERENCES app_users(id), cancelled_at TEXT, cancellation_reason TEXT,
+    expires_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS data_products (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+    source_report_definition_id TEXT NOT NULL REFERENCES report_definitions(id),
+    status TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS data_product_lineage (
+    id TEXT PRIMARY KEY, data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    source_type TEXT NOT NULL, source_id TEXT NOT NULL, source_label TEXT NOT NULL, recorded_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS metrics (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    field TEXT NOT NULL, unit TEXT NOT NULL, status TEXT NOT NULL,
+    anomaly_threshold_pct REAL NOT NULL DEFAULT 25, created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS analytics_model_runs (
+    id TEXT PRIMARY KEY, data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    report_run_id TEXT NOT NULL REFERENCES report_runs(id),
+    status TEXT NOT NULL, model_output TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS data_product_snapshots (
+    id TEXT PRIMARY KEY, data_product_id TEXT NOT NULL REFERENCES data_products(id),
+    model_run_id TEXT NOT NULL REFERENCES analytics_model_runs(id),
+    snapshot TEXT NOT NULL, previous_snapshot_id TEXT REFERENCES data_product_snapshots(id),
+    published_by TEXT NOT NULL REFERENCES app_users(id), published_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS analytics_anomaly_candidates (
+    id TEXT PRIMARY KEY, data_product_snapshot_id TEXT NOT NULL REFERENCES data_product_snapshots(id),
+    metric_code TEXT NOT NULL, previous_value REAL NOT NULL, current_value REAL NOT NULL,
+    pct_change REAL NOT NULL, threshold_pct REAL NOT NULL, detected_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS feature_flags (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+    rollout_scope TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+    updated_by TEXT REFERENCES app_users(id), updated_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS platform_config (
+    id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, category TEXT NOT NULL, description TEXT NOT NULL,
+    value TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, updated_by TEXT REFERENCES app_users(id), updated_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS access_policies (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, policy_type TEXT NOT NULL,
+    description TEXT NOT NULL, parameters TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, updated_by TEXT REFERENCES app_users(id), updated_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS change_requests (
+    id TEXT PRIMARY KEY, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+    previous_value TEXT NOT NULL, proposed_value TEXT NOT NULL, reason TEXT NOT NULL,
+    status TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES app_users(id), requested_at TEXT NOT NULL,
+    decided_by TEXT REFERENCES app_users(id), decided_at TEXT, decision_notes TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS service_components (
     id TEXT PRIMARY KEY, component_key TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
@@ -636,7 +828,17 @@ const SCHEMA_STATEMENTS = [
     description TEXT NOT NULL, quantity TEXT NOT NULL, unit_code TEXT NOT NULL,
     unit_price_cents INTEGER NOT NULL, net_amount_cents INTEGER NOT NULL,
     tax_rate_bps INTEGER NOT NULL, tax_category TEXT NOT NULL, tax_amount_cents INTEGER NOT NULL,
+    vat_rule_id TEXT REFERENCES vat_rules(id),
     UNIQUE (invoice_id, line_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS vat_rules (
+    id TEXT PRIMARY KEY, tax_category TEXT NOT NULL, country TEXT NOT NULL DEFAULT 'NA',
+    rate_bps INTEGER NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL,
+    effective_from TEXT NOT NULL, effective_to TEXT,
+    proposed_by TEXT NOT NULL, proposed_at TEXT NOT NULL,
+    approved_by TEXT, approved_at TEXT, approval_reason TEXT, proposal_reason TEXT NOT NULL,
+    superseded_by TEXT REFERENCES vat_rules(id),
+    UNIQUE (tax_category, country, version)
   )`,
   `CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL UNIQUE REFERENCES invoices(id),
@@ -655,22 +857,28 @@ const SCHEMA_STATEMENTS = [
     taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), entry_type TEXT NOT NULL,
     direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, period TEXT NOT NULL, created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS vat_transactions (
+    id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), transaction_type TEXT NOT NULL,
+    reference_transaction_id TEXT REFERENCES vat_transactions(id), created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS reconciliation_exceptions (
     id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id),
     taxpayer_id TEXT REFERENCES taxpayers(id), exception_type TEXT NOT NULL,
     severity TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL,
-    created_at TEXT NOT NULL, resolved_at TEXT
-  )`,
-  `CREATE TABLE IF NOT EXISTS vat_returns (
-    id TEXT PRIMARY KEY, taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), period TEXT NOT NULL,
-    output_tax_cents INTEGER NOT NULL, input_tax_cents INTEGER NOT NULL,
-    net_payable_cents INTEGER NOT NULL, status TEXT NOT NULL, last_calculated_at TEXT NOT NULL,
-    UNIQUE (taxpayer_id, period)
+    created_at TEXT NOT NULL, resolved_at TEXT,
+    assigned_officer_id TEXT REFERENCES app_users(id), resolved_by TEXT REFERENCES app_users(id),
+    resolution_notes TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, actor_role TEXT NOT NULL, action TEXT NOT NULL,
     resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, outcome TEXT NOT NULL,
     details TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, occurred_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_chain_verifications (
+    id TEXT PRIMARY KEY, requested_by TEXT NOT NULL REFERENCES app_users(id), status TEXT NOT NULL,
+    verified_count INTEGER NOT NULL, first_break_id TEXT, first_break_reason TEXT,
+    started_at TEXT NOT NULL, completed_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS idempotency_records (
     id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
@@ -686,10 +894,22 @@ const SCHEMA_STATEMENTS = [
     source_token TEXT NOT NULL, correlation_id TEXT NOT NULL, action TEXT NOT NULL,
     outcome TEXT NOT NULL, details TEXT NOT NULL, occurred_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS security_detection_rules (
+    id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL,
+    event_type TEXT NOT NULL, group_by TEXT NOT NULL, threshold_count INTEGER NOT NULL,
+    window_minutes INTEGER NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS security_incidents (
     id TEXT PRIMARY KEY, title TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL,
     source_event_id TEXT REFERENCES security_events(id), automated_action TEXT,
-    owner TEXT, opened_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    owner TEXT, detection_rule_id TEXT REFERENCES security_detection_rules(id), group_key TEXT,
+    subject_user_id TEXT REFERENCES app_users(id), opened_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    closed_at TEXT, closed_by TEXT REFERENCES app_users(id), resolution_notes TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS security_playbook_actions (
+    id TEXT PRIMARY KEY, incident_id TEXT NOT NULL REFERENCES security_incidents(id),
+    action_type TEXT NOT NULL, actor_id TEXT REFERENCES app_users(id), automated INTEGER NOT NULL DEFAULT 0,
+    details TEXT NOT NULL, performed_at TEXT NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS outbox_events (
     id TEXT PRIMARY KEY, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL,
@@ -1014,7 +1234,8 @@ const SCHEMA_STATEMENTS = [
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
     delegator_user_id TEXT NOT NULL REFERENCES app_users(id), delegate_user_id TEXT NOT NULL REFERENCES app_users(id),
     workflow_id TEXT REFERENCES workflows(id), scope TEXT NOT NULL, status TEXT NOT NULL,
-    effective_from TEXT NOT NULL, effective_to TEXT NOT NULL, approved_by TEXT NOT NULL REFERENCES app_users(id)
+    effective_from TEXT NOT NULL, effective_to TEXT NOT NULL, approved_by TEXT NOT NULL REFERENCES app_users(id),
+    reason TEXT NOT NULL DEFAULT '', revoked_reason TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS access_requests (
     id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
@@ -1115,6 +1336,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_outbox_status_available ON outbox_events(status, available_at)`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id)`,
   `CREATE INDEX IF NOT EXISTS idx_identity_links_user_status ON identity_links(user_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_step_up_events_user_expires ON step_up_events(user_id, expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_branches_organisation_status ON branches(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_organisation_capabilities_status ON organisation_capabilities(status, capability)`,
   `CREATE INDEX IF NOT EXISTS idx_memberships_user_status ON organisation_memberships(user_id, status)`,
@@ -1122,11 +1344,42 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_registration_status_submitted ON registration_applications(status, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_identifiers ON registration_applications(vat_number, tin)`,
   `CREATE INDEX IF NOT EXISTS idx_registration_verification_application ON registration_verifications(registration_application_id, status)`,
-  `CREATE INDEX IF NOT EXISTS idx_identity_proofing_status_created ON identity_proofing_cases(status, created_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_identity_proofing_subject ON identity_proofing_cases(subject_type, subject_reference)`,
-  `CREATE INDEX IF NOT EXISTS idx_identity_reconciliation_taxpayer ON identity_reconciliation_candidates(candidate_taxpayer_id, outcome)`,
-  `CREATE INDEX IF NOT EXISTS idx_identity_mismatch_status_opened ON identity_mismatch_cases(status, opened_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_identity_proofing_events_case_time ON identity_proofing_events(proofing_case_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_invitations_org_email_status ON user_invitations(organisation_id, email, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_rules_lookup ON vat_rules(tax_category, country, status, effective_from)`,
+  `CREATE INDEX IF NOT EXISTS idx_vat_transactions_invoice ON vat_transactions(invoice_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_queue ON reconciliation_exceptions(status, severity, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_reconciliation_exceptions_officer ON reconciliation_exceptions(assigned_officer_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_case_transitions_case ON audit_case_transitions(audit_case_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_evidence_case ON audit_evidence(audit_case_id, added_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_evidence_custody_events_evidence ON audit_evidence_custody_events(audit_evidence_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_case_notes_case ON audit_case_notes(audit_case_id, created_at)`,
+  // Partial unique index (not an inline table constraint): only one PRESERVED
+  // evidence row may exist per (case, source resource) at a time — a
+  // superseded historical row keeps its place in the table without blocking
+  // its replacement. This is the immutable-versioning guarantee Module 4
+  // Phase D requires: corrections supersede, never overwrite.
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_evidence_active_source ON audit_evidence(audit_case_id, source_resource_type, source_resource_id) WHERE status='PRESERVED'`,
+
+  // Statutory VAT rate catalogue (Module 2 Phase A). Unlike the pilot demo
+  // seed below, this is real reference data — the actual Namibian VAT
+  // rates this system must enforce — so it runs unconditionally in every
+  // environment, not just non-production. 'SYSTEM_BOOTSTRAP' marks these as
+  // pre-approved at deployment rather than through the ProposeVatRule/
+  // ApproveVatRule workflow (matches this codebase's existing pattern for
+  // system-originated rows, e.g. organisation_administrators' 'SYSTEM_LICENSE_ACTIVATION').
+  // OTHER is deliberately left with no approved rule: it is a catch-all with
+  // no real statutory rate, so any invoice line categorized OTHER correctly
+  // fails closed rather than silently falling back to some default.
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-standard-na','STANDARD','NA',1500,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Namibia standard VAT rate.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-zero_rated-na','ZERO_RATED','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Zero-rated supplies.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-exempt-na','EXEMPT','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Exempt supplies.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-outside_scope-na','OUTSIDE_SCOPE','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Outside-scope (non-supply) transactions.',NULL)`,
+  `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
+    VALUES ('vrule-reverse_charge-na','REVERSE_CHARGE','NA',1500,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Reverse-charge supplies (standard rate, liability shifted to the recipient).',NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_trust_status_expiry ON counterparty_trust_profiles(trust_status,expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_snapshot_profile_time ON counterparty_verification_snapshots(trust_profile_id,checked_at)`,
@@ -1142,6 +1395,10 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_quotation_revisions_organisation ON quotation_revisions(organisation_id, quotation_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_journals_status_date ON journal_entries(organisation_id, status, journal_date)`,
   `CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id, journal_entry_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_accounting_periods_org_status ON accounting_periods(organisation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_org_status ON expenses(organisation_id, status, expense_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_project_costs_project ON project_costs(project_id, cost_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_party_verification_snapshots_party ON party_verification_snapshots(party_id, verified_at)`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_status_date ON expenses(organisation_id, status, expense_date)`,
   `CREATE INDEX IF NOT EXISTS idx_expense_decisions_organisation ON expense_decisions(organisation_id, decided_at)`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movement_product_time ON stock_movements(warehouse_id, product_id, occurred_at)`,
@@ -1157,15 +1414,34 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_consent_taxpayer_status ON consent_grants(taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_delegations_delegate_status ON delegations(delegate_user_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_communications_taxpayer_time ON communications(taxpayer_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_communications_thread ON communications(thread_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_communication_threads_taxpayer_status ON communication_threads(taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_recipient_status ON notifications(user_id, taxpayer_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_cases_status_risk ON audit_cases(status, risk_tier, updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_disputes_status_filed ON disputes(status, filed_at)`,
   `CREATE INDEX IF NOT EXISTS idx_risk_taxpayer_status ON risk_indicators(taxpayer_id, status, severity)`,
   `CREATE INDEX IF NOT EXISTS idx_refund_claim_status_risk ON refund_claims(status, risk_tier, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_refund_claim_transitions_claim ON refund_claim_transitions(refund_claim_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_refund_claim_checks_claim ON refund_claim_checks(refund_claim_id, evaluated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_requested ON sync_jobs(status, requested_at)`,
   `CREATE INDEX IF NOT EXISTS idx_bank_import_status_created ON bank_imports(organisation_id, status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_offline_conflicts_status ON offline_conflicts(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_report_runs_status_requested ON report_runs(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_report_exports_run_status ON report_exports(report_run_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_analytics_model_runs_product ON analytics_model_runs(data_product_id, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_data_product_snapshots_product_published ON data_product_snapshots(data_product_id, published_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_metrics_product ON metrics(data_product_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_anomaly_candidates_snapshot ON analytics_anomaly_candidates(data_product_snapshot_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_change_requests_status ON change_requests(status, requested_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_change_requests_target ON change_requests(target_type, target_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_events_type_actor_occurred ON security_events(event_type, actor_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_events_type_source_occurred ON security_events(event_type, source_token, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_incidents_status_severity ON security_incidents(status, severity)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_incidents_rule_group ON security_incidents(detection_rule_id, group_key, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_security_playbook_actions_incident ON security_playbook_actions(incident_id, performed_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_events_resource ON audit_events(resource_type, resource_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_id, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_chain_verifications_started ON audit_chain_verifications(started_at)`,
   `CREATE INDEX IF NOT EXISTS idx_subscription_org_status ON subscriptions(organisation_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_self_serve_signup_status_submitted ON self_serve_signup_applications(status, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS idx_self_serve_signup_identifiers ON self_serve_signup_applications(vat_number, tin)`,
@@ -1469,10 +1745,10 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO invoices VALUES ('inv-0003','AR-7719','SIMPLIFIED_TAX_INVOICE','POS-ATL-22','POS-7719','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789',NULL,'Walk-in customer',NULL,'2026-08-07','NAD',850000,127500,977500,'CERTIFIED','LOW','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0003','cert-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','2026-08-07T12:04:03Z','2026-08-07T12:04:04Z')`,
   `INSERT OR IGNORE INTO invoices VALUES ('inv-0004','KC-1041','TAX_INVOICE','PORTAL','PORTAL-KC-1041','tp-0004','Kalahari Consulting (Pty) Ltd','VAT1000987','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-06','NAD',120000000,18000000,138000000,'EXCEPTION','CRITICAL','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0004','cert-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','2026-08-06T09:32:10Z','2026-08-06T09:32:11Z')`,
 
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0001','inv-0001',1,'Office equipment and consumables','1','EA',11450000,11450000,1500,'STANDARD',1717500)`,
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0002','inv-0002',1,'Regional freight services','1','EA',5200000,5200000,1500,'STANDARD',780000)`,
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0003','inv-0003',1,'Retail merchandise','1','EA',850000,850000,1500,'STANDARD',127500)`,
-  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0004','inv-0004',1,'Enterprise transformation advisory','1','EA',120000000,120000000,1500,'STANDARD',18000000)`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0001','inv-0001',1,'Office equipment and consumables','1','EA',11450000,11450000,1500,'STANDARD',1717500,'vrule-standard-na')`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0002','inv-0002',1,'Regional freight services','1','EA',5200000,5200000,1500,'STANDARD',780000,'vrule-standard-na')`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0003','inv-0003',1,'Retail merchandise','1','EA',850000,850000,1500,'STANDARD',127500,'vrule-standard-na')`,
+  `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0004','inv-0004',1,'Enterprise transformation advisory','1','EA',120000000,120000000,1500,'STANDARD',18000000,'vrule-standard-na')`,
 
   `INSERT OR IGNORE INTO certificates VALUES ('cert-0001','inv-0001','vfy_1a92c57e41f84b89a601d982be634a81','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.13a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-08T08:12:45Z')`,
   `INSERT OR IGNORE INTO certificates VALUES ('cert-0002','inv-0002','vfy_2b13d68f52a94c90b712e093cf745b92','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.23a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-07T14:21:20Z')`,
@@ -1487,13 +1763,9 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0004a','txn-0004','inv-0004','tp-0004','OUTPUT_VAT','CREDIT',18000000,'2026-08','2026-08-06T09:32:11Z')`,
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0004b','txn-0004','inv-0004','tp-0001','INPUT_VAT','DEBIT',18000000,'2026-08','2026-08-06T09:32:11Z')`,
 
-  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0001','inv-0004','tp-0004','HIGH_VALUE_TRANSACTION','CRITICAL','OPEN','Transaction value exceeds the pilot high-value threshold and requires officer review.','2026-08-06T09:32:11Z',NULL)`,
-  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0002','inv-0003','tp-0003','UNREGISTERED_BUYER','MEDIUM','OPEN','Buyer does not have a VAT registration in the pilot registry; input VAT was not posted.','2026-08-07T12:04:04Z',NULL)`,
+  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0001','inv-0004','tp-0004','HIGH_VALUE_TRANSACTION','CRITICAL','OPEN','Transaction value exceeds the pilot high-value threshold and requires officer review.','2026-08-06T09:32:11Z',NULL,NULL,NULL,NULL)`,
+  `INSERT OR IGNORE INTO reconciliation_exceptions VALUES ('exc-0002','inv-0003','tp-0003','UNREGISTERED_BUYER','MEDIUM','OPEN','Buyer does not have a VAT registration in the pilot registry; input VAT was not posted.','2026-08-07T12:04:04Z',NULL,NULL,NULL,NULL)`,
 
-  `INSERT OR IGNORE INTO vat_returns VALUES ('ret-0001','tp-0001','2026-08',1717500,18780000,-17062500,'DRAFT','2026-08-08T18:00:00Z')`,
-  `INSERT OR IGNORE INTO vat_returns VALUES ('ret-0002','tp-0002','2026-08',780000,0,780000,'DRAFT','2026-08-08T18:00:00Z')`,
-  `INSERT OR IGNORE INTO vat_returns VALUES ('ret-0003','tp-0003','2026-08',127500,1717500,-1590000,'DRAFT','2026-08-08T18:00:00Z')`,
-  `INSERT OR IGNORE INTO vat_returns VALUES ('ret-0004','tp-0004','2026-08',18000000,0,18000000,'UNDER_REVIEW','2026-08-08T18:00:00Z')`,
 
   `INSERT OR IGNORE INTO audit_events VALUES ('aud-0001','system','SYSTEM','INVOICE_CERTIFIED','INVOICE','inv-0001','SUCCESS','{"invoice_number":"INV-2026-0182","transaction_id":"txn-0001"}',NULL,'a000000000000000000000000000000000000000000000000000000000000001','2026-08-08T08:12:45Z')`,
   `INSERT OR IGNORE INTO audit_events VALUES ('aud-0002','system','SYSTEM','RECONCILIATION_EXCEPTION_OPENED','EXCEPTION','exc-0001','SUCCESS','{"severity":"CRITICAL","invoice_id":"inv-0004"}','a000000000000000000000000000000000000000000000000000000000000001','a000000000000000000000000000000000000000000000000000000000000002','2026-08-06T09:32:11Z')`,
@@ -1504,7 +1776,18 @@ const SECURITY_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO security_events VALUES ('sec-0001','API_RATE_ANOMALY','MEDIUM','usr-local-admin','src:pilot','a1000000-0000-4000-8000-000000000001','INVOICE_SUBMISSION','THROTTLED','{"bucket":"actor","threshold":120}','2026-08-09T06:45:00Z')`,
   `INSERT OR IGNORE INTO security_events VALUES ('sec-0002','AUTHORISATION_DENIED','HIGH','unknown','src:external','a1000000-0000-4000-8000-000000000002','INVOICE_READ','DENIED','{"reason":"taxpayer_scope_mismatch"}','2026-08-09T07:10:00Z')`,
   `INSERT OR IGNORE INTO security_events VALUES ('sec-0003','PAYLOAD_REJECTED','LOW','usr-local-admin','src:pilot','a1000000-0000-4000-8000-000000000003','INVOICE_SUBMISSION','REJECTED','{"reason":"payload_limit"}','2026-08-09T07:18:00Z')`,
-  `INSERT OR IGNORE INTO security_incidents VALUES ('inc-0001','Repeated cross-taxpayer access attempts','HIGH','INVESTIGATING','sec-0002','SESSION_CHALLENGE','SOC Tier 2','2026-08-09T07:11:00Z','2026-08-09T07:20:00Z')`,
+  `INSERT OR IGNORE INTO security_detection_rules
+    (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
+    VALUES ('secrule-repeated-denials','REPEATED_AUTHORISATION_DENIALS','Repeated authorisation denials','Opens an incident when the same actor accumulates repeated access-denied events in a short window.','AUTHORISATION_DENIED','actor_id',5,15,'HIGH','ACTIVE','2026-08-09T08:00:00Z')`,
+  `INSERT OR IGNORE INTO security_detection_rules
+    (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
+    VALUES ('secrule-rate-limit-abuse','RATE_LIMIT_ABUSE','Rate limit abuse','Opens an incident when the same source repeatedly trips a rate limit in a short window.','RATE_LIMIT_EXCEEDED','source_token',10,10,'MEDIUM','ACTIVE','2026-08-09T08:00:00Z')`,
+  `INSERT OR IGNORE INTO security_detection_rules
+    (id,code,name,description,event_type,group_by,threshold_count,window_minutes,severity,status,created_at)
+    VALUES ('secrule-audit-chain-breach','AUDIT_CHAIN_INTEGRITY_BREACH','Audit chain integrity breach','Opens a CRITICAL incident the moment a chain-verification run finds a broken or tampered audit_events hash chain.','AUDIT_CHAIN_BREAK','actor_id',1,1440,'CRITICAL','ACTIVE','2026-08-09T08:00:00Z')`,
+  `INSERT OR IGNORE INTO security_incidents
+    (id,title,severity,status,source_event_id,automated_action,owner,detection_rule_id,group_key,subject_user_id,opened_at,updated_at,closed_at,closed_by,resolution_notes)
+    VALUES ('inc-0001','Repeated cross-taxpayer access attempts','HIGH','CONTAINED','sec-0002','SESSION_CHALLENGE','SOC Tier 2',NULL,NULL,NULL,'2026-08-09T07:11:00Z','2026-08-09T07:20:00Z',NULL,NULL,NULL)`,
   `INSERT OR IGNORE INTO outbox_events VALUES ('out-0001','INVOICE','inv-0001','InvoiceCertified',1,'tp-0001','{"invoice_id":"inv-0001","transaction_id":"txn-0001"}','PUBLISHED',1,'2026-08-08T08:12:45Z','2026-08-08T08:12:45Z','2026-08-08T08:12:46Z',NULL)`,
   `INSERT OR IGNORE INTO seed_state VALUES ('security-v1','2026-08-09T08:00:00Z')`,
 ];
@@ -1688,12 +1971,9 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO journal_lines VALUES ('journal-line-0002','journal-0001',2,'acct-4000','br-0001',NULL,'Opening balance offset',0,5000000,NULL)`,
   `INSERT OR IGNORE INTO expenses
     (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
-    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-tp1-owner','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
-  `UPDATE expenses SET created_by='usr-tp1-owner' WHERE id='expense-0001' AND created_by=approved_by`,
-  `INSERT OR IGNORE INTO expenses
-    (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
-    VALUES ('expense-0002','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0002','2026-08-14','Synthetic courier evidence review','NAD',50000,7500,57500,'DRAFT',NULL,'usr-tp1-owner',NULL,'2026-08-15T08:00:00Z',NULL)`,
-  `INSERT OR IGNORE INTO project_costs VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
+    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+  `INSERT OR IGNORE INTO project_costs (id,project_id,cost_type,source_id,amount_cents,currency,occurred_at,created_at)
+    VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO inventory_balances
     (id,organisation_id,warehouse_id,product_id,quantity_micros,average_cost_cents,version,updated_at)
     VALUES ('balance-0001','org-0001','wh-0001','prod-0001',12000000,290000,1,'2026-08-09T10:00:00Z')`,
@@ -1807,6 +2087,9 @@ const COMPLIANCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('risk:read','RISK','READ','Read explainable advisory risk indicators','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('risk:review','RISK','REVIEW','Review advisory risk indicators without automated adverse action','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('communications:manage','COMMUNICATION','MANAGE','Record controlled taxpayer communications','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('communications:respond','COMMUNICATION','RESPOND','Respond within an existing NamRA correspondence thread','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('notifications:manage','NOTIFICATION','MANAGE','Queue a notification directly','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
+  `INSERT OR IGNORE INTO access_permissions VALUES ('reports:executive','REPORT','EXECUTIVE','Run executive-tier aggregate reports','CONFIDENTIAL','2026-08-26T00:00:00Z')`,
   `INSERT OR IGNORE INTO access_permissions VALUES ('consents:manage','CONSENT','MANAGE','Manage taxpayer consents and delegations','CONFIDENTIAL','2026-08-10T07:00:00Z')`,
 
   `INSERT OR IGNORE INTO tax_obligations
@@ -1829,7 +2112,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
     VALUES ('notification-0001',NULL,'tp-0004','CASE_UPDATE','Compliance review opened','A high-value transaction is under controlled human review.','HIGH','UNREAD','/cases','2026-08-10T07:05:00Z',NULL)`,
   `INSERT OR IGNORE INTO audit_cases
     (id,case_number,organisation_id,taxpayer_id,case_type,title,opening_reason,risk_tier,status,assigned_officer_id,opened_by,opened_at,updated_at,closed_at)
-    VALUES ('case-0001','CASE-2026-0001','org-0004','tp-0004','DESK_REVIEW','High-value advisory transaction review','Invoice KC-1041 exceeds the controlled high-value pilot threshold and requires evidence-led officer review.','CRITICAL','OPEN','usr-local-admin','usr-local-admin','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z',NULL)`,
+    VALUES ('case-0001','CASE-2026-0001','org-0004','tp-0004','DESK_REVIEW','High-value advisory transaction review','Invoice KC-1041 exceeds the controlled high-value pilot threshold and requires evidence-led officer review.','CRITICAL','PROPOSED','usr-local-admin','usr-local-admin','2026-08-10T07:00:00Z','2026-08-10T07:00:00Z',NULL)`,
   `INSERT OR IGNORE INTO audit_evidence
     (id,audit_case_id,evidence_type,source_resource_type,source_resource_id,document_id,checksum_sha256,description,status,added_by,added_at)
     VALUES ('case-evidence-0001','case-0001','CERTIFIED_RECORD','INVOICE','inv-0004',NULL,'43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','Canonical invoice, certificate and VAT ledger references.','PRESERVED','usr-local-admin','2026-08-10T07:00:00Z')`,
@@ -1841,7 +2124,7 @@ const COMPLIANCE_SEED_STATEMENTS = [
     VALUES ('dispute-0001','DSP-2026-0001','org-0004','tp-0004','case-0001','AUDIT_FINDING','finding-0001','The taxpayer requests clarification of the evidence scope before responding to the preliminary finding.',18000000,'NAD','FILED','usr-local-admin',NULL,'2026-08-10T07:20:00Z',NULL,NULL)`,
   `INSERT OR IGNORE INTO risk_indicators
     (id,organisation_id,taxpayer_id,subject_type,subject_id,indicator_code,score_bps,severity,rationale,rule_version,decision_effect,status,detected_at,reviewed_by,reviewed_at)
-    VALUES ('risk-0001','org-0004','tp-0004','INVOICE','inv-0004','HIGH_VALUE_TRANSACTION',9200,'CRITICAL','Gross value exceeds the controlled pilot threshold; the indicator cannot impose an adverse decision.','RISK-PILOT-2026.1','ADVISORY_ONLY','UNDER_HUMAN_REVIEW','2026-08-06T09:32:11Z','usr-local-admin','2026-08-10T07:00:00Z')`,
+    VALUES ('risk-0001','org-0004','tp-0004','INVOICE','inv-0004','HIGH_VALUE_TRANSACTION',9200,'CRITICAL','Gross value exceeds the controlled pilot threshold; the indicator cannot impose an adverse decision.','RISK-PILOT-2026.1','ADVISORY_ONLY','OPEN','2026-08-06T09:32:11Z',NULL,NULL)`,
   `INSERT OR IGNORE INTO refund_claims
     (id,claim_number,organisation_id,taxpayer_id,vat_return_version_id,amount_cents,currency,status,evidence_status,risk_tier,requested_by,requested_at,approved_by,approved_at,payment_instruction_id)
     VALUES ('refund-0001','RFD-2026-0001','org-0003','tp-0003','returnv-0003',1590000,'NAD','BLOCKED_RETURN_NOT_FILED','AWAITING_ITAS_ACKNOWLEDGEMENT','HIGH','usr-local-admin','2026-08-10T07:30:00Z',NULL,NULL,NULL)`,
@@ -1893,18 +2176,77 @@ const PLATFORM_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO offline_number_ranges
     (id,offline_device_id,document_type,prefix,range_start,range_end,next_number,status,valid_from,valid_to)
     VALUES ('offline-range-0001','offline-device-0001','TAX_INVOICE','WHK26',1,1000,1,'HELD_PENDING_ENROLMENT','2026-08-10T00:00:00Z','2026-12-31T23:59:59Z')`,
-  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-vat','VAT_POSITION','VAT position summary','BOTH','Latest controlled VAT positions and net aggregate.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
-  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-cases','COMPLIANCE_CASELOAD','Compliance caseload','NAMRA','Open and total compliance case counts.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
-  `INSERT OR IGNORE INTO report_definitions VALUES ('report-def-sales','SALES_VAT_SUMMARY','Sales and VAT summary','BOTH','Invoice count, gross value and VAT aggregate.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-vat','VAT_POSITION','VAT position summary','TAXPAYER','Latest controlled VAT positions and net aggregate.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z','NEAR_REAL_TIME','own organisation; delegated scope only')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-cases','COMPLIANCE_CASELOAD','Compliance caseload','NAMRA_OPERATIONS','Open and total compliance case counts.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z','MINUTES_TO_DAILY','office/purpose policy; sensitive field masking')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-sales','SALES_VAT_SUMMARY','Sales and VAT summary','TAXPAYER','Invoice count, gross value and VAT aggregate.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-10T08:30:00Z','NEAR_REAL_TIME','own organisation; delegated scope only')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-portfolio','PORTFOLIO_EXCEPTIONS','Portfolio exceptions and deadlines','PRACTITIONER','Reconciliation exceptions across every taxpayer the requesting practitioner is actively delegated for.','TAX_CONFIDENTIAL','1.0.0','ACTIVE','2026-08-26T08:30:00Z','MINUTES','consent/mandate and client-level isolation')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-executive','REVENUE_COMPLIANCE_TRENDS','Revenue and compliance trends','EXECUTIVE','National aggregate invoice revenue and case-load trend, no taxpayer-level breakdown.','CONFIDENTIAL','1.0.0','ACTIVE','2026-08-26T08:30:00Z','DAILY','aggregation, disclosure controls')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-evidence','CASE_EVIDENCE_SUMMARY','Case evidence summary','AUDITOR_LEGAL','Point-in-time evidence and custody-event counts for one audit case.','RESTRICTED','1.0.0','ACTIVE','2026-08-26T08:30:00Z','POINT_IN_TIME','case authority, custody and watermark')`,
+  `INSERT OR IGNORE INTO report_definitions
+    (id,code,name,audience,description,classification,query_version,status,created_at,freshness_tier,guardrail)
+    VALUES ('report-def-opendata','NATIONAL_VAT_AGGREGATE','National VAT aggregate','OPEN_DATA','Approved national invoice-count and value aggregate, minimum-cell suppressed.','INTERNAL','1.0.0','ACTIVE','2026-08-26T08:30:00Z','SCHEDULED','privacy review, minimum-cell suppression, no re-identification')`,
   `INSERT OR IGNORE INTO report_runs
     (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code)
     VALUES ('report-run-0001','report-def-vat','org-0001','tp-0001','{}','COMPLETED_INLINE',2,'{"periods":2,"net_cents":937500}',NULL,'usr-local-admin','2026-08-10T08:40:00Z','2026-08-10T08:40:00Z','2026-08-11T08:40:00Z',NULL)`,
+  `INSERT OR IGNORE INTO report_runs
+    (id,report_definition_id,organisation_id,taxpayer_id,parameters,status,row_count,result_summary,output_document_id,requested_by,requested_at,completed_at,expires_at,error_code,scope_snapshot,published_by,published_at)
+    VALUES ('report-run-0002','report-def-executive',NULL,NULL,'{}','PUBLISHED',4,'{"invoices":4,"total_cents":137630000,"cases":1,"open_cases":1}',NULL,'usr-local-admin','2026-08-26T09:00:00Z','2026-08-26T09:00:00Z',NULL,NULL,'{"organisationId":null,"taxpayerId":null}','usr-local-admin','2026-08-26T09:05:00Z')`,
+  `INSERT OR IGNORE INTO data_products
+    (id,code,name,description,source_report_definition_id,status,created_at)
+    VALUES ('dp-vat-trends','VAT_COMPLIANCE_TRENDS','VAT and compliance trends','Governed enterprise KPI data product for national revenue and compliance caseload trends, published only from an already-reconciled report run.','report-def-executive','ACTIVE','2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO data_product_lineage
+    (id,data_product_id,source_type,source_id,source_label,recorded_at)
+    VALUES ('lineage-vat-trends-0001','dp-vat-trends','REPORT_DEFINITION','report-def-executive','REVENUE_COMPLIANCE_TRENDS','2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO metrics
+    (id,code,name,data_product_id,field,unit,status,anomaly_threshold_pct,created_at)
+    VALUES ('metric-national-revenue','NATIONAL_REVENUE_CENTS','National invoice revenue','dp-vat-trends','total_cents','CENTS','CERTIFIED',25,'2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO metrics
+    (id,code,name,data_product_id,field,unit,status,anomaly_threshold_pct,created_at)
+    VALUES ('metric-open-cases','OPEN_COMPLIANCE_CASES','Open compliance cases','dp-vat-trends','open_cases','COUNT','CERTIFIED',25,'2026-08-26T09:00:00Z')`,
+  `INSERT OR IGNORE INTO feature_flags
+    (id,key,name,description,rollout_scope,enabled,status,version,created_at)
+    VALUES ('flag-itas-integration','ITAS_INTEGRATION','ITAS statutory integration','Enables the ITAS anti-corruption layer for statutory filing and taxpayer verification.','NATIONAL_ONLY',0,'ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO feature_flags
+    (id,key,name,description,rollout_scope,enabled,status,version,created_at)
+    VALUES ('flag-open-data-reports','OPEN_DATA_PUBLIC_ACCESS','Open data public access','Serves OPEN_DATA-tier reports through an unauthenticated public route, rather than the standard authenticated reports:run path.','NATIONAL_ONLY',0,'ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO feature_flags
+    (id,key,name,description,rollout_scope,enabled,status,version,created_at)
+    VALUES ('flag-offline-sync','OFFLINE_SYNC','Offline device sync','Allows offline invoice batches to be enrolled and accepted.','ALL',1,'ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO platform_config
+    (id,key,category,description,value,status,version,created_at)
+    VALUES ('cfg-step-up-window','STEP_UP_WINDOW_MINUTES','SECURITY','Maximum age of a fresh MFA step-up before a privileged change requires re-authentication.','5','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO platform_config
+    (id,key,category,description,value,status,version,created_at)
+    VALUES ('cfg-export-size-limit','EXPORT_SIZE_LIMIT_KB','REPORTING','Maximum size of a generated report export before it is refused.','200','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO platform_config
+    (id,key,category,description,value,status,version,created_at)
+    VALUES ('cfg-min-cell-suppression','MIN_CELL_SUPPRESSION_THRESHOLD','REPORTING','Minimum row count below which an OPEN_DATA aggregate is suppressed rather than published.','10','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_policies
+    (id,code,name,policy_type,description,parameters,status,version,created_at)
+    VALUES ('policy-mfa-step-up','MFA_STEP_UP_POLICY','MFA step-up policy','MFA','Freshness window and assurance level required for a privileged change.','{"max_age_minutes":5,"required_assurance":"MFA_STEP_UP"}','ACTIVE',1,'2026-08-26T09:30:00Z')`,
+  `INSERT OR IGNORE INTO access_policies
+    (id,code,name,policy_type,description,parameters,status,version,created_at)
+    VALUES ('policy-default-rate-limit','DEFAULT_RATE_LIMIT_POLICY','Default rate limit policy','RATE_LIMIT','Default per-actor request budget applied where a route does not declare its own.','{"window_seconds":60,"limit":120}','ACTIVE',1,'2026-08-26T09:30:00Z')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-web','WEB_APP','VAT-MSA web application','APPLICATION','HIGH','CONFIGURED','OPERATIONAL','Cloudflare Worker/Vinext runtime','2026-08-10T08:45:00Z','Release gate and readiness checks passed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-d1','D1','Structured transactional state','DATABASE','CRITICAL','CONFIGURED','OPERATIONAL','Cloudflare D1 binding DB','2026-08-10T08:45:00Z','Schema initialisation and prepared-query probe passed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-r2','R2_DOCUMENTS','Private document quarantine','OBJECT_STORAGE','HIGH','CONFIGURED','QUARANTINE_ONLY','Cloudflare R2 binding DOCUMENTS','2026-08-10T08:45:00Z','Uploads remain quarantined pending an external malware scanner.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-itas','ITAS','ITAS statutory integration','EXTERNAL','CRITICAL','REQUIRES_AUTHORITY_CONTRACT','DISABLED','NamRA/ITAS contract, credentials and approved mappings','2026-08-10T08:45:00Z','No legal filing or taxpayer verification is claimed.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-hsm','SIGNING_HSM','Production certificate signing','SECURITY','CRITICAL','REQUIRES_SECURITY_CONTRACT','DISABLED','HSM/KMS keys and approved signature profile','2026-08-10T08:45:00Z','Development signatures are not production legal signatures.')`,
   `INSERT OR IGNORE INTO service_components VALUES ('component-events','OUTBOX','Durable event outbox','MESSAGING','HIGH','CONFIGURED','PENDING_CONSUMER','D1 outbox table and external publisher','2026-08-10T08:45:00Z','Events are durable; external broker publisher is not configured.')`,
+  // Module 9 Phase D: the first genuine runtime consumer of service_components as an enforcement guard, not just a display row (see lib/integrations/payment.ts). Seeded DISABLED and nothing anywhere in this codebase writes to this row -- RecordPayment/AllocatePayment refuse to run until it is authorised to SANDBOX_CONFIGURED/SANDBOX_ACTIVE.
+  `INSERT OR IGNORE INTO service_components VALUES ('component-payment','PAYMENT_CONNECTOR','Refund payment connector','EXTERNAL','CRITICAL','REQUIRES_AUTHORITY_CONTRACT','DISABLED','Bank/payment gateway contract, settlement account and NamRA payment authority approval','2026-08-10T08:45:00Z','Payment is DISABLED PENDING AUTHORITY -- no live payment instruction is issued; RecordPayment/AllocatePayment refuse to run until this row is authorised.')`,
   `INSERT OR IGNORE INTO seed_state VALUES ('platform-v1','2026-08-10T09:00:00Z')`,
 ];
 

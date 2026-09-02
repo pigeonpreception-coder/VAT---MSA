@@ -1,14 +1,14 @@
 import { AccessDeniedError } from "@/lib/auth";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { ControlPlaneValidationError } from "@/lib/domain/control-plane";
-import { AuthorityGovernanceValidationError } from "@/lib/domain/authority-governance";
-import { RequestGuardError, type RequestContext } from "@/lib/security/request";
+import { recordAuthorizationDenial, recordRateLimitBreach, RequestGuardError, type RequestContext } from "@/lib/security/request";
 
 export function organisationIdFrom(request: Request): string | null {
   return new URL(request.url).searchParams.get("organisation_id");
 }
 
-export function controlPlaneProblem(error: unknown, context: RequestContext): Response {
+/** Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #4): see lib/api/identity.ts's identityProblem for why this is now async and what it records — this entire control-plane route family (workflows, roles, memberships, access requests/reviews, licensing, employees, offboarding, capabilities, navigation) previously emitted no security events at all. */
+export async function controlPlaneProblem(error: unknown, context: RequestContext): Promise<Response> {
   let status = 500;
   let code = "INTERNAL_ERROR";
   let detail = "The control-plane operation could not be completed.";
@@ -16,6 +16,7 @@ export function controlPlaneProblem(error: unknown, context: RequestContext): Re
     status = error.status;
     code = status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED";
     detail = error.message;
+    await recordAuthorizationDenial(context, error.message, status);
   } else if (error instanceof ControlPlaneValidationError) {
     status = 422;
     code = error.code;
@@ -32,6 +33,7 @@ export function controlPlaneProblem(error: unknown, context: RequestContext): Re
     status = error.status;
     code = error.code;
     detail = error.message;
+    await recordRateLimitBreach(context, error);
   }
   return Response.json({
     type: `https://vat-msa.local/problems/${code.toLowerCase().replaceAll("_", "-")}`,

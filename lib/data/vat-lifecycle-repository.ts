@@ -1,5 +1,6 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
+import { appendAuditEvent } from "@/lib/data/audit-repository";
 import { sha256Hex, stableStringify } from "@/lib/domain/invoice";
 import {
   calculateReturnPosition,
@@ -8,7 +9,7 @@ import {
   type VatAdjustmentSubmission,
 } from "@/lib/domain/vat-lifecycle";
 import type { UserContext } from "@/lib/domain/types";
-import { getItasIdentityPort } from "@/lib/integrations/itas";
+import { getItasIdentityPort, ItasIntegrationUnavailableError } from "@/lib/integrations/itas";
 import { RepositoryConflictError } from "./repository";
 
 type PeriodContext = {
@@ -68,12 +69,9 @@ function commandRecord(db: D1Database, actorId: string, command: string, key: st
     VALUES (?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), actorId, command, key, hash, resourceType, resourceId, now);
 }
 
+/** Module 8 Phase D: delegates to the single shared hash-chain writer — see lib/data/audit-repository.ts's appendAuditEvent. */
 async function auditEnvelope(db: D1Database, actor: UserContext, action: string, resourceType: string, resourceId: string, details: Record<string, unknown>, now: string) {
-  const id = crypto.randomUUID();
-  const prior = await db.prepare("SELECT event_hash FROM audit_events ORDER BY occurred_at DESC LIMIT 1").first<{ event_hash: string }>();
-  const body = JSON.stringify(details);
-  const eventHash = await sha256Hex(`${prior?.event_hash ?? "GENESIS"}|${id}|${actor.userId}|${body}|${now}`);
-  return db.prepare("INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id, actor.userId, actor.role, action, resourceType, resourceId, "SUCCESS", body, prior?.event_hash ?? null, eventHash, now);
+  return appendAuditEvent(db, actor, action, resourceType, resourceId, details, now);
 }
 
 function outbox(db: D1Database, aggregateType: string, aggregateId: string, eventType: string, partitionKey: string, payload: Record<string, unknown>, now: string) {
@@ -128,7 +126,7 @@ export async function getVatLifecycleSnapshot(actor: UserContext) {
       ? db.prepare(`SELECT m.*,i.invoice_number,i.status AS invoice_status FROM reconciliation_matches m JOIN invoices i ON i.id=m.invoice_id WHERE m.taxpayer_id=? ORDER BY m.created_at DESC LIMIT 100`).bind(taxpayerId).all<Record<string, string | number | null>>()
       : db.prepare(`SELECT m.*,i.invoice_number,i.status AS invoice_status,t.legal_name FROM reconciliation_matches m JOIN invoices i ON i.id=m.invoice_id JOIN taxpayers t ON t.id=m.taxpayer_id ORDER BY m.created_at DESC LIMIT 100`).all<Record<string, string | number | null>>(),
   ]);
-  const provider = await getItasIdentityPort().status();
+  const provider = await getItasIdentityPort(db).status();
   return { periods: periods.results, approvals: approvals.results, submissions: submissions.results, rules: rules.results, reconciliation: reconciliation.results, provider };
 }
 
@@ -281,6 +279,32 @@ export async function decideVatApproval(taskId: string, decisionInput: unknown, 
   return db.prepare("SELECT * FROM approval_tasks WHERE id=?").bind(task.id).first<Record<string, unknown>>();
 }
 
+/**
+ * Module 10 Phase B: previously this only ever checked
+ * getItasIdentityPort().status() and branched on `.configured` — the port's
+ * own submitVatReturn method was dead code, never called by anything
+ * anywhere in this codebase. That meant swapping in a working adapter
+ * would still never actually submit anything; the calling code itself
+ * bypassed the anti-corruption layer's real submission path. Now genuinely
+ * calls itas.submitVatReturn() once the local AUTHORITY_APPROVED gate
+ * passes, with the same try/catch-ItasIntegrationUnavailableError
+ * fail-closed shape lib/data/identity-repository.ts's
+ * verifyTaxpayerIdentifiers already established. The tax-rule-authority
+ * gate stays a separate, purely local check ahead of the provider call —
+ * no reason to even attempt ITAS if the rule set itself isn't approved.
+ *
+ * Also fixes a genuine "unhandled error" this same audit found:
+ * vat_return_submissions has UNIQUE(provider, request_reference), and
+ * request_reference is deterministic per return version — so a taxpayer
+ * retrying a BLOCKED_CONFIGURATION submission under a fresh idempotency
+ * key (a legitimate "try again now that ITAS might be configured" action,
+ * distinct from replaying the exact same key) used to hit a raw UNIQUE
+ * constraint violation and 500. attempt_count already existed in the
+ * schema for exactly this case; a still-open prior attempt is now UPDATEd
+ * in place (attempt_count incremented) instead of INSERTed again, and an
+ * already-ACKNOWLEDGED submission is refused outright rather than
+ * re-attempted.
+ */
 export async function submitVatReturn(versionId: string, actor: UserContext, idempotencyKey: string, correlationId: string) {
   validateIdempotencyKey(idempotencyKey);
   const db = await ensureDatabase();
@@ -293,19 +317,63 @@ export async function submitVatReturn(versionId: string, actor: UserContext, ide
   const requestHash = await sha256Hex(stableStringify({ requestReference, vatNumber: version.vat_number, period: version.period_code, version: version.version_number, snapshot: version.ledger_snapshot_hash, boxes: boxesResult.results }));
   const replay = await commandReplay(db, actor.userId, "SUBMIT_VAT_RETURN", idempotencyKey, requestHash);
   if (replay) return db.prepare("SELECT * FROM vat_return_submissions WHERE id=?").bind(replay).first<Record<string, unknown>>();
-  const provider = await getItasIdentityPort().status();
-  const configured = provider.configured && rule.status === "AUTHORITY_APPROVED";
-  const status = configured ? "READY_FOR_PROVIDER" : "BLOCKED_CONFIGURATION";
-  const blocker = !provider.configured ? "ITAS technical contract and credentials are not configured." : "Tax rule set lacks authority approval.";
-  const id = crypto.randomUUID();
+
+  const priorAttempt = await db.prepare("SELECT id,status,attempt_count FROM vat_return_submissions WHERE provider='ITAS' AND request_reference=?").bind(requestReference).first<{ id: string; status: string; attempt_count: number }>();
+  if (priorAttempt?.status === "ACKNOWLEDGED") throw new RepositoryConflictError("This return has already been submitted and acknowledged by ITAS.");
+
+  const id = priorAttempt?.id ?? crypto.randomUUID();
+  const attemptCount = (priorAttempt?.attempt_count ?? 0) + 1;
   const now = new Date().toISOString();
+  let status: string;
+  let providerReference: string | null = null;
+  let responseHash: string | null = null;
+  let submittedAt: string | null = null;
+  let acknowledgedAt: string | null = null;
+  let blocker: string | null = null;
+  let eventType: string;
+
+  if (rule.status !== "AUTHORITY_APPROVED") {
+    status = "BLOCKED_CONFIGURATION";
+    blocker = "Tax rule set lacks authority approval.";
+    eventType = "VatReturnSubmissionBlocked";
+  } else {
+    try {
+      const result = await getItasIdentityPort(db).submitVatReturn({
+        requestReference, taxpayerVatNumber: version.vat_number, periodCode: version.period_code,
+        returnVersion: version.version_number, payloadHash: version.ledger_snapshot_hash,
+        boxes: boxesResult.results.map((box) => ({ code: box.box_code, amountCents: box.amount_cents })),
+        correlationId,
+      });
+      status = result.status === "ACCEPTED" ? "ACKNOWLEDGED" : "REJECTED_BY_PROVIDER";
+      providerReference = result.providerReference;
+      responseHash = result.responseHash;
+      submittedAt = result.submittedAt;
+      acknowledgedAt = result.status === "ACCEPTED" ? result.submittedAt : null;
+      if (result.status === "REJECTED") blocker = "ITAS rejected the submission.";
+      eventType = result.status === "ACCEPTED" ? "VATReturnSubmitted" : "VatReturnSubmissionBlocked";
+    } catch (error) {
+      if (!(error instanceof ItasIntegrationUnavailableError)) throw error;
+      status = "BLOCKED_CONFIGURATION";
+      blocker = "ITAS technical contract and credentials are not configured.";
+      eventType = "VatReturnSubmissionBlocked";
+    }
+  }
+
+  const submissionStatement = priorAttempt
+    ? db.prepare(`UPDATE vat_return_submissions SET
+        status=?, request_hash=?, provider_reference=?, response_hash=?, attempt_count=?, requested_by=?, requested_at=?, submitted_at=?, acknowledged_at=?, last_error=?
+        WHERE id=?`).bind(status, requestHash, providerReference, responseHash, attemptCount, actor.userId, now, submittedAt, acknowledgedAt, blocker, id)
+    : db.prepare(`INSERT INTO vat_return_submissions
+        (id,vat_return_version_id,provider,request_reference,status,request_hash,provider_reference,response_hash,attempt_count,requested_by,requested_at,submitted_at,acknowledged_at,last_error)
+        VALUES (?,?,'ITAS',?,?,?,?,?,?,?,?,?,?,?)`).bind(id, version.id, requestReference, status, requestHash, providerReference, responseHash, attemptCount, actor.userId, now, submittedAt, acknowledgedAt, blocker);
+
   await db.batch([
-    db.prepare(`INSERT INTO vat_return_submissions
-      (id,vat_return_version_id,provider,request_reference,status,request_hash,provider_reference,response_hash,attempt_count,requested_by,requested_at,submitted_at,acknowledged_at,last_error)
-      VALUES (?,?,'ITAS',?,?,?,?,?,0,?,?,NULL,NULL,?)`).bind(id, version.id, requestReference, status, requestHash, null, null, actor.userId, now, configured ? null : blocker),
+    submissionStatement,
     commandRecord(db, actor.userId, "SUBMIT_VAT_RETURN", idempotencyKey, requestHash, "VAT_RETURN_SUBMISSION", id, now),
-    outbox(db, "VAT_RETURN_VERSION", version.id, configured ? "VatReturnReadyForProvider" : "VatReturnSubmissionBlocked", version.taxpayer_id, { return_version_id: version.id, submission_id: id, status, blocker: configured ? null : blocker, correlation_id: correlationId }, now),
-    await auditEnvelope(db, actor, configured ? "VAT_RETURN_READY_FOR_PROVIDER" : "VAT_RETURN_SUBMISSION_BLOCKED", "VAT_RETURN_VERSION", version.id, { submissionId: id, status, blocker: configured ? null : blocker, correlationId }, now),
+    // event-catalog.csv's VATReturnSubmitted fires only on a genuine ITAS ACCEPTED outcome — every other
+    // path (local rule-authority gate, ITAS unavailable, provider REJECTED) is honestly VatReturnSubmissionBlocked.
+    outbox(db, "VAT_RETURN_VERSION", version.id, eventType, version.taxpayer_id, { vatReturnId: version.id, submissionId: id, payloadHash: version.ledger_snapshot_hash, submittedAt, status, blocker, correlationId }, now),
+    await auditEnvelope(db, actor, status === "ACKNOWLEDGED" ? "VAT_RETURN_ACKNOWLEDGED" : "VAT_RETURN_SUBMISSION_BLOCKED", "VAT_RETURN_VERSION", version.id, { submissionId: id, status, blocker, correlationId }, now),
   ]);
   return db.prepare("SELECT * FROM vat_return_submissions WHERE id=?").bind(id).first<Record<string, unknown>>();
 }

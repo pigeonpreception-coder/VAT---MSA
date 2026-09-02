@@ -31,9 +31,14 @@ interface R2Object {
   etag: string;
 }
 
+interface R2ObjectBody extends R2Object {
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
 interface R2Bucket {
   put(key: string, value: ArrayBuffer | ArrayBufferView | Blob | ReadableStream, options?: R2PutOptions): Promise<R2Object | null>;
   delete(key: string): Promise<void>;
+  get(key: string): Promise<R2ObjectBody | null>;
 }
 
 declare module "cloudflare:workers" {

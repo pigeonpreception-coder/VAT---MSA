@@ -9,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    await requireLicensedPermission(actor, "access-governance:manage", { operationClass: "COMPLIANCE_WRITE", requestedOrganisationId: organisationIdFrom(request) });
+    requirePermission(actor, "access-governance:manage");
     await requireStepUp(request, actor);
     return controlPlaneJson({ certification: await certifyQuarterlyAccess(actor, (await contextValue.params).id, await readBoundedJson(request, 16_384), organisationIdFrom(request)) }, context, 201);
   } catch (error) { return controlPlaneProblem(error, context); }
