@@ -48,3 +48,6 @@ yarn-error.log*
 # Architecture visual QA output and local source prompts
 /qa/
 Prompt - VATMS*.docx
+
+# Claude Code local (personal, per-machine) settings
+.claude/settings.local.json
