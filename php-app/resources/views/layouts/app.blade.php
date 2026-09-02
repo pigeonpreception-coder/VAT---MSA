@@ -29,6 +29,21 @@
                                 <a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
                             </li>
                         @endcan
+                        @can('permission', 'cases:manage')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('cases.index') }}" @if (request()->routeIs('cases.*')) aria-current="page" @endif>Audit cases</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'compliance:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('compliance.index') }}" @if (request()->routeIs('compliance.*')) aria-current="page" @endif>Compliance</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'refunds:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>Refunds</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}

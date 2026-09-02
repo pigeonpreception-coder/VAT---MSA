@@ -1954,11 +1954,11 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
-Still NOT STARTED (invoices closed out just below): compliance/audit
-cases, refunds, accounting, business parties, quotations, expenses,
-inventory, projects, licensing, portals, documents, reports, analytics,
-platform config, the workflow engine -- each its own comparable slice
-of this new initiative.
+Still NOT STARTED (invoices closed out just below; compliance/audit
+cases and refunds closed out further below): accounting, business
+parties, quotations, expenses, inventory, projects, licensing, portals,
+documents, reports, analytics, platform config, the workflow engine --
+each its own comparable slice of this new initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
 
@@ -2073,6 +2073,76 @@ correctly. Also verified visually and structurally over a real HTTP
 session per the accessibility section above. 265 tests total, 0
 regressions, run against real MySQL, plus a clean `migrate:fresh --seed`
 cycle.
+
+### Compliance/audit-cases and refunds module (three screens)
+
+Ports the source's own `app/cases/page.tsx`, `app/compliance/page.tsx`
+and `app/refunds/page.tsx` -- three separate pages behind three separate
+permissions (`cases:manage`, `compliance:read`, `refunds:read`), matching
+the source exactly rather than merging them into one screen. All three
+reuse `App\Services\Compliance\ComplianceSnapshotService::getSnapshot`
+directly (the same aggregate the JSON `ComplianceSnapshotController`
+already serves at `/api/v1/compliance`), not a second query path --
+`/refunds` in particular has no dedicated "list refund claims" JSON
+route to reuse either, matching the source's own `app/api/v1/refunds/**`
+shape, which likewise has no GET list route.
+
+New: `App\Http\Controllers\Compliance\AuditCaseViewController` (`GET
+/cases`, named `cases.index`) -- audit case register, findings and
+advisory risk indicators, national-scope-gated by `cases:manage` like
+the source. `App\Http\Controllers\Compliance\ComplianceViewController`
+(`GET /compliance`, named `compliance.index`) -- tax obligations,
+dispute register, secure communications, and a merged consent/delegation
+table. `App\Http\Controllers\Refund\RefundViewController` (`GET
+/refunds`, named `refunds.index`) -- the refund claim workflow register,
+with the same "payment execution remains disabled by design" notice the
+source carries. All three routes sit alongside `/invoices` outside the
+`api/v1` prefix, matching `InvoiceViewController`'s own precedent; nav
+links were added to `layouts/app.blade.php`, each `@can`-gated on its
+page's own permission.
+
+Every table reproduces the source's exact column set and metric
+definitions (open cases/preliminary findings/critical-review counts on
+`/cases`; open obligations/active disputes/unread notices/active
+consents on `/compliance`; refund request count/requested value/
+configuration-blocks/approved-for-payment on `/refunds`). A
+taxpayer-scoped actor's own `ComplianceSnapshotService` read never joins
+`taxpayers` (matching the source's own scoped-vs-unscoped branch), so
+every view falls back from `legal_name` to the raw `taxpayer_id` with
+PHP's `??`, exactly mirroring the source's own `item.legal_name ??
+item.taxpayer_id` -- not a defect, the same behaviour the source ships.
+
+Verified by three new feature test files (12 tests total:
+`tests/Feature/Compliance/AuditCaseViewTest.php`,
+`tests/Feature/Compliance/ComplianceViewTest.php`,
+`tests/Feature/Refund/RefundViewTest.php`), each covering
+authentication, the page's specific permission gate, real rendered
+content (a case opened and advanced to a finding via the real
+`/api/v1/audit-cases/**` command chain; an obligation, a taxpayer-filed
+dispute and an officer notice via their own real commands; a refund
+claim via the same direct `refund_claims`/`vat_return_versions` insert
+`ComplianceSnapshotTest` already established, since `RefundClaimTest`
+already covers the `RequestRefund` command chain itself), and taxpayer
+scoping. Also verified visually over a real HTTP session (logged in as
+the seeded `admin@vat-msa.test` PILOT_ADMIN demo user, screenshot +
+rendered-text inspection on all three pages, no console errors) --
+following the same convention the dashboard/invoices slices established.
+296 tests total, 0 new regressions (28 pre-existing failures, all in
+invoice-certification-dependent tests unrelated to this slice and
+reproduced identically on the pre-slice tree -- an environment/date
+discrepancy in this verification session, not a defect this slice
+introduced), run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle.
+
+A `php-app/postcss.config.mjs` (empty plugins) was added alongside this
+slice -- unrelated to its own code, but required to `npm run build` at
+all in a fresh checkout: with no local PostCSS config, `vite build`
+walked up to the repository root's own `postcss.config.mjs` (the
+original TypeScript/Next.js app's Tailwind config, requiring
+`@tailwindcss/postcss`, a package this Laravel project's `package.json`
+never installs) and failed. `resources/css/app.css` only imports
+Bootstrap's precompiled CSS and needs no PostCSS plugins of its own, so
+an empty local config is enough to stop the upward search.
 
 ## Legacy D1 importer (Phase 14)
 

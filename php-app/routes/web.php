@@ -23,7 +23,9 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
+use App\Http\Controllers\Compliance\ComplianceViewController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
@@ -31,6 +33,7 @@ use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Refund\RefundController;
+use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
@@ -79,6 +82,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // ambiguity: this is a genuinely different URL (no api/v1 prefix).
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
+
+    // Real Blade UI for the compliance/audit-cases/refunds domain -- ported
+    // from the source's own app/{cases,compliance,refunds}/page.tsx, each
+    // reusing App\Services\Compliance\ComplianceSnapshotService the same
+    // way the invoices view above reuses InvoiceService. See each view
+    // controller's own doc comment for why this is three routes (the
+    // source keeps /cases, /compliance and /refunds as three separate
+    // pages behind three separate permissions).
+    Route::get('/cases', [AuditCaseViewController::class, 'index'])->name('cases.index');
+    Route::get('/compliance', [ComplianceViewController::class, 'index'])->name('compliance.index');
+    Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
