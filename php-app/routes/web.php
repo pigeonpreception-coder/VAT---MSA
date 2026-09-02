@@ -31,6 +31,7 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
+use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
@@ -249,6 +250,17 @@ Route::middleware('auth')->group(function () {
         Route::post('/reports/exports/{id}/approval', [ReportController::class, 'approveExport']);
         Route::post('/reports/exports/{id}/cancellation', [ReportController::class, 'cancelExport']);
         Route::get('/reports/exports/{id}/download', [ReportController::class, 'downloadExport']);
+
+        // Module 7 Phase D's data-products/analytics reads and commands
+        // (Phase 13, fifth slice) -- kept 1:1 with the source's own
+        // app/api/v1/analytics/** route shapes. See
+        // App\Services\Platform\DataProductService's own doc comment for
+        // what else in platform-repository.ts remains out of this slice.
+        Route::get('/analytics/data-products', [DataProductController::class, 'index']);
+        Route::post('/analytics/data-products/{id}/model-runs', [DataProductController::class, 'runModel']);
+        Route::post('/analytics/data-products/{id}/publications', [DataProductController::class, 'publish']);
+        Route::get('/analytics/metrics', [DataProductController::class, 'metrics']);
+        Route::get('/analytics/anomalies', [DataProductController::class, 'anomalies']);
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
