@@ -46,7 +46,7 @@ below for the specific commands.
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
 | 11 | Compliance/audits/disputes/refunds/risk | COMPLETE -- every one of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- including `VAT_RETURN`- and `DOCUMENT`-sourced citations, see "VAT_RETURN evidence citation" and "DOCUMENT evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below), and now `getComplianceSnapshot` (see "Compliance dashboard snapshot" below) -- the phase's last remaining gap. Nothing outstanding in this phase's own scope. |
 | 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
-| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | PARTIAL -- `platform-repository.ts` is now entirely COMPLETE: Module 22's own Documents & Records slice (`uploadDocument`/`completeDocumentScan`, pulled forward in Phase 11, plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below), the platform/developer-portal snapshot reads (`getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below), the offline sync command (`receiveOfflineBatch` -- see "Offline sync commands" below), report exports (`runInlineReport`/`publishReportRun`/`requestReportExport`/`approveReportExport`/`cancelReportExport`/`getReportExport`/`downloadReportExport` -- see "Report exports" below), data products & analytics (`listDataProducts`/`runAnalyticsModel`/`publishDataProduct`/`queryApprovedMetrics`/`listAnomalyCandidates` -- see "Data products & analytics" below), and platform config/change-management (`getPlatformConfig`/`listPlatformChangeRequests`/`requestPlatformChange`/`decidePlatformChange`/`provisionPlatformStaff` -- see "Platform config & change-management" below). Only Phases 14-15 (the legacy D1 importer and deployment documentation) remain NOT STARTED. |
+| 13-15 | Documents/integrations/offline/reports, legacy importer, deployment docs | COMPLETE for its actual scope -- `platform-repository.ts` is entirely ported: Module 22's own Documents & Records slice (`uploadDocument`/`completeDocumentScan`, pulled forward in Phase 11, plus `supersedeDocument`/`getDocumentVersionHistory`/`setDocumentRetentionHold`/`downloadDocument` -- see "Document module (closes out Module 22)" below), the platform/developer-portal snapshot reads (`getPlatformSnapshot`/`getTechnicalPlatformSnapshot`/`getDocumentCustodySummary`/`getDeveloperPortalSnapshot` -- see "Platform snapshots" below), the offline sync command (`receiveOfflineBatch` -- see "Offline sync commands" below), report exports (`runInlineReport`/`publishReportRun`/`requestReportExport`/`approveReportExport`/`cancelReportExport`/`getReportExport`/`downloadReportExport` -- see "Report exports" below), data products & analytics (`listDataProducts`/`runAnalyticsModel`/`publishDataProduct`/`queryApprovedMetrics`/`listAnomalyCandidates` -- see "Data products & analytics" below), and platform config/change-management (`getPlatformConfig`/`listPlatformChangeRequests`/`requestPlatformChange`/`decidePlatformChange`/`provisionPlatformStaff` -- see "Platform config & change-management" below). Phase 14 (legacy D1 importer) is COMPLETE as a real, generic, reusable cutover tool -- see "Legacy D1 importer (Phase 14)" below for why it is verified against a synthetic fixture rather than a real dataset (none exists in this repository). Phase 15 (deployment documentation) is COMPLETE -- see `docs/DEPLOYMENT.md`. Every phase in this migration's own tracked scope is now COMPLETE. |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -1884,6 +1884,111 @@ duplicate-identity/email and invalid-role refusal, and a real success
 244 tests total, 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
+## Legacy D1 importer (Phase 14)
+
+`php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
+(`App\Console\Commands\ImportLegacyD1Data`, backed by
+`App\Support\Migration\LegacyD1Importer`) -- a real, generic, reusable
+cutover tool for importing an actual `wrangler d1 export` SQLite file
+into this MySQL schema, table-by-table, structurally.
+
+**There is no real legacy dataset anywhere in this repository.** The
+original Cloudflare D1 database was never checked into source control;
+the only D1-shaped data present locally is `db/runtime.ts`'s own
+hardcoded demo/seed `INSERT OR IGNORE` statements, and those rows are
+already fully ported via this migration's own `DemoSeeder`/
+`RoleSeeder`/`PermissionSeeder`/etc. (Phase 5). Given the choice between
+building a real, generic tool verified against a small synthetic
+fixture, or marking this phase deferred/blocked since nothing real
+exists to import, the former was chosen: the tool is genuinely useful
+whenever an actual cutover happens, and its own mechanics (table/column
+discovery, the one documented rename, type-aware value casting,
+idempotent writes) are fully exercisable and verifiable without a real
+dataset -- what specifically CANNOT be verified here is fidelity
+against real, messy legacy data, and that limitation is stated plainly
+rather than implied away by a passing test suite.
+
+**Mechanics**: this migration's own "UUID `TEXT` primary keys
+throughout" design decision (see "Design decisions carried through the
+whole migration" below) means a cutover is a straight, structural row
+copy, not an FK-remapping exercise -- every id and every FK referencing
+one is byte-identical between a D1 export and this MySQL schema. For
+every table present in both the source export and this schema, every
+column present in both is copied (a source column with no MySQL
+counterpart is skipped and reported, not silently dropped -- this is
+how `positions`, schema-only and never built, stays harmless if present
+empty in an export); values are cast per the MySQL column's own
+`information_schema` type (a `timestamp`/`date` column is reparsed,
+since D1/SQLite's ISO-8601 strings like `2026-08-10T08:30:00Z` are not
+valid MySQL date/time literals; an `enum` column is passed through
+verbatim -- a value the column's own definition does not allow is a
+real fidelity problem this importer deliberately does not paper over).
+Writes use `INSERT IGNORE`, mirroring the source's own `INSERT OR
+IGNORE` seed convention exactly, so a rerun against the same export is
+safely idempotent. Foreign-key checks are disabled for the run's
+duration (standard bulk-load practice, since a D1 export's own table
+order is not guaranteed FK-safe) and re-enabled afterward; this
+importer does not itself verify referential integrity post-import -- a
+real cutover should follow it with this migration's own already-
+verified reports/snapshots as the actual reconciliation check against
+the legacy system's own real figures, not a bespoke integrity-scanning
+feature built here against data that cannot be tested.
+
+**The one documented rename**: the source's `app_users` table merges
+onto Laravel's native `users` table (see the identity-core migration's
+own design-decision note); the importer maps that table name and its
+`display_name` -> `name` column rename explicitly. `users.password` is
+`NOT NULL` in this schema but the source's own account concept never
+has a local password at all (federated-identity-only) -- the importer
+injects a random, nobody-knows-it `Hash::make(Str::random(40))`, the
+same documented approach `PlatformChangeService::provisionStaff()`
+already established, satisfying the column without granting any real
+local-login capability.
+
+Verified by a new `tests/Feature/Console/LegacyD1ImportTest.php` (7
+tests) against a small synthetic SQLite fixture built via raw PDO
+(deliberately not through Laravel's own schema builder, to stand in for
+an independently-produced export file): dry-run reports without writing
+anything; a real run imports rows correctly with the documented rename
+and timestamp reformatting applied; a rerun against the same export is
+idempotent (no duplicate rows); `--only` scopes the import to named
+tables; an unreadable path fails with a clear error rather than a stack
+trace; and the console command itself runs end-to-end, including its
+own destructive-write confirmation prompt. 251 tests total, 0
+regressions, run against real MySQL, plus a clean `migrate:fresh --seed`
+cycle.
+
+## Deployment documentation (Phase 15)
+
+`docs/DEPLOYMENT.md` -- the ops runbook this phase's own scope calls
+for: what changed vs. the original Cloudflare stack (a table mapping
+every substitution -- compute, database, object storage, auth, step-up,
+identity federation, background jobs -- to what actually exists in this
+port, not what the architecture documents aspire to), requirements
+(PHP/MySQL version floors, with the same "tested on 8.2.12/MariaDB
+10.4.32, re-verify against the real 8.3+/MySQL 8 target" caveat this
+matrix already carries throughout), first-time setup (including the
+important distinction between `DatabaseSeeder`, which chains
+`DemoSeeder` and is demo/pilot-only, and the individual real-data
+seeders a genuine deployment should run instead), a full environment-
+variable reference cross-checked against `.env.example`, the legacy
+cutover runbook (Phase 14, above), a storage section (why no
+`storage:link` is needed or should exist, and what backing up
+`storage/app/private` actually means without R2's own redundancy), how
+to run the test suite safely (against a disposable database, never a
+real one -- `RefreshDatabase` truncates), and an honest "what is not
+done yet" section that does not let a real production rollout discover
+gaps by surprise: no password-reset flow, no full TOTP step-up parity,
+platform-config values not yet wired to any real downstream consumer,
+no real object-storage driver configured.
+
+No test suite applies to a documentation-only phase; verification here
+is that every factual claim in the document (version numbers, config
+keys, table/column names, command signatures) was checked against this
+repository's own `composer.json`/`.env.example`/`config/*.php`/
+migration files/service doc comments while writing it, not asserted
+from memory.
+
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
 Opens Phase 12 -- previously entirely `NOT STARTED`. `lib/data/control-
@@ -2645,60 +2750,60 @@ the repo root still has all of them, by design -- it remains the live
 reference implementation until the PHP system is verified module-for-module
 against it.
 
-## Next steps (not started, listed so nothing is silently dropped)
+## Next steps
 
-The organisation-scope trait's own nine permanently-excluded models
-(`RefundClaim`/`VatReturnVersion`/`ApprovalTask`/`VatPeriod`/`AuditCase`/
-`OrganisationCapability`/`CommunicationThread`/`Communication`/
-`DocumentMetadata` -- see "Organisation-scope trait retrofit",
-"Organisation-scope trait: the nullable-column exclusions" and "Document
-module" above) each keep their existing manual tenant checks fully
-correct and untouched; this was always about which models this specific
-automatic-scope mechanism can safely sit on top of, never a security gap
-in those models themselves, so no further action is owed there beyond
-the documented reasoning. Phase 13 is now COMPLETE for its actual scope,
-all six slices closed: Module 22's own Documents & Records (see
-"Document module" above), the platform/developer-portal snapshot reads
-(see "Platform snapshots" above), the offline-sync command (see
-"Offline sync commands" above), report exports (see "Report exports"
-above), data products & analytics (see "Data products & analytics"
-above), and platform config/change-management (see "Platform config &
-change-management" above) -- `platform-repository.ts` is now entirely
-ported, every export has a PHP counterpart. Phases 14-15 in full (the
-legacy D1 importer and deployment documentation) remain the only
-outstanding work in this entire migration.
-Phase 4 is now COMPLETE for its actual scope (154 of 155 tables -- see
-"Remaining schema conversion" above; `positions` stays deliberately
-excluded, the source never writes to it either). Phase 5 is now COMPLETE
-for its actual scope too (see "Demo seed gaps for already-shipped
-features" above). Phase 7 is now COMPLETE for its actual scope as well --
-the trait exists, is proven correct, and is now applied to 43 models
-across Phases 8-12 (see "Organisation-scope trait", "Organisation-scope
-trait retrofit" and "Organisation-scope trait: the nullable-column
-exclusions" above); the nine explicitly excluded models are a closed,
-documented list, not an open item. Phases 8, 9, 10,
-11 and 12 (organisations/taxpayers/administration, invoices/VAT,
-accounting/commercial, compliance/audits/disputes/refunds/risk, and
-portals/licensing/governance) are now all fully COMPLETE -- see "Identity
-foundation snapshot", "Standalone VAT-rule routes", "Supplier
-verification", "Compliance dashboard snapshot" and "Administration
-snapshot & portals" above. This is genuinely a multi-week engineering
-effort at the pace of careful, verified, per-field-checked porting
-demonstrated in this session's Phase 3/4/5/6/7/8/9/10/11/12/13 slices --
-continuing it means repeating this same rigor across the remaining
-~89 routes (the schema itself is now essentially done, and Phase 13 is
-now entirely done), phase by phase (or sub-slice by sub-slice, as
-Phases 10, 11, 12 and 13 all demonstrated), as originally scoped. Given
-the genuine scale each remaining module represents
-(`control-plane-repository.ts` alone, at ~1,200 lines and ~30 exports,
-was comparable in size to the whole of Phase 10's `business-
-repository.ts`, which itself took 6 separate sub-slices to close out --
-Phase 12 took 6, counting the two small files closed out alongside its
-own final slice, and Phase 13 took 6 sub-slices across
-`platform-repository.ts`'s own six genuinely distinct sub-modules;
-Phases 4, 5, 7, 8, 9, 10, 11, 12 and 13 are now all entirely done),
-continuing
-to completion is realistically a
-multi-session effort, not a single
-continuous run -- this document is the honest record of exactly how far
-that effort has gotten at each point.
+**Every phase this migration originally scoped (1 through 15) is now
+COMPLETE for its own actual scope.** This is genuinely the end state of
+a multi-week engineering effort carried out at the pace of careful,
+verified, per-field-checked porting across this session's own
+Phase 3/4/5/6/7/8/9/10/11/12/13/14/15 slices -- 251 tests, all run
+against real MySQL/MariaDB (never SQLite), 0 regressions at every step,
+each phase closed with a clean `migrate:fresh --seed` cycle before being
+marked done. `lib/data/**` and `lib/api/**`'s entire exported surface
+(every repository file: identity, invoices/VAT, business/accounting,
+compliance, control-plane, and platform) now has a ported, tested PHP
+counterpart. `docs/DEPLOYMENT.md` (Phase 15) is the operational
+follow-on to this document.
+
+That does not mean there is nothing left before a real production
+rollout -- it means what is left is genuinely different in kind from
+"port the next function," and is recorded honestly rather than implied
+away by a fully-green test suite:
+
+- **The organisation-scope trait's nine permanently-excluded models**
+  (`RefundClaim`/`VatReturnVersion`/`ApprovalTask`/`VatPeriod`/
+  `AuditCase`/`OrganisationCapability`/`CommunicationThread`/
+  `Communication`/`DocumentMetadata` -- see "Organisation-scope trait
+  retrofit", "Organisation-scope trait: the nullable-column exclusions"
+  and "Document module" above) each keep their existing manual tenant
+  checks fully correct and untouched; this was always about which
+  models this specific automatic-scope mechanism can safely sit on top
+  of, never a security gap in those models themselves. Closed,
+  documented, not an open item.
+- **A handful of documented, non-blocking gaps** carried since early in
+  this migration and never silently dropped: no password-reset flow
+  (Phase 6), TOTP step-up parity is Laravel's `password.confirm`
+  re-authentication rather than the source's own server-verified TOTP
+  (Phase 6; the `step_up_events`/`mfa_totp_credentials` tables exist,
+  schema-only), platform-config values are not yet wired to any real
+  downstream consumer (Phase 13's "Platform config & change-management"
+  above), and no real S3/R2-compatible object-storage driver is
+  configured (`docs/DEPLOYMENT.md`'s "Storage" section) -- a config
+  change only, given every service already goes through Laravel's
+  `Storage::disk(...)` interface.
+- **Re-verification against the actual target runtime.** Every
+  verification in this session ran on PHP 8.2.12 and MariaDB 10.4.32
+  (XAMPP), flagged throughout as differing from a PHP 8.3+/MySQL 8
+  target; code was deliberately written to avoid anything that needs
+  8.3+ or MySQL-8-only syntax, but this substitution should be
+  confirmed, not assumed, before production use.
+- **A real legacy-data cutover, if one is ever needed.** The Phase 14
+  importer (`php artisan legacy:import-d1`) is real and generic, but it
+  has only ever run against a synthetic fixture -- there is no actual
+  legacy dataset anywhere in this repository to import. `docs/
+  DEPLOYMENT.md`'s "Legacy data cutover" section is the runbook for
+  when a real export exists.
+
+None of these block a pilot/demo deployment on the ported functionality
+itself; they are the honest difference between "every phase is
+complete" and "nothing is left to ever think about again."
