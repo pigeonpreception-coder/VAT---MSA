@@ -37,16 +37,16 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 109 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) plus Phase 12 slice 2's organisation-administration/employees tables (access_reviews, departments, business_units, job_titles, employees, organisation_administrator_roles, organisation_administrators, organisation_roles, organisation_role_permissions, user_capability_assignments, user_role_assignments) plus Phase 12 slice 3's portal-navigation tables (navigation_workspaces, navigation_folders, navigation_items, navigation_preferences) plus Phase 12 slice 4's Access-governance tables (access_requests, access_approvals, access_certifications) plus Phase 12 slice 5's workflow-engine tables (sod_rules, sod_violations, workflows, workflow_versions, workflow_nodes, workflow_transitions, workflow_conditions, workflow_instances, workflow_assignments, workflow_approvals, workflow_delegations) |
+| 4 | Convert database schema to MySQL migrations | PARTIAL -- 110 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) plus Phase 12 slice 2's organisation-administration/employees tables (access_reviews, departments, business_units, job_titles, employees, organisation_administrator_roles, organisation_administrators, organisation_roles, organisation_role_permissions, user_capability_assignments, user_role_assignments) plus Phase 12 slice 3's portal-navigation tables (navigation_workspaces, navigation_folders, navigation_items, navigation_preferences) plus Phase 12 slice 4's Access-governance tables (access_requests, access_approvals, access_certifications) plus Phase 12 slice 5's workflow-engine tables (sod_rules, sod_violations, workflows, workflow_versions, workflow_nodes, workflow_transitions, workflow_conditions, workflow_instances, workflow_assignments, workflow_approvals, workflow_delegations) plus `document_metadata` (Module 22's own central table, pulled forward as the real prerequisite for closing Phase 11's `DOCUMENT`-sourced evidence citation gap -- see "DOCUMENT evidence citation" below) |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, IdentityProviderSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
 | 8 | Organisations, taxpayers, administration | COMPLETE -- registration submission/decision (with materialization), taxpayer suspension, branch list/create/update, membership assignment, `getIdentityFoundationSnapshot` (see "Identity foundation snapshot" below), and (Phase 12, see "Organisation administration & employees" and "Access governance" below) employees (including `terminateEmployee`'s own workflow-task reassignment, closed out once Phase 12 slice 5 built the tables it needed), organisation-defined custom roles (`organisation_roles`/`organisation_role_permissions`), capability grants, and access requests. The `positions` table is not built -- never written by the source itself, so genuinely nothing to port. |
 | 9 | Invoices and VAT | COMPLETE -- invoice certification (`TAX_INVOICE`/`SIMPLIFIED_TAX_INVOICE`/`SELF_BILLED_INVOICE`) and correction (`CREDIT_NOTE`/`DEBIT_NOTE`) submission, VAT-rule resolution, idempotent replay (including the concurrent-race recovery path), the ledger/certificate/audit/outbox/security-event side effects, invoice list/detail reads, officer-only cancellation with its reversing ledger entries, per-line VAT-rule explanation, and the full cross-invoice transaction timeline (see "Invoice lifecycle completion"). Also COMPLETE (see "VAT-return-generation prerequisite"): the full `vat-lifecycle-repository.ts` surface built on top of these tables -- VAT periods/adjustments/return generation/maker-checker approval/ITAS submission -- Phase 9's own deferred scope, built to unblock Phase 11's refund slice. Also now COMPLETE (see "Standalone VAT-rule routes" below): `listVatRules`/`proposeVatRule`/`approveVatRule`/`evaluateVatRule` -- `lib/data/vat-rule-repository.ts`'s remaining exports, the last narrow gap this phase had. |
 | 10 | Accounting/commercial | COMPLETE -- all of business-repository.ts's ~36 functions across all 5 sub-slices: business parties (incl. `verifySupplier`/`getSupplierVerificationHistory` -- see "Supplier verification" below), quotations (incl. conversion into a real certified invoice via Phase 9's InvoiceService), accounting (chart of accounts, journal posting/reversal, period close, trial balance, financial statements), expenses (categories, the DRAFT->SUBMITTED->APPROVED/REJECTED maker-checker lifecycle, expense reporting), inventory (products, warehouses, stock movements/transfers with weighted-average costing, availability/valuation), and projects (budgets with maker-checker approval, cost posting from an approved expense or manually, profitability reusing the accounting infrastructure for revenue). |
-| 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- now including `VAT_RETURN`-sourced citations, see "VAT_RETURN evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: `DOCUMENT`-sourced evidence citation (still blocked on the unbuilt `document_metadata` table and its Module 22 quarantine/scan pipeline) and the compliance dashboard snapshot aggregate -- both deferred, not silently dropped. |
+| 11 | Compliance/audits/disputes/refunds/risk | COMPLETE for its actual scope (see below) -- effectively all of compliance-repository.ts's ~30 functions: audit cases (the full PROPOSED->...->CLOSED lifecycle state machine, findings, evidence with custody events and legal hold -- now including both `VAT_RETURN`- and `DOCUMENT`-sourced citations, see "VAT_RETURN evidence citation" and "DOCUMENT evidence citation" below -- and append-only notes), tax obligations (create/mark-satisfied), disputes (taxpayer self-filing), risk (assign review/approve action/evaluate/restricted query, including the risk->case escalation gate), communications/conversations (SendNotice/Respond/Close/Inbox/GetConversation, referencing an audit case or reconciliation exception), the standalone notification commands (queue/cancel/mark-read/preferences/list), and the refund workflow (request/checks/transition/dispute -- a real adjacency-list state machine with maker-checker, unblocked by the VAT-return-generation prerequisite; see that section below). NOT covered: the compliance dashboard snapshot aggregate -- deferred, not silently dropped. |
 | 12 | Portals/licensing/governance | COMPLETE -- every function in `lib/data/control-plane-repository.ts` (~30 exports across 5 sub-domains) is now ported, plus `lib/portals.ts` (a genuinely separate file, found and closed out alongside `getAdministrationSnapshot`/`searchWorkspace` -- see "Administration snapshot & portals" below). Slice 1 (see "Licensing & Entitlements" below): GetEntitlements/GetUsage/Activate-Suspend-Renew/Upgrade, a real licence state machine with plan-change history. Slice 2 (see "Organisation administration & employees" below): inviteEmployee/activateEmployee/terminateEmployee/appointAdministrator/createOrganisationRole/listCapabilityGrants/grantCapability, plus `assertEntitledOperation` (the internal cross-cutting entitlement gate) and `openQuarterlyAccessReview` -- also closing out "the rest of Phase 8"'s own deferred employees/custom-roles gap. Slice 3 (see "Portal navigation" below): getEffectiveNavigation/getNavigationChildren/getNavigationItemActions/saveNavigationPreference. Slice 4 (see "Access governance" below): requestRoleAccess/decideAccessRequest/certifyQuarterlyAccess/revokeAccessGrant/offboardUser. Slice 5 (see "Workflow engine" below): createWorkflowDraft/publishWorkflowVersion/assignWorkflow/decideWorkflowTask/testWorkflowVersion/createDelegation/listDelegations/revokeDelegation (Module 8 Phase C). Final slice: `getAdministrationSnapshot` (the fixed-list dashboard aggregate every other GET-list route across all five slices bundles into), `searchWorkspace` (a small, genuinely separate Workspace & Navigation route), and `lib/portals.ts`'s `getAvailablePortals`. Nothing outstanding in this phase's own scope. |
-| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | NOT STARTED |
+| 13-15 | Documents/integrations/offline/reports through legacy importer and deployment docs | NOT STARTED, except a minimal slice of Module 22 (`document_metadata` + `uploadDocument`/`completeDocumentScan`) pulled forward to unblock Phase 11 -- see "DOCUMENT evidence citation" below. Supersession/version chains, retention holds as their own standalone command, download URLs, the platform/developer-portal snapshots, offline sync, integrations, and report exports are all still NOT STARTED. |
 
 ## Verification performed (this session, not claimed without evidence)
 
@@ -591,9 +591,11 @@ the Phase 11 matrix row above for current status): refunds and
 `vat_return_versions`, a real prerequisite this migration had not built
 yet at the time -- both are since done (see "Refund workflow" and
 "VAT_RETURN evidence citation" below). `DOCUMENT`-sourced evidence
-citation and `getComplianceSnapshot` (the fixed-list dashboard aggregate,
-consistent with the same deferral pattern applied to
-`getBusinessPlatformSnapshot` in Phase 10) remain genuinely outstanding.
+citation was anchored to `document_metadata`, likewise not yet built --
+also since done (see "DOCUMENT evidence citation" below). Only
+`getComplianceSnapshot` (the fixed-list dashboard aggregate, consistent
+with the same deferral pattern applied to `getBusinessPlatformSnapshot` in
+Phase 10) remains genuinely outstanding.
 The source's own partial unique index on `audit_evidence`
 (`WHERE status='PRESERVED'`) has no MySQL/MariaDB equivalent and is
 enforced at the application layer only -- see that migration's own doc
@@ -970,10 +972,11 @@ Phase 11 slice-1 code. Ports `lib/data/compliance-repository.ts`'s
 than inlining the resolution logic separately in each of the two callers
 that need it), matching the source's own stated intent -- "the single
 place both AddEvidence ... and RecordEvidenceCustodyEvent's VERIFY action
-... derive it from, so the two can never silently disagree." `DOCUMENT`
-remains explicitly rejected with a `422` (not silently accepted, not
-crashing) -- `document_metadata` and its Module 22 clean-scan quarantine
-pipeline are still unported, tracked as the one remaining Phase 11 gap.
+... derive it from, so the two can never silently disagree." At the time
+this slice shipped, `DOCUMENT` was still explicitly rejected with a `422`
+-- `document_metadata` and its Module 22 clean-scan quarantine pipeline
+were not yet ported. That gap is now closed; see "DOCUMENT evidence
+citation" immediately below.
 
 Verified by a new PHPUnit test extending
 `tests/Feature/Compliance/ComplianceCaseTest.php` (117 total, 0
@@ -982,9 +985,86 @@ cited as evidence, its `ledger_snapshot_hash` becomes the evidence's
 `checksum_sha256` exactly as `resolveEvidenceChecksum` specifies, and a
 later `VERIFY` custody event correctly re-derives and confirms it
 (`integrity_verified=1`) -- the same round-trip the existing `INVOICE`
-evidence test already proved, now shown to hold for `VAT_RETURN` too; a
-`DOCUMENT` citation attempt in the same test still gets a clean `422`, not
-a crash or a silent accept. No bugs surfaced this pass.
+evidence test already proved, now shown to hold for `VAT_RETURN` too. No
+bugs surfaced this pass.
+
+## DOCUMENT evidence citation (closes out Phase 11's last gap)
+
+Pulls forward the minimal real prerequisite `addEvidence`/
+`recordEvidenceCustodyEvent`'s `DOCUMENT` branch always needed:
+`document_metadata` (Module 22's own central table) plus just enough of
+`lib/data/platform-repository.ts` to populate and transition it --
+`uploadDocument` and `completeDocumentScan` -- rather than inventing a
+shortcut around the real dependency, the same discipline the VAT-return-
+generation prerequisite and Phase 12 slice 2's `access_reviews` pull-
+forward already established. `platform-repository.ts` is genuinely a much
+larger module (platform/developer-portal snapshots, document supersession
+and version chains, retention holds as their own standalone command,
+report exports, offline sync, integrations -- comparable in scope to a
+real slice of Phase 13 on its own), so this stays scoped to exactly the
+Upload -> Quarantine -> ScanDecision chain and nothing past it; everything
+else in that file remains genuinely `NOT STARTED`, tracked in the Phase
+13-15 row above, not silently expanded into this slice.
+
+New: `App\Models\DocumentMetadata` (the `document_metadata` migration,
+matching `db/runtime.ts`'s own columns exactly); `App\Domain\Document\
+DocumentValidator` (ported from `lib/domain/platform.ts`'s `safeFileName`/
+`validateDocumentScanResult`); `App\Exceptions\PlatformResourceException`/
+`PlatformValidationException` (this file's own error classes -- a genuinely
+separate source file from `business-repository.ts`, so it gets its own
+exception pair rather than reusing `BusinessResourceException`/
+`BusinessValidationException`, matching this migration's established
+one-exception-pair-per-source-file convention); `App\Services\Document\
+DocumentService` (`upload()`/`completeScan()`, reusing `App\Support\
+Business\OrganisationResolver` and `App\Support\Business\CommandLedger`
+unchanged -- both already matched their TypeScript counterparts exactly);
+`App\Http\Controllers\Document\DocumentController` (`POST /api/v1/
+documents`, `documents:upload`; `POST /api/v1/documents/{id}/scan-result`,
+`documents:manage`, national-scope only).
+
+Cloudflare R2 (`env.DOCUMENTS`, an `R2Bucket` binding) has no Laravel
+equivalent anywhere in this migration yet -- the first real file-storage
+feature this migration has needed. Substituted with Laravel's own `local`
+filesystem disk (`Storage::disk('local')`), keeping the source's exact
+`quarantine/{organisation_id}/{document_id}/{file_name}` object-key shape
+so a real object-storage adapter is a disk-driver swap later, not a
+key-shape rewrite. The magic-byte content-sniffing check
+(`matchesDeclaredType` -- SECURITY_GAP_ASSESSMENT.md item #7, "never trust
+a client-declared MIME type alone") is ported byte-for-byte (PDF, PNG,
+JPEG, XLSX-as-ZIP magic numbers; CSV via the same bounded NUL-byte
+heuristic) -- not simplified into relying on Laravel's own fileinfo-based
+MIME detection, a different mechanism from what the source's own named
+security fix specifically requires.
+
+`AuditCaseService::resolveEvidenceChecksum`/`addEvidence`/
+`recordEvidenceCustodyEvent` are extended to their full source shape: the
+DOCUMENT branch of `resolveEvidenceChecksum` (requiring the underlying
+document to exist), `addEvidence`'s requirement that a cited document
+already be `scan_status='CLEAN'` (else a `409`, matching the source's
+"Only a clean-scanned document may be cited as evidence."), and
+`recordEvidenceCustodyEvent`'s `SET_LEGAL_HOLD`/`RELEASE_LEGAL_HOLD`
+cascade onto the underlying `document_metadata.legal_hold` row when the
+evidence cites an uploaded document (previously entirely missing from the
+PHP port) -- and its `VERIFY` re-derivation, previously scoped to
+`['INVOICE', 'VAT_RETURN']`, now matches the source's own `!== 'OTHER'`
+condition exactly, covering `DOCUMENT` too.
+
+Verified by a new `tests/Feature/Document/DocumentTest.php` (8 tests) plus
+one existing `ComplianceCaseTest.php` test updated to cover the new
+behaviour (an unknown `DOCUMENT` id is now a real `404`, not a blanket
+`422`) -- 166 total, 0 regressions, run against real MySQL: a valid
+upload quarantines the file with the correct checksum/object key; content
+that doesn't match its declared magic bytes, a disallowed MIME type, and
+an oversized/empty file are each rejected (`415`/`413`); an invalid
+`owner_domain`/`classification` is rejected (`422`); only a national
+`documents:manage` role can record a scan result (`403` otherwise); a
+`CLEAN` scan activates the document and an `INFECTED` scan permanently
+rejects it, with correct idempotent replay and a `409` on a second genuine
+attempt; and the full evidence chain -- citing a still-quarantined document
+is a `409`, citing it after a `CLEAN` scan succeeds with the right
+`evidence_type`/`document_id`/checksum, `VERIFY` re-derives and confirms
+the match, and `SET_LEGAL_HOLD`/`RELEASE_LEGAL_HOLD` correctly cascade
+onto `document_metadata.legal_hold`. No bugs surfaced this pass.
 
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
@@ -1749,15 +1829,14 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (46 more tables -- `positions` deliberately excluded from that
+Phase 4 (45 more tables -- `positions` deliberately excluded from that
 count, since the source never writes to it either), Phase 5 (remaining
 seed data -- identity proofing, etc.), Phase 7's reusable Eloquent
-organisation-scope trait/global scope, the rest of Phase 11
-(`DOCUMENT`-sourced evidence citation, genuinely blocked on the
-still-unbuilt `document_metadata` table and its Module 22 quarantine/scan
-pipeline -- not a scoping choice -- and the compliance dashboard snapshot
-aggregate; see the Phase 11 verification sections above), and Phases 13
-through 15 in full (documents/integrations/offline/reports, the legacy D1
+organisation-scope trait/global scope, the rest of Phase 11 (just the
+compliance dashboard snapshot aggregate now -- see "DOCUMENT evidence
+citation" above for the `DOCUMENT`-sourced evidence gap, which is closed),
+and Phases 13 through 15 in full (documents/integrations/offline/reports
+beyond the minimal Module 22 slice already pulled forward, the legacy D1
 importer, and deployment documentation) are all outstanding. Phases 8, 9,
 10 and 12 (organisations/taxpayers/administration, invoices/VAT,
 accounting/commercial, and portals/licensing/governance) are now all
@@ -1766,7 +1845,7 @@ VAT-rule routes", "Supplier verification" and "Administration snapshot &
 portals" above. This is genuinely a multi-week engineering effort at the
 pace of careful, verified, per-field-checked porting demonstrated in this
 session's Phase 3/4/6/7/8/9/10/11/12 slices -- continuing it means
-repeating this same rigor across the remaining ~46 tables and ~115
+repeating this same rigor across the remaining ~45 tables and ~115
 routes, phase by phase (or sub-slice by sub-slice, as Phases 10, 11 and
 12 all demonstrated), as originally scoped. Given the genuine scale each
 remaining module represents (`control-plane-repository.ts` alone, at
@@ -1775,7 +1854,7 @@ Phase 10's `business-repository.ts`, which itself took 6 separate
 sub-slices to close out -- Phase 12 took 6, counting the two small files
 closed out alongside its own final slice; Phases 8, 9, 10 and 12 are now
 all entirely done, and Phase 11 is complete down to one narrow deferred
-surface genuinely blocked on Module 22's document pipeline), continuing
+dashboard aggregate), continuing
 to completion is realistically a
 multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far

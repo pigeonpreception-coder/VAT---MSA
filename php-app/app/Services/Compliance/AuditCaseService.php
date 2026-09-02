@@ -11,6 +11,7 @@ use App\Models\AuditCaseTransition;
 use App\Models\AuditEvidence;
 use App\Models\AuditEvidenceCustodyEvent;
 use App\Models\AuditFinding;
+use App\Models\DocumentMetadata;
 use App\Models\Invoice;
 use App\Models\User;
 use App\Models\VatReturnVersion;
@@ -225,35 +226,38 @@ class AuditCaseService
      * insertion time) and recordEvidenceCustodyEvent's VERIFY action
      * (re-checked later) derive a cited source's checksum from, so the two
      * can never silently disagree about what "the hash" means for a given
-     * source type. DOCUMENT deliberately has no case here (and no caller
-     * of this method ever reaches it with DOCUMENT) -- see addEvidence's
-     * own doc comment for why.
+     * source type.
      *
-     * @return ?array{checksum: string, evidenceType: string}
+     * @return ?array{checksum: string, evidenceType: string, documentId: ?string}
      */
     private function resolveEvidenceChecksum(string $sourceResourceType, string $sourceResourceId): ?array
     {
         if ($sourceResourceType === 'INVOICE') {
             $invoice = Invoice::find($sourceResourceId);
 
-            return $invoice ? ['checksum' => $invoice->payload_hash, 'evidenceType' => 'CERTIFIED_RECORD'] : null;
+            return $invoice ? ['checksum' => $invoice->payload_hash, 'evidenceType' => 'CERTIFIED_RECORD', 'documentId' => null] : null;
         }
         if ($sourceResourceType === 'VAT_RETURN') {
             $version = VatReturnVersion::find($sourceResourceId);
 
-            return $version ? ['checksum' => $version->ledger_snapshot_hash, 'evidenceType' => 'CERTIFIED_RECORD'] : null;
+            return $version ? ['checksum' => $version->ledger_snapshot_hash, 'evidenceType' => 'CERTIFIED_RECORD', 'documentId' => null] : null;
+        }
+        if ($sourceResourceType === 'DOCUMENT') {
+            $document = DocumentMetadata::find($sourceResourceId);
+
+            return $document ? ['checksum' => $document->checksum_sha256, 'evidenceType' => 'UPLOADED_DOCUMENT', 'documentId' => $sourceResourceId] : null;
         }
 
         return null;
     }
 
     /**
-     * INVOICE, VAT_RETURN and OTHER are all fully supported; DOCUMENT
-     * remains deferred (see docs/MIGRATION_MATRIX.md's Phase 11 note) --
-     * "a document citation must already be clean-scanned" per the source's
-     * own comment, and neither document_metadata nor its Module 22
-     * quarantine/scan pipeline have been migrated. A supersedes_evidence_id
-     * flips the prior row to SUPERSEDED before the new row is inserted.
+     * INVOICE, VAT_RETURN, DOCUMENT and OTHER are all supported. A document
+     * citation must already be clean-scanned (Module 22's quarantine
+     * pipeline) -- evidence integrity can't rest on a file that hasn't
+     * finished its malware scan, per the source's own comment. A
+     * supersedes_evidence_id flips the prior row to SUPERSEDED before the
+     * new row is inserted.
      *
      * @return array<string, mixed>
      */
@@ -277,12 +281,9 @@ class AuditCaseService
             return $this->presentEvidence($this->findEvidenceOrFail($prior));
         }
 
-        if ($input['sourceResourceType'] === 'DOCUMENT') {
-            throw new ComplianceResourceException('Evidence sourced from DOCUMENT is not yet supported by this migration -- document_metadata (and its clean-scan quarantine pipeline) has not been ported. Cite an INVOICE, a VAT_RETURN, or an OTHER (externally hashed) record instead.', 422);
-        }
-
         $checksum = null;
         $evidenceType = null;
+        $documentId = null;
         if ($input['sourceResourceType'] === 'OTHER') {
             $checksum = $input['checksumSha256'];
             $evidenceType = 'EXTERNAL_RECORD';
@@ -291,8 +292,15 @@ class AuditCaseService
             if (! $resolved) {
                 throw new ComplianceResourceException('The cited '.mb_strtolower($input['sourceResourceType']).' was not found.', 404);
             }
+            if ($input['sourceResourceType'] === 'DOCUMENT') {
+                $document = DocumentMetadata::find($input['sourceResourceId']);
+                if (($document->scan_status ?? null) !== 'CLEAN') {
+                    throw new RepositoryConflictException('Only a clean-scanned document may be cited as evidence.');
+                }
+            }
             $checksum = $resolved['checksum'];
             $evidenceType = $resolved['evidenceType'];
+            $documentId = $resolved['documentId'];
         }
 
         if ($input['supersedesEvidenceId']) {
@@ -313,7 +321,7 @@ class AuditCaseService
 
         $id = (string) Str::uuid();
         $now = now();
-        DB::transaction(function () use ($input, $caseId, $auditCase, $checksum, $evidenceType, $actor, $id, $now, $idempotencyKey, $requestHash, $correlationId) {
+        DB::transaction(function () use ($input, $caseId, $auditCase, $checksum, $evidenceType, $documentId, $actor, $id, $now, $idempotencyKey, $requestHash, $correlationId) {
             if ($input['supersedesEvidenceId']) {
                 AuditEvidence::where('id', $input['supersedesEvidenceId'])->update(['status' => 'SUPERSEDED']);
                 AuditEvidenceCustodyEvent::create([
@@ -323,7 +331,7 @@ class AuditCaseService
             }
             AuditEvidence::create([
                 'id' => $id, 'audit_case_id' => $caseId, 'evidence_type' => $evidenceType, 'source_resource_type' => $input['sourceResourceType'],
-                'source_resource_id' => $input['sourceResourceId'], 'document_id' => null, 'checksum_sha256' => $checksum, 'description' => $input['description'],
+                'source_resource_id' => $input['sourceResourceId'], 'document_id' => $documentId, 'checksum_sha256' => $checksum, 'description' => $input['description'],
                 'status' => 'PRESERVED', 'added_by' => $actor->id, 'added_at' => $now, 'previous_version_id' => $input['supersedesEvidenceId'], 'legal_hold' => false,
             ]);
             AuditEvidenceCustodyEvent::create([
@@ -342,7 +350,13 @@ class AuditCaseService
      * VERIFY re-derives the cited record's CURRENT hash and compares it
      * against the hash stored at addition time -- a genuine tamper/drift
      * detector. A mismatch is recorded, not thrown: this is an audit trail
-     * feeding human judgement, not an automated adverse action.
+     * feeding human judgement, not an automated adverse action. Externally
+     * supplied (OTHER) evidence has nothing this system can re-derive, so
+     * its integrity_verified always stays null rather than a false claim
+     * either way. SET_LEGAL_HOLD/RELEASE_LEGAL_HOLD cascade to the
+     * underlying document_metadata row when the evidence cites an uploaded
+     * document, so Module 22's retention/deletion path and this case's
+     * hold stay in sync.
      *
      * @return array<string, mixed>
      */
@@ -367,7 +381,7 @@ class AuditCaseService
         $integrityVerified = null;
         DB::transaction(function () use ($evidence, $evidenceId, $input, $actor, $now, $idempotencyKey, $requestHash, $correlationId, &$integrityVerified) {
             if ($input['action'] === 'VERIFY') {
-                if (in_array($evidence->source_resource_type, ['INVOICE', 'VAT_RETURN'], true)) {
+                if ($evidence->source_resource_type !== 'OTHER') {
                     $resolved = $this->resolveEvidenceChecksum($evidence->source_resource_type, $evidence->source_resource_id);
                     $integrityVerified = $resolved && $resolved['checksum'] === $evidence->checksum_sha256;
                 }
@@ -375,8 +389,14 @@ class AuditCaseService
                 // re-derive, so integrity_verified stays null rather than a false claim.
             } elseif ($input['action'] === 'SET_LEGAL_HOLD') {
                 AuditEvidence::where('id', $evidenceId)->update(['legal_hold' => true]);
+                if ($evidence->document_id) {
+                    DocumentMetadata::where('id', $evidence->document_id)->update(['legal_hold' => true]);
+                }
             } else {
                 AuditEvidence::where('id', $evidenceId)->update(['legal_hold' => false]);
+                if ($evidence->document_id) {
+                    DocumentMetadata::where('id', $evidence->document_id)->update(['legal_hold' => false]);
+                }
             }
             AuditEvidenceCustodyEvent::create([
                 'id' => (string) Str::uuid(), 'audit_evidence_id' => $evidenceId, 'action' => $input['action'], 'actor_id' => $actor->id,

@@ -248,7 +248,7 @@ class ComplianceCaseTest extends TestCase
         $listing->assertStatus(200)->assertJsonCount(2, 'evidence');
     }
 
-    public function test_vat_return_evidence_can_be_cited_and_verified_but_document_evidence_is_still_rejected(): void
+    public function test_vat_return_evidence_can_be_cited_and_verified_and_an_unknown_document_is_still_a_404(): void
     {
         $tp = $this->makeTaxpayer('VAT-CASE-0005B');
         $auditor = $this->namraAuditor();
@@ -280,11 +280,15 @@ class ComplianceCaseTest extends TestCase
         $verify->assertStatus(200);
         $this->assertDatabaseHas('audit_evidence_custody_events', ['audit_evidence_id' => $evidenceId, 'action' => 'VERIFY', 'integrity_verified' => 1]);
 
-        // DOCUMENT remains explicitly rejected -- document_metadata has not been ported.
+        // A DOCUMENT citation of a source_resource_id that doesn't exist in
+        // document_metadata is a genuine 404, same as an unknown INVOICE/
+        // VAT_RETURN id would be -- see DocumentTest for the full
+        // Upload -> Quarantine -> ScanDecision -> Evidence chain now that
+        // document_metadata has been ported.
         $document = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/evidence", [
             'schema_version' => '1.0.0', 'source_resource_type' => 'DOCUMENT', 'source_resource_id' => (string) Str::uuid(), 'description' => 'An uploaded supporting document.',
         ], ['Idempotency-Key' => 'test-idem-evidence-doc-0001']);
-        $document->assertStatus(422);
+        $document->assertStatus(404);
     }
 
     public function test_case_notes_are_append_only_and_a_correction_supersedes_without_deleting(): void

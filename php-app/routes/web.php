@@ -24,6 +24,7 @@ use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
+use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
@@ -201,6 +202,13 @@ Route::middleware('auth')->group(function () {
         Route::post('/audit-evidence/{id}/custody-events', [AuditCaseController::class, 'recordEvidenceCustodyEvent']);
         Route::get('/audit-cases/{id}/notes', [AuditCaseController::class, 'notes']);
         Route::post('/audit-cases/{id}/notes', [AuditCaseController::class, 'addNote']);
+
+        // Module 22's minimal Upload -> Quarantine -> ScanDecision slice,
+        // pulled forward to close this phase's own DOCUMENT-sourced
+        // evidence citation gap -- see App\Services\Document\
+        // DocumentService's doc comment for what's deliberately deferred.
+        Route::post('/documents', [DocumentController::class, 'store']);
+        Route::post('/documents/{id}/scan-result', [DocumentController::class, 'scanResult']);
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
