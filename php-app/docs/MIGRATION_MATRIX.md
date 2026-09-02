@@ -2971,16 +2971,18 @@ away by a fully-green test suite:
   of, never a security gap in those models themselves. Closed,
   documented, not an open item.
 - **A handful of documented, non-blocking gaps** carried since early in
-  this migration and never silently dropped: no password-reset flow
-  (Phase 6), TOTP step-up parity is Laravel's `password.confirm`
-  re-authentication rather than the source's own server-verified TOTP
-  (Phase 6; the `step_up_events`/`mfa_totp_credentials` tables exist,
-  schema-only), platform-config values are not yet wired to any real
-  downstream consumer (Phase 13's "Platform config & change-management"
-  above), and no real S3/R2-compatible object-storage driver is
+  this migration and never silently dropped: TOTP step-up parity is
+  Laravel's `password.confirm` re-authentication rather than the
+  source's own server-verified TOTP (Phase 6; the
+  `step_up_events`/`mfa_totp_credentials` tables exist, schema-only),
+  platform-config values are not yet wired to any real downstream
+  consumer (Phase 13's "Platform config & change-management" above),
+  and no real S3/R2-compatible object-storage driver is
   configured (`docs/DEPLOYMENT.md`'s "Storage" section) -- a config
   change only, given every service already goes through Laravel's
-  `Storage::disk(...)` interface.
+  `Storage::disk(...)` interface. (Self-service password reset -- once
+  listed here as a gap -- was closed 2026-09-02 per red team finding
+  RT-005; see `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.)
 - **Re-verification against the actual target runtime.** Every
   verification in this session ran on PHP 8.2.12 and MariaDB 10.4.32
   (XAMPP), flagged throughout as differing from a PHP 8.3+/MySQL 8
