@@ -28,6 +28,7 @@ use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\VatRule\VatRuleController;
+use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -296,7 +297,7 @@ Route::middleware('auth')->group(function () {
         // Only the initial access *request* is not step-up gated (matching
         // the source -- it needs access-governance:read, not :manage, and
         // no requireStepUp call); every decide/certify/revoke/offboard
-        // command is. Only the workflow engine remains after this slice.
+        // command is.
         Route::post('/access-requests', [AccessGovernanceController::class, 'storeAccessRequest']);
         Route::post('/access-requests/{id}/decision', [AccessGovernanceController::class, 'decideAccessRequest'])
             ->middleware('password.confirm');
@@ -305,6 +306,31 @@ Route::middleware('auth')->group(function () {
         Route::post('/access-grants/revocation', [AccessGovernanceController::class, 'storeRevocation'])
             ->middleware('password.confirm');
         Route::post('/organisations/offboarding', [AccessGovernanceController::class, 'storeOffboarding'])
+            ->middleware('password.confirm');
+
+        // Phase 12 slice 5: the workflow engine (Module 8 Phase C --
+        // createWorkflowDraft/publishWorkflowVersion/assignWorkflow/
+        // decideWorkflowTask/testWorkflowVersion/createDelegation/
+        // listDelegations/revokeDelegation). Closes out
+        // control-plane-repository.ts's last self-contained sub-domain --
+        // only the getAdministrationSnapshot dashboard aggregate remains
+        // in Phase 12. GET /workflows bundles into that aggregate
+        // (deferred); GET /workflows/delegations is a genuinely
+        // standalone read. Test is not step-up gated (a dry-run has no
+        // side effects); every other write command is.
+        Route::post('/workflows', [WorkflowController::class, 'storeWorkflow'])
+            ->middleware('password.confirm');
+        Route::post('/workflows/versions/{id}/publication', [WorkflowController::class, 'publishVersion'])
+            ->middleware('password.confirm');
+        Route::post('/workflows/versions/{id}/test', [WorkflowController::class, 'testVersion']);
+        Route::post('/workflows/instances', [WorkflowController::class, 'storeInstance'])
+            ->middleware('password.confirm');
+        Route::post('/workflow-tasks/{id}/decision', [WorkflowController::class, 'decideTask'])
+            ->middleware('password.confirm');
+        Route::get('/workflows/delegations', [WorkflowController::class, 'delegations']);
+        Route::post('/workflows/delegations', [WorkflowController::class, 'storeDelegation'])
+            ->middleware('password.confirm');
+        Route::post('/workflows/delegations/{id}/revocation', [WorkflowController::class, 'revokeDelegation'])
             ->middleware('password.confirm');
     });
 });
