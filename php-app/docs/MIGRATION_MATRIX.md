@@ -1303,11 +1303,71 @@ Four org-scoped models with a **nullable** `organisation_id` column
 `SodRule`) were excluded from this pass entirely, kept for a separate,
 more careful follow-up: a `NULL` row's interaction with the scope's own
 `whereIn` subquery needs its own deliberate reasoning, not inherited from
-this batch's NOT-NULL analysis.
+this batch's NOT-NULL analysis -- see "Organisation-scope trait: the
+nullable-column exclusions" below for that follow-up's outcome (two
+added, two permanently excluded).
 
 Verified by the full test suite after every revert (not just once at the
 end) -- 174 tests, 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
+
+## Organisation-scope trait: the nullable-column exclusions
+
+Resolves the four models the retrofit above deferred, by checking each
+one's *actual* usage rather than reasoning about the nullable column in
+the abstract -- the same discipline that caught the six NOT-NULL
+exclusions.
+
+**`SodRule` and `NavigationPreference` were added.** Both have a
+schema-nullable `organisation_id`, but a full-repo grep of `app/Services/`
+found each has exactly **one** real usage, and neither ever queries or
+writes a `NULL`-organisation row: `WorkflowService::
+decideWorkflowTask`'s own SoD-violation check always filters
+`SodRule::where('organisation_id', $organisation->id)` against a real,
+resolved organisation (the "NULL row applies globally" possibility the
+migration's own doc comment noted as schema-legal was already confirmed,
+independently, as unexercised by any command when that table was built
+in Phase 12 slice 5); `NavigationService::saveNavigationPreference`
+always resolves a real organisation via `LicenseResolver::
+resolveOrganisation` before its `updateOrCreate`. The trait's own filter
+is therefore exactly as redundant here as it is for the other 42 models --
+same reasoning, not a special case.
+
+**`CommunicationThread` and `Communication` are permanently excluded --
+for two independent reasons, not merely "nullable and unexamined."**
+First, `CommunicationService::respond`/`::conversation` (both reachable
+by a taxpayer-scoped actor holding `communications:respond`) have the
+identical fetch-then-check shape as the six already-excluded models:
+`CommunicationThread::find($threadId)` unscoped, followed by
+`! TenantScope::isNational($actor) && $actor->taxpayer_id !== $thread->
+taxpayer_id` to distinguish a `403` from a `404` -- the trait would
+collapse that the same way it did for `AuditCase`/`RefundClaim`. Second,
+and independently disqualifying even if that check did not exist:
+`CommunicationService::resolveCaseReference` deliberately writes
+`organisation_id: null` for a thread sourced from a
+`RECONCILIATION_EXCEPTION` (which has no resolvable organisation), while
+its `taxpayer_id` is always real and non-null -- the actual tenant
+boundary for this table is `taxpayer_id`, not `organisation_id`. A
+taxpayer-scoped actor's own reconciliation-exception correspondence would
+become permanently invisible under the trait's `organisation_id`-based
+filter (`NULL IN (...)` is never true in SQL), a real functional
+regression, not just an HTTP status code change.
+
+The organisation-scope trait now covers 44 models (42 from the original
+retrofit plus these two); 8 models are permanently excluded with a
+documented reason each (`RefundClaim`, `VatReturnVersion`, `ApprovalTask`,
+`VatPeriod`, `AuditCase`, `OrganisationCapability`, `CommunicationThread`,
+`Communication`) -- their existing manual tenant checks are untouched and
+remain fully correct; this was never about a security gap in those
+models, only about which ones this specific automatic-scope mechanism can
+safely sit on top of.
+
+Verified by the full test suite -- 174 tests, 0 regressions, run against
+real MySQL (`WorkflowTest`'s own self-approval SoD test and
+`NavigationTest`'s own preference-save test already exercise `SodRule`/
+`NavigationPreference` through their real services, so no new dedicated
+test was needed beyond the existing `OrganisationScopeTest`, which already
+proves the trait mechanism itself in isolation).
 
 ## Demo seed gaps for already-shipped features (closes out Phase 5)
 
@@ -2109,27 +2169,28 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-The organisation-scope trait's own remaining nullable-`organisation_id`
-follow-up (`CommunicationThread`/`Communication`/`NavigationPreference`/
-`SodRule` -- see "Organisation-scope trait retrofit" above), the six
-models that pass's own verification explicitly excluded as unsafe for
-this specific automatic-scope mechanism (`RefundClaim`/
-`VatReturnVersion`/`ApprovalTask`/`VatPeriod`/`AuditCase`/
-`OrganisationCapability` -- their existing manual tenant checks remain
-fully correct and untouched; this is about the *trait*, not a security
-gap in those models), and Phases 13 through 15 in full (documents/
-integrations/offline/reports beyond the minimal Module 22 slice already
-pulled forward, the legacy D1 importer, and deployment documentation) are
-all outstanding. Phase 4 is now COMPLETE for its actual scope (154 of 155
-tables -- see "Remaining schema conversion" above; `positions` stays
-deliberately excluded, the source never writes to it either). Phase 5 is
-now COMPLETE for its actual scope too (see "Demo seed gaps for already-
-shipped features" above). Phase 7 is now COMPLETE for its actual scope as
-well -- the trait exists, is proven correct, and is now applied to 42
-models across Phases 8-12 (see "Organisation-scope trait" and
-"Organisation-scope trait retrofit" above); the handful of explicitly
-excluded models and the smaller nullable-column follow-up are the only
-open items, tracked here rather than silently dropped. Phases 8, 9, 10,
+The organisation-scope trait's own eight permanently-excluded models
+(`RefundClaim`/`VatReturnVersion`/`ApprovalTask`/`VatPeriod`/`AuditCase`/
+`OrganisationCapability`/`CommunicationThread`/`Communication` -- see
+"Organisation-scope trait retrofit" and "Organisation-scope trait: the
+nullable-column exclusions" above) each keep their existing manual
+tenant checks fully correct and untouched; this was always about which
+models this specific automatic-scope mechanism can safely sit on top of,
+never a security gap in those models themselves, so no further action is
+owed there beyond the documented reasoning. Phases 13 through 15 in full
+(documents/integrations/offline/reports beyond the minimal Module 22
+slice already pulled forward, the legacy D1 importer, and deployment
+documentation) remain outstanding. Phase 4 is now COMPLETE for its actual
+scope (154 of 155 tables -- see "Remaining schema conversion" above;
+`positions` stays deliberately excluded, the source never writes to it
+either). Phase 5 is now COMPLETE for its actual scope too (see "Demo seed
+gaps for already-shipped features" above). Phase 7 is now COMPLETE for
+its actual scope as well -- the trait exists, is proven correct, and is
+now applied to 44 models across Phases 8-12 (see "Organisation-scope
+trait", "Organisation-scope trait retrofit" and "Organisation-scope
+trait: the nullable-column exclusions" above); the eight explicitly
+excluded models are a closed, documented list, not an open item. Phases
+8, 9, 10,
 11 and 12 (organisations/taxpayers/administration, invoices/VAT,
 accounting/commercial, compliance/audits/disputes/refunds/risk, and
 portals/licensing/governance) are now all fully COMPLETE -- see "Identity
