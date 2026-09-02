@@ -37,7 +37,7 @@ below for the specific commands.
 | 1 | Analyse the current project | COMPLETE |
 | 2 | Protect existing source (branches) | COMPLETE -- `backup/pre-php-mysql-migration`, `migration/php-mysql`, both pushed to origin |
 | 3 | Create the Laravel structure | COMPLETE -- Laravel 12.68.0 scaffolded in `php-app/`, Bootstrap 5 (npm, via Vite, not Tailwind) replacing the default frontend stack |
-| 4 | Convert database schema to MySQL migrations | PARTIAL -- 112 of 155 tables. The identity/access core (taxpayers, users, organisations, branches, identity_providers, identity_links, access_roles, access_permissions, role_permission_grants, organisation_memberships) plus Phase 8's registration/audit infrastructure (audit_events, outbox_events, taxpayer_identifiers, organisation_capabilities, registration_applications, registration_verifications) plus Phase 9's invoice/VAT core (vat_rules, invoices, invoice_lines, certificates, invoice_corrections, ledger_entries, vat_transactions, reconciliation_exceptions, idempotency_records, security_events) plus the VAT-return-generation prerequisite (tax_rule_sets, tax_box_mappings, vat_periods, vat_adjustments, reconciliation_matches, vat_return_versions, vat_return_boxes, approval_tasks, vat_return_submissions) plus the refund workflow (refund_claims, refund_claim_transitions, refund_claim_checks) plus `party_verification_snapshots` (VerifySupplier) plus Phase 12's Licensing & Entitlements slice (license_plans, license_features, license_plan_entitlements, subscriptions, organisation_licenses, license_usage, license_events) plus Phase 12 slice 2's organisation-administration/employees tables (access_reviews, departments, business_units, job_titles, employees, organisation_administrator_roles, organisation_administrators, organisation_roles, organisation_role_permissions, user_capability_assignments, user_role_assignments) plus Phase 12 slice 3's portal-navigation tables (navigation_workspaces, navigation_folders, navigation_items, navigation_preferences) plus Phase 12 slice 4's Access-governance tables (access_requests, access_approvals, access_certifications) plus Phase 12 slice 5's workflow-engine tables (sod_rules, sod_violations, workflows, workflow_versions, workflow_nodes, workflow_transitions, workflow_conditions, workflow_instances, workflow_assignments, workflow_approvals, workflow_delegations) plus `document_metadata` (Module 22's own central table, pulled forward as the real prerequisite for closing Phase 11's `DOCUMENT`-sourced evidence citation gap -- see "DOCUMENT evidence citation" below) plus `consent_grants`/`delegations` (read-only tables `getComplianceSnapshot` needed -- see "Compliance dashboard snapshot" below) |
+| 4 | Convert database schema to MySQL migrations | COMPLETE for its actual scope -- 154 of 155 tables (`positions` deliberately excluded, since the source itself never writes to it -- confirmed by a full-repo grep; see below). Everything already tracked in earlier phase slices, plus the remaining ~43 tables belonging to genuinely not-yet-built modules (Developer Portal, SaaS marketplace, offline-invoicing sync, reports/analytics/data-products, security operations, platform config/change-management, MFA/step-up auth, `payment_instructions`, `bank_imports`, `import_records`, `user_invitations`) -- see "Remaining schema conversion" below for the full breakdown and the fidelity checks this pass caught. Migrations only, deliberately -- no Eloquent models or services were added for tables no command reads or writes yet, matching this migration's `consent_grants`/`delegations` precedent; each table gets its model/service when its own owning phase actually builds that feature. |
 | 5 | Convert seed data | PARTIAL -- RoleSeeder, PermissionSeeder, IdentityProviderSeeder, VatRuleSeeder, TaxRuleSetSeeder, LicensePlanSeeder, OrganisationAdministratorRoleSeeder, NavigationSeeder, DemoSeeder written and verified; two genuine gaps found and completed (see "Source-fidelity findings" below) |
 | 6 | Authentication | COMPLETE for its actual scope -- real Laravel session auth (login/logout, password hashing, CSRF, rate-limited attempts, session regeneration, account-status check) verified end-to-end over HTTP; no password reset flow yet |
 | 7 | Role/permission/organisation security | COMPLETE for its actual scope -- `App\Support\Access\Permissions` (RBAC) and `App\Support\Access\TenantScope` (tenant isolation) are now genuinely exercised by every Phase 8 controller via `Gate::authorize('permission', ...)` and `OrganisationService::requireInScope()`/`get()`, proven by real 403s in the test suite (a `TAXPAYER_VIEWER` denied `registrations:submit`, a `TAXPAYER_OWNER` denied `taxpayers:suspend`) and by cross-tenant scope checks on every organisation-scoped read/write. `User::hasAppPermission()`/`Gate::define('permission', ...)` now also OR in organisation-defined custom-role grants via the new `App\Support\Access\DynamicPermissions` (Phase 12 slice 3's own closure of a gap explicitly deferred since this phase -- see "Portal navigation" below), matching the source's `hasPermission`'s static-*and*-dynamic union exactly, not just its static half. No Eloquent *global* scope class exists yet (each service calls `TenantScope` explicitly instead) -- a reusable trait is a natural follow-up once more modules land, not a gap in the security property itself. |
@@ -1108,6 +1108,82 @@ only their own taxpayer's obligations/cases and excludes a second
 taxpayer's; and a role lacking `compliance:read` is refused `403`. No
 bugs surfaced this pass.
 
+## Remaining schema conversion (closes out Phase 4: the last ~43 tables)
+
+Converts every remaining `db/runtime.ts` table this migration had not yet
+built -- 43 migrations (`2026_09_03_000000` through `_000042`), taking
+Phase 4 from 112 to 154 of 155 tables. A full-repo grep against the
+TypeScript source, table by table, before writing each migration
+confirmed: **none of these 43 tables are read or written by any
+already-shipped PHP code** -- every one belongs to a genuinely
+not-yet-built module (Developer Portal, SaaS marketplace,
+offline-invoicing sync, reports/analytics/data-products, security
+operations, platform config/change-management, MFA/step-up auth,
+`payment_instructions`, `bank_imports`, `import_records`,
+`user_invitations`). Per this migration's established discipline
+(`consent_grants`/`delegations`, closed out in "Compliance dashboard
+snapshot" above): **migrations only, no Eloquent models or services** --
+each table gets its model/service when its own owning phase (13-15, or
+wherever Developer Portal/security-ops/reporting eventually lands)
+actually builds the feature that reads or writes it, not speculatively
+now.
+
+`positions` remains the one genuinely excluded table -- confirmed again
+this pass via the same full-repo grep: `db/schema.ts` declares it and one
+column (`employees.position_id`) references it, but no command in the
+entire TypeScript source ever reads or writes a `positions` row. Building
+it would be pure speculation the source itself never commits to.
+
+Two tables initially looked like they might already be silently required
+by shipped code and got extra scrutiny before being deferred anyway:
+- `navigation_permissions` -- a full-repo grep found the source seeds two
+  rows into it but **never reads it anywhere**, including inside
+  `getEffectiveNavigation`/`getNavigationItemActions` themselves (Phase 12
+  slice 3, already fully ported in `App\Services\Navigation\
+  NavigationService`, which does not consult this table either -- matching
+  the source's own behaviour exactly, not a gap this port introduced).
+- `import_records` -- read only by `getBusinessPlatformSnapshot`
+  (`business-repository.ts`), itself already an explicitly deferred
+  dashboard aggregate (see Phase 10's own completion note); no command
+  anywhere writes to it. `imports:read`/`imports:manage` permissions
+  already exist in `App\Support\Access\Permissions` for whichever future
+  command creates rows here.
+
+Dependency order matters for 43 interlinked `Schema::create` calls, so
+each migration's timestamp encodes a topological sort by real foreign-key
+dependency (e.g. `developer_accounts` before `api_clients` before
+`credential_refs`/`webhook_subscriptions` before `webhook_deliveries`) --
+verified by a clean `php artisan migrate:fresh` from empty, not merely an
+incremental `migrate` that could hide an ordering bug the first run
+happened not to hit.
+
+Two genuine MySQL/MariaDB portability bugs were caught and fixed by this
+verification, not shipped:
+- **The MariaDB implicit-zero-date `TIMESTAMP` gotcha, at much larger
+  scale than any single migration in this session has hit it before.**
+  Every non-nullable `TIMESTAMP` column beyond the first one in a table,
+  with no explicit default, silently gets an implicit
+  `DEFAULT '0000-00-00 00:00:00'` under this session's MariaDB
+  configuration -- rejected outright by strict SQL mode
+  (`SQLSTATE[42000]: 1067 Invalid default value`). Caught immediately on
+  the very first migration with two required timestamps
+  (`step_up_events`); fixed by auditing all 43 files for every
+  non-nullable, non-`useCurrent()` `timestamp()` column and adding
+  `->useCurrent()` uniformly (purely defensive, the same reasoning
+  `workflow_delegations`' own doc comment already recorded) -- 45 columns
+  across 30 files needed it.
+- **MySQL's 64-character identifier limit** on a handful of
+  multi-column unique-index names Laravel auto-generates from long
+  table/column combinations (e.g.
+  `offline_sync_batches_offline_device_id_sequence_from_sequence_to_unique`
+  at 71 characters). Caught by `SQLSTATE[42S01]`/`42000` errors on
+  `migrate`; fixed by giving those four indexes explicit, shorter names.
+
+Verified by a clean `php artisan migrate:fresh` (all 155-1 tables, in
+order, from empty) followed by `php artisan db:seed` and the full
+existing test suite (169 tests, 0 regressions -- expected, since this
+batch touches no table any shipped service reads or writes).
+
 ## Licensing & Entitlements (Phase 12 slice 1: portals/licensing/governance)
 
 Opens Phase 12 -- previously entirely `NOT STARTED`. `lib/data/control-
@@ -1871,13 +1947,14 @@ against it.
 
 ## Next steps (not started, listed so nothing is silently dropped)
 
-Phase 4 (43 more tables -- `positions` deliberately excluded from that
-count, since the source never writes to it either), Phase 5 (remaining
-seed data -- identity proofing, etc.), Phase 7's reusable Eloquent
-organisation-scope trait/global scope, and Phases 13 through 15 in full
-(documents/integrations/offline/reports beyond the minimal Module 22
-slice already pulled forward, the legacy D1 importer, and deployment
-documentation) are all outstanding. Phases 8, 9, 10, 11 and 12
+Phase 5 (remaining seed data -- identity proofing, etc.), Phase 7's
+reusable Eloquent organisation-scope trait/global scope, and Phases 13
+through 15 in full (documents/integrations/offline/reports beyond the
+minimal Module 22 slice already pulled forward, the legacy D1 importer,
+and deployment documentation) are all outstanding. Phase 4 is now
+COMPLETE for its actual scope (154 of 155 tables -- see "Remaining schema
+conversion" above; `positions` stays deliberately excluded, the source
+never writes to it either). Phases 8, 9, 10, 11 and 12
 (organisations/taxpayers/administration, invoices/VAT, accounting/
 commercial, compliance/audits/disputes/refunds/risk, and portals/
 licensing/governance) are now all fully COMPLETE -- see "Identity
@@ -1886,15 +1963,16 @@ verification", "Compliance dashboard snapshot" and "Administration
 snapshot & portals" above. This is genuinely a multi-week engineering
 effort at the pace of careful, verified, per-field-checked porting
 demonstrated in this session's Phase 3/4/6/7/8/9/10/11/12 slices --
-continuing it means repeating this same rigor across the remaining ~43
-tables and ~115 routes, phase by phase (or sub-slice by sub-slice, as
-Phases 10, 11 and 12 all demonstrated), as originally scoped. Given the
-genuine scale each remaining module represents (`control-plane-
-repository.ts` alone, at ~1,200 lines and ~30 exports, was comparable in
-size to the whole of Phase 10's `business-repository.ts`, which itself
-took 6 separate sub-slices to close out -- Phase 12 took 6, counting the
-two small files closed out alongside its own final slice; Phases 8, 9,
-10, 11 and 12 are now all entirely done), continuing
+continuing it means repeating this same rigor across the remaining ~115
+routes (the schema itself is now essentially done), phase by phase (or
+sub-slice by sub-slice, as Phases 10, 11 and 12 all demonstrated), as
+originally scoped. Given the genuine scale each remaining module
+represents (`control-plane-repository.ts` alone, at ~1,200 lines and ~30
+exports, was comparable in size to the whole of Phase 10's `business-
+repository.ts`, which itself took 6 separate sub-slices to close out --
+Phase 12 took 6, counting the two small files closed out alongside its
+own final slice; Phases 4, 8, 9, 10, 11 and 12 are now all entirely
+done), continuing
 to completion is realistically a
 multi-session effort, not a single
 continuous run -- this document is the honest record of exactly how far
