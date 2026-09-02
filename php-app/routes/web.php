@@ -31,6 +31,7 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
+use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowController;
@@ -219,6 +220,13 @@ Route::middleware('auth')->group(function () {
         // Phase 11's own fixed-list dashboard aggregate, closing out the
         // phase's one remaining gap.
         Route::get('/compliance', [ComplianceSnapshotController::class, 'show']);
+
+        // Module 22's platform/developer-portal snapshot reads (Phase 13) --
+        // see App\Services\Platform\PlatformSnapshotService's own doc
+        // comment for what's still out of this slice.
+        Route::get('/platform', [PlatformSnapshotController::class, 'show']);
+        Route::get('/platform/document-custody', [PlatformSnapshotController::class, 'documentCustody']);
+        Route::get('/platform/developer-portal', [PlatformSnapshotController::class, 'developerPortal']);
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
