@@ -1884,6 +1884,82 @@ duplicate-identity/email and invalid-role refusal, and a real success
 244 tests total, 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
+## Frontend UI build-out (a new initiative, not one of the original 15 phases)
+
+**A discovery, not a phase deliverable**: with the backend migration
+(Phases 1-15) complete, an audit of `resources/views/` found only 5
+Blade views total (login, password-confirm, a placeholder dashboard,
+the layout, and the default Laravel welcome page) against **179**
+routes -- 3 controllers return a view, 36+ return raw JSON. Every
+module this migration ported (invoices, VAT returns, compliance/audit
+cases, refunds, accounting, business parties, quotations, expenses,
+inventory, projects, licensing, portals, documents, reports, analytics,
+platform config, the workflow engine) is API-only; there is no
+application a person can actually use yet, only endpoints something
+else would call. This is a genuinely new, comparably-sized initiative
+(179 routes' worth of screens), not something the original 15-phase
+scope ever covered -- tracked here as its own section, not folded into
+the phase numbering above.
+
+### Real dashboard (replaces the placeholder)
+
+Ports the source's own `app/page.tsx` ("VAT transaction control
+centre") + `lib/data/repository.ts`'s `getDashboardSnapshot` -- the
+source's single, role-agnostic landing dashboard. Not a per-role
+snapshot dispatch (there is no such routing in the source for the main
+dashboard) -- every actor with `dashboard:read` sees the same shape;
+the only variation is national-vs-own-taxpayer scoping, matching every
+other snapshot service in this migration.
+
+New: `App\Services\Dashboard\DashboardSnapshotService::snapshot()`,
+reusing `InvoiceService::list()` directly for `recentInvoices` (matching
+the source's own reuse of `listInvoices`, not a second query that could
+drift from it). `recentAudit` is empty for an actor without
+`audit:read` -- checked per-field, not as a route-level gate, since a
+taxpayer-scoped actor legitimately sees their own VAT metrics/invoices
+without ever seeing the append-only audit stream. `DashboardController`
+now calls this service and renders a real Blade view (4 KPI cards --
+certified documents, transaction value, VAT controlled, open exceptions
+with a high/critical-risk footnote -- plus a recent-invoices table and
+an audit-events activity stream) in place of the earlier Session/
+effective-permissions placeholder.
+
+Not ported: the source's own `requireLicensedPermission(user,
+"dashboard:read", { operationClass: "READ" })` combines the permission
+check with a licensing/entitlement gate
+(`App\Support\Licensing\EntitlementGate`, this migration's own pattern
+for genuinely organisation-scoped licensed operations -- see Phase 12's
+Access Governance/Administration snapshot sections). `dashboard:read`
+is granted unconditionally to every one of this migration's 21 roles
+(verified against `Permissions::ROLE_PERMISSIONS`), including
+national-scope roles that resolve to no organisation at all, so the
+controller checks the permission alone
+(`$this->authorize('permission', 'dashboard:read')`) rather than
+routing a landing page through an entitlement gate built for a
+different kind of check -- a documented simplification, not a silently
+dropped control.
+
+Verified by a new `tests/Feature/Dashboard/DashboardTest.php` (5
+tests): unauthenticated access redirects to login; a taxpayer-scoped
+actor sees only their own supplier-or-customer invoices and an empty
+(permission-gated) evidence stream; a national actor sees every
+taxpayer's invoices and the real audit trail, correctly ordered; the
+high/critical-risk footnote counts only `HIGH`/`CRITICAL` rows, not
+every open exception; and a customer-side (not just supplier-side)
+invoice correctly counts toward a taxpayer's own metrics. Also
+verified visually over a real HTTP session (login as the
+`owner@demo-trading.test` demo user, screenshot + rendered-text
+inspection, no console errors) -- this migration's first screen ever
+checked that way, not just via `curl`/JSON assertions. 256 tests total,
+0 regressions, run against real MySQL, plus a clean
+`migrate:fresh --seed` cycle.
+
+Still NOT STARTED: every other module's own screens (invoices,
+compliance/audit cases, refunds, accounting, business parties,
+quotations, expenses, inventory, projects, licensing, portals,
+documents, reports, analytics, platform config, the workflow engine) --
+each its own comparable slice of this new initiative.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
