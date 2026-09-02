@@ -13,6 +13,7 @@ use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Invoice\InvoiceViewController;
+use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\ExpenseController;
@@ -51,7 +52,12 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [LoginController::class, 'store']);
 });
 
-Route::middleware('auth')->group(function () {
+// RT-001 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md): every authenticated
+// response gets a `no-store` Cache-Control on top of Laravel's default
+// session-middleware headers, so a browser's back-forward cache cannot
+// replay an authenticated page after logout. Scoped to this group only --
+// /login and the static-asset routes are untouched.
+Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
