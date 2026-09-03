@@ -1957,12 +1957,12 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
--- and business parties, quotations and accounting closed out further
-below): expenses (its own standalone screen -- the Buyer/Seller portal
-dashboards surface expenses read-only, not a replacement for a
-dedicated module UI), inventory, projects,
+-- and business parties, quotations, accounting and operations
+(expenses/inventory/projects) closed out further below):
 licensing, documents, reports, analytics,
-platform config, the workflow engine --
+platform config, the workflow engine, and import declarations (a
+genuinely separate, not-yet-built backend module -- see the
+"Operations" section below) --
 each its own comparable slice of this new initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
@@ -2953,6 +2953,104 @@ posted journal seeded directly for the walkthrough (the demo seeder
 itself creates none): both tables render correctly, the metrics count
 correctly (2 accounts, 1 journal, 1 posted), and the info banner text
 matches the source's own copy exactly.
+
+### Operations (expenses register + maker-checker, inventory balances, project control)
+
+Ports the source's own `app/operations/page.tsx` +
+`ExpenseDecisionActions.tsx` + `ExpenseReceiptActions.tsx`. Unlike the
+earlier slices, the source bundles four operational domains onto one
+combined page (there is no separate `/expenses`, `/inventory` or
+`/projects` page anywhere in the source -- confirmed by listing every
+top-level `app/` directory), so this slice mirrors that combined shape
+at `/operations` rather than inventing three or four separate routes
+the source doesn't have. New:
+`App\Http\Controllers\Business\OperationsViewController` (`index`/
+`store`/`submit`/`approve`/`reject`) and
+`resources/views/operations/index.blade.php`, reusing
+`App\Services\Business\ExpenseService` for every expense write and
+direct `InventoryBalance`/`Project`(+`ProjectBudget`/`ProjectCost`)
+reads mirroring `InventoryController::indexMovements`/
+`ProjectController::index`'s own existing inline-query precedent
+(neither has a dedicated enrichment service method, so this doesn't add
+a second, competing one).
+
+One small, genuine gap in `ExpenseService::present()` was closed here,
+benefiting the JSON API too, the same pattern as the `customer_name`
+gap the quotations slice closed: `category_name`, `supplier_name` and
+`receipt_document_id` were all missing (the source's own dashboard
+query joins `expense_categories`/`business_parties` for the first two;
+`receipt_document_id` was simply never selected despite being a real
+column since the table's creation).
+
+Two confirmed, deliberately **not** ported scope boundaries, each
+documented rather than silently faked:
+- **Import VAT evidence** -- the source's fourth panel (customs
+  declaration evidence) is not rendered at all. Unlike every other gap
+  this migration has closed, `import_records` has no backing model,
+  service, or controller whatsoever -- only its migration exists (Phase
+  4's own "not yet built" list). Building it would mean inventing an
+  entire new backend domain (customs declarations, evidence-gated input
+  VAT) under an "expenses" UI slice, not porting an existing one; the
+  view instead shows an explicit "not yet available" notice.
+- **Receipt linking stays read-only.** The source's own
+  `ExpenseReceiptActions.tsx` calls `POST /api/v1/expenses/{id}/receipt`
+  to link an already-uploaded, already-scanned-clean document to a
+  `DRAFT` expense -- but that command was never ported to
+  `ExpenseService` (no method, no route registered, confirmed by
+  reading the file in full), and its own "Upload receipt" action
+  depends on the Documents module's own upload UI, which also has no
+  Blade screen yet (`documents` remains in this initiative's own
+  not-yet-started list). This view reads and displays a linked
+  receipt's real state directly from `App\Models\DocumentMetadata`
+  (file name, scan status, availability) -- a genuine, working read --
+  but does not invent the missing link/upload commands themselves.
+
+One deliberate, documented deviation from source, closing a confirmed
+dead end the same way the quotations slice's own "Send" action did:
+the source's operations page has **no create-expense form and no
+`DRAFT` -> `SUBMITTED` action anywhere** -- confirmed by a full-repo
+grep of every `.tsx` file for `"submission"`/`submitExpense"`, which
+turns up nothing related to expenses at all -- even though
+`ExpenseService::create`/`submit` are both fully built and already
+reachable via the JSON API. Without either, no expense created through
+this application could ever reach the maker-checker decision this same
+page's own UI is otherwise built entirely around. This controller adds
+a "Record an expense" form (`store`, creating a `DRAFT`) and a "Submit"
+action (`DRAFT` -> `SUBMITTED`), closing that dead end. Approve/reject
+(the source's own real, working actions) are ported unchanged,
+including the self-review denial `ExpenseService::approve`/`reject`
+already enforce (`AuthorizationException`, rendering the shared
+`errors/403.blade.php` like every other authorization failure in this
+migration, not caught/redirected specially).
+
+Verified by `tests/Feature/Business/OperationsViewTest.php` (8 tests):
+the page requires authentication; a role without `expenses:read`
+(`SELLER_VIEWER`) is denied `403`; all three panels render correctly
+with the enriched expense fields, inventory balances and project data,
+plus the explicit import-VAT-evidence notice, all with accessible table
+markup; an expense can be recorded through the form (`DRAFT`, correct
+computed total); a role without `expenses:manage`
+(`TAXPAYER_VIEWER`) cannot record one; a `DRAFT` expense can be
+submitted and then approved by a second, independent user
+(`TAXPAYER_ACCOUNTANT`); the expense's own creator is denied `403`
+attempting to approve their own submitted expense (maker-checker
+self-review denial, reached through this UI); and a submitted expense
+can be rejected with a reason. 372 tests total (342 passing), 0 new
+regressions -- the failing set is byte-for-byte identical to the
+pre-slice baseline, run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end across two real user sessions (seeded directly for
+the walkthrough, since the demo seeder creates neither a second
+taxpayer-org user nor any expense/inventory/project data): recording
+an expense as `owner@demo-trading.test`, submitting it, confirming the
+creator's own view correctly shows "Independent reviewer required"
+rather than decision buttons, logging in as a separate seeded
+`TAXPAYER_ACCOUNTANT` and confirming that session sees real
+Approve/Reject actions, approving it (status flips to `Approved`,
+"Decision recorded" now shown to both users), and confirming the
+inventory balance and project control panels render real seeded data
+correctly alongside the explicit import-VAT-evidence and
+receipt-upload-not-available notices.
 
 ## Legacy D1 importer (Phase 14)
 
