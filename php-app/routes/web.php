@@ -27,6 +27,7 @@ use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
+use App\Http\Controllers\Compliance\DisputeViewController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
@@ -140,6 +141,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/audit-cases/{id}/evidence', [AuditCaseViewController::class, 'storeEvidence'])->name('audit-cases.evidence.store');
     Route::post('/audit-evidence/{id}/custody-events', [AuditCaseViewController::class, 'storeEvidenceCustodyEvent'])->name('audit-evidence.custody-events.store');
     Route::post('/audit-cases/{id}/notes', [AuditCaseViewController::class, 'storeNote'])->name('audit-cases.notes.store');
+
+    // Real Blade UI for disputes, alongside the JSON API surface below --
+    // see DisputeViewController's own doc comment. Unlike every other
+    // compliance module built so far, this one is taxpayer-INITIATED:
+    // DisputeService::file() lets a taxpayer self-file against their own
+    // case/finding/return/decision (disputes:manage is held by taxpayer
+    // roles too, not just officer ones), matching the source's own design.
+    Route::get('/disputes', [DisputeViewController::class, 'index'])->name('disputes.index');
+    Route::get('/disputes/{id}', [DisputeViewController::class, 'show'])->name('disputes.show');
+    Route::post('/disputes', [DisputeViewController::class, 'store'])->name('disputes.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
