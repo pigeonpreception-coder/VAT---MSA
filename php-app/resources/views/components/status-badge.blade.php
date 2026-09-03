@@ -7,8 +7,12 @@
     // one, so no combination here needs a manual contrast check.
     $statusMap = [
         'CERTIFIED' => 'text-bg-success', 'ACTIVE' => 'text-bg-success', 'APPROVED' => 'text-bg-success', 'APPLIED' => 'text-bg-success',
-        'MATCHED' => 'text-bg-info', 'PENDING' => 'text-bg-info', 'PENDING_APPROVAL' => 'text-bg-info',
-        'EXCEPTION' => 'text-bg-danger', 'REJECTED' => 'text-bg-danger', 'CANCELLED' => 'text-bg-secondary', 'RETIRED' => 'text-bg-secondary',
+        'OPEN' => 'text-bg-success', 'ACKNOWLEDGED' => 'text-bg-success', 'FILED' => 'text-bg-success',
+        'MATCHED' => 'text-bg-info', 'PENDING' => 'text-bg-info', 'PENDING_APPROVAL' => 'text-bg-info', 'AWAITING_PROVIDER' => 'text-bg-info',
+        'EXCEPTION' => 'text-bg-danger', 'REJECTED' => 'text-bg-danger', 'REJECTED_BY_PROVIDER' => 'text-bg-danger',
+        'CANCELLED' => 'text-bg-secondary', 'RETIRED' => 'text-bg-secondary', 'LOCKED' => 'text-bg-secondary',
+        'DRAFT' => 'text-bg-secondary', 'SUPERSEDED' => 'text-bg-secondary',
+        'BLOCKED_CONFIGURATION' => 'text-bg-warning',
     ];
     $riskMap = [
         'LOW' => 'text-bg-success',

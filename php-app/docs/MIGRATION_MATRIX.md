@@ -2074,6 +2074,73 @@ session per the accessibility section above. 265 tests total, 0
 regressions, run against real MySQL, plus a clean `migrate:fresh --seed`
 cycle.
 
+### VAT returns & periods module (the third UI slice, and the first with real write actions)
+
+Ports the source's own VAT-return-lifecycle screens over
+`VatLifecycleService` (see that Phase 9/11 section above) -- unlike
+Dashboard and Invoices (read-only so far), this slice is genuinely
+interactive: generate a return, submit a VAT adjustment, request
+approval, decide it (maker-checker), and submit to ITAS, all as real
+POST-and-redirect Blade forms.
+
+New: `App\Http\Controllers\VatLifecycle\VatLifecycleViewController`,
+reusing `VatLifecycleService` directly -- the exact same service
+instance the JSON `VatLifecycleController` already calls, so behaviour,
+validation and the audit trail are identical regardless of which
+surface triggered a command. Routes (`GET /vat-periods`, `GET
+/vat-periods/{id}`, `GET /vat-returns/{id}`, plus five POST write
+routes), registered outside the `api/v1` prefix, matching the Invoices
+slice's own precedent. Three views: `vat-periods/index.blade.php`
+(periods table with search/status filter, plus pending-approvals/
+recent-submissions/ITAS-provider-status side panels),
+`vat-periods/show.blade.php` (period record, latest return summary,
+full adjustment history with an inline "submit a new adjustment" form
+and a "pending adjustment approvals" decide-inline section),
+`vat-returns/show.blade.php` (the four computed boxes, approval
+history, adjustments, submission history, and status-gated action
+cards for request-approval/decide/submit-to-ITAS).
+
+Each Blade form submission generates its own fresh idempotency key
+(`Str::uuid()`) rather than reading an `Idempotency-Key` header the way
+the JSON API does -- a real browser form POST is inherently a *new*
+user-initiated attempt each time, not a client retrying a prior request
+with the same key. Domain exceptions that already have their own clean
+`render()` (`VatLifecycleValidationException`,
+`VatLifecycleResourceException`, `RepositoryConflictException`, and
+`AuthorizationException` for the maker-checker self-approval case) are
+deliberately caught inline in each write action and turned into a
+normal `back()->withErrors(...)` redirect, rather than being let
+through to the global handler -- that would show a raw JSON body on
+what is otherwise a normal web form. The status-badge component
+(`resources/views/components/status-badge.blade.php`) gained mappings
+for every new status this module introduces (`OPEN`/`LOCKED`,
+`DRAFT`/`SUPERSEDED`, `AWAITING_PROVIDER`/`FILED`,
+`ACKNOWLEDGED`/`REJECTED_BY_PROVIDER`/`BLOCKED_CONFIGURATION`), all
+reusing the same six already-WCAG-AA-verified Bootstrap `text-bg-*`
+classes -- no new contrast check needed.
+
+Verified by a new `tests/Feature/VatLifecycle/VatLifecycleViewTest.php`
+(11 tests, reusing `VatReturnLifecycleTest`'s own
+makeTradingParty/invoicePayload/certifyInvoice/openPeriod fixture
+pattern, since a real return position genuinely depends on certified-
+invoice ledger entries): authentication and `returns:read` permission
+gates; the periods list renders with a working link; a cross-tenant
+period 404s; generating a return from the period page creates a real
+draft and redirects to it; a permitted user can submit an adjustment
+(and an invalid one is rejected with field-level errors and creates no
+row); requesting approval moves a return to `PENDING_APPROVAL`; a
+same-user self-approval attempt is caught and shown as a friendly form
+error, *not* the RT-002 clean-403 error page (that page is reserved for
+authorization failures the controller doesn't expect and catch itself);
+a different user (a `PILOT_ADMIN`) can approve, which locks the period;
+submitting an approved return records a real `vat_return_submissions`
+row; and a cross-tenant return version correctly gets the RT-002
+clean-403 page (matching the JSON API's own behaviour for that specific
+method, which throws `AuthorizationException`, not a 404, for a
+cross-tenant version -- a pre-existing, narrower-than-Invoices privacy
+posture in the backend itself, not something newly introduced by this
+UI). 295 tests total, 0 regressions, run against real MySQL.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

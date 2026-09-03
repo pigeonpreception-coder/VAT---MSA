@@ -29,6 +29,11 @@
                                 <a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
                             </li>
                         @endcan
+                        @can('permission', 'returns:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT Returns</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}

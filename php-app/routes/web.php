@@ -32,6 +32,7 @@ use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
+use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
@@ -79,6 +80,21 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // ambiguity: this is a genuinely different URL (no api/v1 prefix).
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
+
+    // Real Blade UI for the VAT returns lifecycle, alongside the JSON API
+    // surface below -- see VatLifecycleViewController's own doc comment.
+    // Unlike invoices (read-only so far), this slice includes real write
+    // actions (generate/adjust/approve/submit), each a plain POST->redirect
+    // form reusing App\Services\VatLifecycle\VatLifecycleService directly,
+    // the same service the JSON API controller calls.
+    Route::get('/vat-periods', [VatLifecycleViewController::class, 'index'])->name('vat-periods.index');
+    Route::get('/vat-periods/{id}', [VatLifecycleViewController::class, 'show'])->name('vat-periods.show');
+    Route::post('/vat-periods/{id}/adjustments', [VatLifecycleViewController::class, 'storeAdjustment'])->name('vat-periods.adjustments.store');
+    Route::post('/vat-periods/{id}/return', [VatLifecycleViewController::class, 'storeReturn'])->name('vat-periods.return.store');
+    Route::get('/vat-returns/{id}', [VatLifecycleViewController::class, 'showReturn'])->name('vat-returns.show');
+    Route::post('/vat-returns/{id}/approval-request', [VatLifecycleViewController::class, 'requestApproval'])->name('vat-returns.approval-request.store');
+    Route::post('/vat-returns/{id}/submission', [VatLifecycleViewController::class, 'submit'])->name('vat-returns.submission.store');
+    Route::post('/approval-tasks/{id}/decision', [VatLifecycleViewController::class, 'decideApproval'])->name('approval-tasks.decision.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
