@@ -1955,10 +1955,13 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases and refunds closed out further below): accounting, business
-parties, quotations, expenses, inventory, projects, licensing, portals,
-documents, reports, analytics, platform config, the workflow engine --
-each its own comparable slice of this new initiative.
+cases, refunds and the portal switchboard closed out further below):
+accounting, business parties, quotations, expenses, inventory, projects,
+licensing, the six per-portal dashboards (buyer/seller/namra/namra-admin/
+super-admin/developer -- the switchboard that lists them is done, each
+dashboard behind it is not), documents, reports, analytics, platform
+config, the workflow engine -- each its own comparable slice of this new
+initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
 
@@ -2143,6 +2146,52 @@ original TypeScript/Next.js app's Tailwind config, requiring
 never installs) and failed. `resources/css/app.css` only imports
 Bootstrap's precompiled CSS and needs no PostCSS plugins of its own, so
 an empty local config is enough to stop the upward search.
+
+### Portal switchboard (a fourth screen)
+
+Ports the source's own `app/portals/page.tsx` -- the role/capability-
+scoped "which of these six workspaces am I authorised to open" screen.
+Reuses `App\Services\Portal\PortalService::getAvailablePortals` directly,
+the same read the JSON `App\Http\Controllers\Portal\PortalController`
+already serves at `/api/v1/portals` -- no second query path, same
+precedent as every other view controller in this initiative.
+
+New: `App\Http\Controllers\Portal\PortalViewController` (`GET /portals`,
+named `portals.index`), gated on `dashboard:read` alone (matching the
+source exactly -- the answer is inherently self-scoped, so no stronger
+permission gate applies). `resources/views/portals/index.blade.php`
+uses a plain Bootstrap card grid (`row row-cols-*` + `.card`) rather than
+porting the source's own `.portal-grid`/`.portal-card` CSS classes --
+this Blade UI has never introduced a parallel design-system, only
+Bootstrap components, and mixing one in here would be the first
+inconsistency in an otherwise uniform frontend. An unconditional
+"Portals" nav link was added right after Dashboard (not `@can`-gated,
+since `dashboard:read` is already granted to all 22 roles).
+
+Each portal's `href` in the source points at its own dedicated dashboard
+(`app/portal/buyer/page.tsx` and five siblings) -- six genuinely
+separate, comparably-sized initiatives this migration has not built yet.
+Rather than a dead `href="#"` link, every "Open X" button here points at
+`route('dashboard')`, the one real authenticated landing page this port
+currently has -- the same "no button with no real destination" precedent
+`DashboardController`'s own doc comment already established for the
+removed "+ Submit invoice" button. Those six portal dashboards are their
+own future slices, tracked here rather than silently implied by a
+working-looking link that goes nowhere real.
+
+Verified by a new `tests/Feature/Portal/PortalViewTest.php` (5 tests):
+authentication is required; a taxpayer owner with no Buyer/Seller
+capability sees only the capability-free Developer portal; granting a
+Buyer capability adds exactly the Buyer portal (not Seller); a
+PILOT_ADMIN sees all six; and `INTERNAL_AUDITOR` -- on no portal's role
+list at all -- renders the source's own empty state. 278 tests total, 0
+new regressions (the same 28 pre-existing, invoice-certification-
+dependent failures noted in the compliance/audit-cases/refunds section
+above, reproduced identically on the pre-slice tree), run against real
+MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
+visually over a real HTTP session (PILOT_ADMIN, screenshot + rendered-
+text inspection, all six cards present with working links, no console
+errors).
 
 ## Legacy D1 importer (Phase 14)
 

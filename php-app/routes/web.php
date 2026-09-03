@@ -44,6 +44,7 @@ use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Portal\PortalController;
+use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
@@ -93,6 +94,10 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/cases', [AuditCaseViewController::class, 'index'])->name('cases.index');
     Route::get('/compliance', [ComplianceViewController::class, 'index'])->name('compliance.index');
     Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
+
+    // Ported from the source's own app/portals/page.tsx -- see
+    // PortalViewController's own doc comment.
+    Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
