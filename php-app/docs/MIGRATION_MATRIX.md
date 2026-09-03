@@ -1955,13 +1955,16 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard, and the Buyer/Seller/NamRA
-portal dashboards closed out further below): accounting, business
-parties, quotations, expenses (each as their own standalone screen --
-the Buyer/Seller portal dashboards surface expenses/quotations read-only,
-not a replacement for a dedicated module UI), inventory, projects,
-licensing, the remaining three per-portal dashboards
-(namra-admin/super-admin/developer), documents, reports, analytics,
+cases, refunds, the portal switchboard, and the Buyer/Seller/NamRA/
+Super Administration portal dashboards closed out further below):
+accounting, business parties, quotations, expenses (each as their own
+standalone screen -- the Buyer/Seller portal dashboards surface
+expenses/quotations read-only, not a replacement for a dedicated module
+UI), inventory, projects, licensing, the remaining two per-portal
+dashboards (the Developer portal -- a quick composition like Super
+Administration -- and NamRA Administration, which needs a whole new
+backend module first, see its own dedicated section below), documents,
+reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
 
@@ -2410,6 +2413,97 @@ verified visually over a real HTTP session, clicking "Open NamRA" from
 the switchboard through to the rendered page with real case/risk data
 carried over from this session's own earlier compliance-slice fixtures
 (screenshot).
+
+### NamRA Administration portal: deferred (a genuinely new backend module)
+
+Investigated as the natural fourth portal in sequence and deliberately
+**not** built this slice, at the user's own direction after the scope
+was surfaced. The source's `app/portal/namra-admin/page.tsx` reads
+`getAuthorityGovernanceSnapshot` from `lib/data/authority-governance-repository.ts`
+(276 lines: a snapshot read plus `createAuthorityOnboardingCase`/
+`decideAuthorityOnboardingCase` commands) -- a genuinely new backend
+module this migration has never touched, unlike every other portal
+dashboard so far. It needs its own migrations (`tax_authorities`,
+`tax_authority_administrators`, `tax_authority_units`,
+`tax_authority_role_definitions`, `tax_authority_role_assignments`,
+`tax_authority_federation_connections`, `tax_authority_onboarding_cases`,
+`tax_authority_onboarding_decisions`, `tax_authority_access_reviews`,
+`tax_authority_governance_events`, plus `tax_jurisdictions`/`countries`
+if not already present), models, an `AuthorityGovernanceValidator`, an
+`AuthorityGovernanceService`, and administrator-assignment seed data
+before any snapshot can even render (the source's own
+`getAuthorityGovernanceSnapshot` throws `AccessDeniedError` for an actor
+with no `tax_authority_administrators` row at all) -- closer in size to
+one of this document's own numbered Phase slices than to a portal
+dashboard. Tracked here as a real, scoped-out gap rather than a silent
+skip; a future slice's own job, not folded into this one.
+
+### Super Administration portal dashboard (the fourth of six)
+
+Ports the source's own `app/portal/super-admin/page.tsx`. Like the
+NamRA portal before it, this needed zero new backend query:
+`App\Services\Platform\PlatformSnapshotService::getTechnicalSnapshot()`
+already returns exactly `components`/`integrations`/`outbox`/
+`securityEvents` -- the same method
+`App\Http\Controllers\Platform\PlatformSnapshotController::show` already
+routes `SUPER_ADMIN`/`INFRASTRUCTURE_ADMIN` to.
+
+**A genuine fidelity nuance caught while building this one, worth
+recording precisely**: every portal controller built so far
+(Buyer/Seller/NamRA) gates on `dashboard:read`, which happens to be
+harmless because `dashboard:read` is granted unconditionally to all 22
+roles -- the real gate in each of those three has always been
+`PortalService::getAvailablePortals()`'s own role/capability membership
+check alone. The source's own `lib/portals.ts` `PORTAL_PERMISSIONS` map
+names a *different* permission per portal (`platform:read` for
+`super-admin`, `developer:read` for `developer`, `authority-governance:read`
+for `namra-admin`), and `getAvailablePortals`/`requirePortalAccess` check
+*both* the role/capability list and that specific permission together.
+For `super-admin` this is load-bearing: `SECURITY_ANALYST` is on
+`PortalDefinitions`' own `super-admin` role list but does not hold
+`platform:read` (confirmed against `Permissions::ROLE_PERMISSIONS`), so
+the source denies that role even though role/capability membership alone
+would not catch it. `App\Http\Controllers\Portal\
+SuperAdminPortalController` therefore gates on `platform:read`
+explicitly rather than `dashboard:read`, plus the usual
+`getAvailablePortals()` membership check -- see the controller's own doc
+comment.
+
+**`PortalService::getAvailablePortals()` itself does not yet enforce
+the source's full `PORTAL_PERMISSIONS` matrix** (only `PortalDefinitions::
+roleAllows`'s role/capability check) -- a real, narrow, pre-existing gap
+this investigation surfaced rather than introduced. Fixing it wholesale
+was deliberately *not* done here: `authority-governance:read` does not
+exist anywhere in `Permissions::ROLE_PERMISSIONS` yet (would make
+`namra-admin` disappear from the switchboard for every role, including
+`PILOT_ADMIN`), and `SELLER_ADMIN` -- a legitimate `developer` portal
+role per `PortalDefinitions` -- does not hold `developer:read` either
+(would make `developer` disappear for that role too). Both are real,
+narrower fidelity gaps of the same shape as this one, left for whichever
+future slice builds the `developer` and `namra-admin` dashboards to
+resolve alongside their own controllers (as `super-admin`'s was resolved
+here), rather than one broad change to shared code risking regressions
+in portals not yet under test. The switchboard itself still shows
+`SECURITY_ANALYST` a `super-admin` card that then correctly 403s on
+click -- a known, narrow consequence of not touching
+`PortalService` this slice, not a new defect.
+
+Verified by a new `tests/Feature/Portal/SuperAdminPortalTest.php` (4
+tests): authentication is required; a role entirely absent from the
+portal's list is denied; `SECURITY_ANALYST` specifically -- present on
+the role list but missing `platform:read` -- is denied, proving the gate
+is genuinely `platform:read`; and real `service_components`/
+`integration_connections`/`security_events` rows (inserted directly --
+neither table has any write command anywhere in this migration, per
+each one's own migration doc comment) plus a real `PENDING` outbox row
+(from a real `/api/v1/obligations` command, since every command writes
+one via `CommandLedger::outbox`) all render correctly with accessible
+table markup. 293 tests total, 0 new regressions (same 29 pre-existing
+`bcmath`-caused failures noted in the Seller portal section above), run
+against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
+Also verified visually over a real HTTP session, clicking "Open Super
+Administration" from the switchboard through to the rendered page with
+real component/integration/security-event data (screenshot).
 
 ## Legacy D1 importer (Phase 14)
 

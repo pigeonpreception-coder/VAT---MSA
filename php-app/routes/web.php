@@ -48,6 +48,7 @@ use App\Http\Controllers\Portal\NamraPortalController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
+use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
@@ -110,6 +111,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
     Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
     Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
+    Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
