@@ -72,6 +72,11 @@
                                 <a class="nav-link {{ request()->routeIs('disputes.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('disputes.index') }}" @if (request()->routeIs('disputes.*')) aria-current="page" @endif>Disputes</a>
                             </li>
                         @endcan
+                        @can('permission', 'compliance:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('obligations.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('obligations.index') }}" @if (request()->routeIs('obligations.*')) aria-current="page" @endif>Obligations</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">
