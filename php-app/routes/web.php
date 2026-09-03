@@ -24,6 +24,7 @@ use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
+use App\Http\Controllers\Business\QuotationViewController;
 use App\Http\Controllers\Compliance\AuditCaseController;
 use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
@@ -112,6 +113,24 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/parties', [BusinessPartyViewController::class, 'store'])->name('parties.store');
     Route::patch('/parties/{id}', [BusinessPartyViewController::class, 'update'])->name('parties.update');
     Route::post('/parties/{id}/deactivation', [BusinessPartyViewController::class, 'deactivate'])->name('parties.deactivate');
+
+    // Real Blade UI for the quotation register/lifecycle/edit -- ported
+    // from the source's own app/commercial/page.tsx + QuotationForm.tsx +
+    // QuotationActions.tsx + app/commercial/quotations/[id]/edit/page.tsx +
+    // QuotationEditForm.tsx. See QuotationViewController's own doc comment
+    // for the one deliberate deviation from source (a "Send" action for a
+    // DRAFT quotation, closing a genuine dead end in the original). No
+    // step-up gate, matching the JSON API's own /api/v1/quotations/**
+    // routes below.
+    Route::get('/quotations', [QuotationViewController::class, 'index'])->name('quotations.index');
+    Route::post('/quotations', [QuotationViewController::class, 'store'])->name('quotations.store');
+    Route::get('/quotations/{id}/edit', [QuotationViewController::class, 'edit'])->name('quotations.edit');
+    Route::patch('/quotations/{id}', [QuotationViewController::class, 'update'])->name('quotations.update');
+    Route::post('/quotations/{id}/sending', [QuotationViewController::class, 'send'])->name('quotations.send');
+    Route::post('/quotations/{id}/accept', [QuotationViewController::class, 'accept'])->name('quotations.accept');
+    Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
+    Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
+    Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.

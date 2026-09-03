@@ -1957,10 +1957,10 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
--- and business parties closed out further below): accounting,
-quotations, expenses (each as their own standalone screen -- the
-Buyer/Seller portal dashboards surface expenses/quotations read-only,
-not a replacement for a dedicated module UI), inventory, projects,
+-- and business parties and quotations closed out further below):
+accounting, expenses (each as their own standalone screen -- the
+Buyer/Seller portal dashboards surface expenses read-only, not a
+replacement for a dedicated module UI), inventory, projects,
 licensing, documents, reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
@@ -2790,6 +2790,116 @@ selectable together) registering a second party -- "Dual Role Trading
 CC" -- with both the Customer and Supplier boxes checked at once,
 confirming both badges render in the register and both boxes remain
 checked when its edit form is reopened.
+
+### Quotations (register, lifecycle actions, multi-line edit -- the second write-capable screen)
+
+Ports the source's own `app/commercial/page.tsx` + `QuotationForm.tsx` +
+`QuotationActions.tsx` + `app/commercial/quotations/[id]/edit/page.tsx` +
+`QuotationEditForm.tsx` -- the quotation register, a one-line issue
+form, the full lifecycle (send/accept/reject/expire/convert), and a
+dedicated multi-line revision editor. New:
+`App\Http\Controllers\Business\QuotationViewController` (`index`/
+`store`/`edit`/`update`/`send`/`accept`/`reject`/`expire`/`convert`)
+and `resources/views/quotations/{index,edit}.blade.php`, reusing
+`App\Services\Business\QuotationService` and
+`App\Services\Business\BusinessPartyService` directly (the same
+methods the JSON API at `/api/v1/quotations` already serves) plus a
+direct `App\Models\Product` read for the catalog dropdown, matching
+`App\Http\Controllers\Business\InventoryController::indexProducts`'s
+own precedent of querying the model inline (no dedicated product-search
+service exists, and none was added just for this).
+
+Two small, genuine gaps in `QuotationService` itself -- not new to this
+slice, but only surfaced because this is the first caller that needed a
+single-record read -- were closed here, benefiting the JSON API too:
+`present()` was missing `customer_name` (the source's own
+`searchQuotations`/`getQuotationForEdit` SQL both join
+`business_parties` for `p.display_name AS customer_name`; this port's
+`present()` never carried it); and there was no public single-quotation
+read at all (`findOrFail`/`present` were private, and neither the JSON
+`QuotationController` nor the service exposed a `show`/`find` -- the
+source's own `getQuotationForEdit` is a server-component-only data
+function with no JSON API equivalent either, confirmed by
+`app/api/v1/quotations/[id]/route.ts` only implementing `PATCH`). Added
+`QuotationService::find()`, a thin public wrapper the same shape as
+`App\Services\Invoice\InvoiceService::find`, including `revision_count`
+(matching the source's own `COUNT(*)` subquery, which `search()`
+deliberately still omits, matching `searchQuotations` never selecting
+it either).
+
+One deliberate, documented deviation from the source, found and closed
+in this slice, not a silent fix: `createQuotation` always creates a
+quotation in `DRAFT` status, but a full-repo grep of the source's own
+`app/` tree for `"sending"`/`sendQuotation` turns up nothing -- neither
+`app/commercial/page.tsx` nor `QuotationActions.tsx` (nor anywhere else)
+ever reaches the already-built `sendQuotation` (`DRAFT` -> `ISSUED`)
+transition. A quotation created through the source's own screen is a
+genuine dead end: permanently `DRAFT`, with no UI path to any later
+lifecycle action. `QuotationViewController` adds a "Send" action for a
+`DRAFT` row (calling the already-fully-built and already JSON-API-
+reachable `QuotationService::send`) so a quotation created through this
+screen is actually usable, rather than faithfully reproducing a bug.
+
+The multi-line edit form's "Add line"/"Remove line" controls are
+self-contained vanilla JavaScript (a `<template>` clone, index
+rewriting, and one `change` listener for the tax-category/tax-rate
+lock) with zero `fetch()` calls -- the actual save is still one plain
+`POST` (`PATCH` via `@method`) + redirect, matching this migration's
+Blade/session-driven precedent everywhere else. This is different in
+kind from the source's own `QuotationForm`/`QuotationActions`/
+`QuotationEditForm`, which are full client-side components driving
+every action (including the save itself) through `fetch()` without a
+page navigation.
+
+A second gap was found and fixed during this slice's own verification,
+not shipped: `QuotationViewController::convert` initially caught only
+`BusinessValidationException`/`BusinessResourceException`/
+`RepositoryConflictException`, but `QuotationService::convertToInvoice`
+calls `InvoiceService::submit` internally, which throws
+`App\Exceptions\InvoiceValidationException` on a certification failure
+-- a different exception class the controller didn't catch, so it
+reached Laravel's default handler and rendered a raw JSON error page to
+a browser user instead of a normal Blade error redirect. Caught by this
+sandbox's own missing-`bcmath` limitation triggering exactly that path
+during the visual walkthrough below; fixed by adding
+`InvoiceValidationException` to the same catch clause.
+
+Verified by `tests/Feature/Business/QuotationViewTest.php` (11 tests):
+the page requires authentication; a role without `commercial:read` is
+denied `403`; the register and issue form render with accessible table
+markup; a quotation can be created through the form (`DRAFT`, correct
+total); a role without `quotations:manage` cannot issue one; a `DRAFT`
+quotation can be sent, then accepted, then converted to a real
+certified invoice (the one test in this file that needs `bcmath` --
+see below); an `ISSUED` quotation can be rejected with a reason; an
+overdue `ISSUED` quotation can be expired; the edit form renders
+prefilled lines and the correct `revision_count`; an `ISSUED` quotation
+can be edited with its line count changed from one to two (correct
+recalculated total, a new hash-chained revision row); and an `ACCEPTED`
+quotation's edit route correctly refuses with the lifecycle guard's own
+reason rather than rendering an edit form. 360 tests total (330
+passing), 0 unexpected regressions: exactly the same 29 pre-existing
+`bcmath`-caused failures plus this file's own one new `bcmath`-caused
+failure (the convert-to-invoice assertion -- confirmed by `php -m |
+grep bcmath` returning nothing in this sandbox, the same root cause as
+every other invoice-certification-dependent test in this suite), run
+against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
+
+Also verified visually over a real HTTP session end to end as
+`owner@demo-trading.test`: registering a customer party, issuing a
+`DRAFT` quotation (metrics correctly still `N$ 0.00` quoted value, since
+`DRAFT` is deliberately excluded from that aggregate), sending it
+(`ISSUED`, `Accept`/`Edit`/`Reject` actions appear, quoted value updates
+to the real total), opening the edit form, adding a second line through
+the vanilla-JS repeater, saving (the register's total and quoted-value
+metric both recalculate correctly to include the new line), accepting
+the quotation (`ACCEPTED`, the inline convert form appears), and
+attempting conversion -- which in this `bcmath`-less sandbox correctly
+renders the accessible validation-error banner fixed above rather than
+a raw JSON page, leaving the quotation safely at `ACCEPTED` rather than
+in a partially-converted state, exactly as the idempotent
+`convertToInvoice`/`InvoiceService::submit` pairing is designed to
+behave on failure.
 
 ## Legacy D1 importer (Phase 14)
 
