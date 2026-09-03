@@ -12,49 +12,68 @@
          skip the repeated nav on every page. Visually hidden until focused. --}}
     <a class="visually-hidden-focusable skip-link" href="#main-content">Skip to main content</a>
 
-    @auth
-        <nav class="navbar navbar-expand-lg navbar-dark bg-dark" aria-label="Primary">
-            <div class="container-fluid">
-                <a class="navbar-brand" href="{{ route('dashboard') }}">VAT-MSA</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="collapse navbar-collapse" id="navMain">
-                    <ul class="navbar-nav me-auto">
+    <div class="d-flex flex-column flex-md-row">
+        @auth
+            {{-- Below md: a slim top bar with the brand and a toggle button
+                 that reveals the nav, stacked full-width above the content
+                 (never squeezed side-by-side -- this app is verified down to
+                 a 320px viewport with no horizontal scroll, so the sidebar
+                 must not permanently steal width there). At md and up, this
+                 bar is hidden and the sidebar itself carries the brand,
+                 always visible, fixed-width, to the left of the content. --}}
+            <nav class="navbar navbar-dark bg-dark d-md-none" aria-label="Primary">
+                <div class="container-fluid">
+                    <a class="navbar-brand" href="{{ route('dashboard') }}">VAT-MSA</a>
+                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarNav" aria-controls="sidebarNav" aria-expanded="false" aria-label="Toggle navigation">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+                </div>
+            </nav>
+
+            <nav id="sidebarNav" class="collapse d-md-block bg-dark sidebar" aria-label="Primary">
+                <div class="d-flex flex-column h-100 p-3">
+                    <a class="navbar-brand text-white d-none d-md-inline-block mb-3" href="{{ route('dashboard') }}">VAT-MSA</a>
+                    {{-- Active state uses text-bg-primary, not nav-pills' own
+                         .active (Bootstrap primary-blue bg + white text with
+                         no documented auto-contrast guarantee) -- text-bg-*
+                         is this app's own established, verified-WCAG-AA
+                         pairing (see <x-status-badge>'s own doc comment). --}}
+                    <ul class="nav nav-pills flex-column mb-auto">
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ route('dashboard') }}" @if (request()->routeIs('dashboard')) aria-current="page" @endif>Dashboard</a>
+                            <a class="nav-link {{ request()->routeIs('dashboard') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('dashboard') }}" @if (request()->routeIs('dashboard')) aria-current="page" @endif>Dashboard</a>
                         </li>
                         @can('permission', 'invoices:read')
                             <li class="nav-item">
-                                <a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
+                                <a class="nav-link {{ request()->routeIs('invoices.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
                             </li>
                         @endcan
                         @can('permission', 'returns:read')
                             <li class="nav-item">
-                                <a class="nav-link" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT Returns</a>
+                                <a class="nav-link {{ request()->routeIs('vat-periods.*', 'vat-returns.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT Returns</a>
                             </li>
                         @endcan
                     </ul>
-                    <span class="navbar-text text-white-50 me-3">
+                    <hr class="text-white-50">
+                    <div class="text-white-50 small mb-2">
                         {{ auth()->user()->name }}
                         <span class="badge bg-secondary ms-1">{{ auth()->user()->role }}</span>
-                    </span>
+                    </div>
                     <form method="POST" action="{{ route('logout') }}">
                         @csrf
-                        <button type="submit" class="btn btn-outline-light btn-sm">Log out</button>
+                        <button type="submit" class="btn btn-outline-light btn-sm w-100">Log out</button>
                     </form>
                 </div>
-            </div>
-        </nav>
-    @endauth
+            </nav>
+        @endauth
 
-    <main id="main-content" class="container-fluid py-4" tabindex="-1">
-        @if (session('status'))
-            <div class="alert alert-success" role="alert">{{ session('status') }}</div>
-        @endif
+        <main id="main-content" class="flex-grow-1 container-fluid py-4" tabindex="-1">
+            @if (session('status'))
+                <div class="alert alert-success" role="alert">{{ session('status') }}</div>
+            @endif
 
-        @yield('content')
-    </main>
+            @yield('content')
+        </main>
+    </div>
 
     @stack('scripts')
 </body>

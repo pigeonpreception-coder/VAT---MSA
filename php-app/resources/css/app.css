@@ -13,6 +13,31 @@ body {
     font-weight: 600;
 }
 
+/* Vertical sidebar nav. Full-width when the mobile toggle reveals it
+   (stacked above the content, never squeezed beside it -- this app is
+   verified down to a 320px viewport with no horizontal scroll); a
+   fixed-width rail to the left of the content from the md breakpoint
+   up, matching Bootstrap's own d-md-block/collapse breakpoint used on
+   the nav itself. */
+.sidebar {
+    width: 100%;
+}
+@media (min-width: 768px) {
+    .sidebar {
+        width: 240px;
+        min-height: 100vh;
+    }
+}
+
+/* Bootstrap 5.3 has no min-w-0 utility (unlike min-vw-100/min-vh-100) --
+   without this, a flex child's default min-width:auto can force the
+   whole row wider than the viewport once a wide table is inside it,
+   defeating the .table-responsive scroll region that table is meant to
+   contain itself to. */
+#main-content {
+    min-width: 0;
+}
+
 /* Skip-to-content link (WCAG 2.1 SC 2.4.1) -- Bootstrap's
    .visually-hidden-focusable handles show/hide on focus; this just gives
    it a legible, unmistakable appearance once focused. */
