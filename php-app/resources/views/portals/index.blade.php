@@ -18,16 +18,16 @@
                         <div class="text-uppercase text-muted small fw-semibold mb-1">{{ $portal['audience'] }}</div>
                         <h2 class="h5">{{ $portal['name'] }}</h2>
                         <p class="text-muted flex-grow-1">{{ $portal['description'] }}</p>
-                        {{-- Five of the six portals have real destinations
-                             built now -- only 'namra-admin' still falls
-                             back to the one real authenticated landing page
-                             this port has, matching PortalViewController's
-                             own doc comment: it needs a whole new backend
-                             module first (see docs/MIGRATION_MATRIX.md). --}}
-                        @php
-                            $builtPortalRoutes = ['buyer' => 'portal.buyer', 'seller' => 'portal.seller', 'namra' => 'portal.namra', 'super-admin' => 'portal.super-admin', 'developer' => 'portal.developer'];
-                        @endphp
-                        <a href="{{ route($builtPortalRoutes[$portal['key']] ?? 'dashboard') }}" class="btn btn-primary align-self-start">Open {{ $portal['name'] }}</a>
+                        {{-- All six portal dashboards are real destinations
+                             now -- PortalDefinitions::all()'s own 'href'
+                             for every portal is identical to its actual
+                             Laravel route path (e.g. '/portal/buyer'), so
+                             this links straight to it rather than through a
+                             route-name lookup table (dropped now that
+                             there's no portal left to fall back to
+                             route('dashboard') for -- see git history for
+                             that earlier, now-obsolete precedent). --}}
+                        <a href="{{ $portal['href'] }}" class="btn btn-primary align-self-start">Open {{ $portal['name'] }}</a>
                     </div>
                 </div>
             </div>

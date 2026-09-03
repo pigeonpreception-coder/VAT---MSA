@@ -1955,15 +1955,12 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard, and five of the six portal
-dashboards -- Buyer/Seller/NamRA/Super Administration/Developer --
-closed out further below): accounting, business parties, quotations,
+cases, refunds, the portal switchboard, and all six portal dashboards --
+Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
+-- closed out further below): accounting, business parties, quotations,
 expenses (each as their own standalone screen -- the Buyer/Seller portal
 dashboards surface expenses/quotations read-only, not a replacement for
-a dedicated module UI), inventory, projects, licensing, the NamRA
-Administration portal dashboard (needs a whole new backend module first,
-see its own dedicated section below -- the only one of the six portals
-left), documents,
+a dedicated module UI), inventory, projects, licensing, documents,
 reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
@@ -2552,6 +2549,162 @@ through to the rendered page with a real client/webhook pair
 Administration remains, deliberately deferred per its own dedicated
 section above (a genuinely new backend module, not a quick composition
 like the other five all turned out to be).
+
+### Authority Governance module + the NamRA Administration portal (the sixth and final)
+
+Closes out the one deferred portal from the "NamRA Administration
+portal: deferred" section above, at the user's own explicit request to
+build the backend module. Ported `lib/data/authority-governance-repository.ts`
+in full -- `getAuthorityGovernanceSnapshot`/`createAuthorityOnboardingCase`/
+`decideAuthorityOnboardingCase` -- a genuinely new module, unlike every
+other portal built so far:
+
+- **12 new migrations** (`countries`, `tax_jurisdictions`,
+  `tax_authorities`, `tax_authority_units`,
+  `tax_authority_role_definitions`, `tax_authority_role_assignments`,
+  `tax_authority_federation_connections`,
+  `tax_authority_onboarding_cases`, `tax_authority_onboarding_decisions`,
+  `tax_authority_governance_events`, `tax_authority_access_reviews`,
+  `tax_authority_administrators`). Three needed an explicit short
+  constraint name (`ta_federation_conn_idp_fk`/`ta_onboarding_decisions_unique`/
+  `ta_role_assignments_unique` etc.) -- MySQL's 64-character identifier
+  limit rejected Laravel's own auto-generated name for those particular
+  table/column pairings. `id` columns are `uuid()` (a plain `CHAR(36)`,
+  matching this migration's own `tax_rule_sets.id` precedent) but the
+  reference tables (`tax_jurisdictions`/`tax_authorities`) hold the
+  source's own stable, human-readable seed IDs (`tax-authority-na-namra`),
+  not generated UUIDs -- no command in this module ever creates one.
+  Every source `CHECK` constraint that spans more than one column (no
+  self-parenting unit, no self-approval, no self-review) is enforced at
+  the application layer, matching this migration's own established
+  convention throughout.
+- **`authority-governance:read`/`authority-governance:manage`** added to
+  `Permissions::ROLE_PERMISSIONS` for `PILOT_ADMIN`/`NAMRA_SYSTEM_ADMIN`
+  only -- the one exception to that class's own "line-for-line port of
+  access.ts" doc comment, since the source never grants either
+  permission through its static role-permission map at all: it grants
+  them exclusively through a separate, genuinely dynamic
+  `role_permission_grants` database table this migration's own
+  `role_permission_grants` table (migrated schema-only in Phase 4) has
+  never had a runtime reader for. A targeted transcription of that
+  table's effective two-role result, not a new permission mechanism --
+  see `Permissions`' own doc comment for the full explanation.
+- **`App\Services\AuthorityGovernance\AuthorityGovernanceService`** --
+  the three functions in full, including the maker-checker chain
+  (self-review denial, a distinct decider required), the quarterly
+  Tax-Authority-access-review gate (`requireCurrentAuthorityReview`,
+  distinct from the already-ported organisation-scoped `access_reviews`
+  table from Phase 12 slice 4), idempotency via the same `CommandLedger`
+  every other command in this migration uses, and a dual write
+  (`audit_events` via `AuditService::append` plus this module's own
+  `tax_authority_governance_events` stream) matching the source's own
+  pattern exactly. `authorityGovernanceLocalWritesEnabled()`'s
+  `VAT_MSA_ENVIRONMENT`/`NODE_ENV` check (source) has no PHP equivalent
+  env var, so it's simplified to Laravel's own environment idiom (writes
+  enabled everywhere except `app()->environment('production')`) -- see
+  that service's own doc comment for why the practical effect is
+  identical for this pilot. Real Tax-Authority production activation has
+  no command anywhere in the source either; `productionActivationEnabled`
+  and every response's `production_activation_effect` are hardcoded
+  `false`, reproduced identically.
+- **`App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController`**
+  (`GET`/`POST /api/v1/tax-authority-onboarding-cases`,
+  `POST /api/v1/tax-authority-onboarding-cases/{id}/decisions`), kept
+  1:1 with the source's own URL shape; both write commands are
+  `password.confirm`-gated (this migration's own established step-up
+  equivalent), with the server-computed
+  `"verified-step-up:{$correlationId}"` reference the source's own route
+  computes rather than accepting one from the client.
+- **`AuthorityGovernanceSeeder`** (new, run in `DatabaseSeeder` after
+  `IdentityProviderSeeder`) ports the source's own Namibia/NAMRA
+  reference-data seed verbatim (`countries`/`tax_jurisdictions`/
+  `tax_authorities`/the nine-role `tax_authority_role_definitions`
+  catalogue) -- genuine deploy-time configuration, matching
+  `IdentityProviderSeeder`'s own "not demo fixture data" precedent.
+  `DemoSeeder` gained the demo-specific rows (two real administrators --
+  `admin@vat-msa.test` and a new `namra-admin@vat-msa.test`
+  `NAMRA_SYSTEM_ADMIN` login -- substituted for the source's own
+  placeholder Cloudflare-Sites identities, so maker-checker is genuinely
+  demonstrable, not just readable; three authority units; two role
+  assignments; one federation connection against the already-seeded ITAS
+  identity provider; one submitted onboarding case; and a current
+  `QUARTERLY` access review computed relative to "now", matching this
+  file's own established `consent_grants`/`delegations` precedent for
+  exactly that reason).
+- **A real, closed gap in `App\Services\Portal\PortalService::getAvailablePortals()`**,
+  documented as open in both the Super Administration and Developer
+  portal sections above: it only ever checked
+  `PortalDefinitions::roleAllows` (role/capability membership), never
+  the source's own further `PORTAL_PERMISSIONS` permission ("both
+  checks together" in the source's own `getAvailablePortals`). Closing
+  it needed `authority-governance:read` to exist as a real permission
+  first (it didn't, until this same change set) -- now added as
+  `PortalService::PORTAL_PERMISSIONS`, filtered in addition to the
+  existing role/capability check. The switchboard itself now stops
+  showing `SECURITY_ANALYST` a `super-admin` card or `SELLER_ADMIN` a
+  `developer` card that previously 403'd on click.
+- **`resources/views/portals/index.blade.php`** simplified back from the
+  `$builtPortalRoutes` lookup array (introduced for the Seller portal
+  slice, grown by one entry per portal since) to linking `$portal['href']`
+  directly -- now that every portal has a real destination,
+  `PortalDefinitions::all()`'s own `href` for each one is already
+  identical to its actual route path, so the lookup indirection has
+  nothing left to do.
+- **`App\Http\Controllers\Portal\NamraAdminPortalController`**
+  (`GET /portal/namra-admin`) -- read-only, matching every other portal
+  dashboard's own precedent: the source's interactive
+  `AuthorityGovernanceActions` onboarding-case submission/decision form
+  is not ported to this page (the JSON commands themselves are real and
+  tested, just not yet wired to a form here, the same gap this
+  initiative's other portal dashboards' own backend commands already
+  carry). Reuses `AuthorityGovernanceService::getSnapshot` and the
+  already-ported `IdentityFoundationSnapshotService::getSnapshot`
+  directly -- the source's own two-way `Promise.all`, no second query
+  path. Gated on `authority-governance:read` (matching the
+  `platform:read`/`developer:read` precedent from the two portals before
+  it) plus `getAvailablePortals()` membership.
+
+Verified by two new test files. `tests/Feature/AuthorityGovernance/
+AuthorityGovernanceTest.php` (11 tests): the snapshot requires
+`authority-governance:read` and denies an actor with no governed
+authority scope; a real onboarding case can be created for
+`LOCAL_STAGING` (and is created `BLOCKED_EXTERNAL` for `PRODUCTION`,
+never rejected); creating one without administrator scope is denied and
+a duplicate open case for the same authority/environment is a conflict;
+creating one without step-up confirmation is denied (`423`, matching
+this codebase's own established convention for that exact scenario); a
+requester cannot decide their own case; a distinct reviewer can approve
+local staging (and the resulting decision/status are asserted in the
+database); and a decision without a current access review is denied.
+`tests/Feature/Portal/NamraAdminPortalTest.php` (4 tests): auth
+required; a role absent from the portal's list is denied; an actor with
+`authority-governance:read` but no governed authority scope is denied
+(the same "assigned identity, no data" edge every other portal
+dashboard's own zero-state carries); and real units/federation/
+identity-provider data renders correctly with accessible table markup
+(the assigned authority's own name is never rendered as visible text
+anywhere on this page -- confirmed against the source, which only ever
+uses it for the metric count).
+
+338 tests total (309 passing), 0 new regressions (same 29 pre-existing `bcmath`-caused
+failures noted in the Seller portal section above, confirmed byte-for-
+byte identical to the pre-slice run), run against real MySQL/MariaDB,
+plus a clean `migrate:fresh --seed` cycle. Also verified visually over a
+real HTTP session end to end: `admin@vat-msa.test` clicking "Open NamRA
+Administration" from the switchboard through to a fully populated
+dashboard (3 authority units in their real parent/child hierarchy, 1
+federation connection, 2 protected role assignments across both demo
+administrators, a live-computed current quarterly access review, and all
+3 identity providers with correctly brand-mapped status colours), plus
+the switchboard screenshot itself confirming all six portal cards now
+resolve to real pages.
+
+**All six per-portal dashboards are now built.** The frontend build-out
+initiative's remaining scope is everything outside the portals
+themselves: accounting, business parties, quotations, expenses,
+inventory, projects, licensing, documents, reports, analytics, platform
+config, and the workflow engine, each its own comparable slice --
+see the "Frontend UI build-out" section's own running list above.
 
 ## Legacy D1 importer (Phase 14)
 

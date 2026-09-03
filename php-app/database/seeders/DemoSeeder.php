@@ -191,8 +191,118 @@ class DemoSeeder extends Seeder
             ],
         );
 
+        // Authority Governance demo data (NamRA Administration portal) --
+        // ported from db/runtime.ts's own 'usr-local-admin'/
+        // 'usr-authority-onboarding-maker'/'usr-authority-governance-approver'
+        // seed rows against 'tax-authority-na-namra'
+        // (AuthorityGovernanceSeeder's own reference data), substituting
+        // two real logins for the source's placeholder Cloudflare-Sites
+        // identities -- $admin plays 'usr-local-admin' (the system
+        // administrator); a new NAMRA_SYSTEM_ADMIN login plays
+        // 'usr-authority-onboarding-maker' (the case requester), giving a
+        // second real administrator so the maker-checker self-review
+        // denial and the decide command are genuinely demonstrable, not
+        // just readable.
+        $namraAdmin = User::updateOrCreate(
+            ['email' => 'namra-admin@vat-msa.test'],
+            [
+                'name' => 'NamRA System Administrator', 'password' => Hash::make('password'), 'role' => 'NAMRA_SYSTEM_ADMIN',
+                'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+        foreach ([$admin->id, $namraAdmin->id] as $userId) {
+            DB::table('tax_authority_administrators')->updateOrInsert(
+                ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $userId],
+                [
+                    'id' => (string) Str::uuid(), 'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                    'appointed_by' => 'SYNTHETIC_ARCHITECTURE_BASELINE', 'approval_reference' => 'LOCAL-STAGING-ADR-030',
+                ],
+            );
+        }
+        $hqUnit = (string) Str::uuid();
+        $identityUnit = (string) Str::uuid();
+        DB::table('tax_authority_units')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'HQ'],
+            ['id' => $hqUnit, 'parent_unit_id' => null, 'name' => 'Head Office', 'unit_type' => 'HEAD_OFFICE', 'status' => 'ACTIVE', 'created_at' => now()],
+        );
+        $hqUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'HQ')->value('id');
+        DB::table('tax_authority_units')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'DOMESTIC_TAX'],
+            ['id' => (string) Str::uuid(), 'parent_unit_id' => $hqUnit, 'name' => 'Domestic Taxes Directorate', 'unit_type' => 'DIRECTORATE', 'status' => 'ACTIVE', 'created_at' => now()],
+        );
+        DB::table('tax_authority_units')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'IDENTITY_SECURITY'],
+            ['id' => $identityUnit, 'parent_unit_id' => $hqUnit, 'name' => 'Identity and Access Governance', 'unit_type' => 'DIVISION', 'status' => 'ACTIVE', 'created_at' => now()],
+        );
+        $identityUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'IDENTITY_SECURITY')->value('id');
+
+        DB::table('tax_authority_role_assignments')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $namraAdmin->id, 'role_code' => 'AUTHORITY_ONBOARDING_MAKER', 'authority_unit_id' => $hqUnit],
+            [
+                'id' => (string) Str::uuid(), 'scope' => json_encode(['jurisdiction' => 'NA', 'environment' => 'LOCAL_STAGING']),
+                'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                'requested_by' => $namraAdmin->id, 'approved_by' => $admin->id, 'approval_reference' => 'ISSUE4-SYNTHETIC-MAKER-ASSIGNMENT', 'created_at' => now(),
+            ],
+        );
+        DB::table('tax_authority_role_assignments')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $admin->id, 'role_code' => 'AUTHORITY_SYSTEM_ADMIN', 'authority_unit_id' => $identityUnit],
+            [
+                'id' => (string) Str::uuid(), 'scope' => json_encode(['jurisdiction' => 'NA', 'environment' => 'LOCAL_STAGING']),
+                'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                'requested_by' => $namraAdmin->id, 'approved_by' => $admin->id, 'approval_reference' => 'ISSUE4-SYNTHETIC-SYSTEM-ASSIGNMENT', 'created_at' => now(),
+            ],
+        );
+
+        $itasProviderId = DB::table('identity_providers')->where('provider_key', 'ITAS')->value('id');
+        if ($itasProviderId) {
+            DB::table('tax_authority_federation_connections')->updateOrInsert(
+                ['tax_authority_id' => 'tax-authority-na-namra', 'identity_provider_id' => $itasProviderId, 'environment' => 'CONTRACT_PENDING'],
+                [
+                    'id' => (string) Str::uuid(), 'protocol' => 'UNCONFIRMED', 'issuer' => null, 'audience' => null,
+                    'metadata_hash' => null, 'claims_contract_hash' => null, 'assurance_profile' => null, 'status' => 'CONTRACT_PENDING',
+                    'requested_by' => $namraAdmin->id, 'reviewed_by' => null, 'checked_at' => null, 'expires_at' => null,
+                    'created_at' => now(), 'updated_at' => now(),
+                ],
+            );
+        }
+
+        $onboardingCaseId = (string) Str::uuid();
+        DB::table('tax_authority_onboarding_cases')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'target_environment' => 'LOCAL_STAGING', 'status' => 'SUBMITTED'],
+            [
+                'id' => $onboardingCaseId,
+                'purpose' => 'Validate the authority hierarchy, governance and independent approval workflow using synthetic local data only.',
+                'evidence_bundle_hash' => null, 'readiness_reference' => 'ISSUE4-LOCAL-STAGING', 'requested_by' => $namraAdmin->id,
+                'submitted_at' => now(), 'approved_at' => null, 'activated_at' => null, 'created_at' => now(), 'updated_at' => now(),
+            ],
+        );
+        $onboardingCaseId = DB::table('tax_authority_onboarding_cases')
+            ->where('tax_authority_id', 'tax-authority-na-namra')->where('target_environment', 'LOCAL_STAGING')->where('status', 'SUBMITTED')
+            ->value('id');
+        DB::table('tax_authority_governance_events')->updateOrInsert(
+            ['onboarding_case_id' => $onboardingCaseId, 'event_type' => 'TaxAuthorityOnboardingRequested'],
+            [
+                'id' => (string) Str::uuid(), 'tax_authority_id' => 'tax-authority-na-namra', 'from_status' => null, 'to_status' => 'SUBMITTED',
+                'reason_code' => 'LOCAL_STAGING_REVIEW_REQUIRED', 'evidence_hash' => null, 'actor_id' => $namraAdmin->id, 'occurred_at' => now(),
+            ],
+        );
+
+        // A current QUARTERLY access review -- decideOnboardingCase's own
+        // requireCurrentAuthorityReview gate needs one to exist, matching
+        // the source's own dynamically-computed-quarter seed row (kept
+        // relative to "now" for the same reason this file's consent_grants/
+        // delegations rows already are, per that block's own comment above).
+        DB::table('tax_authority_access_reviews')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'review_type' => 'QUARTERLY', 'period_start' => now()->startOfQuarter()->toDateString()],
+            [
+                'id' => (string) Str::uuid(), 'due_at' => now()->addMonths(3)->addDays(14), 'status' => 'OPEN',
+                'owner_id' => $admin->id, 'completed_by' => null, 'completed_at' => null, 'created_at' => now(),
+            ],
+        );
+
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
         $this->command?->info("Admin login: admin@vat-msa.test / password (PILOT_ADMIN, national scope)");
+        $this->command?->info("NamRA admin login: namra-admin@vat-msa.test / password (NAMRA_SYSTEM_ADMIN)");
     }
 }

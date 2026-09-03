@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
+use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
@@ -45,6 +46,7 @@ use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Portal\BuyerPortalController;
 use App\Http\Controllers\Portal\DeveloperPortalController;
+use App\Http\Controllers\Portal\NamraAdminPortalController;
 use App\Http\Controllers\Portal\NamraPortalController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
@@ -104,15 +106,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // PortalViewController's own doc comment.
     Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
 
-    // Five of the six per-portal dashboards the switchboard above links
-    // to (the sixth, namra-admin, is deliberately deferred -- see
-    // docs/MIGRATION_MATRIX.md) -- see each controller's own doc
-    // comment. URLs kept 1:1 with the source's own
-    // app/portal/{buyer,seller,namra,super-admin,developer}/page.tsx
-    // paths and with PortalDefinitions::all()'s own hrefs.
+    // All six per-portal dashboards the switchboard above links to --
+    // see each controller's own doc comment. URLs kept 1:1 with the
+    // source's own app/portal/{buyer,seller,namra,namra-admin,
+    // super-admin,developer}/page.tsx paths and with
+    // PortalDefinitions::all()'s own hrefs.
     Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
     Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
     Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
+    Route::get('/portal/namra-admin', [NamraAdminPortalController::class, 'index'])->name('portal.namra-admin');
     Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
     Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
 
@@ -390,6 +392,21 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/refunds/{id}/checks', [RefundController::class, 'checks']);
         Route::post('/refunds/{id}/transition', [RefundController::class, 'transition']);
         Route::post('/refunds/{id}/disputes', [RefundController::class, 'dispute']);
+
+        // Authority Governance (lib/data/authority-governance-repository.ts's
+        // getAuthorityGovernanceSnapshot/createAuthorityOnboardingCase/
+        // decideAuthorityOnboardingCase) -- the backend the NamRA
+        // Administration portal needed, deferred out of every other
+        // portal dashboard's own slice (see docs/MIGRATION_MATRIX.md).
+        // Kept 1:1 with the source's own
+        // app/api/v1/tax-authority-onboarding-cases/** shape; both
+        // write commands are step-up gated, matching the source's own
+        // requireStepUp.
+        Route::get('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'show']);
+        Route::post('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'store'])
+            ->middleware('password.confirm');
+        Route::post('/tax-authority-onboarding-cases/{id}/decisions', [AuthorityGovernanceController::class, 'decide'])
+            ->middleware('password.confirm');
 
         // Phase 12 (portals/licensing/governance), slice 1: Licensing &
         // Entitlements (lib/data/control-plane-repository.ts's
