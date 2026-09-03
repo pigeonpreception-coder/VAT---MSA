@@ -98,6 +98,21 @@ class LicenseResolver
      *
      * @return list<array<string, mixed>>
      */
+    /**
+     * `capacity_mode` is a genuine stored column in the source's own
+     * `license_plan_entitlements` table (FINITE/UNLIMITED/NOT_APPLICABLE),
+     * but this port's own migration for that table never carried it --
+     * confirmed missing from the schema entirely, not just this query.
+     * Rather than a migration + backfill for a column no command in this
+     * port ever needs to set (every currently-seeded plan's mode is fully
+     * determined by its other two already-real columns), it's computed
+     * here instead: NOT_APPLICABLE for an unmetered boolean feature-gate
+     * (no metric_key), UNLIMITED for a metered feature with no configured
+     * cap, FINITE otherwise -- functionally identical output to the
+     * source's stored value for every plan this migration seeds.
+     *
+     * @return array<string, mixed>
+     */
     public static function getEntitlements(array $license): array
     {
         return DB::table('license_plan_entitlements as e')
@@ -116,6 +131,7 @@ class LicenseResolver
                 'feature_key' => $row->feature_key, 'name' => $row->name, 'description' => $row->description,
                 'metric_key' => $row->metric_key, 'enabled' => (bool) $row->enabled,
                 'limit_value' => $row->limit_value !== null ? (int) $row->limit_value : null,
+                'capacity_mode' => $row->metric_key === null ? 'NOT_APPLICABLE' : ($row->limit_value === null ? 'UNLIMITED' : 'FINITE'),
                 'used_value' => (int) $row->used_value, 'reserved_value' => (int) $row->reserved_value,
             ])->values()->all();
     }

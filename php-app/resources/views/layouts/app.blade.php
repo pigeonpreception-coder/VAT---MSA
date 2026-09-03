@@ -24,9 +24,72 @@
                         <li class="nav-item">
                             <a class="nav-link" href="{{ route('dashboard') }}" @if (request()->routeIs('dashboard')) aria-current="page" @endif>Dashboard</a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('portals.index') }}" @if (request()->routeIs('portals.*')) aria-current="page" @endif>Portals</a>
+                        </li>
                         @can('permission', 'invoices:read')
                             <li class="nav-item">
                                 <a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'cases:manage')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('cases.index') }}" @if (request()->routeIs('cases.*')) aria-current="page" @endif>Audit cases</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'compliance:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('compliance.index') }}" @if (request()->routeIs('compliance.*')) aria-current="page" @endif>Compliance</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'refunds:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>Refunds</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'parties:manage')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('parties.index') }}" @if (request()->routeIs('parties.*')) aria-current="page" @endif>Customers &amp; suppliers</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'commercial:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Quotations</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'accounting:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('accounting.index') }}" @if (request()->routeIs('accounting.*')) aria-current="page" @endif>Accounting</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'expenses:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.*')) aria-current="page" @endif>Operations</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'administration:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'documents:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'reports:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('reports.index') }}" @if (request()->routeIs('reports.*')) aria-current="page" @endif>Reports &amp; analytics</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'platform:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('platform.index') }}" @if (request()->routeIs('platform.*')) aria-current="page" @endif>Platform</a>
+                            </li>
+                        @endcan
+                        @can('permission', 'workflows:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('workflows.index') }}" @if (request()->routeIs('workflows.*')) aria-current="page" @endif>Workflows</a>
                             </li>
                         @endcan
                     </ul>

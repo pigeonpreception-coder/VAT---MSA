@@ -268,15 +268,27 @@ class ExpenseService
         return $this->present($expense);
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Ported from lib/data/business-repository.ts's own expense read shape --
+     * category_name/supplier_name/receipt_document_id were missing from this
+     * port's present() until now (the source's own dashboard query joins
+     * expense_categories and business_parties for exactly these fields);
+     * closing that gap here benefits every caller (JSON API and the new
+     * Blade operations view alike), not a second query path.
+     *
+     * @return array<string, mixed>
+     */
     private function present(Expense $expense): array
     {
         return [
             'id' => $expense->id, 'organisation_id' => $expense->organisation_id, 'branch_id' => $expense->branch_id,
-            'category_id' => $expense->category_id, 'supplier_party_id' => $expense->supplier_party_id, 'project_id' => $expense->project_id,
+            'category_id' => $expense->category_id, 'category_name' => optional($expense->category)->name,
+            'supplier_party_id' => $expense->supplier_party_id, 'supplier_name' => optional($expense->supplier)->display_name,
+            'project_id' => $expense->project_id,
             'expense_number' => $expense->expense_number, 'expense_date' => $expense->expense_date->toDateString(),
             'description' => $expense->description, 'currency' => $expense->currency, 'net_cents' => (int) $expense->net_cents,
             'tax_cents' => (int) $expense->tax_cents, 'total_cents' => (int) $expense->total_cents, 'status' => $expense->status,
+            'receipt_document_id' => $expense->receipt_document_id,
             'created_by' => $expense->created_by, 'approved_by' => $expense->approved_by,
             'created_at' => optional($expense->created_at)->toISOString(), 'approved_at' => optional($expense->approved_at)->toISOString(),
             'rejection_reason' => $expense->rejection_reason,

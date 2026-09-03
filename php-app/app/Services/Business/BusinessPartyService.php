@@ -214,7 +214,15 @@ class BusinessPartyService
             'id' => $party->id, 'organisation_id' => $party->organisation_id, 'display_name' => $party->display_name,
             'legal_name' => $party->legal_name, 'vat_number' => $party->vat_number, 'tin' => $party->tin,
             'email' => $party->email, 'phone' => $party->phone, 'address' => $party->address, 'status' => $party->status,
-            'relationships' => PartyRelationship::where('party_id', $party->id)->where('status', 'ACTIVE')->pluck('relationship')->values()->all(),
+            // Explicit orderBy: without one, MySQL's row order for this
+            // unindexed-on-relationship read is unspecified (the source's
+            // own GROUP_CONCAT carries the same lack of a guarantee), which
+            // surfaced as a genuinely flaky ['CUSTOMER','SUPPLIER'] vs.
+            // ['SUPPLIER','CUSTOMER'] assertion under the full test suite's
+            // differently-shaped query plans -- alphabetical is stable and
+            // matches this file's own present() ordering conventions
+            // elsewhere.
+            'relationships' => PartyRelationship::where('party_id', $party->id)->where('status', 'ACTIVE')->orderBy('relationship')->pluck('relationship')->values()->all(),
             'created_at' => optional($party->created_at)->toISOString(), 'updated_at' => optional($party->updated_at)->toISOString(),
         ];
     }

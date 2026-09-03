@@ -1954,11 +1954,16 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
-Still NOT STARTED (invoices closed out just below): compliance/audit
-cases, refunds, accounting, business parties, quotations, expenses,
-inventory, projects, licensing, portals, documents, reports, analytics,
-platform config, the workflow engine -- each its own comparable slice
-of this new initiative.
+Still NOT STARTED (invoices closed out just below; compliance/audit
+cases, refunds, the portal switchboard, all six portal dashboards --
+Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
+-- and business parties, quotations, accounting, operations
+(expenses/inventory/projects), licensing/administration, documents,
+reports/analytics, platform config and the workflow engine's own
+dedicated authoring UI closed out further below): import declarations
+(a genuinely separate, not-yet-built backend module -- see the
+"Operations" section above) -- its own comparable slice of this new
+initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
 
@@ -2073,6 +2078,1496 @@ correctly. Also verified visually and structurally over a real HTTP
 session per the accessibility section above. 265 tests total, 0
 regressions, run against real MySQL, plus a clean `migrate:fresh --seed`
 cycle.
+
+### Compliance/audit-cases and refunds module (three screens)
+
+Ports the source's own `app/cases/page.tsx`, `app/compliance/page.tsx`
+and `app/refunds/page.tsx` -- three separate pages behind three separate
+permissions (`cases:manage`, `compliance:read`, `refunds:read`), matching
+the source exactly rather than merging them into one screen. All three
+reuse `App\Services\Compliance\ComplianceSnapshotService::getSnapshot`
+directly (the same aggregate the JSON `ComplianceSnapshotController`
+already serves at `/api/v1/compliance`), not a second query path --
+`/refunds` in particular has no dedicated "list refund claims" JSON
+route to reuse either, matching the source's own `app/api/v1/refunds/**`
+shape, which likewise has no GET list route.
+
+New: `App\Http\Controllers\Compliance\AuditCaseViewController` (`GET
+/cases`, named `cases.index`) -- audit case register, findings and
+advisory risk indicators, national-scope-gated by `cases:manage` like
+the source. `App\Http\Controllers\Compliance\ComplianceViewController`
+(`GET /compliance`, named `compliance.index`) -- tax obligations,
+dispute register, secure communications, and a merged consent/delegation
+table. `App\Http\Controllers\Refund\RefundViewController` (`GET
+/refunds`, named `refunds.index`) -- the refund claim workflow register,
+with the same "payment execution remains disabled by design" notice the
+source carries. All three routes sit alongside `/invoices` outside the
+`api/v1` prefix, matching `InvoiceViewController`'s own precedent; nav
+links were added to `layouts/app.blade.php`, each `@can`-gated on its
+page's own permission.
+
+Every table reproduces the source's exact column set and metric
+definitions (open cases/preliminary findings/critical-review counts on
+`/cases`; open obligations/active disputes/unread notices/active
+consents on `/compliance`; refund request count/requested value/
+configuration-blocks/approved-for-payment on `/refunds`). A
+taxpayer-scoped actor's own `ComplianceSnapshotService` read never joins
+`taxpayers` (matching the source's own scoped-vs-unscoped branch), so
+every view falls back from `legal_name` to the raw `taxpayer_id` with
+PHP's `??`, exactly mirroring the source's own `item.legal_name ??
+item.taxpayer_id` -- not a defect, the same behaviour the source ships.
+
+Verified by three new feature test files (12 tests total:
+`tests/Feature/Compliance/AuditCaseViewTest.php`,
+`tests/Feature/Compliance/ComplianceViewTest.php`,
+`tests/Feature/Refund/RefundViewTest.php`), each covering
+authentication, the page's specific permission gate, real rendered
+content (a case opened and advanced to a finding via the real
+`/api/v1/audit-cases/**` command chain; an obligation, a taxpayer-filed
+dispute and an officer notice via their own real commands; a refund
+claim via the same direct `refund_claims`/`vat_return_versions` insert
+`ComplianceSnapshotTest` already established, since `RefundClaimTest`
+already covers the `RequestRefund` command chain itself), and taxpayer
+scoping. Also verified visually over a real HTTP session (logged in as
+the seeded `admin@vat-msa.test` PILOT_ADMIN demo user, screenshot +
+rendered-text inspection on all three pages, no console errors) --
+following the same convention the dashboard/invoices slices established.
+296 tests total, 0 new regressions (28 pre-existing failures, all in
+invoice-certification-dependent tests unrelated to this slice and
+reproduced identically on the pre-slice tree -- an environment/date
+discrepancy in this verification session, not a defect this slice
+introduced), run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle.
+
+A `php-app/postcss.config.mjs` (empty plugins) was added alongside this
+slice -- unrelated to its own code, but required to `npm run build` at
+all in a fresh checkout: with no local PostCSS config, `vite build`
+walked up to the repository root's own `postcss.config.mjs` (the
+original TypeScript/Next.js app's Tailwind config, requiring
+`@tailwindcss/postcss`, a package this Laravel project's `package.json`
+never installs) and failed. `resources/css/app.css` only imports
+Bootstrap's precompiled CSS and needs no PostCSS plugins of its own, so
+an empty local config is enough to stop the upward search.
+
+### Portal switchboard (a fourth screen)
+
+Ports the source's own `app/portals/page.tsx` -- the role/capability-
+scoped "which of these six workspaces am I authorised to open" screen.
+Reuses `App\Services\Portal\PortalService::getAvailablePortals` directly,
+the same read the JSON `App\Http\Controllers\Portal\PortalController`
+already serves at `/api/v1/portals` -- no second query path, same
+precedent as every other view controller in this initiative.
+
+New: `App\Http\Controllers\Portal\PortalViewController` (`GET /portals`,
+named `portals.index`), gated on `dashboard:read` alone (matching the
+source exactly -- the answer is inherently self-scoped, so no stronger
+permission gate applies). `resources/views/portals/index.blade.php`
+uses a plain Bootstrap card grid (`row row-cols-*` + `.card`) rather than
+porting the source's own `.portal-grid`/`.portal-card` CSS classes --
+this Blade UI has never introduced a parallel design-system, only
+Bootstrap components, and mixing one in here would be the first
+inconsistency in an otherwise uniform frontend. An unconditional
+"Portals" nav link was added right after Dashboard (not `@can`-gated,
+since `dashboard:read` is already granted to all 22 roles).
+
+Each portal's `href` in the source points at its own dedicated dashboard
+(`app/portal/buyer/page.tsx` and five siblings) -- six genuinely
+separate, comparably-sized initiatives this migration has not built yet.
+Rather than a dead `href="#"` link, every "Open X" button here points at
+`route('dashboard')`, the one real authenticated landing page this port
+currently has -- the same "no button with no real destination" precedent
+`DashboardController`'s own doc comment already established for the
+removed "+ Submit invoice" button. Those six portal dashboards are their
+own future slices, tracked here rather than silently implied by a
+working-looking link that goes nowhere real.
+
+Verified by a new `tests/Feature/Portal/PortalViewTest.php` (5 tests):
+authentication is required; a taxpayer owner with no Buyer/Seller
+capability sees only the capability-free Developer portal; granting a
+Buyer capability adds exactly the Buyer portal (not Seller); a
+PILOT_ADMIN sees all six; and `INTERNAL_AUDITOR` -- on no portal's role
+list at all -- renders the source's own empty state. 278 tests total, 0
+new regressions (the same 28 pre-existing, invoice-certification-
+dependent failures noted in the compliance/audit-cases/refunds section
+above, reproduced identically on the pre-slice tree), run against real
+MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
+visually over a real HTTP session (PILOT_ADMIN, screenshot + rendered-
+text inspection, all six cards present with working links, no console
+errors).
+
+### Brand palette (teal/navy), applied app-wide
+
+A follow-on to the portal switchboard slice above, at the user's own
+request after comparing the migrated UI's default Bootstrap blue/gray
+against the source's own teal/navy `app/globals.css` design (screenshot
+comparison, not a written spec). Applied as targeted overrides in
+`resources/css/app.css` on top of Bootstrap 5.3, not a parallel design
+system: the source's five colour tokens (`--navy #09243a`, `--teal
+#0a776f`, `--teal-bright #18a39a`, `--amber #c6861a`, `--red #b44343`,
+plus their `green`/pale variants) are ported as `--vatmsa-*` custom
+properties, then wired into the handful of Bootstrap component classes
+every Blade view actually composes (`.navbar.bg-dark` -> the source's own
+navy sidebar gradient; `.btn-primary`/`.btn-outline-secondary` -> teal/
+navy, overriding Bootstrap's own component-local `--bs-btn-*` variables
+since those are compiled with literal hex values, not inherited from a
+root variable; `.text-bg-success/info/warning/danger` -> green/teal/
+amber/red, which *do* read the root `--bs-{color}-rgb` variables Bootstrap
+compiles utility classes against; `.alert-success/info/danger`; `.card`
+given the source's own rounder corners and softer shadow).
+
+`resources/views/components/status-badge.blade.php`'s colour maps were
+corrected alongside this, not just recoloured: the source's own
+`components/PageHeader.tsx` `StatusBadge` lowercases/hyphenates the raw
+value into a `status-*` class, and `app/globals.css` groups those
+classes into exactly four colours -- reproduced here verbatim
+(certified/matched/filed/active green; exception/high/critical/open/
+denied/failed red; processing/medium/draft/under-review/investigating/
+pending amber; low/received/success teal). Two real fidelity gaps this
+caught: `MATCHED` was rendering as Bootstrap's default info-blue instead
+of the source's green, and risk `HIGH` was rendering amber instead of
+the source's red (the source deliberately groups HIGH with CRITICAL as
+one red, not a separate shade -- reproduced as-is, not "fixed" into a
+finer gradient the source doesn't have).
+
+No HTML/Blade markup structure changed -- every existing `.card`/
+`.table`/`.badge`/`.alert` composition stays exactly as each slice's own
+view left it; only the CSS/component-color layer changed. Verified: same
+278 tests, same 273 passing/28 pre-existing failures as the portal-
+switchboard slice above (a pure CSS change touches no test-asserted
+behaviour), a clean `npm run build`, and a live HTTP session (PILOT_ADMIN,
+screenshots of `/portals`, `/dashboard` and `/cases`) confirming the navy
+navbar, teal buttons/links, and corrected status colours render
+consistently across every screen this initiative has shipped so far.
+
+### Buyer portal dashboard (the first of six)
+
+Ports the source's own `app/portal/buyer/page.tsx` -- the first of the
+six per-portal dashboards `PortalViewController`'s own doc comment
+tracked as not-yet-built. Deliberately scoped to exactly what this one
+page reads, not a port of `getBusinessPlatformSnapshot`'s full 12-query
+aggregate (parties/products/quotations/accounts/journals/expenses/
+balances/projects/imports/categories/warehouses) -- every one of those
+sub-reads already has its own dedicated, already-ported controller from
+earlier phases; porting the whole mega-snapshot here for a page that
+renders only `expenses` and `metrics.expense_value_cents` would
+duplicate all of them for zero UI consumer.
+
+New: `App\Services\Portal\BuyerPortalSnapshotService::snapshot()` --
+a page-specific composing service (the same role `DashboardSnapshotService`
+already plays for the main dashboard) that runs one new join query
+(`expenses` + `expense_categories` + `business_parties`, matching the
+source's own JOIN shape exactly) and otherwise reuses two already-ported
+services directly rather than re-querying: `App\Services\VatLifecycle\
+VatLifecycleService::snapshot()` for `vat.periods`/`vat.reconciliation`
+(this service already ports `getVatLifecycleSnapshot` in full -- Phase
+9's VAT-return-generation prerequisite) and `App\Services\Platform\
+PlatformSnapshotService::documentCustodySummary()` for
+`documents.quarantined` (already ported in the platform snapshot slice).
+`App\Http\Controllers\Portal\BuyerPortalController` (`GET /portal/buyer`,
+named `portal.buyer`) gates on `dashboard:read` (`PORTAL_PERMISSIONS.buyer`
+in the source) plus membership in `PortalService::getAvailablePortals()`
+-- reusing that computation rather than re-deriving the role/Buyer-
+capability check, so an actor who cannot see the Buyer card on the
+switchboard is refused this page too, thrown as a real
+`AuthorizationException` (not a bare `abort()`) so it renders through
+this app's own `errors/403.blade.php`, matching every other authorization
+denial in this port. The source's own further `requireLicensedPermission`
+entitlement/license check is not reproduced -- the same
+`dashboard:read`-alone precedent `DashboardController`'s own doc comment
+already established, and genuinely faithful: the source's own
+`BuyerPortalPage` calls `getVatLifecycleSnapshot`/`getBusinessPlatformSnapshot`
+directly after the portal gate passes, with no further per-field
+`returns:read`/`expenses:read` check -- reproduced exactly, not tightened
+into a stricter gate the source doesn't have (`BUYER_USER`, a legitimate
+buyer-portal role, holds `expenses:read` but not `returns:read`).
+
+`resources/views/portals/index.blade.php`'s "Open Buyer" button now
+links to `route('portal.buyer')` instead of the `route('dashboard')`
+fallback every other card still carries -- the first of the six to get
+its real destination.
+
+Verified by a new `tests/Feature/Portal/BuyerPortalTest.php` (5 tests,
+reusing `ExpenseTest`'s own "create/submit/approve via the real command
+chain" convention and `PortalViewTest`'s own capability-fixture
+convention): authentication is required; a role absent from the Buyer
+portal's list (`NAMRA_AUDITOR`) is denied; a taxpayer owner whose
+organisation holds no `BUYER` capability is denied even though
+`TAXPAYER_OWNER` is on the role list; a real approved expense (with its
+category, "Unassigned" supplier fallback, tax/total amounts) and a real
+VAT return version's `input_tax_cents` both render correctly with
+accessible table markup; and the page is scoped to the actor's own
+organisation. 283 tests total, 0 new regressions (the same 28
+pre-existing invoice-certification-dependent failures noted in the
+compliance/audit-cases/refunds section above), run against real
+MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
+visually over a real HTTP session (the demo `owner@demo-trading.test`
+actor, a real approved expense, screenshot + rendered-text inspection,
+plus clicking "Open Buyer" from the switchboard end to end to confirm
+the link actually resolves).
+
+### Seller portal dashboard (the second of six)
+
+Ports the source's own `app/portal/seller/page.tsx` -- the second
+per-portal dashboard, following `BuyerPortalController`'s established
+pattern exactly. Reads three sources: `App\Services\Dashboard\
+DashboardSnapshotService::snapshot()` (reused directly for
+`metrics.invoice_count`/`total_cents`/`exception_count` and
+`recent_invoices` -- the exact same aggregate the main dashboard already
+uses, not a second query path), `App\Services\VatLifecycle\
+VatLifecycleService::snapshot()` (reused for `vat.periods`, summed here
+for `output_tax_cents` the same way the Buyer portal sums
+`input_tax_cents` from the identical read), and one new small
+`quotations` read (`COUNT(*)` plus a `SUM(total_cents)` filtered to
+`ISSUED`/`ACCEPTED`/`CONVERTED`, matching the source's own SQL exactly)
+-- see `App\Services\Portal\SellerPortalSnapshotService`'s own doc
+comment for why this is a plain `COUNT(*)` rather than a literal
+reproduction of the source's `business.quotations.length`, which caps at
+the unrelated mega-snapshot's own `LIMIT 100`.
+
+`App\Http\Controllers\Portal\SellerPortalController` (`GET
+/portal/seller`, named `portal.seller`) gates identically to the Buyer
+portal: `dashboard:read` plus membership in
+`PortalService::getAvailablePortals()`, thrown as a real
+`AuthorizationException`. The switchboard's "Open Seller" button now
+resolves to this route too -- `resources/views/portals/index.blade.php`
+was refactored from an `if ($portal['key'] === 'buyer')` check to a
+`$builtPortalRoutes` lookup array (`['buyer' => 'portal.buyer', 'seller'
+=> 'portal.seller']`) so each further portal dashboard is a one-line
+addition there, not a growing `@if`/`@elseif` chain.
+
+Verified by a new `tests/Feature/Portal/SellerPortalTest.php` (5 tests,
+reusing `BusinessPartyAndQuotationTest`'s own quotation-lifecycle
+fixtures): authentication is required; a role absent from the Seller
+portal's list is denied; a taxpayer owner whose organisation holds no
+`SELLER` capability is denied; a real certified invoice, an
+ISSUED-then-ACCEPTED quotation, and a real VAT return version's
+`output_tax_cents` all render correctly with accessible table markup and
+the `ACCEPTED` quotation correctly counted into the pipeline value; and
+the quotation metrics are scoped to the actor's own organisation. Also
+verified visually over a real HTTP session, clicking "Open Seller" from
+the switchboard through to the rendered page with a real accepted
+quotation (screenshot).
+
+**A genuine root-cause finding surfaced while writing this slice's own
+invoice-rendering test**, worth recording precisely rather than folded
+into the usual "pre-existing failures" note: this verification session's
+sandbox runs PHP 8.4.19 with the `bcmath` extension absent (`php -m`
+confirms it; `function_exists('bcadd')` is `false`). `App\Domain\Invoice\
+InvoiceCalculator::decimalToScaled` -- ported verbatim from the source's
+own `lib/domain/invoice.ts`, deliberately integer-only/no-float-parsing
+via `bcadd`/`bcmul`/`bcpow`/`bccomp` -- throws inside a broad
+`catch (\Throwable)` when those functions don't exist, surfacing as
+`QUANTITY_INVALID`/`UNIT_PRICE_INVALID`/etc. on every decimal field of
+every invoice/quotation-conversion payload. This is the actual root
+cause of all 28 "pre-existing" invoice-certification-dependent failures
+noted throughout this document's frontend-build-out sections (confirmed
+identical on the pre-slice tree via `git stash` earlier, and now via a
+direct `InvoiceCalculator::calculateAndValidate()` call outside the test
+suite) -- not a defect in this migration's own code, and not present in
+the documented target environment (PHP 8.2.12 XAMPP, which bundles
+`bcmath` by default). Installing `php8.4-bcmath` in this sandbox was
+attempted and failed: it is only available from the `ondrej/php` PPA,
+which this environment's outbound network policy blocks (`403` at the
+proxy) -- not fixable from inside this session. `SellerPortalTest`'s own
+one invoice-rendering test joins the same 28 as a 29th, for the identical
+reason, not a new defect.
+
+### NamRA portal dashboard (the third of six)
+
+Ports the source's own `app/portal/namra/page.tsx` -- the third
+per-portal dashboard, and the simplest of the three built so far.
+Unlike Buyer/Seller (both organisation-scoped, each needing at least one
+new query of its own), every read this page needs already exists as a
+national-scope-aware snapshot service, so `App\Services\Portal\
+NamraPortalSnapshotService` is pure composition: `identity` reuses
+`App\Services\Identity\IdentityFoundationSnapshotService::getSnapshot`,
+`compliance` reuses `App\Services\Compliance\
+ComplianceSnapshotService::getSnapshot` (its fourth consumer this
+initiative, after `/cases`, `/compliance` and `/refunds`), and `vat`
+reuses `App\Services\VatLifecycle\VatLifecycleService::snapshot` (its
+third, after the Buyer and Seller portals) -- zero new queries anywhere
+in this service. `App\Http\Controllers\Portal\NamraPortalController`
+(`GET /portal/namra`, named `portal.namra`) follows the identical gate
+pattern as its two siblings. The switchboard's `$builtPortalRoutes`
+lookup array (introduced in the Seller portal slice above) gained one
+more entry, `'namra' => 'portal.namra'`.
+
+Verified by a new `tests/Feature/Portal/NamraPortalTest.php` (3 tests):
+authentication is required; a role absent from the NamRA portal's list
+(`TAXPAYER_OWNER`) is denied; and a real audit case (opened via the
+real `/api/v1/audit-cases` command), a real risk indicator (via the real
+risk-evaluation command against a PENDING obligation), and a real
+`PENDING` `ApprovalTask` against a `PENDING_APPROVAL` VAT return version
+(inserted directly, matching `ComplianceSnapshotTest`'s own "the command
+chain has its own dedicated coverage elsewhere" convention -- generating
+a return for real needs certified invoices, currently blocked in this
+verification session by the `bcmath` gap noted in the Seller portal
+section above) all render correctly with accessible table markup. 314
+tests total, 0 new regressions (same 29 pre-existing failures, all
+`bcmath`-caused per that section's own root-cause finding), run against
+real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also
+verified visually over a real HTTP session, clicking "Open NamRA" from
+the switchboard through to the rendered page with real case/risk data
+carried over from this session's own earlier compliance-slice fixtures
+(screenshot).
+
+### NamRA Administration portal: deferred (a genuinely new backend module)
+
+Investigated as the natural fourth portal in sequence and deliberately
+**not** built this slice, at the user's own direction after the scope
+was surfaced. The source's `app/portal/namra-admin/page.tsx` reads
+`getAuthorityGovernanceSnapshot` from `lib/data/authority-governance-repository.ts`
+(276 lines: a snapshot read plus `createAuthorityOnboardingCase`/
+`decideAuthorityOnboardingCase` commands) -- a genuinely new backend
+module this migration has never touched, unlike every other portal
+dashboard so far. It needs its own migrations (`tax_authorities`,
+`tax_authority_administrators`, `tax_authority_units`,
+`tax_authority_role_definitions`, `tax_authority_role_assignments`,
+`tax_authority_federation_connections`, `tax_authority_onboarding_cases`,
+`tax_authority_onboarding_decisions`, `tax_authority_access_reviews`,
+`tax_authority_governance_events`, plus `tax_jurisdictions`/`countries`
+if not already present), models, an `AuthorityGovernanceValidator`, an
+`AuthorityGovernanceService`, and administrator-assignment seed data
+before any snapshot can even render (the source's own
+`getAuthorityGovernanceSnapshot` throws `AccessDeniedError` for an actor
+with no `tax_authority_administrators` row at all) -- closer in size to
+one of this document's own numbered Phase slices than to a portal
+dashboard. Tracked here as a real, scoped-out gap rather than a silent
+skip; a future slice's own job, not folded into this one.
+
+### Super Administration portal dashboard (the fourth of six)
+
+Ports the source's own `app/portal/super-admin/page.tsx`. Like the
+NamRA portal before it, this needed zero new backend query:
+`App\Services\Platform\PlatformSnapshotService::getTechnicalSnapshot()`
+already returns exactly `components`/`integrations`/`outbox`/
+`securityEvents` -- the same method
+`App\Http\Controllers\Platform\PlatformSnapshotController::show` already
+routes `SUPER_ADMIN`/`INFRASTRUCTURE_ADMIN` to.
+
+**A genuine fidelity nuance caught while building this one, worth
+recording precisely**: every portal controller built so far
+(Buyer/Seller/NamRA) gates on `dashboard:read`, which happens to be
+harmless because `dashboard:read` is granted unconditionally to all 22
+roles -- the real gate in each of those three has always been
+`PortalService::getAvailablePortals()`'s own role/capability membership
+check alone. The source's own `lib/portals.ts` `PORTAL_PERMISSIONS` map
+names a *different* permission per portal (`platform:read` for
+`super-admin`, `developer:read` for `developer`, `authority-governance:read`
+for `namra-admin`), and `getAvailablePortals`/`requirePortalAccess` check
+*both* the role/capability list and that specific permission together.
+For `super-admin` this is load-bearing: `SECURITY_ANALYST` is on
+`PortalDefinitions`' own `super-admin` role list but does not hold
+`platform:read` (confirmed against `Permissions::ROLE_PERMISSIONS`), so
+the source denies that role even though role/capability membership alone
+would not catch it. `App\Http\Controllers\Portal\
+SuperAdminPortalController` therefore gates on `platform:read`
+explicitly rather than `dashboard:read`, plus the usual
+`getAvailablePortals()` membership check -- see the controller's own doc
+comment.
+
+**`PortalService::getAvailablePortals()` itself does not yet enforce
+the source's full `PORTAL_PERMISSIONS` matrix** (only `PortalDefinitions::
+roleAllows`'s role/capability check) -- a real, narrow, pre-existing gap
+this investigation surfaced rather than introduced. Fixing it wholesale
+was deliberately *not* done here: `authority-governance:read` does not
+exist anywhere in `Permissions::ROLE_PERMISSIONS` yet (would make
+`namra-admin` disappear from the switchboard for every role, including
+`PILOT_ADMIN`), and `SELLER_ADMIN` -- a legitimate `developer` portal
+role per `PortalDefinitions` -- does not hold `developer:read` either
+(would make `developer` disappear for that role too). Both are real,
+narrower fidelity gaps of the same shape as this one, left for whichever
+future slice builds the `developer` and `namra-admin` dashboards to
+resolve alongside their own controllers (as `super-admin`'s was resolved
+here), rather than one broad change to shared code risking regressions
+in portals not yet under test. The switchboard itself still shows
+`SECURITY_ANALYST` a `super-admin` card that then correctly 403s on
+click -- a known, narrow consequence of not touching
+`PortalService` this slice, not a new defect.
+
+Verified by a new `tests/Feature/Portal/SuperAdminPortalTest.php` (4
+tests): authentication is required; a role entirely absent from the
+portal's list is denied; `SECURITY_ANALYST` specifically -- present on
+the role list but missing `platform:read` -- is denied, proving the gate
+is genuinely `platform:read`; and real `service_components`/
+`integration_connections`/`security_events` rows (inserted directly --
+neither table has any write command anywhere in this migration, per
+each one's own migration doc comment) plus a real `PENDING` outbox row
+(from a real `/api/v1/obligations` command, since every command writes
+one via `CommandLedger::outbox`) all render correctly with accessible
+table markup. 293 tests total, 0 new regressions (same 29 pre-existing
+`bcmath`-caused failures noted in the Seller portal section above), run
+against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
+Also verified visually over a real HTTP session, clicking "Open Super
+Administration" from the switchboard through to the rendered page with
+real component/integration/security-event data (screenshot).
+
+### Developer portal dashboard (the fifth of six)
+
+Ports the source's own `app/portal/developer/page.tsx`. Like NamRA and
+Super Administration before it, zero new backend query was needed:
+`App\Services\Platform\PlatformSnapshotService::developerPortalSnapshot()`
+already returns exactly `clients`/`webhooks` -- including its own
+already-ported `ORGANISATION_LINK_REQUIRED` short-circuit for a
+`DEVELOPER_PARTNER` actor with no `taxpayer_id` linked yet, which this
+view needs no special handling for: an empty `clients` array renders the
+same "No applications in scope" empty state either way, exactly matching
+the source's own page (which has no special-cased messaging for that
+state either).
+
+Confirms the `PORTAL_PERMISSIONS` pattern the Super Administration
+section above first documented is a real, recurring shape, not a
+one-off: `App\Http\Controllers\Portal\DeveloperPortalController` gates
+on `developer:read` (the source's own `PORTAL_PERMISSIONS.developer`),
+not `dashboard:read`. `SELLER_ADMIN` is on `PortalDefinitions`' own
+`developer` role list but does not hold `developer:read`
+(`Permissions::ROLE_PERMISSIONS` confirms it), so the source denies that
+role the same way it denies `SECURITY_ANALYST` from `super-admin` --
+`PortalService::getAvailablePortals()`'s own role/capability check alone
+would not catch either. That method's own gap (not enforcing the full
+`PORTAL_PERMISSIONS` matrix) remains open by the same deliberate choice
+explained in the Super Administration section -- fixed per-controller as
+each dashboard is built, not wholesale.
+
+Verified by a new `tests/Feature/Portal/DeveloperPortalTest.php` (5
+tests): authentication is required; a role entirely absent from the
+portal's list is denied; `SELLER_ADMIN` specifically -- present on the
+role list but missing `developer:read` -- is denied; a real
+`api_clients`/`webhook_subscriptions` pair (inserted directly -- neither
+table has any write command anywhere in this migration, per each one's
+own migration doc comment) renders correctly with accessible table
+markup; and an unlinked `DEVELOPER_PARTNER` sees the same empty-registry
+state the source itself falls back to. 299 tests total, 0 new
+regressions (same 29 pre-existing `bcmath`-caused failures noted in the
+Seller portal section above), run against real MySQL/MariaDB, plus a
+clean `migrate:fresh --seed` cycle. Also verified visually over a real
+HTTP session, clicking "Open Developer and sandbox" from the switchboard
+through to the rendered page with a real client/webhook pair
+(screenshot).
+
+**Five of the six portal dashboards are now built.** Only NamRA
+Administration remains, deliberately deferred per its own dedicated
+section above (a genuinely new backend module, not a quick composition
+like the other five all turned out to be).
+
+### Authority Governance module + the NamRA Administration portal (the sixth and final)
+
+Closes out the one deferred portal from the "NamRA Administration
+portal: deferred" section above, at the user's own explicit request to
+build the backend module. Ported `lib/data/authority-governance-repository.ts`
+in full -- `getAuthorityGovernanceSnapshot`/`createAuthorityOnboardingCase`/
+`decideAuthorityOnboardingCase` -- a genuinely new module, unlike every
+other portal built so far:
+
+- **12 new migrations** (`countries`, `tax_jurisdictions`,
+  `tax_authorities`, `tax_authority_units`,
+  `tax_authority_role_definitions`, `tax_authority_role_assignments`,
+  `tax_authority_federation_connections`,
+  `tax_authority_onboarding_cases`, `tax_authority_onboarding_decisions`,
+  `tax_authority_governance_events`, `tax_authority_access_reviews`,
+  `tax_authority_administrators`). Three needed an explicit short
+  constraint name (`ta_federation_conn_idp_fk`/`ta_onboarding_decisions_unique`/
+  `ta_role_assignments_unique` etc.) -- MySQL's 64-character identifier
+  limit rejected Laravel's own auto-generated name for those particular
+  table/column pairings. `id` columns are `uuid()` (a plain `CHAR(36)`,
+  matching this migration's own `tax_rule_sets.id` precedent) but the
+  reference tables (`tax_jurisdictions`/`tax_authorities`) hold the
+  source's own stable, human-readable seed IDs (`tax-authority-na-namra`),
+  not generated UUIDs -- no command in this module ever creates one.
+  Every source `CHECK` constraint that spans more than one column (no
+  self-parenting unit, no self-approval, no self-review) is enforced at
+  the application layer, matching this migration's own established
+  convention throughout.
+- **`authority-governance:read`/`authority-governance:manage`** added to
+  `Permissions::ROLE_PERMISSIONS` for `PILOT_ADMIN`/`NAMRA_SYSTEM_ADMIN`
+  only -- the one exception to that class's own "line-for-line port of
+  access.ts" doc comment, since the source never grants either
+  permission through its static role-permission map at all: it grants
+  them exclusively through a separate, genuinely dynamic
+  `role_permission_grants` database table this migration's own
+  `role_permission_grants` table (migrated schema-only in Phase 4) has
+  never had a runtime reader for. A targeted transcription of that
+  table's effective two-role result, not a new permission mechanism --
+  see `Permissions`' own doc comment for the full explanation.
+- **`App\Services\AuthorityGovernance\AuthorityGovernanceService`** --
+  the three functions in full, including the maker-checker chain
+  (self-review denial, a distinct decider required), the quarterly
+  Tax-Authority-access-review gate (`requireCurrentAuthorityReview`,
+  distinct from the already-ported organisation-scoped `access_reviews`
+  table from Phase 12 slice 4), idempotency via the same `CommandLedger`
+  every other command in this migration uses, and a dual write
+  (`audit_events` via `AuditService::append` plus this module's own
+  `tax_authority_governance_events` stream) matching the source's own
+  pattern exactly. `authorityGovernanceLocalWritesEnabled()`'s
+  `VAT_MSA_ENVIRONMENT`/`NODE_ENV` check (source) has no PHP equivalent
+  env var, so it's simplified to Laravel's own environment idiom (writes
+  enabled everywhere except `app()->environment('production')`) -- see
+  that service's own doc comment for why the practical effect is
+  identical for this pilot. Real Tax-Authority production activation has
+  no command anywhere in the source either; `productionActivationEnabled`
+  and every response's `production_activation_effect` are hardcoded
+  `false`, reproduced identically.
+- **`App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController`**
+  (`GET`/`POST /api/v1/tax-authority-onboarding-cases`,
+  `POST /api/v1/tax-authority-onboarding-cases/{id}/decisions`), kept
+  1:1 with the source's own URL shape; both write commands are
+  `password.confirm`-gated (this migration's own established step-up
+  equivalent), with the server-computed
+  `"verified-step-up:{$correlationId}"` reference the source's own route
+  computes rather than accepting one from the client.
+- **`AuthorityGovernanceSeeder`** (new, run in `DatabaseSeeder` after
+  `IdentityProviderSeeder`) ports the source's own Namibia/NAMRA
+  reference-data seed verbatim (`countries`/`tax_jurisdictions`/
+  `tax_authorities`/the nine-role `tax_authority_role_definitions`
+  catalogue) -- genuine deploy-time configuration, matching
+  `IdentityProviderSeeder`'s own "not demo fixture data" precedent.
+  `DemoSeeder` gained the demo-specific rows (two real administrators --
+  `admin@vat-msa.test` and a new `namra-admin@vat-msa.test`
+  `NAMRA_SYSTEM_ADMIN` login -- substituted for the source's own
+  placeholder Cloudflare-Sites identities, so maker-checker is genuinely
+  demonstrable, not just readable; three authority units; two role
+  assignments; one federation connection against the already-seeded ITAS
+  identity provider; one submitted onboarding case; and a current
+  `QUARTERLY` access review computed relative to "now", matching this
+  file's own established `consent_grants`/`delegations` precedent for
+  exactly that reason).
+- **A real, closed gap in `App\Services\Portal\PortalService::getAvailablePortals()`**,
+  documented as open in both the Super Administration and Developer
+  portal sections above: it only ever checked
+  `PortalDefinitions::roleAllows` (role/capability membership), never
+  the source's own further `PORTAL_PERMISSIONS` permission ("both
+  checks together" in the source's own `getAvailablePortals`). Closing
+  it needed `authority-governance:read` to exist as a real permission
+  first (it didn't, until this same change set) -- now added as
+  `PortalService::PORTAL_PERMISSIONS`, filtered in addition to the
+  existing role/capability check. The switchboard itself now stops
+  showing `SECURITY_ANALYST` a `super-admin` card or `SELLER_ADMIN` a
+  `developer` card that previously 403'd on click.
+- **`resources/views/portals/index.blade.php`** simplified back from the
+  `$builtPortalRoutes` lookup array (introduced for the Seller portal
+  slice, grown by one entry per portal since) to linking `$portal['href']`
+  directly -- now that every portal has a real destination,
+  `PortalDefinitions::all()`'s own `href` for each one is already
+  identical to its actual route path, so the lookup indirection has
+  nothing left to do.
+- **`App\Http\Controllers\Portal\NamraAdminPortalController`**
+  (`GET /portal/namra-admin`) -- read-only, matching every other portal
+  dashboard's own precedent: the source's interactive
+  `AuthorityGovernanceActions` onboarding-case submission/decision form
+  is not ported to this page (the JSON commands themselves are real and
+  tested, just not yet wired to a form here, the same gap this
+  initiative's other portal dashboards' own backend commands already
+  carry). Reuses `AuthorityGovernanceService::getSnapshot` and the
+  already-ported `IdentityFoundationSnapshotService::getSnapshot`
+  directly -- the source's own two-way `Promise.all`, no second query
+  path. Gated on `authority-governance:read` (matching the
+  `platform:read`/`developer:read` precedent from the two portals before
+  it) plus `getAvailablePortals()` membership.
+
+Verified by two new test files. `tests/Feature/AuthorityGovernance/
+AuthorityGovernanceTest.php` (11 tests): the snapshot requires
+`authority-governance:read` and denies an actor with no governed
+authority scope; a real onboarding case can be created for
+`LOCAL_STAGING` (and is created `BLOCKED_EXTERNAL` for `PRODUCTION`,
+never rejected); creating one without administrator scope is denied and
+a duplicate open case for the same authority/environment is a conflict;
+creating one without step-up confirmation is denied (`423`, matching
+this codebase's own established convention for that exact scenario); a
+requester cannot decide their own case; a distinct reviewer can approve
+local staging (and the resulting decision/status are asserted in the
+database); and a decision without a current access review is denied.
+`tests/Feature/Portal/NamraAdminPortalTest.php` (4 tests): auth
+required; a role absent from the portal's list is denied; an actor with
+`authority-governance:read` but no governed authority scope is denied
+(the same "assigned identity, no data" edge every other portal
+dashboard's own zero-state carries); and real units/federation/
+identity-provider data renders correctly with accessible table markup
+(the assigned authority's own name is never rendered as visible text
+anywhere on this page -- confirmed against the source, which only ever
+uses it for the metric count).
+
+338 tests total (309 passing), 0 new regressions (same 29 pre-existing `bcmath`-caused
+failures noted in the Seller portal section above, confirmed byte-for-
+byte identical to the pre-slice run), run against real MySQL/MariaDB,
+plus a clean `migrate:fresh --seed` cycle. Also verified visually over a
+real HTTP session end to end: `admin@vat-msa.test` clicking "Open NamRA
+Administration" from the switchboard through to a fully populated
+dashboard (3 authority units in their real parent/child hierarchy, 1
+federation connection, 2 protected role assignments across both demo
+administrators, a live-computed current quarterly access review, and all
+3 identity providers with correctly brand-mapped status colours), plus
+the switchboard screenshot itself confirming all six portal cards now
+resolve to real pages.
+
+**All six per-portal dashboards are now built.** The frontend build-out
+initiative's remaining scope is everything outside the portals
+themselves: accounting, business parties, quotations, expenses,
+inventory, projects, licensing, documents, reports, analytics, platform
+config, and the workflow engine, each its own comparable slice --
+see the "Frontend UI build-out" section's own running list above.
+
+### Business parties (customers & suppliers directory, closes out the first slice outside the portals)
+
+Ports the source's own `app/commercial/parties/page.tsx` +
+`PartyManager.tsx` -- the shared customer/supplier register. New:
+`App\Http\Controllers\Business\BusinessPartyViewController` (`index`/
+`store`/`update`/`deactivate`) and `resources/views/parties/index.blade.php`,
+reusing `App\Services\Business\BusinessPartyService` directly -- the
+same `search`/`create`/`update`/`deactivate` methods
+`App\Http\Controllers\Business\BusinessPartyController` already serves
+at `/api/v1/business-parties`, not a second query or command path.
+`parties:manage` gates the page, matching the source's own gate for
+this screen; the nav link (`Customers & suppliers`) is likewise
+`@can`-gated.
+
+This is the first screen in the whole frontend build-out initiative
+with a genuine write form rather than a read-only dashboard: create and
+edit share one server-rendered Blade `<form>` (edit reached via
+`?edit={id}`, since `BusinessPartyService::update` shares the same
+`BusinessValidator::party` validator `create` uses and requires the
+party still be `ACTIVE`), plus a small per-row deactivate form
+collecting the required 5-500 character reason. Unlike the source's
+own client-side `fetch()`-driven `PartyManager`, this is a traditional
+POST + redirect flow, matching every other write path already built in
+this migration (Blade/session-driven, not a client-rendered SPA
+fragment). `BusinessValidationException`/`BusinessResourceException`/
+`RepositoryConflictException` all render JSON-only by default (their
+own `render()` methods), so the view controller catches each explicitly
+and converts it to `redirect()->back()->withErrors(...)->withInput()`
+rather than letting a web-form POST hit a raw JSON error body. The
+source's own `/api/v1/business-parties/**` writes carry no step-up
+(`password.confirm`) gate, so neither does this form.
+
+Two deliberate, documented omissions, both because the data they'd need
+isn't produced by `BusinessPartyService::search`/`present` at all (and
+adding it would mean a second, wider query path serving this screen
+alone, which this migration's own "no second query path" rule rejects):
+the source's "Trust" column/metric (a join against supplier-verification
+snapshots) is not rendered here, and the source's "Synthetic check"
+action (`App\Services\Business\SupplierVerificationService::verify`,
+already ported in full and reachable at
+`POST /api/v1/business-parties/{id}/verification` -- see "Supplier
+verification" above) has no UI on this screen yet. Both are tracked
+here, not silently dropped.
+
+The relationship control is two independent checkboxes sharing one
+`relationships[]` array field (never a radio group), so a party can be
+registered -- or edited -- as a customer, a supplier, or both at once,
+matching the source's own data model exactly: `party_relationships` is
+a set of independent, revocable grants per party, not a single fixed
+column. Confirmed by both a feature test and a real HTTP session (see
+below).
+
+Verified by `tests/Feature/Business/BusinessPartyViewTest.php` (11
+tests): the page requires authentication; a role without
+`parties:manage` (`SELLER_VIEWER`) is denied `403`; the register and
+create form render with accessible table markup; a party can be
+created through the form (with the audit-event side effect verified); a
+party can be created as both a customer and a supplier at once, with
+both relationship rows persisted and both checkboxes correctly
+pre-checked when its edit form is reopened; creating a party with no
+relationship selected fails validation and redisplays the form with its
+input preserved, writing nothing; a duplicate VAT number surfaces as a
+form error rather than a raw 500; the edit form is correctly prefilled
+from `?edit={id}`; an active party can be updated (including its
+relationship set) through the form; a party can be deactivated with a
+reason (status flips to `INACTIVE`, the audit event is recorded, the
+record itself is never deleted); and deactivating with too short a
+reason fails validation without changing the party's status. 349 tests
+total (320 passing), 0 new regressions (the same 29 pre-existing
+`bcmath`-caused failures noted in the Seller portal section above), run
+against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
+Also verified visually over a real HTTP session end to end as
+`owner@demo-trading.test`: the empty register, creating a supplier
+party (metrics update from 0 to 1 active/1 supplier), opening its edit
+form pre-filled with its saved data, saving an edited legal name,
+deactivating it with a reason (status badge flips to grey "Inactive",
+the Edit action remains, Deactivate disappears, and the metrics drop
+back to 0), a rejected submission (missing relationship) redisplaying
+the form with its accessible error summary and the entered display name
+preserved, and (following a direct user report that both should be
+selectable together) registering a second party -- "Dual Role Trading
+CC" -- with both the Customer and Supplier boxes checked at once,
+confirming both badges render in the register and both boxes remain
+checked when its edit form is reopened.
+
+### Quotations (register, lifecycle actions, multi-line edit -- the second write-capable screen)
+
+Ports the source's own `app/commercial/page.tsx` + `QuotationForm.tsx` +
+`QuotationActions.tsx` + `app/commercial/quotations/[id]/edit/page.tsx` +
+`QuotationEditForm.tsx` -- the quotation register, a one-line issue
+form, the full lifecycle (send/accept/reject/expire/convert), and a
+dedicated multi-line revision editor. New:
+`App\Http\Controllers\Business\QuotationViewController` (`index`/
+`store`/`edit`/`update`/`send`/`accept`/`reject`/`expire`/`convert`)
+and `resources/views/quotations/{index,edit}.blade.php`, reusing
+`App\Services\Business\QuotationService` and
+`App\Services\Business\BusinessPartyService` directly (the same
+methods the JSON API at `/api/v1/quotations` already serves) plus a
+direct `App\Models\Product` read for the catalog dropdown, matching
+`App\Http\Controllers\Business\InventoryController::indexProducts`'s
+own precedent of querying the model inline (no dedicated product-search
+service exists, and none was added just for this).
+
+Two small, genuine gaps in `QuotationService` itself -- not new to this
+slice, but only surfaced because this is the first caller that needed a
+single-record read -- were closed here, benefiting the JSON API too:
+`present()` was missing `customer_name` (the source's own
+`searchQuotations`/`getQuotationForEdit` SQL both join
+`business_parties` for `p.display_name AS customer_name`; this port's
+`present()` never carried it); and there was no public single-quotation
+read at all (`findOrFail`/`present` were private, and neither the JSON
+`QuotationController` nor the service exposed a `show`/`find` -- the
+source's own `getQuotationForEdit` is a server-component-only data
+function with no JSON API equivalent either, confirmed by
+`app/api/v1/quotations/[id]/route.ts` only implementing `PATCH`). Added
+`QuotationService::find()`, a thin public wrapper the same shape as
+`App\Services\Invoice\InvoiceService::find`, including `revision_count`
+(matching the source's own `COUNT(*)` subquery, which `search()`
+deliberately still omits, matching `searchQuotations` never selecting
+it either).
+
+One deliberate, documented deviation from the source, found and closed
+in this slice, not a silent fix: `createQuotation` always creates a
+quotation in `DRAFT` status, but a full-repo grep of the source's own
+`app/` tree for `"sending"`/`sendQuotation` turns up nothing -- neither
+`app/commercial/page.tsx` nor `QuotationActions.tsx` (nor anywhere else)
+ever reaches the already-built `sendQuotation` (`DRAFT` -> `ISSUED`)
+transition. A quotation created through the source's own screen is a
+genuine dead end: permanently `DRAFT`, with no UI path to any later
+lifecycle action. `QuotationViewController` adds a "Send" action for a
+`DRAFT` row (calling the already-fully-built and already JSON-API-
+reachable `QuotationService::send`) so a quotation created through this
+screen is actually usable, rather than faithfully reproducing a bug.
+
+The multi-line edit form's "Add line"/"Remove line" controls are
+self-contained vanilla JavaScript (a `<template>` clone, index
+rewriting, and one `change` listener for the tax-category/tax-rate
+lock) with zero `fetch()` calls -- the actual save is still one plain
+`POST` (`PATCH` via `@method`) + redirect, matching this migration's
+Blade/session-driven precedent everywhere else. This is different in
+kind from the source's own `QuotationForm`/`QuotationActions`/
+`QuotationEditForm`, which are full client-side components driving
+every action (including the save itself) through `fetch()` without a
+page navigation.
+
+A second gap was found and fixed during this slice's own verification,
+not shipped: `QuotationViewController::convert` initially caught only
+`BusinessValidationException`/`BusinessResourceException`/
+`RepositoryConflictException`, but `QuotationService::convertToInvoice`
+calls `InvoiceService::submit` internally, which throws
+`App\Exceptions\InvoiceValidationException` on a certification failure
+-- a different exception class the controller didn't catch, so it
+reached Laravel's default handler and rendered a raw JSON error page to
+a browser user instead of a normal Blade error redirect. Caught by this
+sandbox's own missing-`bcmath` limitation triggering exactly that path
+during the visual walkthrough below; fixed by adding
+`InvoiceValidationException` to the same catch clause.
+
+Verified by `tests/Feature/Business/QuotationViewTest.php` (11 tests):
+the page requires authentication; a role without `commercial:read` is
+denied `403`; the register and issue form render with accessible table
+markup; a quotation can be created through the form (`DRAFT`, correct
+total); a role without `quotations:manage` cannot issue one; a `DRAFT`
+quotation can be sent, then accepted, then converted to a real
+certified invoice (the one test in this file that needs `bcmath` --
+see below); an `ISSUED` quotation can be rejected with a reason; an
+overdue `ISSUED` quotation can be expired; the edit form renders
+prefilled lines and the correct `revision_count`; an `ISSUED` quotation
+can be edited with its line count changed from one to two (correct
+recalculated total, a new hash-chained revision row); and an `ACCEPTED`
+quotation's edit route correctly refuses with the lifecycle guard's own
+reason rather than rendering an edit form. 360 tests total (330
+passing), 0 unexpected regressions: exactly the same 29 pre-existing
+`bcmath`-caused failures plus this file's own one new `bcmath`-caused
+failure (the convert-to-invoice assertion -- confirmed by `php -m |
+grep bcmath` returning nothing in this sandbox, the same root cause as
+every other invoice-certification-dependent test in this suite), run
+against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
+
+Also verified visually over a real HTTP session end to end as
+`owner@demo-trading.test`: registering a customer party, issuing a
+`DRAFT` quotation (metrics correctly still `N$ 0.00` quoted value, since
+`DRAFT` is deliberately excluded from that aggregate), sending it
+(`ISSUED`, `Accept`/`Edit`/`Reject` actions appear, quoted value updates
+to the real total), opening the edit form, adding a second line through
+the vanilla-JS repeater, saving (the register's total and quoted-value
+metric both recalculate correctly to include the new line), accepting
+the quotation (`ACCEPTED`, the inline convert form appears), and
+attempting conversion -- which in this `bcmath`-less sandbox correctly
+renders the accessible validation-error banner fixed above rather than
+a raw JSON page, leaving the quotation safely at `ACCEPTED` rather than
+in a partially-converted state, exactly as the idempotent
+`convertToInvoice`/`InvoiceService::submit` pairing is designed to
+behave on failure.
+
+### Accounting (controlled general ledger dashboard -- read-only, matching the source)
+
+Ports the source's own `app/accounting/page.tsx` -- the journal register
+and chart of accounts. Unlike the business parties and quotations
+slices just above, the source's own page here has **no write forms at
+all**: no journal-posting form, no account-creation form, nothing --
+and its own closing note says so explicitly ("Interactive journal
+authoring and approval queues will be expanded with the VAT close
+workflow"), ported into the new Blade view's own info banner verbatim
+rather than paraphrased. `App\Services\Business\AccountingService`
+already fully supports posting journals, creating accounts, reversing
+entries, closing periods, trial balance and financial statements
+(reachable today at `/api/v1/accounting/**`, covered end to end by
+`tests/Feature/Business/AccountingTest.php`), so this is a UI gap only,
+and the source's own stated scope for this specific screen is
+read-only -- so this slice stays read-only too, rather than inventing
+forms the source itself doesn't have (the opposite call from the
+business-parties/quotations slices, made for the opposite reason: there
+the source had real forms/actions this port was missing; here the
+source has none to port).
+
+New: `App\Http\Controllers\Business\AccountingViewController::index`
+and `resources/views/accounting/index.blade.php`. Queries
+`App\Models\ChartOfAccount` and `App\Models\JournalEntry` directly,
+mirroring `AccountingController::indexAccounts`/`indexJournals`'s own
+already-established precedent (a simple real query, not the source's
+own fixed `getBusinessPlatformSnapshot` list) rather than adding a
+third copy of the same two queries behind a new service method.
+
+One fidelity note, not a bug: journal and account status badges render
+with no distinct colour (Bootstrap's neutral `text-bg-light`) because
+neither `POSTED`, `REVERSED`, nor `ACTIVE`-for-an-account is any
+different from `ACTIVE` elsewhere in `<x-status-badge>`'s own shared
+colour map -- confirmed against the source's own `app/globals.css`,
+which likewise defines no `.status-posted`/`.status-reversed` class at
+all. Matching that absence exactly, not a missed mapping.
+
+Verified by `tests/Feature/Business/AccountingViewTest.php` (4 tests):
+the page requires authentication; a role without `accounting:read`
+(`SELLER_VIEWER`) is denied `403`; the ledger and chart of accounts
+render correctly with accessible table markup and the right
+`postedCount`; and an empty organisation renders both tables' zero-state
+rows. 364 tests total (333 passing), 0 new regressions -- the failing
+set is byte-for-byte identical to the pre-slice run (the same 29
+pre-existing `bcmath`-caused failures plus the one new one introduced by
+the quotations slice above), run against real MySQL/MariaDB, plus a
+clean `migrate:fresh --seed` cycle. Also verified visually over a real
+HTTP session as `owner@demo-trading.test`, with two accounts and one
+posted journal seeded directly for the walkthrough (the demo seeder
+itself creates none): both tables render correctly, the metrics count
+correctly (2 accounts, 1 journal, 1 posted), and the info banner text
+matches the source's own copy exactly.
+
+### Operations (expenses register + maker-checker, inventory balances, project control)
+
+Ports the source's own `app/operations/page.tsx` +
+`ExpenseDecisionActions.tsx` + `ExpenseReceiptActions.tsx`. Unlike the
+earlier slices, the source bundles four operational domains onto one
+combined page (there is no separate `/expenses`, `/inventory` or
+`/projects` page anywhere in the source -- confirmed by listing every
+top-level `app/` directory), so this slice mirrors that combined shape
+at `/operations` rather than inventing three or four separate routes
+the source doesn't have. New:
+`App\Http\Controllers\Business\OperationsViewController` (`index`/
+`store`/`submit`/`approve`/`reject`) and
+`resources/views/operations/index.blade.php`, reusing
+`App\Services\Business\ExpenseService` for every expense write and
+direct `InventoryBalance`/`Project`(+`ProjectBudget`/`ProjectCost`)
+reads mirroring `InventoryController::indexMovements`/
+`ProjectController::index`'s own existing inline-query precedent
+(neither has a dedicated enrichment service method, so this doesn't add
+a second, competing one).
+
+One small, genuine gap in `ExpenseService::present()` was closed here,
+benefiting the JSON API too, the same pattern as the `customer_name`
+gap the quotations slice closed: `category_name`, `supplier_name` and
+`receipt_document_id` were all missing (the source's own dashboard
+query joins `expense_categories`/`business_parties` for the first two;
+`receipt_document_id` was simply never selected despite being a real
+column since the table's creation).
+
+Two confirmed, deliberately **not** ported scope boundaries, each
+documented rather than silently faked:
+- **Import VAT evidence** -- the source's fourth panel (customs
+  declaration evidence) is not rendered at all. Unlike every other gap
+  this migration has closed, `import_records` has no backing model,
+  service, or controller whatsoever -- only its migration exists (Phase
+  4's own "not yet built" list). Building it would mean inventing an
+  entire new backend domain (customs declarations, evidence-gated input
+  VAT) under an "expenses" UI slice, not porting an existing one; the
+  view instead shows an explicit "not yet available" notice.
+- **Receipt linking stays read-only.** The source's own
+  `ExpenseReceiptActions.tsx` calls `POST /api/v1/expenses/{id}/receipt`
+  to link an already-uploaded, already-scanned-clean document to a
+  `DRAFT` expense -- but that command was never ported to
+  `ExpenseService` (no method, no route registered, confirmed by
+  reading the file in full), and its own "Upload receipt" action
+  depends on the Documents module's own upload UI, which also has no
+  Blade screen yet (`documents` remains in this initiative's own
+  not-yet-started list). This view reads and displays a linked
+  receipt's real state directly from `App\Models\DocumentMetadata`
+  (file name, scan status, availability) -- a genuine, working read --
+  but does not invent the missing link/upload commands themselves.
+
+One deliberate, documented deviation from source, closing a confirmed
+dead end the same way the quotations slice's own "Send" action did:
+the source's operations page has **no create-expense form and no
+`DRAFT` -> `SUBMITTED` action anywhere** -- confirmed by a full-repo
+grep of every `.tsx` file for `"submission"`/`submitExpense"`, which
+turns up nothing related to expenses at all -- even though
+`ExpenseService::create`/`submit` are both fully built and already
+reachable via the JSON API. Without either, no expense created through
+this application could ever reach the maker-checker decision this same
+page's own UI is otherwise built entirely around. This controller adds
+a "Record an expense" form (`store`, creating a `DRAFT`) and a "Submit"
+action (`DRAFT` -> `SUBMITTED`), closing that dead end. Approve/reject
+(the source's own real, working actions) are ported unchanged,
+including the self-review denial `ExpenseService::approve`/`reject`
+already enforce (`AuthorizationException`, rendering the shared
+`errors/403.blade.php` like every other authorization failure in this
+migration, not caught/redirected specially).
+
+Verified by `tests/Feature/Business/OperationsViewTest.php` (8 tests):
+the page requires authentication; a role without `expenses:read`
+(`SELLER_VIEWER`) is denied `403`; all three panels render correctly
+with the enriched expense fields, inventory balances and project data,
+plus the explicit import-VAT-evidence notice, all with accessible table
+markup; an expense can be recorded through the form (`DRAFT`, correct
+computed total); a role without `expenses:manage`
+(`TAXPAYER_VIEWER`) cannot record one; a `DRAFT` expense can be
+submitted and then approved by a second, independent user
+(`TAXPAYER_ACCOUNTANT`); the expense's own creator is denied `403`
+attempting to approve their own submitted expense (maker-checker
+self-review denial, reached through this UI); and a submitted expense
+can be rejected with a reason. 372 tests total (342 passing), 0 new
+regressions -- the failing set is byte-for-byte identical to the
+pre-slice baseline, run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end across two real user sessions (seeded directly for
+the walkthrough, since the demo seeder creates neither a second
+taxpayer-org user nor any expense/inventory/project data): recording
+an expense as `owner@demo-trading.test`, submitting it, confirming the
+creator's own view correctly shows "Independent reviewer required"
+rather than decision buttons, logging in as a separate seeded
+`TAXPAYER_ACCOUNTANT` and confirming that session sees real
+Approve/Reject actions, approving it (status flips to `Approved`,
+"Decision recorded" now shown to both users), and confirming the
+inventory balance and project control panels render real seeded data
+correctly alongside the explicit import-VAT-evidence and
+receipt-upload-not-available notices.
+
+### Administration (licensing/entitlements, employees, roles, workflows, access governance)
+
+Ports the source's own `app/administration/page.tsx` +
+`AdministrationActions.tsx` -- the "Administration command centre".
+There is no standalone `/licensing` page in the source at all (the
+whole "still not started: licensing" item from the earlier matrix note
+turned out to mean this page, not a page of its own); licensing and
+entitlements are one panel embedded in this same combined
+organisation-control-plane screen, alongside employees, organisation
+roles, versioned workflows and access governance. New:
+`App\Http\Controllers\Administration\AdministrationViewController`
+(`index`/`storeEmployee`/`storeRole`) and
+`resources/views/administration/index.blade.php`. The read side is the
+simplest of any slice in this whole initiative: it calls
+`App\Services\Administration\AdministrationSnapshotService::getAdministrationSnapshot`
+once and renders it directly -- the fixed-list aggregate every one of
+Phase 12's five sub-domain slices already bundles into, already fully
+joined/enriched (department, job title, branch, permission lists,
+licence entitlements) by that existing service, so unlike every prior
+slice this one added no query, no enrichment fix, and no new read path
+at all. The two writes reuse
+`App\Services\OrganisationAdmin\OrganisationAdminService::inviteEmployee`/
+`createOrganisationRole` directly -- the exact methods
+`App\Http\Controllers\OrganisationAdmin\OrganisationAdminController`
+already serves at `/api/v1/organisations/{employees,roles}`.
+
+One deliberate, documented substitution, not a simplification: the
+source's own `AdministrationActions.tsx` gates both writes behind a
+client-side checkbox ("I completed the local/staging privileged-change
+step-up check") plus a custom `x-vat-msa-local-step-up` header the
+server trusts blindly -- theatre, not a real check. Both write routes
+here use the `password.confirm` middleware instead, the same genuine,
+server-enforced step-up every other sensitive command in this
+migration already uses -- continuing Phase 6's own precedent of
+replacing the source's platform-header trust entirely, not just for
+authentication. Verified live: submitting either form without a recent
+confirmation redirects to the real `/confirm-password` screen (not the
+423 this codebase's JSON API returns for the same condition, since a
+plain form POST doesn't send an `Accept: application/json` header --
+confirmed by reading Laravel's own `RequirePassword` middleware
+source); confirming and resubmitting then succeeds.
+
+Two small, genuine backend gaps found and fixed during this slice,
+both benefiting the JSON API too:
+- `App\Support\Licensing\LicenseResolver::getEntitlements` was missing
+  `capacity_mode` (`FINITE`/`UNLIMITED`/`NOT_APPLICABLE`) entirely --
+  a real, displayed field the source's own dashboard branches on (the
+  "User seats" metric card's own "Unlimited" vs numeric-limit
+  decision). The source stores it as a genuine column on
+  `license_plan_entitlements`, but this port's own migration for that
+  table never carried the column at all. Rather than a migration and a
+  backfill for a column no command in this port ever needs to set
+  (every currently-seeded plan's mode is fully determined by its other
+  two already-real columns), it's computed at read time instead:
+  `NOT_APPLICABLE` for an unmetered boolean feature-gate (no
+  `metric_key`), `UNLIMITED` for a metered feature with no configured
+  cap, `FINITE` otherwise -- a documented simplification (computed
+  property vs. a stored column), not a fidelity gap in what's
+  displayed.
+- The demo organisation seeded by `DemoSeeder` never had a licence at
+  all -- no `subscriptions` or `organisation_licenses` row was ever
+  created for it, silently blocking every `EntitlementGate`-gated
+  screen (this one included) for the demo login, confirmed by
+  reproducing `LicenseResolver::getLicense`'s own "The organisation has
+  no configured licence" `AuthorizationException` against the real
+  seeded database before this fix. No command anywhere in this port
+  can create a licence from scratch (`changeState`/`upgrade` both
+  themselves require one to already exist), so this was a genuine,
+  pre-existing demo-seed gap, the same class of finding as "Demo seed
+  gaps for already-shipped features" earlier in this document, not
+  something a real organisation-onboarding flow would ever hit.
+  `DemoSeeder` now creates both rows on the `PILOT_PROFESSIONAL` plan
+  for the demo organisation.
+
+One further, honestly-labelled gap, left unfixed rather than silently
+worked around: the source's own `snapshot.capacityExceptions` (the
+"Licence capacity exception" alert) has no backing table in this port
+at all -- confirmed by a repo-wide search for any capacity-exceptions
+migration or model. The Blade view still renders that alert's markup
+(always empty, via a defensive `?? []`) with an inline comment
+explaining why, rather than silently dropping the whole feature
+without a trace.
+
+The workflow engine and access-governance panels here are read-only
+registers only, reusing data the already-built
+`App\Services\Workflow\WorkflowService`/`App\Services\AccessGovernance\AccessGovernanceService`
+JSON APIs already write to -- this slice does not add its own
+authoring UI for either (drafting/publishing a workflow version,
+deciding a workflow task, requesting/deciding access, certifying a
+quarterly review all remain JSON-API-only for now), tracked as its own
+remaining item, distinct from this read-only register.
+
+Verified by `tests/Feature/Administration/AdministrationViewTest.php`
+(8 tests): the page requires authentication; a role without
+`administration:read` (`TAXPAYER_STAFF`) is denied `403`; the full
+snapshot renders correctly (licence, entitlements table with the
+now-computed `capacity_mode`, employees, roles, workflows, access
+governance) with accessible table markup; an employee can be invited
+once step-up is confirmed; the same request without a confirmed
+password redirects to `/confirm-password` rather than being silently
+allowed or crashing; a role without `employees:manage`
+(`TAXPAYER_ACCOUNTANT`) is denied `403`; an organisation role can be
+created (with its permissions correctly persisted) once step-up is
+confirmed; and a role creation naming a protected, non-grantable
+permission fails validation before ever reaching the entitlement/
+quarterly-review gate. 380 tests total (349 passing), 0 new
+regressions -- the failing set is byte-for-byte identical to the
+pre-slice baseline, run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end as `owner@demo-trading.test` (with a quarterly
+access review opened directly via the already-built
+`openQuarterlyAccessReview` service, matching this migration's own
+"seed via the real command, not a raw insert" precedent, since
+`ADMIN_WRITE` operations are blocked without one): the full command
+centre rendering real seeded licence/entitlement data with correctly
+computed capacity modes, attempting to invite an employee without a
+fresh step-up and landing on the genuine confirm-password screen,
+confirming and having the same submission then succeed (the new
+employee appearing in the register as `INVITED`), and creating an
+organisation role that appears immediately with its permissions listed.
+
+### Documents (evidence register and governed upload)
+
+Ports the source's own `app/documents/page.tsx` +
+`DocumentUploadForm.tsx` -- the evidence register and a real, governed
+multipart upload-to-quarantine form. New:
+`App\Http\Controllers\Document\DocumentViewController` (`index`/
+`store`) and `resources/views/documents/index.blade.php`. The upload
+reuses `App\Services\Document\DocumentService::upload` directly --
+the exact same method `App\Http\Controllers\Document\DocumentController::store`
+already serves at `POST /api/v1/documents`, including its real MIME
+allow-list, 1-byte-to-10-MiB size bound, magic-byte content-sniffing
+(never trusting a client-declared MIME type alone) and SHA-256
+checksum. None of that is re-implemented here. The register is a
+direct `App\Models\DocumentMetadata` read scoped to the actor's own
+organisation, matching the exact `$documents` sub-query already inside
+`App\Services\Platform\PlatformSnapshotService::getSnapshot` (the
+source's own combined `getPlatformSnapshot`, which the source's
+`/documents` page itself calls) rather than pulling in that whole
+dozen-table integrations/sync/reports aggregate for a page that only
+ever needed one slice of it -- the same "simple real query, not the
+source's fixed list" call already made for accounting, business
+parties and every list this initiative has built since.
+
+Confirmed, not assumed: the source's own page has **no UI at all** for
+scan-decision, supersede, retention-hold, or download -- its own
+subtitle even says so explicitly ("Downloads are unavailable while
+malware scanning is not configured"). None of those four are built
+here either. This isn't a gap this slice introduces; all four commands
+remain fully built and reachable at their existing JSON routes
+(`/api/v1/documents/{id}/{scan-result,supersession,retention-hold,download}`)
+for whichever future admin/national-scope screen needs them -- this
+slice faithfully matches the source's own scope for this specific
+page, nothing more.
+
+Closes the loop this initiative's own Operations slice left open: its
+expense register's receipt column previously read "Upload receipt
+(not yet available in this UI)" -- a placeholder note written at the
+time because Documents didn't exist yet. `resources/views/operations/index.blade.php`
+now links that "Upload receipt" text straight to
+`/documents?owner_domain=EXPENSE&owner_resource_id={expense_id}`,
+matching the source's own `DocumentUploadForm`'s `defaultOwnerDomain`/
+`defaultOwnerResourceId` prefill behaviour exactly (confirmed live:
+following the link from an unreceipted expense correctly pre-selects
+"Expense" and pre-fills the resource ID field).
+
+A genuine, unrelated flaky test was found and fixed during this
+slice's own full-suite verification, not shipped: running the whole
+suite (not `BusinessPartyViewTest.php` alone) intermittently failed
+`test_a_party_can_be_created_as_both_a_customer_and_a_supplier_at_once`'s
+own `$editing['relationships'] === ['CUSTOMER', 'SUPPLIER']` assertion
+-- `App\Services\Business\BusinessPartyService::present()`'s
+relationships read had no `orderBy` at all, so MySQL's row order for
+that query was genuinely unspecified (the source's own `GROUP_CONCAT`
+carries the identical lack of a guarantee) and could shift under a
+different query plan once the full, much larger suite was in play.
+Fixed with an explicit `orderBy('relationship')` (alphabetical,
+matching every other `present()` method's own ordering conventions in
+that file) -- confirmed stable across four consecutive full-suite runs
+after the fix, byte-for-byte identical failing set each time.
+
+Verified by `tests/Feature/Document/DocumentViewTest.php` (7 tests):
+the page requires authentication; a role without `documents:read`
+(`SELLER_VIEWER`) is denied `403`; the register and upload form render
+correctly with accessible table markup; a valid PDF (real magic bytes,
+not just a `.pdf` extension) uploads successfully into `QUARANTINED`/
+`PENDING_EXTERNAL_SCANNER`; a role without `documents:upload`
+(`TAXPAYER_VIEWER`) is denied `403`; a file whose content doesn't
+match its declared MIME type is rejected with a clear form error
+rather than a 500 or a silently-accepted forgery; and the upload
+form's domain/resource-id fields correctly prefill from the
+`?owner_domain=EXPENSE&owner_resource_id=` query string. 387 tests
+total (357 passing), 0 new regressions -- the failing set is
+byte-for-byte identical to the pre-slice baseline (confirmed stable
+across four consecutive full-suite runs, per the flaky-test fix
+above), run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end as `owner@demo-trading.test`: starting from a
+seeded unreceipted expense on the Operations page, following its real
+"Upload receipt" link into Documents with the domain/resource ID
+already correctly filled in, uploading a real minimal PDF fixture, and
+confirming it appears in the register as `QUARANTINED`/
+`PENDING_EXTERNAL_SCANNER` with its SHA-256 checksum shown and the
+metrics (documents/quarantined/clean/legal holds) all updating
+correctly.
+
+### Reports & analytics (governed reporting console)
+
+Ports the source's own reports/analytics screens onto `App\Services\
+Platform\ReportExportService` (all 7 methods -- `runInline`, `publish`,
+`requestExport`, `approveExport`, `cancelExport`, `getExport`,
+`downloadExport`) and `App\Services\Platform\DataProductService` (all 5
+methods -- `list`, `runModel`, `publish`, `approvedMetrics`,
+`anomalyCandidates`) directly, both already fully covered end to end
+(every audience-tier guardrail, the publish reconciliation gate, the
+anomaly-detection maths) by `tests/Feature/Platform/ReportExportTest.php`
+(24 tests) and `DataProductTest.php` (11 tests) from Phase 13's fourth and
+fifth slices. New: `App\Http\Controllers\Platform\ReportViewController`
+(`index`/`run`/`publish`/`requestExport`/`approveExport`/`cancelExport`/
+`downloadExport`/`runModel`/`publishDataProduct`) and
+`resources/views/reports/index.blade.php`. This view adds no query of
+its own for anything either service already exposes; the catalogue read
+(`report_definitions`) and the "my runs"/"my exports"/"pending
+approvals"/"publishable model runs" lists are direct supporting reads
+with no command precedent to reuse, the same "no second query path for
+business logic, a listing read is fine" posture Document/Inventory's own
+view controllers already established.
+
+**Distinct URL shapes from the JSON API, on purpose**: the Blade routes
+(`/reports`, `/reports/{code}/run`, `/reports/runs/{id}/publish`,
+`/reports/runs/{id}/export`, `/reports/exports/{id}/approve`,
+`/reports/exports/{id}/cancel`, `/reports/exports/{id}/file`,
+`/analytics/data-products/{id}/run-model`, `/analytics/data-products/{id}/
+publish`) live outside the `api/v1` prefix entirely (a first pass
+accidentally nested them inside the `Route::prefix('api/v1')->group()`
+alongside `ReportController`/`DataProductController`'s own JSON routes --
+caught immediately by every new feature test 404ing, moved out to sit
+beside `/documents` instead) and use deliberately different path segments
+from their JSON counterparts even where both now share a prefix-free
+base (`run` vs `runs`, `file` vs `download`, `run-model`/`publish` vs
+`model-runs`/`publications`) so the two route sets never collide on the
+same method+path.
+
+**Data-conditional step-up, handled inline, not via route middleware**:
+`requestExport`/`approveExport` are the one pair of write commands in
+this whole migration whose step-up requirement is data-conditional (only
+when the report's classification is `TAX_CONFIDENTIAL`/`RESTRICTED`, or
+the export's own `requires_step_up` flag is set -- see `App\Support\
+Access\StepUp`'s own doc comment), not route-wide like every other
+`password.confirm`-gated Blade route this initiative has built so far
+(Administration's employee/role invitations, Licensing's state changes,
+Platform config's `provisionStaff`). Gating the whole route would
+over-restrict the non-sensitive case the source itself exempts, so the
+controller instead passes `StepUp::isFresh($request)` through to the
+service and, if it still refuses for exactly that reason (detected by
+matching `'step-up'` in the thrown `AuthorizationException`'s message,
+never by re-deriving sensitivity itself), stores the reports page as
+`url.intended` and redirects to the real `password.confirm` screen with a
+flash message asking the actor to confirm and retry. This migration's
+Blade forms are plain POSTs with no client-side replay anywhere in this
+initiative, so a manual retry (now with a satisfied freshness window) is
+the honest UX here, not a silently-swallowed failure or a first
+JS-driven auto-resubmit. Verified live through a real browser session:
+requesting an export for a `TAX_CONFIDENTIAL` run redirects to
+`/confirm-password` with nothing written to `report_exports`; confirming
+and retrying the identical action succeeds, landing the export in
+`PENDING_APPROVAL` with a visible "Step-up" badge.
+
+**No JS anywhere on this page, matching every other screen in this
+initiative**: the two per-data-product "run analytics model"/"publish
+snapshot" mini-forms could have used a single shared dropdown-driven form
+with a JS `onchange` handler rewriting the form's `action` -- the first
+draft did exactly that -- but this codebase's entire Blade UI build-out
+has never shipped a line of inline JavaScript, so it was reworked into
+one small, plain per-card form pair instead (one for `run-model`, one for
+`publish`), matching the established "an inline form per row/card, no
+shared dynamic state" convention already used everywhere else (Quotations'
+register, this same page's own "my report runs" table).
+
+**Demo seed gap closed**: a full-repo check found `report_definitions`/
+`data_products`/`data_product_lineage`/`metrics` were all genuinely
+seed-only by design (Phase 13's own documented posture -- defining a new
+governed report/metric is a governance/config action, out of scope for a
+runtime command) but nothing had ever actually seeded one, leaving this
+screen's catalogue and analytics section permanently empty for any real
+login. `DemoSeeder` now seeds the 7 report codes this migration
+implements (`VAT_POSITION`, `SALES_VAT_SUMMARY`, `COMPLIANCE_CASELOAD`,
+`PORTFOLIO_EXCEPTIONS`, `REVENUE_COMPLIANCE_TRENDS`,
+`CASE_EVIDENCE_SUMMARY`, `NATIONAL_VAT_AGGREGATE`) with audiences chosen
+so the demo `admin@vat-msa.test` login (`PILOT_ADMIN`, national scope,
+`reports:executive`, and -- via the pre-existing demo `delegations` row --
+an active `PRACTITIONER` delegation) can exercise every audience-tier
+guardrail end to end, plus one `VAT_TRENDS` data product sourced from
+`SALES_VAT_SUMMARY` with two certified metrics (`DEMO_INVOICE_COUNT`,
+`DEMO_TAX_TOTAL`). `CASE_EVIDENCE_SUMMARY` still needs a real `case_id`
+typed in by whoever runs it -- no case is auto-seeded, matching the
+source's own per-case scoping rather than fabricating a fake evidence
+trail.
+
+Verified by a new `tests/Feature/Platform/ReportViewTest.php` (14 tests):
+the page requires authentication; a role without `reports:read` is
+denied `403`; the catalogue renders with accessible table markup; running
+a report requires `reports:run`; a `TAXPAYER`-audience run completes
+inline; `CASE_EVIDENCE_SUMMARY` without a `case_id` is refused with a
+flashed error rather than a 500; a completed run publishes; a
+non-sensitive export auto-approves and downloads with the correct
+`Content-Type`; a sensitive export without a fresh step-up redirects to
+`/confirm-password` with nothing persisted, and with one succeeds into
+`PENDING_APPROVAL`; the requester can cancel their own pending export; a
+national reviewer can approve a colleague's pending export but is refused
+(with a flashed error, not a 500) attempting to approve their own; running
+and publishing an analytics model snapshot end to end produces a real
+`data_product_snapshots` row and the product's card then shows it; and
+running an analytics model is refused for a non-national actor. 401 tests
+total, 0 new regressions -- the failing set (30 tests, all pre-existing
+`bcmath`-dependent invoice-certification/VAT-return/refund failures) is
+the same class already documented throughout this initiative, confirmed
+by the failure list carrying no `Report`/`DataProduct`/`Platform` test
+among it, run against real MySQL/MariaDB, plus a clean `migrate:fresh
+--seed` cycle. Also verified visually over a real HTTP session as
+`admin@vat-msa.test`: the catalogue, running and publishing
+`SALES_VAT_SUMMARY`, the step-up redirect and its confirm-then-retry
+flow landing the export in `PENDING_APPROVAL` with a "Step-up" badge, and
+running a model then publishing a snapshot for the `VAT_TRENDS` data
+product, after which its certified metrics show real (`0`, since this
+migrate:fresh cycle seeded no invoices) values with `AVAILABLE` status
+instead of "No Data".
+
+### Platform config (feature flags, config values, access policies)
+
+Ports the source's own platform config/change-management screen onto
+`App\Services\Platform\PlatformChangeService` directly (all 5 methods --
+`config`, `listChangeRequests`, `requestChange`, `decideChange`,
+`provisionStaff`), already fully covered end to end (every target-type
+shape check, the self-decision refusal, `provisionStaff`'s
+`identity_links` creation) by `tests/Feature/Platform/
+PlatformChangeTest.php`'s 12 tests from Phase 13's sixth slice. New:
+`App\Http\Controllers\Platform\PlatformConfigViewController`
+(`index`/`requestChange`/`decideChange`/`provisionStaff`) and
+`resources/views/platform/index.blade.php`. This view adds no query of
+its own -- `config()`/`listChangeRequests()` are read straight from the
+service.
+
+**Three propose-change forms, one per target type, not one generic
+form with conditional fields**: `feature_flags`/`platform_config`/
+`access_policies` each need a genuinely different `proposed_value` shape
+(`{enabled: bool}`, `{value: string}`, `{parameters: object}}` --
+`PlatformChangeService::validateShape`'s own per-target-type check), and
+this initiative has never shipped a line of inline JavaScript to
+conditionally show/hide fields, so each row gets its own small, plain
+inline form instead (the feature-flag row's form proposes the opposite
+of the current state with one click; the config-value row takes a text
+input; the access-policy row takes a JSON-text input, prefilled with the
+current parameters so a reviewer only edits what's changing) -- matching
+the "one inline form per row, no shared dynamic state" convention this
+whole build-out has used everywhere else (Reports' own "run
+model"/"publish snapshot" per-card forms most recently).
+
+**`provisionStaff` wears `password.confirm` at the route level**, a
+genuine contrast with Reports' `requestExport`/`approveExport`: this
+command is unconditionally step-up gated in the source (the same posture
+Administration's employee/role invitations and Licensing's state changes
+already established), not data-conditional, so Laravel's own middleware
+refuses an unconfirmed request before the controller is ever reached --
+no need to replicate `StepUp::isFresh()`'s inline check-and-redirect
+dance here.
+
+**Distinct URL shapes from the JSON API**: `/platform`,
+`/platform/change-requests`, `/platform/change-requests/{id}/decide`,
+`/platform/staff` sit outside the `api/v1` prefix entirely (learned from
+Reports' own first-pass mistake nesting its Blade routes inside
+`api/v1` by accident -- this slice's routes were placed correctly the
+first time) and use `decide` rather than `.../decision` so the two route
+sets never collide even without the prefix difference alone to rely on.
+
+**Demo seed gap closed**: a full-repo check found `feature_flags`/
+`platform_config`/`access_policies` were all genuinely seed-only by
+design (the same documented posture as `report_definitions`/
+`data_products` above -- defining a new governed flag/config
+key/policy is a governance action, out of scope for a runtime command)
+but nothing had ever actually seeded one, leaving this screen
+permanently empty for any real login. `DemoSeeder` now seeds one row of
+each (`offline_sync.enabled`, `reports.export_size_limit_bytes`,
+`STEP_UP_WINDOW`) plus two distinct `platform:manage` logins
+(`platform-admin@vat-msa.test` as `SUPER_ADMIN`,
+`infra-admin@vat-msa.test` as `INFRASTRUCTURE_ADMIN`) so the
+maker-checker decide step is genuinely demonstrable between two real
+accounts, not just readable -- the same reasoning that already justified
+a second Authority Governance login earlier in this initiative. Both
+seeded config rows document, in their own `description`, that
+`ReportExportService`'s export size limit and `StepUp`'s freshness
+window are still the real hardcoded values those modules enforce --
+changing the seeded row does not yet feed back into either, exactly as
+Phase 13's own "Platform config & change-management" section above
+already stated and reproduced faithfully here, not silently implied
+otherwise by a UI that lets you "change" a number nothing reads.
+
+Verified by a new `tests/Feature/Platform/PlatformConfigViewTest.php`
+(12 tests): the page requires authentication; a role without
+`platform:read` is denied `403`; the console renders read-only (no
+propose-change actions) for a `platform:read`-only actor; proposing a
+change requires `platform:manage`; a manager can propose a feature-flag
+change, a platform-config value change, and an access-policy change (with
+invalid JSON parameters refused via a flashed error, not a 500); a
+reviewer cannot decide their own change request; a different reviewer's
+approval both marks the request `APPLIED` and actually flips the
+target's live value (with `version` bumped), while a different
+reviewer's rejection leaves the target untouched; and `provisionStaff`
+without a fresh step-up redirects to `/confirm-password` with nothing
+persisted, while a fresh step-up creates the real `users`/
+`identity_links` rows. 413 tests total, 0 new regressions -- the failing
+set (the same 30 pre-existing `bcmath`-dependent tests documented
+throughout this initiative) is unchanged, run against real
+MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
+visually over a real HTTP session as `platform-admin@vat-msa.test`: the
+three config tables and the staff form render correctly, and proposing a
+feature-flag change stages a real `PENDING` row in the change-requests
+table with working Approve/Reject actions.
+
+### Workflow engine authoring console
+
+Ports the source's own workflow-engine authoring screen onto
+`App\Services\Workflow\WorkflowService` directly (all 8 methods --
+`createWorkflowDraft`, `publishWorkflowVersion`, `testWorkflowVersion`,
+`assignWorkflow`, `decideWorkflowTask`, `createDelegation`,
+`listDelegations`, `revokeDelegation`), already fully covered end to end
+(licence-seat reservation, conditional routing, the maker-checker self-
+publish/self-approval refusals) by `tests/Feature/Workflow/
+WorkflowTest.php`'s own suite from Phase 12's fifth slice. New:
+`App\Http\Controllers\Workflow\WorkflowAuthoringViewController`
+(`index`/`store`/`publish`/`test`/`assign`/`decide`/`storeDelegation`/
+`revokeDelegation`) and `resources/views/workflows/index.blade.php`.
+This is the write side of a read-only register that was already part of
+Administration's own page before this slice existed
+(`AdministrationSnapshotService::getAdministrationSnapshot`'s
+`workflows`/`tasks` arrays, reused here verbatim rather than re-queried)
+-- what this slice adds is what makes the engine's own commands
+reachable at all, closing out this initiative's own frontend build-out
+list entirely (every item named in "Still NOT STARTED" above is now
+built).
+
+**Definition/context authoring is JSON-textarea, not a visual node
+editor**: `nodes`/`transitions`/routing `context` are structured lists
+of typed objects (`WorkflowValidator::definition()`'s own shape) --
+building a drag-and-drop graph editor is out of scope for a build-out
+that has never shipped a line of client-side JavaScript. A JSON
+textarea, prefilled with a valid minimal example and validated entirely
+server-side by the same `WorkflowValidator` every JSON-API caller
+already goes through, is the same "trust the real validator, don't
+duplicate its shape checks in the UI" posture Platform config's
+`ACCESS_POLICY` `parameters` field already established. Reference
+panels (organisation roles, active members) sit next to the textareas so
+an author can copy a real ID into a `ROLE`/`USER` `assignee_ref` without
+guessing.
+
+**A genuine bug found and fixed in already-shipped, tested code, not
+just this slice's own new code**: `WorkflowValidator::context()`
+rejects its input unless `is_array($contextRaw) && ! array_is_list
+($contextRaw)` -- but PHP's `array_is_list([])` is vacuously `true` for
+an empty array, and `json_decode('{}', true)` produces exactly that
+empty array, indistinguishable from `json_decode('[]', true)`. A caller
+sending a literal empty JSON object (`{}`, meaning "no routing filters")
+-- something no existing test ever happened to exercise, JSON API
+included -- would be rejected with "context must be an object", the
+same bug this slice's own "Test routing" and "Assign instance" forms hit
+immediately with their own empty-textarea default. Fixed on the caller
+side, not by touching the shared validator: `WorkflowAuthoringViewController::
+jsonContextField()` normalises a decoded empty array back to `null`
+(the shape `context()` already handles correctly) before it ever reaches
+`WorkflowValidator`, leaving the already-tested validator itself
+untouched. Documented here rather than silently patched, since the same
+latent bug remains reachable from the JSON API's own `POST /api/v1/
+workflows/versions/{id}/test` and `POST /api/v1/workflows/instances` for
+any caller that sends `"context": {}` explicitly -- a real, if narrow,
+pre-existing gap this slice surfaced but did not close for that surface.
+
+**Demo seed gap closed, and a real pre-existing one**: a full-repo check
+found the demo organisation had never had an `access_reviews` row at
+all. `App\Support\Licensing\EntitlementGate::assert`'s own `ADMIN_WRITE`
+gate -- which `createWorkflowDraft`/`publishWorkflowVersion`/
+`assignWorkflow`/`decideWorkflowTask`/`createDelegation`/
+`revokeDelegation` all go through, alongside Administration's own
+already-shipped `inviteEmployee`/`createOrganisationRole` -- requires a
+current-quarter `access_reviews` row (`OPEN` or `COMPLETED`, not
+overdue) before any privileged organisation-administration write. This
+silently blocked every one of those already-shipped `ADMIN_WRITE`
+actions for a real demo login even though their own feature tests always
+pass (each opens its own review via `POST /api/v1/access-reviews`
+first, a step no demo login had ever taken). `DemoSeeder` now seeds a
+current, `OPEN` quarterly review for the demo organisation, closing this
+gap for every `ADMIN_WRITE` command in the application, not just this
+slice's own new ones.
+
+Verified by a new `tests/Feature/Workflow/WorkflowAuthoringViewTest.php`
+(11 tests): the page requires authentication; a role without
+`workflows:read` is denied `403`; the console renders its catalogue and
+hides manage-only actions for a `workflows:read`+`workflows:decide`
+(but not `workflows:manage`) actor; creating a draft requires
+`workflows:manage`; every write (create/publish/test excepted/assign/
+decide/delegate/revoke) wears `password.confirm`, matching the JSON
+API's own unconditional step-up posture exactly; a draft's own creator
+cannot publish it themselves, but a different user can; testing a
+draft's routing needs no step-up and shows a real path/terminal result;
+assigning an instance and deciding its task work end to end (with the
+initiator refused deciding their own task, and role-based decision
+working for a different, role-holding user), completing the instance;
+and creating then revoking a delegation both succeed. 424 tests total, 0
+new regressions -- the failing set (the same 30 pre-existing
+`bcmath`-dependent tests documented throughout this initiative) is
+unchanged, run against real MySQL/MariaDB, plus a clean `migrate:fresh
+--seed` cycle. Also verified visually over a real HTTP session as
+`owner@demo-trading.test`: creating a draft (redirected to
+`/confirm-password` on the first attempt, succeeding after confirming),
+seeing it appear in both the versioned-workflows and draft-versions
+cards, and running "Test routing" to see a real `start → approve → end`
+/`COMPLETED` result rendered on the page.
 
 ## Legacy D1 importer (Phase 14)
 

@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
+use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
+use App\Http\Controllers\Administration\AdministrationViewController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
@@ -17,20 +19,28 @@ use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
+use App\Http\Controllers\Business\AccountingViewController;
 use App\Http\Controllers\Business\BusinessPartyController;
+use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
+use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
+use App\Http\Controllers\Business\QuotationViewController;
 use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
+use App\Http\Controllers\Compliance\ComplianceViewController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Document\DocumentController;
+use App\Http\Controllers\Document\DocumentViewController;
 use App\Http\Controllers\Refund\RefundController;
+use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
@@ -38,10 +48,20 @@ use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
+use App\Http\Controllers\Platform\PlatformConfigViewController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
+use App\Http\Controllers\Platform\ReportViewController;
+use App\Http\Controllers\Portal\BuyerPortalController;
+use App\Http\Controllers\Portal\DeveloperPortalController;
+use App\Http\Controllers\Portal\NamraAdminPortalController;
+use App\Http\Controllers\Portal\NamraPortalController;
 use App\Http\Controllers\Portal\PortalController;
+use App\Http\Controllers\Portal\PortalViewController;
+use App\Http\Controllers\Portal\SellerPortalController;
+use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
+use App\Http\Controllers\Workflow\WorkflowAuthoringViewController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
 
@@ -79,6 +99,163 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // ambiguity: this is a genuinely different URL (no api/v1 prefix).
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
+
+    // Real Blade UI for the compliance/audit-cases/refunds domain -- ported
+    // from the source's own app/{cases,compliance,refunds}/page.tsx, each
+    // reusing App\Services\Compliance\ComplianceSnapshotService the same
+    // way the invoices view above reuses InvoiceService. See each view
+    // controller's own doc comment for why this is three routes (the
+    // source keeps /cases, /compliance and /refunds as three separate
+    // pages behind three separate permissions).
+    Route::get('/cases', [AuditCaseViewController::class, 'index'])->name('cases.index');
+    Route::get('/compliance', [ComplianceViewController::class, 'index'])->name('compliance.index');
+    Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
+
+    // Real Blade UI for the customer/supplier directory -- ported from the
+    // source's own app/commercial/parties/page.tsx + PartyManager.tsx, the
+    // first slice in this migration's frontend build-out with a genuine
+    // write form. See BusinessPartyViewController's own doc comment for
+    // what it reuses and what it deliberately omits.
+    Route::get('/parties', [BusinessPartyViewController::class, 'index'])->name('parties.index');
+    Route::post('/parties', [BusinessPartyViewController::class, 'store'])->name('parties.store');
+    Route::patch('/parties/{id}', [BusinessPartyViewController::class, 'update'])->name('parties.update');
+    Route::post('/parties/{id}/deactivation', [BusinessPartyViewController::class, 'deactivate'])->name('parties.deactivate');
+
+    // Real Blade UI for the quotation register/lifecycle/edit -- ported
+    // from the source's own app/commercial/page.tsx + QuotationForm.tsx +
+    // QuotationActions.tsx + app/commercial/quotations/[id]/edit/page.tsx +
+    // QuotationEditForm.tsx. See QuotationViewController's own doc comment
+    // for the one deliberate deviation from source (a "Send" action for a
+    // DRAFT quotation, closing a genuine dead end in the original). No
+    // step-up gate, matching the JSON API's own /api/v1/quotations/**
+    // routes below.
+    Route::get('/quotations', [QuotationViewController::class, 'index'])->name('quotations.index');
+    Route::post('/quotations', [QuotationViewController::class, 'store'])->name('quotations.store');
+    Route::get('/quotations/{id}/edit', [QuotationViewController::class, 'edit'])->name('quotations.edit');
+    Route::patch('/quotations/{id}', [QuotationViewController::class, 'update'])->name('quotations.update');
+    Route::post('/quotations/{id}/sending', [QuotationViewController::class, 'send'])->name('quotations.send');
+    Route::post('/quotations/{id}/accept', [QuotationViewController::class, 'accept'])->name('quotations.accept');
+    Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
+    Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
+    Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
+
+    // Ported from the source's own app/accounting/page.tsx -- read-only,
+    // matching the source exactly (its own closing note says interactive
+    // journal authoring is a future scope, not a gap this port silently
+    // introduced). See AccountingViewController's own doc comment.
+    Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
+
+    // Ported from the source's own app/operations/page.tsx -- expenses,
+    // inventory and projects. See OperationsViewController's own doc
+    // comment for its two confirmed scope boundaries (no import-VAT-
+    // evidence panel, receipt linking stays read-only) and its one
+    // deliberate deviation (a create-expense form + a "Submit" action,
+    // closing a confirmed dead end the same way quotations' own "Send"
+    // action did).
+    Route::get('/operations', [OperationsViewController::class, 'index'])->name('operations.index');
+    Route::post('/operations/expenses', [OperationsViewController::class, 'store'])->name('operations.store');
+    Route::post('/operations/expenses/{id}/submission', [OperationsViewController::class, 'submit'])->name('operations.submit');
+    Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
+    Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
+
+    // Ported from the source's own app/administration/page.tsx +
+    // AdministrationActions.tsx -- the Administration command centre
+    // (licensing/entitlements, employees, roles, workflows, access
+    // governance). See AdministrationViewController's own doc comment for
+    // its one deliberate substitution: password.confirm step-up in place
+    // of the source's own client-side checkbox theatre.
+    Route::get('/administration', [AdministrationViewController::class, 'index'])->name('administration.index');
+    Route::post('/administration/employees', [AdministrationViewController::class, 'storeEmployee'])
+        ->name('administration.employees.store')->middleware('password.confirm');
+    Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
+        ->name('administration.roles.store')->middleware('password.confirm');
+
+    // Ported from the source's own app/documents/page.tsx +
+    // DocumentUploadForm.tsx -- see DocumentViewController's own doc
+    // comment for why supersede/scan-decision/retention-hold/download
+    // have no UI here either (the source's own page has none of them).
+    // No step-up gate, matching the source's own /api/v1/documents
+    // upload route (no password.confirm there either).
+    Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
+    Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
+
+    // Frontend UI build-out: the Reports & Analytics console, reusing
+    // ReportExportService/DataProductService directly (see
+    // App\Http\Controllers\Platform\ReportViewController's own doc
+    // comment). Deliberately distinct path segments from the JSON API
+    // routes under api/v1/reports and api/v1/analytics below (run vs
+    // runs, file vs download, run-model/publish vs model-runs/
+    // publications) so the two route sets never collide on the same
+    // method+path even though they share a path prefix. requestExport/
+    // approveExport carry no password.confirm middleware -- their
+    // step-up is data-conditional, handled inline by the controller.
+    Route::get('/reports', [ReportViewController::class, 'index'])->name('reports.index');
+    Route::post('/reports/{code}/run', [ReportViewController::class, 'run'])->name('reports.run');
+    Route::post('/reports/runs/{id}/publish', [ReportViewController::class, 'publish'])->name('reports.publish');
+    Route::post('/reports/runs/{id}/export', [ReportViewController::class, 'requestExport'])->name('reports.export.request');
+    Route::post('/reports/exports/{id}/approve', [ReportViewController::class, 'approveExport'])->name('reports.export.approve');
+    Route::post('/reports/exports/{id}/cancel', [ReportViewController::class, 'cancelExport'])->name('reports.export.cancel');
+    Route::get('/reports/exports/{id}/file', [ReportViewController::class, 'downloadExport'])->name('reports.export.download');
+    Route::post('/analytics/data-products/{id}/run-model', [ReportViewController::class, 'runModel'])->name('reports.analytics.run-model');
+    Route::post('/analytics/data-products/{id}/publish', [ReportViewController::class, 'publishDataProduct'])->name('reports.analytics.publish');
+
+    // Frontend UI build-out: the Platform config console, reusing
+    // PlatformChangeService directly (see App\Http\Controllers\Platform\
+    // PlatformConfigViewController's own doc comment). Distinct path
+    // segments from the JSON API routes under api/v1/platform below
+    // (change-requests/{id}/decide vs .../decision, staff vs
+    // api/v1/platform/staff) so the two route sets never collide.
+    // provisionStaff wears password.confirm (unconditional step-up,
+    // matching the JSON route's own posture) -- unlike the reports
+    // console's data-conditional requestExport/approveExport, this one
+    // is a plain route-level gate.
+    Route::get('/platform', [PlatformConfigViewController::class, 'index'])->name('platform.index');
+    Route::post('/platform/change-requests', [PlatformConfigViewController::class, 'requestChange'])->name('platform.change-requests.store');
+    Route::post('/platform/change-requests/{id}/decide', [PlatformConfigViewController::class, 'decideChange'])->name('platform.change-requests.decide');
+    Route::post('/platform/staff', [PlatformConfigViewController::class, 'provisionStaff'])->name('platform.staff.store')
+        ->middleware('password.confirm');
+
+    // Frontend UI build-out: the workflow engine's own authoring console,
+    // reusing WorkflowService directly (see App\Http\Controllers\Workflow\
+    // WorkflowAuthoringViewController's own doc comment). Its read-only
+    // register was already part of Administration's own page before this
+    // slice existed -- this adds the write side. Distinct path segments
+    // from the JSON API under api/v1/workflows[-tasks] below (decide vs
+    // decision, revoke vs revocation) so the two route sets never
+    // collide even without the prefix difference alone to rely on. Every
+    // write here wears password.confirm, matching the JSON route's own
+    // unconditional step-up posture exactly -- test is the one exception
+    // in both (a dry-run has no side effects).
+    Route::get('/workflows', [WorkflowAuthoringViewController::class, 'index'])->name('workflows.index');
+    Route::post('/workflows', [WorkflowAuthoringViewController::class, 'store'])->name('workflows.store')
+        ->middleware('password.confirm');
+    Route::post('/workflows/versions/{id}/publish', [WorkflowAuthoringViewController::class, 'publish'])->name('workflows.publish')
+        ->middleware('password.confirm');
+    Route::post('/workflows/versions/{id}/test', [WorkflowAuthoringViewController::class, 'test'])->name('workflows.test');
+    Route::post('/workflows/instances', [WorkflowAuthoringViewController::class, 'assign'])->name('workflows.assign')
+        ->middleware('password.confirm');
+    Route::post('/workflow-tasks/{id}/decide', [WorkflowAuthoringViewController::class, 'decide'])->name('workflows.decide')
+        ->middleware('password.confirm');
+    Route::post('/workflows/delegations', [WorkflowAuthoringViewController::class, 'storeDelegation'])->name('workflows.delegations.store')
+        ->middleware('password.confirm');
+    Route::post('/workflows/delegations/{id}/revoke', [WorkflowAuthoringViewController::class, 'revokeDelegation'])->name('workflows.delegations.revoke')
+        ->middleware('password.confirm');
+
+    // Ported from the source's own app/portals/page.tsx -- see
+    // PortalViewController's own doc comment.
+    Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
+
+    // All six per-portal dashboards the switchboard above links to --
+    // see each controller's own doc comment. URLs kept 1:1 with the
+    // source's own app/portal/{buyer,seller,namra,namra-admin,
+    // super-admin,developer}/page.tsx paths and with
+    // PortalDefinitions::all()'s own hrefs.
+    Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
+    Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
+    Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
+    Route::get('/portal/namra-admin', [NamraAdminPortalController::class, 'index'])->name('portal.namra-admin');
+    Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
+    Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
@@ -354,6 +531,21 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/refunds/{id}/checks', [RefundController::class, 'checks']);
         Route::post('/refunds/{id}/transition', [RefundController::class, 'transition']);
         Route::post('/refunds/{id}/disputes', [RefundController::class, 'dispute']);
+
+        // Authority Governance (lib/data/authority-governance-repository.ts's
+        // getAuthorityGovernanceSnapshot/createAuthorityOnboardingCase/
+        // decideAuthorityOnboardingCase) -- the backend the NamRA
+        // Administration portal needed, deferred out of every other
+        // portal dashboard's own slice (see docs/MIGRATION_MATRIX.md).
+        // Kept 1:1 with the source's own
+        // app/api/v1/tax-authority-onboarding-cases/** shape; both
+        // write commands are step-up gated, matching the source's own
+        // requireStepUp.
+        Route::get('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'show']);
+        Route::post('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'store'])
+            ->middleware('password.confirm');
+        Route::post('/tax-authority-onboarding-cases/{id}/decisions', [AuthorityGovernanceController::class, 'decide'])
+            ->middleware('password.confirm');
 
         // Phase 12 (portals/licensing/governance), slice 1: Licensing &
         // Entitlements (lib/data/control-plane-repository.ts's

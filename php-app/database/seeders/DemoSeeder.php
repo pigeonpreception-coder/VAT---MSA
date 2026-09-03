@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Domain\Licensing\AccessReviewWindow;
 use App\Models\Branch;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
@@ -100,6 +101,58 @@ class DemoSeeder extends Seeder
             );
         }
 
+        // App\Support\Licensing\LicenseResolver::getLicense throws "The
+        // organisation has no configured licence" for any organisation with
+        // no organisation_licenses row -- this demo organisation never had
+        // one, silently blocking every EntitlementGate-gated screen (the new
+        // Administration/Licensing view included) for the demo login. No
+        // command in this port ever creates a license from scratch (only
+        // changeState/upgrade, both of which themselves require one to
+        // already exist) -- confirmed this is a genuine, pre-existing demo
+        // seed gap, the same class of finding as "Demo seed gaps for
+        // already-shipped features" in docs/MIGRATION_MATRIX.md, not
+        // something a real onboarding flow would ever hit.
+        $subscription = DB::table('subscriptions')->where('provider', 'DEMO')->where('provider_reference', $organisation->id)->first();
+        if (! $subscription) {
+            $subscriptionId = (string) Str::uuid();
+            DB::table('subscriptions')->insert([
+                'id' => $subscriptionId, 'organisation_id' => $organisation->id, 'provider' => 'DEMO',
+                'provider_reference' => $organisation->id, 'status' => 'ACTIVE', 'activated_at' => now(),
+                'current_period_start' => now()->startOfMonth()->toDateString(), 'current_period_end' => now()->addYear()->toDateString(),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        } else {
+            $subscriptionId = $subscription->id;
+        }
+        if (! DB::table('organisation_licenses')->where('organisation_id', $organisation->id)->exists()) {
+            DB::table('organisation_licenses')->insert([
+                'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'subscription_id' => $subscriptionId,
+                'license_plan_id' => 'plan-pilot-professional-v1', 'state' => 'ACTIVE', 'state_version' => 1,
+                'effective_from' => now(), 'effective_to' => null, 'grace_ends_at' => null,
+                'retention_policy' => 'STANDARD', 'updated_at' => now(),
+            ]);
+        }
+
+        // App\Support\Licensing\EntitlementGate::assert's own ADMIN_WRITE
+        // gate additionally requires a current-quarter access_reviews row
+        // (OPEN or COMPLETED, not overdue) before any privileged
+        // organisation-administration write -- Administration's own
+        // inviteEmployee/createOrganisationRole and the workflow engine's
+        // createWorkflowDraft all go through it. A genuine, pre-existing
+        // demo seed gap (the same class as this file's own license/
+        // report_definitions/platform_config gaps above): nothing ever
+        // seeded one, silently blocking every one of those already-shipped
+        // ADMIN_WRITE actions for a real demo login even though their own
+        // feature tests pass (each opens its own review via
+        // POST /api/v1/access-reviews first).
+        DB::table('access_reviews')->updateOrInsert(
+            ['organisation_id' => $organisation->id, 'review_type' => 'QUARTERLY', 'period_start' => AccessReviewWindow::current()['periodStart']],
+            [
+                'id' => (string) Str::uuid(), 'name' => 'Quarterly access review', 'status' => 'OPEN',
+                'due_at' => AccessReviewWindow::current()['dueAt'], 'created_by' => $owner->id, 'created_at' => now(), 'completed_at' => null,
+            ],
+        );
+
         // A second demo taxpayer purely as a registered-buyer counterparty, so a
         // demo invoice can be certified against a real customer (status MATCHED)
         // rather than only the unregistered-buyer path (status CERTIFIED, risk+15).
@@ -191,8 +244,240 @@ class DemoSeeder extends Seeder
             ],
         );
 
+        // Authority Governance demo data (NamRA Administration portal) --
+        // ported from db/runtime.ts's own 'usr-local-admin'/
+        // 'usr-authority-onboarding-maker'/'usr-authority-governance-approver'
+        // seed rows against 'tax-authority-na-namra'
+        // (AuthorityGovernanceSeeder's own reference data), substituting
+        // two real logins for the source's placeholder Cloudflare-Sites
+        // identities -- $admin plays 'usr-local-admin' (the system
+        // administrator); a new NAMRA_SYSTEM_ADMIN login plays
+        // 'usr-authority-onboarding-maker' (the case requester), giving a
+        // second real administrator so the maker-checker self-review
+        // denial and the decide command are genuinely demonstrable, not
+        // just readable.
+        $namraAdmin = User::updateOrCreate(
+            ['email' => 'namra-admin@vat-msa.test'],
+            [
+                'name' => 'NamRA System Administrator', 'password' => Hash::make('password'), 'role' => 'NAMRA_SYSTEM_ADMIN',
+                'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+        foreach ([$admin->id, $namraAdmin->id] as $userId) {
+            DB::table('tax_authority_administrators')->updateOrInsert(
+                ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $userId],
+                [
+                    'id' => (string) Str::uuid(), 'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                    'appointed_by' => 'SYNTHETIC_ARCHITECTURE_BASELINE', 'approval_reference' => 'LOCAL-STAGING-ADR-030',
+                ],
+            );
+        }
+        $hqUnit = (string) Str::uuid();
+        $identityUnit = (string) Str::uuid();
+        DB::table('tax_authority_units')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'HQ'],
+            ['id' => $hqUnit, 'parent_unit_id' => null, 'name' => 'Head Office', 'unit_type' => 'HEAD_OFFICE', 'status' => 'ACTIVE', 'created_at' => now()],
+        );
+        $hqUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'HQ')->value('id');
+        DB::table('tax_authority_units')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'DOMESTIC_TAX'],
+            ['id' => (string) Str::uuid(), 'parent_unit_id' => $hqUnit, 'name' => 'Domestic Taxes Directorate', 'unit_type' => 'DIRECTORATE', 'status' => 'ACTIVE', 'created_at' => now()],
+        );
+        DB::table('tax_authority_units')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'IDENTITY_SECURITY'],
+            ['id' => $identityUnit, 'parent_unit_id' => $hqUnit, 'name' => 'Identity and Access Governance', 'unit_type' => 'DIVISION', 'status' => 'ACTIVE', 'created_at' => now()],
+        );
+        $identityUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'IDENTITY_SECURITY')->value('id');
+
+        DB::table('tax_authority_role_assignments')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $namraAdmin->id, 'role_code' => 'AUTHORITY_ONBOARDING_MAKER', 'authority_unit_id' => $hqUnit],
+            [
+                'id' => (string) Str::uuid(), 'scope' => json_encode(['jurisdiction' => 'NA', 'environment' => 'LOCAL_STAGING']),
+                'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                'requested_by' => $namraAdmin->id, 'approved_by' => $admin->id, 'approval_reference' => 'ISSUE4-SYNTHETIC-MAKER-ASSIGNMENT', 'created_at' => now(),
+            ],
+        );
+        DB::table('tax_authority_role_assignments')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $admin->id, 'role_code' => 'AUTHORITY_SYSTEM_ADMIN', 'authority_unit_id' => $identityUnit],
+            [
+                'id' => (string) Str::uuid(), 'scope' => json_encode(['jurisdiction' => 'NA', 'environment' => 'LOCAL_STAGING']),
+                'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                'requested_by' => $namraAdmin->id, 'approved_by' => $admin->id, 'approval_reference' => 'ISSUE4-SYNTHETIC-SYSTEM-ASSIGNMENT', 'created_at' => now(),
+            ],
+        );
+
+        $itasProviderId = DB::table('identity_providers')->where('provider_key', 'ITAS')->value('id');
+        if ($itasProviderId) {
+            DB::table('tax_authority_federation_connections')->updateOrInsert(
+                ['tax_authority_id' => 'tax-authority-na-namra', 'identity_provider_id' => $itasProviderId, 'environment' => 'CONTRACT_PENDING'],
+                [
+                    'id' => (string) Str::uuid(), 'protocol' => 'UNCONFIRMED', 'issuer' => null, 'audience' => null,
+                    'metadata_hash' => null, 'claims_contract_hash' => null, 'assurance_profile' => null, 'status' => 'CONTRACT_PENDING',
+                    'requested_by' => $namraAdmin->id, 'reviewed_by' => null, 'checked_at' => null, 'expires_at' => null,
+                    'created_at' => now(), 'updated_at' => now(),
+                ],
+            );
+        }
+
+        $onboardingCaseId = (string) Str::uuid();
+        DB::table('tax_authority_onboarding_cases')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'target_environment' => 'LOCAL_STAGING', 'status' => 'SUBMITTED'],
+            [
+                'id' => $onboardingCaseId,
+                'purpose' => 'Validate the authority hierarchy, governance and independent approval workflow using synthetic local data only.',
+                'evidence_bundle_hash' => null, 'readiness_reference' => 'ISSUE4-LOCAL-STAGING', 'requested_by' => $namraAdmin->id,
+                'submitted_at' => now(), 'approved_at' => null, 'activated_at' => null, 'created_at' => now(), 'updated_at' => now(),
+            ],
+        );
+        $onboardingCaseId = DB::table('tax_authority_onboarding_cases')
+            ->where('tax_authority_id', 'tax-authority-na-namra')->where('target_environment', 'LOCAL_STAGING')->where('status', 'SUBMITTED')
+            ->value('id');
+        DB::table('tax_authority_governance_events')->updateOrInsert(
+            ['onboarding_case_id' => $onboardingCaseId, 'event_type' => 'TaxAuthorityOnboardingRequested'],
+            [
+                'id' => (string) Str::uuid(), 'tax_authority_id' => 'tax-authority-na-namra', 'from_status' => null, 'to_status' => 'SUBMITTED',
+                'reason_code' => 'LOCAL_STAGING_REVIEW_REQUIRED', 'evidence_hash' => null, 'actor_id' => $namraAdmin->id, 'occurred_at' => now(),
+            ],
+        );
+
+        // A current QUARTERLY access review -- decideOnboardingCase's own
+        // requireCurrentAuthorityReview gate needs one to exist, matching
+        // the source's own dynamically-computed-quarter seed row (kept
+        // relative to "now" for the same reason this file's consent_grants/
+        // delegations rows already are, per that block's own comment above).
+        DB::table('tax_authority_access_reviews')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'review_type' => 'QUARTERLY', 'period_start' => now()->startOfQuarter()->toDateString()],
+            [
+                'id' => (string) Str::uuid(), 'due_at' => now()->addMonths(3)->addDays(14), 'status' => 'OPEN',
+                'owner_id' => $admin->id, 'completed_by' => null, 'completed_at' => null, 'created_at' => now(),
+            ],
+        );
+
+        // Reports/analytics/platform-config demo data: a 2026-08-26 audit
+        // (see docs/MIGRATION_MATRIX.md's Report exports/Data products &
+        // analytics/Platform config sections) found `report_definitions`/
+        // `data_products`/`metrics`/`feature_flags`/`platform_config`/
+        // `access_policies` are all seed-only by design (defining a new
+        // governed report/metric/flag/config key is a governance action,
+        // out of scope for a runtime command) -- but nothing had ever
+        // actually seeded one for local/staging use, silently leaving the
+        // real Reports/Analytics/Platform config UI with an empty catalogue
+        // to browse and nothing runnable. Audiences below are chosen so
+        // $admin (PILOT_ADMIN, national scope, reports:executive, and --
+        // via the delegations row above -- an active PRACTITIONER
+        // delegation for the demo taxpayer) can exercise every guardrail
+        // tier end to end; CASE_EVIDENCE_SUMMARY still needs a real
+        // case_id typed in by whoever runs it, matching the source's own
+        // per-case scoping (no case is auto-created here).
+        $reportDefinitions = [
+            ['code' => 'VAT_POSITION', 'name' => 'VAT position summary', 'audience' => 'TAXPAYER', 'classification' => 'CONFIDENTIAL', 'freshness_tier' => 'DAILY', 'guardrail' => 'Own-organisation scope only.'],
+            ['code' => 'SALES_VAT_SUMMARY', 'name' => 'Sales VAT summary', 'audience' => 'TAXPAYER', 'classification' => 'TAX_CONFIDENTIAL', 'freshness_tier' => 'DAILY', 'guardrail' => 'Own-organisation scope only.'],
+            ['code' => 'COMPLIANCE_CASELOAD', 'name' => 'Compliance caseload', 'audience' => 'NAMRA_OPERATIONS', 'classification' => 'TAX_CONFIDENTIAL', 'freshness_tier' => 'DAILY', 'guardrail' => 'Restricted to NamRA operations roles.'],
+            ['code' => 'PORTFOLIO_EXCEPTIONS', 'name' => 'Practitioner portfolio exceptions', 'audience' => 'PRACTITIONER', 'classification' => 'RESTRICTED', 'freshness_tier' => 'DAILY', 'guardrail' => 'Scoped to the practitioner\'s own active delegated taxpayers.'],
+            ['code' => 'REVENUE_COMPLIANCE_TRENDS', 'name' => 'Revenue and compliance trends', 'audience' => 'EXECUTIVE', 'classification' => 'CONFIDENTIAL', 'freshness_tier' => 'WEEKLY', 'guardrail' => 'National scope and reports:executive required.'],
+            ['code' => 'CASE_EVIDENCE_SUMMARY', 'name' => 'Case evidence summary', 'audience' => 'AUDITOR_LEGAL', 'classification' => 'RESTRICTED', 'freshness_tier' => 'ON_DEMAND', 'guardrail' => 'Requires audit case authority (audit:read or cases:manage).'],
+            ['code' => 'NATIONAL_VAT_AGGREGATE', 'name' => 'National VAT aggregate', 'audience' => 'OPEN_DATA', 'classification' => 'PUBLIC', 'freshness_tier' => 'WEEKLY', 'guardrail' => 'Minimum-cell suppressed below 10 invoices.'],
+        ];
+        $reportDefinitionIds = [];
+        foreach ($reportDefinitions as $definition) {
+            $existingId = DB::table('report_definitions')->where('code', $definition['code'])->value('id');
+            $id = $existingId ?: (string) Str::uuid();
+            DB::table('report_definitions')->updateOrInsert(
+                ['code' => $definition['code']],
+                [
+                    'id' => $id, 'name' => $definition['name'], 'audience' => $definition['audience'],
+                    'description' => "{$definition['name']} -- seeded demo report definition.", 'classification' => $definition['classification'],
+                    'query_version' => '1.0.0', 'status' => 'ACTIVE', 'created_at' => now(),
+                    'freshness_tier' => $definition['freshness_tier'], 'guardrail' => $definition['guardrail'],
+                ],
+            );
+            $reportDefinitionIds[$definition['code']] = $id;
+        }
+
+        $dataProductId = DB::table('data_products')->where('code', 'VAT_TRENDS')->value('id') ?: (string) Str::uuid();
+        DB::table('data_products')->updateOrInsert(
+            ['code' => 'VAT_TRENDS'],
+            [
+                'id' => $dataProductId, 'name' => 'VAT sales trends', 'description' => 'Certified invoice/tax metrics governed by the published SALES_VAT_SUMMARY report.',
+                'source_report_definition_id' => $reportDefinitionIds['SALES_VAT_SUMMARY'], 'status' => 'ACTIVE', 'created_at' => now(),
+            ],
+        );
+        DB::table('data_product_lineage')->updateOrInsert(
+            ['data_product_id' => $dataProductId, 'source_id' => $reportDefinitionIds['SALES_VAT_SUMMARY']],
+            ['id' => (string) Str::uuid(), 'source_type' => 'REPORT_DEFINITION', 'source_label' => 'SALES_VAT_SUMMARY', 'recorded_at' => now()],
+        );
+        $metrics = [
+            ['code' => 'DEMO_INVOICE_COUNT', 'name' => 'Certified invoice count', 'field' => 'invoices', 'unit' => 'COUNT', 'threshold' => 25.0],
+            ['code' => 'DEMO_TAX_TOTAL', 'name' => 'Total tax collected', 'field' => 'tax_cents', 'unit' => 'NAD_CENTS', 'threshold' => 15.0],
+        ];
+        foreach ($metrics as $metric) {
+            DB::table('metrics')->updateOrInsert(
+                ['code' => $metric['code']],
+                [
+                    'id' => DB::table('metrics')->where('code', $metric['code'])->value('id') ?: (string) Str::uuid(),
+                    'name' => $metric['name'], 'data_product_id' => $dataProductId, 'field' => $metric['field'],
+                    'unit' => $metric['unit'], 'status' => 'CERTIFIED', 'anomaly_threshold_pct' => $metric['threshold'], 'created_at' => now(),
+                ],
+            );
+        }
+
+        // Platform config/change-management demo data: same seed-only gap
+        // as report_definitions/data_products above (see this file's own
+        // comment there) -- feature_flags/platform_config/access_policies
+        // are governance-defined, seed-only tables with nothing seeding
+        // one anywhere, silently leaving the real Platform config UI with
+        // nothing to browse or propose a change against. Two distinct
+        // platform:manage logins (SUPER_ADMIN/INFRASTRUCTURE_ADMIN) so the
+        // maker-checker decide step is genuinely demonstrable between two
+        // real accounts, not just readable -- the same reasoning that
+        // already justified $namraAdmin as a second Authority Governance
+        // login above.
+        User::updateOrCreate(
+            ['email' => 'platform-admin@vat-msa.test'],
+            [
+                'name' => 'Platform Super Admin', 'password' => Hash::make('password'), 'role' => 'SUPER_ADMIN',
+                'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+        User::updateOrCreate(
+            ['email' => 'infra-admin@vat-msa.test'],
+            [
+                'name' => 'Infrastructure Admin', 'password' => Hash::make('password'), 'role' => 'INFRASTRUCTURE_ADMIN',
+                'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+
+        $flagId = DB::table('feature_flags')->where('key', 'offline_sync.enabled')->value('id') ?: (string) Str::uuid();
+        DB::table('feature_flags')->updateOrInsert(
+            ['key' => 'offline_sync.enabled'],
+            [
+                'id' => $flagId, 'name' => 'Offline sync enabled', 'description' => 'Allows offline-invoicing batch intake for pilot devices.',
+                'rollout_scope' => 'PILOT', 'enabled' => true, 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+        $configId = DB::table('platform_config')->where('key', 'reports.export_size_limit_bytes')->value('id') ?: (string) Str::uuid();
+        DB::table('platform_config')->updateOrInsert(
+            ['key' => 'reports.export_size_limit_bytes'],
+            [
+                'id' => $configId, 'category' => 'REPORTS', 'description' => 'Documentary value only today -- ReportExportService::requestExport still enforces its own hardcoded 200KiB limit (see docs/MIGRATION_MATRIX.md).',
+                'value' => '204800', 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+        $policyId = DB::table('access_policies')->where('code', 'STEP_UP_WINDOW')->value('id') ?: (string) Str::uuid();
+        DB::table('access_policies')->updateOrInsert(
+            ['code' => 'STEP_UP_WINDOW'],
+            [
+                'id' => $policyId, 'name' => 'Step-up freshness window', 'policy_type' => 'AUTHENTICATION',
+                'description' => 'Documentary value only today -- App\Support\Access\StepUp::isFresh still reads config(\'auth.password_timeout\') directly (see docs/MIGRATION_MATRIX.md).',
+                'parameters' => json_encode(['window_seconds' => 10800]), 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
         $this->command?->info("Admin login: admin@vat-msa.test / password (PILOT_ADMIN, national scope)");
+        $this->command?->info("NamRA admin login: namra-admin@vat-msa.test / password (NAMRA_SYSTEM_ADMIN)");
+        $this->command?->info("Platform admin login: platform-admin@vat-msa.test / password (SUPER_ADMIN)");
+        $this->command?->info("Infrastructure admin login: infra-admin@vat-msa.test / password (INFRASTRUCTURE_ADMIN)");
     }
 }
