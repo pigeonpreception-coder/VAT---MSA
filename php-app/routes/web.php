@@ -3,6 +3,7 @@
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
 use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
+use App\Http\Controllers\Administration\AdministrationViewController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
@@ -152,6 +153,18 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/operations/expenses/{id}/submission', [OperationsViewController::class, 'submit'])->name('operations.submit');
     Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
     Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
+
+    // Ported from the source's own app/administration/page.tsx +
+    // AdministrationActions.tsx -- the Administration command centre
+    // (licensing/entitlements, employees, roles, workflows, access
+    // governance). See AdministrationViewController's own doc comment for
+    // its one deliberate substitution: password.confirm step-up in place
+    // of the source's own client-side checkbox theatre.
+    Route::get('/administration', [AdministrationViewController::class, 'index'])->name('administration.index');
+    Route::post('/administration/employees', [AdministrationViewController::class, 'storeEmployee'])
+        ->name('administration.employees.store')->middleware('password.confirm');
+    Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
+        ->name('administration.roles.store')->middleware('password.confirm');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.

@@ -100,6 +100,38 @@ class DemoSeeder extends Seeder
             );
         }
 
+        // App\Support\Licensing\LicenseResolver::getLicense throws "The
+        // organisation has no configured licence" for any organisation with
+        // no organisation_licenses row -- this demo organisation never had
+        // one, silently blocking every EntitlementGate-gated screen (the new
+        // Administration/Licensing view included) for the demo login. No
+        // command in this port ever creates a license from scratch (only
+        // changeState/upgrade, both of which themselves require one to
+        // already exist) -- confirmed this is a genuine, pre-existing demo
+        // seed gap, the same class of finding as "Demo seed gaps for
+        // already-shipped features" in docs/MIGRATION_MATRIX.md, not
+        // something a real onboarding flow would ever hit.
+        $subscription = DB::table('subscriptions')->where('provider', 'DEMO')->where('provider_reference', $organisation->id)->first();
+        if (! $subscription) {
+            $subscriptionId = (string) Str::uuid();
+            DB::table('subscriptions')->insert([
+                'id' => $subscriptionId, 'organisation_id' => $organisation->id, 'provider' => 'DEMO',
+                'provider_reference' => $organisation->id, 'status' => 'ACTIVE', 'activated_at' => now(),
+                'current_period_start' => now()->startOfMonth()->toDateString(), 'current_period_end' => now()->addYear()->toDateString(),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        } else {
+            $subscriptionId = $subscription->id;
+        }
+        if (! DB::table('organisation_licenses')->where('organisation_id', $organisation->id)->exists()) {
+            DB::table('organisation_licenses')->insert([
+                'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'subscription_id' => $subscriptionId,
+                'license_plan_id' => 'plan-pilot-professional-v1', 'state' => 'ACTIVE', 'state_version' => 1,
+                'effective_from' => now(), 'effective_to' => null, 'grace_ends_at' => null,
+                'retention_policy' => 'STANDARD', 'updated_at' => now(),
+            ]);
+        }
+
         // A second demo taxpayer purely as a registered-buyer counterparty, so a
         // demo invoice can be certified against a real customer (status MATCHED)
         // rather than only the unregistered-buyer path (status CERTIFIED, risk+15).

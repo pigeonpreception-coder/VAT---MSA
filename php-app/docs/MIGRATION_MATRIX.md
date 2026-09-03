@@ -1957,12 +1957,14 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
--- and business parties, quotations, accounting and operations
-(expenses/inventory/projects) closed out further below):
-licensing, documents, reports, analytics,
-platform config, the workflow engine, and import declarations (a
-genuinely separate, not-yet-built backend module -- see the
-"Operations" section below) --
+-- and business parties, quotations, accounting, operations
+(expenses/inventory/projects) and licensing/administration closed out
+further below):
+documents, reports, analytics,
+platform config, the workflow engine's own dedicated authoring UI (its
+read-only register is already part of Administration -- see below),
+and import declarations (a genuinely separate, not-yet-built backend
+module -- see the "Operations" section above) --
 each its own comparable slice of this new initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
@@ -3051,6 +3053,127 @@ Approve/Reject actions, approving it (status flips to `Approved`,
 inventory balance and project control panels render real seeded data
 correctly alongside the explicit import-VAT-evidence and
 receipt-upload-not-available notices.
+
+### Administration (licensing/entitlements, employees, roles, workflows, access governance)
+
+Ports the source's own `app/administration/page.tsx` +
+`AdministrationActions.tsx` -- the "Administration command centre".
+There is no standalone `/licensing` page in the source at all (the
+whole "still not started: licensing" item from the earlier matrix note
+turned out to mean this page, not a page of its own); licensing and
+entitlements are one panel embedded in this same combined
+organisation-control-plane screen, alongside employees, organisation
+roles, versioned workflows and access governance. New:
+`App\Http\Controllers\Administration\AdministrationViewController`
+(`index`/`storeEmployee`/`storeRole`) and
+`resources/views/administration/index.blade.php`. The read side is the
+simplest of any slice in this whole initiative: it calls
+`App\Services\Administration\AdministrationSnapshotService::getAdministrationSnapshot`
+once and renders it directly -- the fixed-list aggregate every one of
+Phase 12's five sub-domain slices already bundles into, already fully
+joined/enriched (department, job title, branch, permission lists,
+licence entitlements) by that existing service, so unlike every prior
+slice this one added no query, no enrichment fix, and no new read path
+at all. The two writes reuse
+`App\Services\OrganisationAdmin\OrganisationAdminService::inviteEmployee`/
+`createOrganisationRole` directly -- the exact methods
+`App\Http\Controllers\OrganisationAdmin\OrganisationAdminController`
+already serves at `/api/v1/organisations/{employees,roles}`.
+
+One deliberate, documented substitution, not a simplification: the
+source's own `AdministrationActions.tsx` gates both writes behind a
+client-side checkbox ("I completed the local/staging privileged-change
+step-up check") plus a custom `x-vat-msa-local-step-up` header the
+server trusts blindly -- theatre, not a real check. Both write routes
+here use the `password.confirm` middleware instead, the same genuine,
+server-enforced step-up every other sensitive command in this
+migration already uses -- continuing Phase 6's own precedent of
+replacing the source's platform-header trust entirely, not just for
+authentication. Verified live: submitting either form without a recent
+confirmation redirects to the real `/confirm-password` screen (not the
+423 this codebase's JSON API returns for the same condition, since a
+plain form POST doesn't send an `Accept: application/json` header --
+confirmed by reading Laravel's own `RequirePassword` middleware
+source); confirming and resubmitting then succeeds.
+
+Two small, genuine backend gaps found and fixed during this slice,
+both benefiting the JSON API too:
+- `App\Support\Licensing\LicenseResolver::getEntitlements` was missing
+  `capacity_mode` (`FINITE`/`UNLIMITED`/`NOT_APPLICABLE`) entirely --
+  a real, displayed field the source's own dashboard branches on (the
+  "User seats" metric card's own "Unlimited" vs numeric-limit
+  decision). The source stores it as a genuine column on
+  `license_plan_entitlements`, but this port's own migration for that
+  table never carried the column at all. Rather than a migration and a
+  backfill for a column no command in this port ever needs to set
+  (every currently-seeded plan's mode is fully determined by its other
+  two already-real columns), it's computed at read time instead:
+  `NOT_APPLICABLE` for an unmetered boolean feature-gate (no
+  `metric_key`), `UNLIMITED` for a metered feature with no configured
+  cap, `FINITE` otherwise -- a documented simplification (computed
+  property vs. a stored column), not a fidelity gap in what's
+  displayed.
+- The demo organisation seeded by `DemoSeeder` never had a licence at
+  all -- no `subscriptions` or `organisation_licenses` row was ever
+  created for it, silently blocking every `EntitlementGate`-gated
+  screen (this one included) for the demo login, confirmed by
+  reproducing `LicenseResolver::getLicense`'s own "The organisation has
+  no configured licence" `AuthorizationException` against the real
+  seeded database before this fix. No command anywhere in this port
+  can create a licence from scratch (`changeState`/`upgrade` both
+  themselves require one to already exist), so this was a genuine,
+  pre-existing demo-seed gap, the same class of finding as "Demo seed
+  gaps for already-shipped features" earlier in this document, not
+  something a real organisation-onboarding flow would ever hit.
+  `DemoSeeder` now creates both rows on the `PILOT_PROFESSIONAL` plan
+  for the demo organisation.
+
+One further, honestly-labelled gap, left unfixed rather than silently
+worked around: the source's own `snapshot.capacityExceptions` (the
+"Licence capacity exception" alert) has no backing table in this port
+at all -- confirmed by a repo-wide search for any capacity-exceptions
+migration or model. The Blade view still renders that alert's markup
+(always empty, via a defensive `?? []`) with an inline comment
+explaining why, rather than silently dropping the whole feature
+without a trace.
+
+The workflow engine and access-governance panels here are read-only
+registers only, reusing data the already-built
+`App\Services\Workflow\WorkflowService`/`App\Services\AccessGovernance\AccessGovernanceService`
+JSON APIs already write to -- this slice does not add its own
+authoring UI for either (drafting/publishing a workflow version,
+deciding a workflow task, requesting/deciding access, certifying a
+quarterly review all remain JSON-API-only for now), tracked as its own
+remaining item, distinct from this read-only register.
+
+Verified by `tests/Feature/Administration/AdministrationViewTest.php`
+(8 tests): the page requires authentication; a role without
+`administration:read` (`TAXPAYER_STAFF`) is denied `403`; the full
+snapshot renders correctly (licence, entitlements table with the
+now-computed `capacity_mode`, employees, roles, workflows, access
+governance) with accessible table markup; an employee can be invited
+once step-up is confirmed; the same request without a confirmed
+password redirects to `/confirm-password` rather than being silently
+allowed or crashing; a role without `employees:manage`
+(`TAXPAYER_ACCOUNTANT`) is denied `403`; an organisation role can be
+created (with its permissions correctly persisted) once step-up is
+confirmed; and a role creation naming a protected, non-grantable
+permission fails validation before ever reaching the entitlement/
+quarterly-review gate. 380 tests total (349 passing), 0 new
+regressions -- the failing set is byte-for-byte identical to the
+pre-slice baseline, run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end as `owner@demo-trading.test` (with a quarterly
+access review opened directly via the already-built
+`openQuarterlyAccessReview` service, matching this migration's own
+"seed via the real command, not a raw insert" precedent, since
+`ADMIN_WRITE` operations are blocked without one): the full command
+centre rendering real seeded licence/entitlement data with correctly
+computed capacity modes, attempting to invite an employee without a
+fresh step-up and landing on the genuine confirm-password screen,
+confirming and having the same submission then succeed (the new
+employee appearing in the register as `INVITED`), and creating an
+organisation role that appears immediately with its permissions listed.
 
 ## Legacy D1 importer (Phase 14)
 

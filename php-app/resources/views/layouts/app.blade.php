@@ -67,6 +67,11 @@
                                 <a class="nav-link" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.*')) aria-current="page" @endif>Operations</a>
                             </li>
                         @endcan
+                        @can('permission', 'administration:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}
