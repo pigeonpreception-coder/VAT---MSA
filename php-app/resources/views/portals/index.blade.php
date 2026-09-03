@@ -18,16 +18,14 @@
                         <div class="text-uppercase text-muted small fw-semibold mb-1">{{ $portal['audience'] }}</div>
                         <h2 class="h5">{{ $portal['name'] }}</h2>
                         <p class="text-muted flex-grow-1">{{ $portal['description'] }}</p>
-                        {{-- Only 'buyer', 'seller', 'namra' and
-                             'super-admin' have real destinations built so
-                             far -- the other two fall back to the one real
-                             authenticated landing page this port has,
-                             matching PortalViewController's own doc
-                             comment, until their own dashboards exist
-                             ('namra-admin' also needs a whole new backend
-                             module first -- see docs/MIGRATION_MATRIX.md). --}}
+                        {{-- Five of the six portals have real destinations
+                             built now -- only 'namra-admin' still falls
+                             back to the one real authenticated landing page
+                             this port has, matching PortalViewController's
+                             own doc comment: it needs a whole new backend
+                             module first (see docs/MIGRATION_MATRIX.md). --}}
                         @php
-                            $builtPortalRoutes = ['buyer' => 'portal.buyer', 'seller' => 'portal.seller', 'namra' => 'portal.namra', 'super-admin' => 'portal.super-admin'];
+                            $builtPortalRoutes = ['buyer' => 'portal.buyer', 'seller' => 'portal.seller', 'namra' => 'portal.namra', 'super-admin' => 'portal.super-admin', 'developer' => 'portal.developer'];
                         @endphp
                         <a href="{{ route($builtPortalRoutes[$portal['key']] ?? 'dashboard') }}" class="btn btn-primary align-self-start">Open {{ $portal['name'] }}</a>
                     </div>

@@ -1955,15 +1955,15 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard, and the Buyer/Seller/NamRA/
-Super Administration portal dashboards closed out further below):
-accounting, business parties, quotations, expenses (each as their own
-standalone screen -- the Buyer/Seller portal dashboards surface
-expenses/quotations read-only, not a replacement for a dedicated module
-UI), inventory, projects, licensing, the remaining two per-portal
-dashboards (the Developer portal -- a quick composition like Super
-Administration -- and NamRA Administration, which needs a whole new
-backend module first, see its own dedicated section below), documents,
+cases, refunds, the portal switchboard, and five of the six portal
+dashboards -- Buyer/Seller/NamRA/Super Administration/Developer --
+closed out further below): accounting, business parties, quotations,
+expenses (each as their own standalone screen -- the Buyer/Seller portal
+dashboards surface expenses/quotations read-only, not a replacement for
+a dedicated module UI), inventory, projects, licensing, the NamRA
+Administration portal dashboard (needs a whole new backend module first,
+see its own dedicated section below -- the only one of the six portals
+left), documents,
 reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
@@ -2504,6 +2504,54 @@ against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
 Also verified visually over a real HTTP session, clicking "Open Super
 Administration" from the switchboard through to the rendered page with
 real component/integration/security-event data (screenshot).
+
+### Developer portal dashboard (the fifth of six)
+
+Ports the source's own `app/portal/developer/page.tsx`. Like NamRA and
+Super Administration before it, zero new backend query was needed:
+`App\Services\Platform\PlatformSnapshotService::developerPortalSnapshot()`
+already returns exactly `clients`/`webhooks` -- including its own
+already-ported `ORGANISATION_LINK_REQUIRED` short-circuit for a
+`DEVELOPER_PARTNER` actor with no `taxpayer_id` linked yet, which this
+view needs no special handling for: an empty `clients` array renders the
+same "No applications in scope" empty state either way, exactly matching
+the source's own page (which has no special-cased messaging for that
+state either).
+
+Confirms the `PORTAL_PERMISSIONS` pattern the Super Administration
+section above first documented is a real, recurring shape, not a
+one-off: `App\Http\Controllers\Portal\DeveloperPortalController` gates
+on `developer:read` (the source's own `PORTAL_PERMISSIONS.developer`),
+not `dashboard:read`. `SELLER_ADMIN` is on `PortalDefinitions`' own
+`developer` role list but does not hold `developer:read`
+(`Permissions::ROLE_PERMISSIONS` confirms it), so the source denies that
+role the same way it denies `SECURITY_ANALYST` from `super-admin` --
+`PortalService::getAvailablePortals()`'s own role/capability check alone
+would not catch either. That method's own gap (not enforcing the full
+`PORTAL_PERMISSIONS` matrix) remains open by the same deliberate choice
+explained in the Super Administration section -- fixed per-controller as
+each dashboard is built, not wholesale.
+
+Verified by a new `tests/Feature/Portal/DeveloperPortalTest.php` (5
+tests): authentication is required; a role entirely absent from the
+portal's list is denied; `SELLER_ADMIN` specifically -- present on the
+role list but missing `developer:read` -- is denied; a real
+`api_clients`/`webhook_subscriptions` pair (inserted directly -- neither
+table has any write command anywhere in this migration, per each one's
+own migration doc comment) renders correctly with accessible table
+markup; and an unlinked `DEVELOPER_PARTNER` sees the same empty-registry
+state the source itself falls back to. 299 tests total, 0 new
+regressions (same 29 pre-existing `bcmath`-caused failures noted in the
+Seller portal section above), run against real MySQL/MariaDB, plus a
+clean `migrate:fresh --seed` cycle. Also verified visually over a real
+HTTP session, clicking "Open Developer and sandbox" from the switchboard
+through to the rendered page with a real client/webhook pair
+(screenshot).
+
+**Five of the six portal dashboards are now built.** Only NamRA
+Administration remains, deliberately deferred per its own dedicated
+section above (a genuinely new backend module, not a quick composition
+like the other five all turned out to be).
 
 ## Legacy D1 importer (Phase 14)
 

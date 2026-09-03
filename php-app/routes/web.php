@@ -44,6 +44,7 @@ use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Portal\BuyerPortalController;
+use App\Http\Controllers\Portal\DeveloperPortalController;
 use App\Http\Controllers\Portal\NamraPortalController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
@@ -103,15 +104,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // PortalViewController's own doc comment.
     Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
 
-    // The first three of the six per-portal dashboards the switchboard
-    // above links to -- see BuyerPortalController/SellerPortalController/
-    // NamraPortalController's own doc comments. URLs kept 1:1 with the
-    // source's own app/portal/{buyer,seller,namra}/page.tsx paths and
-    // with PortalDefinitions::all()'s own hrefs.
+    // Five of the six per-portal dashboards the switchboard above links
+    // to (the sixth, namra-admin, is deliberately deferred -- see
+    // docs/MIGRATION_MATRIX.md) -- see each controller's own doc
+    // comment. URLs kept 1:1 with the source's own
+    // app/portal/{buyer,seller,namra,super-admin,developer}/page.tsx
+    // paths and with PortalDefinitions::all()'s own hrefs.
     Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
     Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
     Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
     Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
+    Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
