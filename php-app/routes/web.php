@@ -44,6 +44,7 @@ use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Portal\BuyerPortalController;
+use App\Http\Controllers\Portal\NamraPortalController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
@@ -101,13 +102,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // PortalViewController's own doc comment.
     Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
 
-    // The first two of the six per-portal dashboards the switchboard
-    // above links to -- see BuyerPortalController/SellerPortalController's
-    // own doc comments. URLs kept 1:1 with the source's own
-    // app/portal/{buyer,seller}/page.tsx paths and with
-    // PortalDefinitions::all()'s own 'buyer'/'seller' hrefs.
+    // The first three of the six per-portal dashboards the switchboard
+    // above links to -- see BuyerPortalController/SellerPortalController/
+    // NamraPortalController's own doc comments. URLs kept 1:1 with the
+    // source's own app/portal/{buyer,seller,namra}/page.tsx paths and
+    // with PortalDefinitions::all()'s own hrefs.
     Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
     Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
+    Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

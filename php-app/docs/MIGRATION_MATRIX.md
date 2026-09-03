@@ -1955,13 +1955,13 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard, the Buyer portal dashboard and
-the Seller portal dashboard closed out further below): accounting,
-business parties, quotations, expenses (each as their own standalone
-screen -- the Buyer/Seller portal dashboards surface expenses/quotations
-read-only, not a replacement for a dedicated module UI), inventory,
-projects, licensing, the remaining four per-portal dashboards
-(namra/namra-admin/super-admin/developer), documents, reports, analytics,
+cases, refunds, the portal switchboard, and the Buyer/Seller/NamRA
+portal dashboards closed out further below): accounting, business
+parties, quotations, expenses (each as their own standalone screen --
+the Buyer/Seller portal dashboards surface expenses/quotations read-only,
+not a replacement for a dedicated module UI), inventory, projects,
+licensing, the remaining three per-portal dashboards
+(namra-admin/super-admin/developer), documents, reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
 
@@ -2371,6 +2371,45 @@ which this environment's outbound network policy blocks (`403` at the
 proxy) -- not fixable from inside this session. `SellerPortalTest`'s own
 one invoice-rendering test joins the same 28 as a 29th, for the identical
 reason, not a new defect.
+
+### NamRA portal dashboard (the third of six)
+
+Ports the source's own `app/portal/namra/page.tsx` -- the third
+per-portal dashboard, and the simplest of the three built so far.
+Unlike Buyer/Seller (both organisation-scoped, each needing at least one
+new query of its own), every read this page needs already exists as a
+national-scope-aware snapshot service, so `App\Services\Portal\
+NamraPortalSnapshotService` is pure composition: `identity` reuses
+`App\Services\Identity\IdentityFoundationSnapshotService::getSnapshot`,
+`compliance` reuses `App\Services\Compliance\
+ComplianceSnapshotService::getSnapshot` (its fourth consumer this
+initiative, after `/cases`, `/compliance` and `/refunds`), and `vat`
+reuses `App\Services\VatLifecycle\VatLifecycleService::snapshot` (its
+third, after the Buyer and Seller portals) -- zero new queries anywhere
+in this service. `App\Http\Controllers\Portal\NamraPortalController`
+(`GET /portal/namra`, named `portal.namra`) follows the identical gate
+pattern as its two siblings. The switchboard's `$builtPortalRoutes`
+lookup array (introduced in the Seller portal slice above) gained one
+more entry, `'namra' => 'portal.namra'`.
+
+Verified by a new `tests/Feature/Portal/NamraPortalTest.php` (3 tests):
+authentication is required; a role absent from the NamRA portal's list
+(`TAXPAYER_OWNER`) is denied; and a real audit case (opened via the
+real `/api/v1/audit-cases` command), a real risk indicator (via the real
+risk-evaluation command against a PENDING obligation), and a real
+`PENDING` `ApprovalTask` against a `PENDING_APPROVAL` VAT return version
+(inserted directly, matching `ComplianceSnapshotTest`'s own "the command
+chain has its own dedicated coverage elsewhere" convention -- generating
+a return for real needs certified invoices, currently blocked in this
+verification session by the `bcmath` gap noted in the Seller portal
+section above) all render correctly with accessible table markup. 314
+tests total, 0 new regressions (same 29 pre-existing failures, all
+`bcmath`-caused per that section's own root-cause finding), run against
+real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also
+verified visually over a real HTTP session, clicking "Open NamRA" from
+the switchboard through to the rendered page with real case/risk data
+carried over from this session's own earlier compliance-slice fixtures
+(screenshot).
 
 ## Legacy D1 importer (Phase 14)
 

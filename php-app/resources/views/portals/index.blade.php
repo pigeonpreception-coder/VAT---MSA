@@ -18,15 +18,14 @@
                         <div class="text-uppercase text-muted small fw-semibold mb-1">{{ $portal['audience'] }}</div>
                         <h2 class="h5">{{ $portal['name'] }}</h2>
                         <p class="text-muted flex-grow-1">{{ $portal['description'] }}</p>
-                        {{-- Only 'buyer' and 'seller' have real destinations
-                             built so far (route('portal.buyer')/
-                             route('portal.seller')) -- the other four fall
-                             back to the one real authenticated landing page
-                             this port has, matching PortalViewController's
-                             own doc comment, until their own dashboards
-                             exist. --}}
+                        {{-- Only 'buyer', 'seller' and 'namra' have real
+                             destinations built so far -- the other three
+                             fall back to the one real authenticated landing
+                             page this port has, matching
+                             PortalViewController's own doc comment, until
+                             their own dashboards exist. --}}
                         @php
-                            $builtPortalRoutes = ['buyer' => 'portal.buyer', 'seller' => 'portal.seller'];
+                            $builtPortalRoutes = ['buyer' => 'portal.buyer', 'seller' => 'portal.seller', 'namra' => 'portal.namra'];
                         @endphp
                         <a href="{{ route($builtPortalRoutes[$portal['key']] ?? 'dashboard') }}" class="btn btn-primary align-self-start">Open {{ $portal['name'] }}</a>
                     </div>
