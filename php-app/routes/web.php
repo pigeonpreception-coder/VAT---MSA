@@ -61,6 +61,7 @@ use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
+use App\Http\Controllers\Workflow\WorkflowAuthoringViewController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
 
@@ -212,6 +213,32 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/platform/change-requests', [PlatformConfigViewController::class, 'requestChange'])->name('platform.change-requests.store');
     Route::post('/platform/change-requests/{id}/decide', [PlatformConfigViewController::class, 'decideChange'])->name('platform.change-requests.decide');
     Route::post('/platform/staff', [PlatformConfigViewController::class, 'provisionStaff'])->name('platform.staff.store')
+        ->middleware('password.confirm');
+
+    // Frontend UI build-out: the workflow engine's own authoring console,
+    // reusing WorkflowService directly (see App\Http\Controllers\Workflow\
+    // WorkflowAuthoringViewController's own doc comment). Its read-only
+    // register was already part of Administration's own page before this
+    // slice existed -- this adds the write side. Distinct path segments
+    // from the JSON API under api/v1/workflows[-tasks] below (decide vs
+    // decision, revoke vs revocation) so the two route sets never
+    // collide even without the prefix difference alone to rely on. Every
+    // write here wears password.confirm, matching the JSON route's own
+    // unconditional step-up posture exactly -- test is the one exception
+    // in both (a dry-run has no side effects).
+    Route::get('/workflows', [WorkflowAuthoringViewController::class, 'index'])->name('workflows.index');
+    Route::post('/workflows', [WorkflowAuthoringViewController::class, 'store'])->name('workflows.store')
+        ->middleware('password.confirm');
+    Route::post('/workflows/versions/{id}/publish', [WorkflowAuthoringViewController::class, 'publish'])->name('workflows.publish')
+        ->middleware('password.confirm');
+    Route::post('/workflows/versions/{id}/test', [WorkflowAuthoringViewController::class, 'test'])->name('workflows.test');
+    Route::post('/workflows/instances', [WorkflowAuthoringViewController::class, 'assign'])->name('workflows.assign')
+        ->middleware('password.confirm');
+    Route::post('/workflow-tasks/{id}/decide', [WorkflowAuthoringViewController::class, 'decide'])->name('workflows.decide')
+        ->middleware('password.confirm');
+    Route::post('/workflows/delegations', [WorkflowAuthoringViewController::class, 'storeDelegation'])->name('workflows.delegations.store')
+        ->middleware('password.confirm');
+    Route::post('/workflows/delegations/{id}/revoke', [WorkflowAuthoringViewController::class, 'revokeDelegation'])->name('workflows.delegations.revoke')
         ->middleware('password.confirm');
 
     // Ported from the source's own app/portals/page.tsx -- see

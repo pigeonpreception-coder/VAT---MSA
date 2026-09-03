@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Domain\Licensing\AccessReviewWindow;
 use App\Models\Branch;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
@@ -131,6 +132,26 @@ class DemoSeeder extends Seeder
                 'retention_policy' => 'STANDARD', 'updated_at' => now(),
             ]);
         }
+
+        // App\Support\Licensing\EntitlementGate::assert's own ADMIN_WRITE
+        // gate additionally requires a current-quarter access_reviews row
+        // (OPEN or COMPLETED, not overdue) before any privileged
+        // organisation-administration write -- Administration's own
+        // inviteEmployee/createOrganisationRole and the workflow engine's
+        // createWorkflowDraft all go through it. A genuine, pre-existing
+        // demo seed gap (the same class as this file's own license/
+        // report_definitions/platform_config gaps above): nothing ever
+        // seeded one, silently blocking every one of those already-shipped
+        // ADMIN_WRITE actions for a real demo login even though their own
+        // feature tests pass (each opens its own review via
+        // POST /api/v1/access-reviews first).
+        DB::table('access_reviews')->updateOrInsert(
+            ['organisation_id' => $organisation->id, 'review_type' => 'QUARTERLY', 'period_start' => AccessReviewWindow::current()['periodStart']],
+            [
+                'id' => (string) Str::uuid(), 'name' => 'Quarterly access review', 'status' => 'OPEN',
+                'due_at' => AccessReviewWindow::current()['dueAt'], 'created_by' => $owner->id, 'created_at' => now(), 'completed_at' => null,
+            ],
+        );
 
         // A second demo taxpayer purely as a registered-buyer counterparty, so a
         // demo invoice can be certified against a real customer (status MATCHED)

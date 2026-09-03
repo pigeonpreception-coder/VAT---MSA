@@ -87,6 +87,11 @@
                                 <a class="nav-link" href="{{ route('platform.index') }}" @if (request()->routeIs('platform.*')) aria-current="page" @endif>Platform</a>
                             </li>
                         @endcan
+                        @can('permission', 'workflows:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('workflows.index') }}" @if (request()->routeIs('workflows.*')) aria-current="page" @endif>Workflows</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}

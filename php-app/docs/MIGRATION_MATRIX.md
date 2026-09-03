@@ -1959,12 +1959,11 @@ cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
 -- and business parties, quotations, accounting, operations
 (expenses/inventory/projects), licensing/administration, documents,
-reports/analytics and platform config closed out further below):
-the workflow engine's own dedicated authoring UI (its
-read-only register is already part of Administration -- see below),
-and import declarations (a genuinely separate, not-yet-built backend
-module -- see the "Operations" section above) --
-each its own comparable slice of this new initiative.
+reports/analytics, platform config and the workflow engine's own
+dedicated authoring UI closed out further below): import declarations
+(a genuinely separate, not-yet-built backend module -- see the
+"Operations" section above) -- its own comparable slice of this new
+initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
 
@@ -3471,6 +3470,104 @@ visually over a real HTTP session as `platform-admin@vat-msa.test`: the
 three config tables and the staff form render correctly, and proposing a
 feature-flag change stages a real `PENDING` row in the change-requests
 table with working Approve/Reject actions.
+
+### Workflow engine authoring console
+
+Ports the source's own workflow-engine authoring screen onto
+`App\Services\Workflow\WorkflowService` directly (all 8 methods --
+`createWorkflowDraft`, `publishWorkflowVersion`, `testWorkflowVersion`,
+`assignWorkflow`, `decideWorkflowTask`, `createDelegation`,
+`listDelegations`, `revokeDelegation`), already fully covered end to end
+(licence-seat reservation, conditional routing, the maker-checker self-
+publish/self-approval refusals) by `tests/Feature/Workflow/
+WorkflowTest.php`'s own suite from Phase 12's fifth slice. New:
+`App\Http\Controllers\Workflow\WorkflowAuthoringViewController`
+(`index`/`store`/`publish`/`test`/`assign`/`decide`/`storeDelegation`/
+`revokeDelegation`) and `resources/views/workflows/index.blade.php`.
+This is the write side of a read-only register that was already part of
+Administration's own page before this slice existed
+(`AdministrationSnapshotService::getAdministrationSnapshot`'s
+`workflows`/`tasks` arrays, reused here verbatim rather than re-queried)
+-- what this slice adds is what makes the engine's own commands
+reachable at all, closing out this initiative's own frontend build-out
+list entirely (every item named in "Still NOT STARTED" above is now
+built).
+
+**Definition/context authoring is JSON-textarea, not a visual node
+editor**: `nodes`/`transitions`/routing `context` are structured lists
+of typed objects (`WorkflowValidator::definition()`'s own shape) --
+building a drag-and-drop graph editor is out of scope for a build-out
+that has never shipped a line of client-side JavaScript. A JSON
+textarea, prefilled with a valid minimal example and validated entirely
+server-side by the same `WorkflowValidator` every JSON-API caller
+already goes through, is the same "trust the real validator, don't
+duplicate its shape checks in the UI" posture Platform config's
+`ACCESS_POLICY` `parameters` field already established. Reference
+panels (organisation roles, active members) sit next to the textareas so
+an author can copy a real ID into a `ROLE`/`USER` `assignee_ref` without
+guessing.
+
+**A genuine bug found and fixed in already-shipped, tested code, not
+just this slice's own new code**: `WorkflowValidator::context()`
+rejects its input unless `is_array($contextRaw) && ! array_is_list
+($contextRaw)` -- but PHP's `array_is_list([])` is vacuously `true` for
+an empty array, and `json_decode('{}', true)` produces exactly that
+empty array, indistinguishable from `json_decode('[]', true)`. A caller
+sending a literal empty JSON object (`{}`, meaning "no routing filters")
+-- something no existing test ever happened to exercise, JSON API
+included -- would be rejected with "context must be an object", the
+same bug this slice's own "Test routing" and "Assign instance" forms hit
+immediately with their own empty-textarea default. Fixed on the caller
+side, not by touching the shared validator: `WorkflowAuthoringViewController::
+jsonContextField()` normalises a decoded empty array back to `null`
+(the shape `context()` already handles correctly) before it ever reaches
+`WorkflowValidator`, leaving the already-tested validator itself
+untouched. Documented here rather than silently patched, since the same
+latent bug remains reachable from the JSON API's own `POST /api/v1/
+workflows/versions/{id}/test` and `POST /api/v1/workflows/instances` for
+any caller that sends `"context": {}` explicitly -- a real, if narrow,
+pre-existing gap this slice surfaced but did not close for that surface.
+
+**Demo seed gap closed, and a real pre-existing one**: a full-repo check
+found the demo organisation had never had an `access_reviews` row at
+all. `App\Support\Licensing\EntitlementGate::assert`'s own `ADMIN_WRITE`
+gate -- which `createWorkflowDraft`/`publishWorkflowVersion`/
+`assignWorkflow`/`decideWorkflowTask`/`createDelegation`/
+`revokeDelegation` all go through, alongside Administration's own
+already-shipped `inviteEmployee`/`createOrganisationRole` -- requires a
+current-quarter `access_reviews` row (`OPEN` or `COMPLETED`, not
+overdue) before any privileged organisation-administration write. This
+silently blocked every one of those already-shipped `ADMIN_WRITE`
+actions for a real demo login even though their own feature tests always
+pass (each opens its own review via `POST /api/v1/access-reviews`
+first, a step no demo login had ever taken). `DemoSeeder` now seeds a
+current, `OPEN` quarterly review for the demo organisation, closing this
+gap for every `ADMIN_WRITE` command in the application, not just this
+slice's own new ones.
+
+Verified by a new `tests/Feature/Workflow/WorkflowAuthoringViewTest.php`
+(11 tests): the page requires authentication; a role without
+`workflows:read` is denied `403`; the console renders its catalogue and
+hides manage-only actions for a `workflows:read`+`workflows:decide`
+(but not `workflows:manage`) actor; creating a draft requires
+`workflows:manage`; every write (create/publish/test excepted/assign/
+decide/delegate/revoke) wears `password.confirm`, matching the JSON
+API's own unconditional step-up posture exactly; a draft's own creator
+cannot publish it themselves, but a different user can; testing a
+draft's routing needs no step-up and shows a real path/terminal result;
+assigning an instance and deciding its task work end to end (with the
+initiator refused deciding their own task, and role-based decision
+working for a different, role-holding user), completing the instance;
+and creating then revoking a delegation both succeed. 424 tests total, 0
+new regressions -- the failing set (the same 30 pre-existing
+`bcmath`-dependent tests documented throughout this initiative) is
+unchanged, run against real MySQL/MariaDB, plus a clean `migrate:fresh
+--seed` cycle. Also verified visually over a real HTTP session as
+`owner@demo-trading.test`: creating a draft (redirected to
+`/confirm-password` on the first attempt, succeeding after confirming),
+seeing it appear in both the versioned-workflows and draft-versions
+cards, and running "Test routing" to see a real `start → approve → end`
+/`COMPLETED` result rendered on the page.
 
 ## Legacy D1 importer (Phase 14)
 
