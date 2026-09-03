@@ -2750,31 +2750,46 @@ already ported in full and reachable at
 verification" above) has no UI on this screen yet. Both are tracked
 here, not silently dropped.
 
-Verified by a new `tests/Feature/Business/BusinessPartyViewTest.php`
-(10 tests): the page requires authentication; a role without
+The relationship control is two independent checkboxes sharing one
+`relationships[]` array field (never a radio group), so a party can be
+registered -- or edited -- as a customer, a supplier, or both at once,
+matching the source's own data model exactly: `party_relationships` is
+a set of independent, revocable grants per party, not a single fixed
+column. Confirmed by both a feature test and a real HTTP session (see
+below).
+
+Verified by `tests/Feature/Business/BusinessPartyViewTest.php` (11
+tests): the page requires authentication; a role without
 `parties:manage` (`SELLER_VIEWER`) is denied `403`; the register and
 create form render with accessible table markup; a party can be
-created through the form (with the audit-event side effect verified);
-creating a party with no relationship selected fails validation and
-redisplays the form with its input preserved, writing nothing; a
-duplicate VAT number surfaces as a form error rather than a raw 500; the
-edit form is correctly prefilled from `?edit={id}`; an active party can
-be updated (including its relationship set) through the form; a party
-can be deactivated with a reason (status flips to `INACTIVE`, the audit
-event is recorded, the record itself is never deleted); and deactivating
-with too short a reason fails validation without changing the party's
-status. 348 tests total (319 passing), 0 new regressions (the same 29
-pre-existing `bcmath`-caused failures noted in the Seller portal section
-above), run against real MySQL/MariaDB, plus a clean
-`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
-session end to end as `owner@demo-trading.test`: the empty register,
-creating a supplier party (metrics update from 0 to 1 active/1
-supplier), opening its edit form pre-filled with its saved data, saving
-an edited legal name, deactivating it with a reason (status badge flips
-to grey "Inactive", the Edit action remains, Deactivate disappears, and
-the metrics drop back to 0), and a rejected submission (missing
-relationship) redisplaying the form with its accessible error summary
-and the entered display name preserved.
+created through the form (with the audit-event side effect verified); a
+party can be created as both a customer and a supplier at once, with
+both relationship rows persisted and both checkboxes correctly
+pre-checked when its edit form is reopened; creating a party with no
+relationship selected fails validation and redisplays the form with its
+input preserved, writing nothing; a duplicate VAT number surfaces as a
+form error rather than a raw 500; the edit form is correctly prefilled
+from `?edit={id}`; an active party can be updated (including its
+relationship set) through the form; a party can be deactivated with a
+reason (status flips to `INACTIVE`, the audit event is recorded, the
+record itself is never deleted); and deactivating with too short a
+reason fails validation without changing the party's status. 349 tests
+total (320 passing), 0 new regressions (the same 29 pre-existing
+`bcmath`-caused failures noted in the Seller portal section above), run
+against real MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle.
+Also verified visually over a real HTTP session end to end as
+`owner@demo-trading.test`: the empty register, creating a supplier
+party (metrics update from 0 to 1 active/1 supplier), opening its edit
+form pre-filled with its saved data, saving an edited legal name,
+deactivating it with a reason (status badge flips to grey "Inactive",
+the Edit action remains, Deactivate disappears, and the metrics drop
+back to 0), a rejected submission (missing relationship) redisplaying
+the form with its accessible error summary and the entered display name
+preserved, and (following a direct user report that both should be
+selectable together) registering a second party -- "Dual Role Trading
+CC" -- with both the Customer and Supplier boxes checked at once,
+confirming both badges render in the register and both boxes remain
+checked when its edit form is reopened.
 
 ## Legacy D1 importer (Phase 14)
 

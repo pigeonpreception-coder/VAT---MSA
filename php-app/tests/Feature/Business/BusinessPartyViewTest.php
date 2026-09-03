@@ -120,6 +120,25 @@ class BusinessPartyViewTest extends TestCase
         $this->assertDatabaseHas('audit_events', ['action' => 'BUSINESS_PARTY_CREATED']);
     }
 
+    public function test_a_party_can_be_created_as_both_a_customer_and_a_supplier_at_once(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0009');
+
+        $response = $this->actingAs($seller['owner'])->post('/parties', [
+            'display_name' => 'Dual Role Trading CC', 'relationships' => ['CUSTOMER', 'SUPPLIER'],
+        ]);
+
+        $response->assertRedirect('/parties');
+        $response->assertSessionHas('status', 'Business party created.');
+        $party = \App\Models\BusinessParty::where('display_name', 'Dual Role Trading CC')->firstOrFail();
+        $this->assertDatabaseHas('party_relationships', ['party_id' => $party->id, 'relationship' => 'CUSTOMER', 'status' => 'ACTIVE']);
+        $this->assertDatabaseHas('party_relationships', ['party_id' => $party->id, 'relationship' => 'SUPPLIER', 'status' => 'ACTIVE']);
+
+        $editResponse = $this->actingAs($seller['owner'])->get('/parties?edit='.$party->id);
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('editing', fn ($editing) => $editing['relationships'] === ['CUSTOMER', 'SUPPLIER']);
+    }
+
     public function test_creating_a_party_without_a_relationship_fails_validation_and_keeps_input(): void
     {
         $seller = $this->makeOrganisation('VAT-SELLER-0003');
