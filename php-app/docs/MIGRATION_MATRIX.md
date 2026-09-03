@@ -1955,13 +1955,14 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard and the Buyer portal dashboard
-closed out further below): accounting, business parties, quotations,
-expenses (each as their own standalone screen -- the Buyer portal
-dashboard surfaces expenses read-only, not a replacement for a dedicated
-expenses module UI), inventory, projects, licensing, the remaining five
-per-portal dashboards (seller/namra/namra-admin/super-admin/developer),
-documents, reports, analytics, platform config, the workflow engine --
+cases, refunds, the portal switchboard, the Buyer portal dashboard and
+the Seller portal dashboard closed out further below): accounting,
+business parties, quotations, expenses (each as their own standalone
+screen -- the Buyer/Seller portal dashboards surface expenses/quotations
+read-only, not a replacement for a dedicated module UI), inventory,
+projects, licensing, the remaining four per-portal dashboards
+(namra/namra-admin/super-admin/developer), documents, reports, analytics,
+platform config, the workflow engine --
 each its own comparable slice of this new initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
@@ -2303,6 +2304,73 @@ visually over a real HTTP session (the demo `owner@demo-trading.test`
 actor, a real approved expense, screenshot + rendered-text inspection,
 plus clicking "Open Buyer" from the switchboard end to end to confirm
 the link actually resolves).
+
+### Seller portal dashboard (the second of six)
+
+Ports the source's own `app/portal/seller/page.tsx` -- the second
+per-portal dashboard, following `BuyerPortalController`'s established
+pattern exactly. Reads three sources: `App\Services\Dashboard\
+DashboardSnapshotService::snapshot()` (reused directly for
+`metrics.invoice_count`/`total_cents`/`exception_count` and
+`recent_invoices` -- the exact same aggregate the main dashboard already
+uses, not a second query path), `App\Services\VatLifecycle\
+VatLifecycleService::snapshot()` (reused for `vat.periods`, summed here
+for `output_tax_cents` the same way the Buyer portal sums
+`input_tax_cents` from the identical read), and one new small
+`quotations` read (`COUNT(*)` plus a `SUM(total_cents)` filtered to
+`ISSUED`/`ACCEPTED`/`CONVERTED`, matching the source's own SQL exactly)
+-- see `App\Services\Portal\SellerPortalSnapshotService`'s own doc
+comment for why this is a plain `COUNT(*)` rather than a literal
+reproduction of the source's `business.quotations.length`, which caps at
+the unrelated mega-snapshot's own `LIMIT 100`.
+
+`App\Http\Controllers\Portal\SellerPortalController` (`GET
+/portal/seller`, named `portal.seller`) gates identically to the Buyer
+portal: `dashboard:read` plus membership in
+`PortalService::getAvailablePortals()`, thrown as a real
+`AuthorizationException`. The switchboard's "Open Seller" button now
+resolves to this route too -- `resources/views/portals/index.blade.php`
+was refactored from an `if ($portal['key'] === 'buyer')` check to a
+`$builtPortalRoutes` lookup array (`['buyer' => 'portal.buyer', 'seller'
+=> 'portal.seller']`) so each further portal dashboard is a one-line
+addition there, not a growing `@if`/`@elseif` chain.
+
+Verified by a new `tests/Feature/Portal/SellerPortalTest.php` (5 tests,
+reusing `BusinessPartyAndQuotationTest`'s own quotation-lifecycle
+fixtures): authentication is required; a role absent from the Seller
+portal's list is denied; a taxpayer owner whose organisation holds no
+`SELLER` capability is denied; a real certified invoice, an
+ISSUED-then-ACCEPTED quotation, and a real VAT return version's
+`output_tax_cents` all render correctly with accessible table markup and
+the `ACCEPTED` quotation correctly counted into the pipeline value; and
+the quotation metrics are scoped to the actor's own organisation. Also
+verified visually over a real HTTP session, clicking "Open Seller" from
+the switchboard through to the rendered page with a real accepted
+quotation (screenshot).
+
+**A genuine root-cause finding surfaced while writing this slice's own
+invoice-rendering test**, worth recording precisely rather than folded
+into the usual "pre-existing failures" note: this verification session's
+sandbox runs PHP 8.4.19 with the `bcmath` extension absent (`php -m`
+confirms it; `function_exists('bcadd')` is `false`). `App\Domain\Invoice\
+InvoiceCalculator::decimalToScaled` -- ported verbatim from the source's
+own `lib/domain/invoice.ts`, deliberately integer-only/no-float-parsing
+via `bcadd`/`bcmul`/`bcpow`/`bccomp` -- throws inside a broad
+`catch (\Throwable)` when those functions don't exist, surfacing as
+`QUANTITY_INVALID`/`UNIT_PRICE_INVALID`/etc. on every decimal field of
+every invoice/quotation-conversion payload. This is the actual root
+cause of all 28 "pre-existing" invoice-certification-dependent failures
+noted throughout this document's frontend-build-out sections (confirmed
+identical on the pre-slice tree via `git stash` earlier, and now via a
+direct `InvoiceCalculator::calculateAndValidate()` call outside the test
+suite) -- not a defect in this migration's own code, and not present in
+the documented target environment (PHP 8.2.12 XAMPP, which bundles
+`bcmath` by default). Installing `php8.4-bcmath` in this sandbox was
+attempted and failed: it is only available from the `ondrej/php` PPA,
+which this environment's outbound network policy blocks (`403` at the
+proxy) -- not fixable from inside this session. `SellerPortalTest`'s own
+one invoice-rendering test joins the same 28 as a 29th, for the identical
+reason, not a new defect.
 
 ## Legacy D1 importer (Phase 14)
 
