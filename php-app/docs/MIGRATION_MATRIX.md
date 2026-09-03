@@ -1958,9 +1958,9 @@ Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
 -- and business parties, quotations, accounting, operations
-(expenses/inventory/projects), licensing/administration, documents and
-reports/analytics closed out further below):
-platform config, the workflow engine's own dedicated authoring UI (its
+(expenses/inventory/projects), licensing/administration, documents,
+reports/analytics and platform config closed out further below):
+the workflow engine's own dedicated authoring UI (its
 read-only register is already part of Administration -- see below),
 and import declarations (a genuinely separate, not-yet-built backend
 module -- see the "Operations" section above) --
@@ -3380,6 +3380,97 @@ running a model then publishing a snapshot for the `VAT_TRENDS` data
 product, after which its certified metrics show real (`0`, since this
 migrate:fresh cycle seeded no invoices) values with `AVAILABLE` status
 instead of "No Data".
+
+### Platform config (feature flags, config values, access policies)
+
+Ports the source's own platform config/change-management screen onto
+`App\Services\Platform\PlatformChangeService` directly (all 5 methods --
+`config`, `listChangeRequests`, `requestChange`, `decideChange`,
+`provisionStaff`), already fully covered end to end (every target-type
+shape check, the self-decision refusal, `provisionStaff`'s
+`identity_links` creation) by `tests/Feature/Platform/
+PlatformChangeTest.php`'s 12 tests from Phase 13's sixth slice. New:
+`App\Http\Controllers\Platform\PlatformConfigViewController`
+(`index`/`requestChange`/`decideChange`/`provisionStaff`) and
+`resources/views/platform/index.blade.php`. This view adds no query of
+its own -- `config()`/`listChangeRequests()` are read straight from the
+service.
+
+**Three propose-change forms, one per target type, not one generic
+form with conditional fields**: `feature_flags`/`platform_config`/
+`access_policies` each need a genuinely different `proposed_value` shape
+(`{enabled: bool}`, `{value: string}`, `{parameters: object}}` --
+`PlatformChangeService::validateShape`'s own per-target-type check), and
+this initiative has never shipped a line of inline JavaScript to
+conditionally show/hide fields, so each row gets its own small, plain
+inline form instead (the feature-flag row's form proposes the opposite
+of the current state with one click; the config-value row takes a text
+input; the access-policy row takes a JSON-text input, prefilled with the
+current parameters so a reviewer only edits what's changing) -- matching
+the "one inline form per row, no shared dynamic state" convention this
+whole build-out has used everywhere else (Reports' own "run
+model"/"publish snapshot" per-card forms most recently).
+
+**`provisionStaff` wears `password.confirm` at the route level**, a
+genuine contrast with Reports' `requestExport`/`approveExport`: this
+command is unconditionally step-up gated in the source (the same posture
+Administration's employee/role invitations and Licensing's state changes
+already established), not data-conditional, so Laravel's own middleware
+refuses an unconfirmed request before the controller is ever reached --
+no need to replicate `StepUp::isFresh()`'s inline check-and-redirect
+dance here.
+
+**Distinct URL shapes from the JSON API**: `/platform`,
+`/platform/change-requests`, `/platform/change-requests/{id}/decide`,
+`/platform/staff` sit outside the `api/v1` prefix entirely (learned from
+Reports' own first-pass mistake nesting its Blade routes inside
+`api/v1` by accident -- this slice's routes were placed correctly the
+first time) and use `decide` rather than `.../decision` so the two route
+sets never collide even without the prefix difference alone to rely on.
+
+**Demo seed gap closed**: a full-repo check found `feature_flags`/
+`platform_config`/`access_policies` were all genuinely seed-only by
+design (the same documented posture as `report_definitions`/
+`data_products` above -- defining a new governed flag/config
+key/policy is a governance action, out of scope for a runtime command)
+but nothing had ever actually seeded one, leaving this screen
+permanently empty for any real login. `DemoSeeder` now seeds one row of
+each (`offline_sync.enabled`, `reports.export_size_limit_bytes`,
+`STEP_UP_WINDOW`) plus two distinct `platform:manage` logins
+(`platform-admin@vat-msa.test` as `SUPER_ADMIN`,
+`infra-admin@vat-msa.test` as `INFRASTRUCTURE_ADMIN`) so the
+maker-checker decide step is genuinely demonstrable between two real
+accounts, not just readable -- the same reasoning that already justified
+a second Authority Governance login earlier in this initiative. Both
+seeded config rows document, in their own `description`, that
+`ReportExportService`'s export size limit and `StepUp`'s freshness
+window are still the real hardcoded values those modules enforce --
+changing the seeded row does not yet feed back into either, exactly as
+Phase 13's own "Platform config & change-management" section above
+already stated and reproduced faithfully here, not silently implied
+otherwise by a UI that lets you "change" a number nothing reads.
+
+Verified by a new `tests/Feature/Platform/PlatformConfigViewTest.php`
+(12 tests): the page requires authentication; a role without
+`platform:read` is denied `403`; the console renders read-only (no
+propose-change actions) for a `platform:read`-only actor; proposing a
+change requires `platform:manage`; a manager can propose a feature-flag
+change, a platform-config value change, and an access-policy change (with
+invalid JSON parameters refused via a flashed error, not a 500); a
+reviewer cannot decide their own change request; a different reviewer's
+approval both marks the request `APPLIED` and actually flips the
+target's live value (with `version` bumped), while a different
+reviewer's rejection leaves the target untouched; and `provisionStaff`
+without a fresh step-up redirects to `/confirm-password` with nothing
+persisted, while a fresh step-up creates the real `users`/
+`identity_links` rows. 413 tests total, 0 new regressions -- the failing
+set (the same 30 pre-existing `bcmath`-dependent tests documented
+throughout this initiative) is unchanged, run against real
+MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
+visually over a real HTTP session as `platform-admin@vat-msa.test`: the
+three config tables and the staff form render correctly, and proposing a
+feature-flag change stages a real `PENDING` row in the change-requests
+table with working Approve/Reject actions.
 
 ## Legacy D1 importer (Phase 14)
 

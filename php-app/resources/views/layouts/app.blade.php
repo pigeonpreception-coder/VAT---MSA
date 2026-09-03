@@ -82,6 +82,11 @@
                                 <a class="nav-link" href="{{ route('reports.index') }}" @if (request()->routeIs('reports.*')) aria-current="page" @endif>Reports &amp; analytics</a>
                             </li>
                         @endcan
+                        @can('permission', 'platform:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('platform.index') }}" @if (request()->routeIs('platform.*')) aria-current="page" @endif>Platform</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}

@@ -48,6 +48,7 @@ use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
+use App\Http\Controllers\Platform\PlatformConfigViewController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Platform\ReportViewController;
@@ -196,6 +197,22 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/reports/exports/{id}/file', [ReportViewController::class, 'downloadExport'])->name('reports.export.download');
     Route::post('/analytics/data-products/{id}/run-model', [ReportViewController::class, 'runModel'])->name('reports.analytics.run-model');
     Route::post('/analytics/data-products/{id}/publish', [ReportViewController::class, 'publishDataProduct'])->name('reports.analytics.publish');
+
+    // Frontend UI build-out: the Platform config console, reusing
+    // PlatformChangeService directly (see App\Http\Controllers\Platform\
+    // PlatformConfigViewController's own doc comment). Distinct path
+    // segments from the JSON API routes under api/v1/platform below
+    // (change-requests/{id}/decide vs .../decision, staff vs
+    // api/v1/platform/staff) so the two route sets never collide.
+    // provisionStaff wears password.confirm (unconditional step-up,
+    // matching the JSON route's own posture) -- unlike the reports
+    // console's data-conditional requestExport/approveExport, this one
+    // is a plain route-level gate.
+    Route::get('/platform', [PlatformConfigViewController::class, 'index'])->name('platform.index');
+    Route::post('/platform/change-requests', [PlatformConfigViewController::class, 'requestChange'])->name('platform.change-requests.store');
+    Route::post('/platform/change-requests/{id}/decide', [PlatformConfigViewController::class, 'decideChange'])->name('platform.change-requests.decide');
+    Route::post('/platform/staff', [PlatformConfigViewController::class, 'provisionStaff'])->name('platform.staff.store')
+        ->middleware('password.confirm');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.

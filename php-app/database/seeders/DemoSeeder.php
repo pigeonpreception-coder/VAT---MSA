@@ -400,9 +400,63 @@ class DemoSeeder extends Seeder
             );
         }
 
+        // Platform config/change-management demo data: same seed-only gap
+        // as report_definitions/data_products above (see this file's own
+        // comment there) -- feature_flags/platform_config/access_policies
+        // are governance-defined, seed-only tables with nothing seeding
+        // one anywhere, silently leaving the real Platform config UI with
+        // nothing to browse or propose a change against. Two distinct
+        // platform:manage logins (SUPER_ADMIN/INFRASTRUCTURE_ADMIN) so the
+        // maker-checker decide step is genuinely demonstrable between two
+        // real accounts, not just readable -- the same reasoning that
+        // already justified $namraAdmin as a second Authority Governance
+        // login above.
+        User::updateOrCreate(
+            ['email' => 'platform-admin@vat-msa.test'],
+            [
+                'name' => 'Platform Super Admin', 'password' => Hash::make('password'), 'role' => 'SUPER_ADMIN',
+                'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+        User::updateOrCreate(
+            ['email' => 'infra-admin@vat-msa.test'],
+            [
+                'name' => 'Infrastructure Admin', 'password' => Hash::make('password'), 'role' => 'INFRASTRUCTURE_ADMIN',
+                'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+
+        $flagId = DB::table('feature_flags')->where('key', 'offline_sync.enabled')->value('id') ?: (string) Str::uuid();
+        DB::table('feature_flags')->updateOrInsert(
+            ['key' => 'offline_sync.enabled'],
+            [
+                'id' => $flagId, 'name' => 'Offline sync enabled', 'description' => 'Allows offline-invoicing batch intake for pilot devices.',
+                'rollout_scope' => 'PILOT', 'enabled' => true, 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+        $configId = DB::table('platform_config')->where('key', 'reports.export_size_limit_bytes')->value('id') ?: (string) Str::uuid();
+        DB::table('platform_config')->updateOrInsert(
+            ['key' => 'reports.export_size_limit_bytes'],
+            [
+                'id' => $configId, 'category' => 'REPORTS', 'description' => 'Documentary value only today -- ReportExportService::requestExport still enforces its own hardcoded 200KiB limit (see docs/MIGRATION_MATRIX.md).',
+                'value' => '204800', 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+        $policyId = DB::table('access_policies')->where('code', 'STEP_UP_WINDOW')->value('id') ?: (string) Str::uuid();
+        DB::table('access_policies')->updateOrInsert(
+            ['code' => 'STEP_UP_WINDOW'],
+            [
+                'id' => $policyId, 'name' => 'Step-up freshness window', 'policy_type' => 'AUTHENTICATION',
+                'description' => 'Documentary value only today -- App\Support\Access\StepUp::isFresh still reads config(\'auth.password_timeout\') directly (see docs/MIGRATION_MATRIX.md).',
+                'parameters' => json_encode(['window_seconds' => 10800]), 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
         $this->command?->info("Admin login: admin@vat-msa.test / password (PILOT_ADMIN, national scope)");
         $this->command?->info("NamRA admin login: namra-admin@vat-msa.test / password (NAMRA_SYSTEM_ADMIN)");
+        $this->command?->info("Platform admin login: platform-admin@vat-msa.test / password (SUPER_ADMIN)");
+        $this->command?->info("Infrastructure admin login: infra-admin@vat-msa.test / password (INFRASTRUCTURE_ADMIN)");
     }
 }
