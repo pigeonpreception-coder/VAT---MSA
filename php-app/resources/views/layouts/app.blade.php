@@ -57,6 +57,11 @@
                                 <a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Quotations</a>
                             </li>
                         @endcan
+                        @can('permission', 'accounting:read')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('accounting.index') }}" @if (request()->routeIs('accounting.*')) aria-current="page" @endif>Accounting</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}

@@ -1957,10 +1957,10 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
--- and business parties and quotations closed out further below):
-accounting, expenses (each as their own standalone screen -- the
-Buyer/Seller portal dashboards surface expenses read-only, not a
-replacement for a dedicated module UI), inventory, projects,
+-- and business parties, quotations and accounting closed out further
+below): expenses (its own standalone screen -- the Buyer/Seller portal
+dashboards surface expenses read-only, not a replacement for a
+dedicated module UI), inventory, projects,
 licensing, documents, reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
@@ -2900,6 +2900,59 @@ a raw JSON page, leaving the quotation safely at `ACCEPTED` rather than
 in a partially-converted state, exactly as the idempotent
 `convertToInvoice`/`InvoiceService::submit` pairing is designed to
 behave on failure.
+
+### Accounting (controlled general ledger dashboard -- read-only, matching the source)
+
+Ports the source's own `app/accounting/page.tsx` -- the journal register
+and chart of accounts. Unlike the business parties and quotations
+slices just above, the source's own page here has **no write forms at
+all**: no journal-posting form, no account-creation form, nothing --
+and its own closing note says so explicitly ("Interactive journal
+authoring and approval queues will be expanded with the VAT close
+workflow"), ported into the new Blade view's own info banner verbatim
+rather than paraphrased. `App\Services\Business\AccountingService`
+already fully supports posting journals, creating accounts, reversing
+entries, closing periods, trial balance and financial statements
+(reachable today at `/api/v1/accounting/**`, covered end to end by
+`tests/Feature/Business/AccountingTest.php`), so this is a UI gap only,
+and the source's own stated scope for this specific screen is
+read-only -- so this slice stays read-only too, rather than inventing
+forms the source itself doesn't have (the opposite call from the
+business-parties/quotations slices, made for the opposite reason: there
+the source had real forms/actions this port was missing; here the
+source has none to port).
+
+New: `App\Http\Controllers\Business\AccountingViewController::index`
+and `resources/views/accounting/index.blade.php`. Queries
+`App\Models\ChartOfAccount` and `App\Models\JournalEntry` directly,
+mirroring `AccountingController::indexAccounts`/`indexJournals`'s own
+already-established precedent (a simple real query, not the source's
+own fixed `getBusinessPlatformSnapshot` list) rather than adding a
+third copy of the same two queries behind a new service method.
+
+One fidelity note, not a bug: journal and account status badges render
+with no distinct colour (Bootstrap's neutral `text-bg-light`) because
+neither `POSTED`, `REVERSED`, nor `ACTIVE`-for-an-account is any
+different from `ACTIVE` elsewhere in `<x-status-badge>`'s own shared
+colour map -- confirmed against the source's own `app/globals.css`,
+which likewise defines no `.status-posted`/`.status-reversed` class at
+all. Matching that absence exactly, not a missed mapping.
+
+Verified by `tests/Feature/Business/AccountingViewTest.php` (4 tests):
+the page requires authentication; a role without `accounting:read`
+(`SELLER_VIEWER`) is denied `403`; the ledger and chart of accounts
+render correctly with accessible table markup and the right
+`postedCount`; and an empty organisation renders both tables' zero-state
+rows. 364 tests total (333 passing), 0 new regressions -- the failing
+set is byte-for-byte identical to the pre-slice run (the same 29
+pre-existing `bcmath`-caused failures plus the one new one introduced by
+the quotations slice above), run against real MySQL/MariaDB, plus a
+clean `migrate:fresh --seed` cycle. Also verified visually over a real
+HTTP session as `owner@demo-trading.test`, with two accounts and one
+posted journal seeded directly for the walkthrough (the demo seeder
+itself creates none): both tables render correctly, the metrics count
+correctly (2 accounts, 1 journal, 1 posted), and the info banner text
+matches the source's own copy exactly.
 
 ## Legacy D1 importer (Phase 14)
 

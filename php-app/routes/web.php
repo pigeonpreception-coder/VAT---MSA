@@ -18,6 +18,7 @@ use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
+use App\Http\Controllers\Business\AccountingViewController;
 use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
@@ -131,6 +132,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
     Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
     Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
+
+    // Ported from the source's own app/accounting/page.tsx -- read-only,
+    // matching the source exactly (its own closing note says interactive
+    // journal authoring is a future scope, not a gap this port silently
+    // introduced). See AccountingViewController's own doc comment.
+    Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.
