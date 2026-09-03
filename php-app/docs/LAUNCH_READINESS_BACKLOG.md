@@ -47,16 +47,21 @@ and the exact request/response contract for `submitVatReturn` and
 `verifyTaxpayer` (see `ItasIdentityPort`'s own interface for the shape
 this migration already expects).
 
-### 2. UI coverage: 3 of ~20+ backend modules
+### 2. UI coverage: 3 of ~20+ backend modules on `main`, 5 in an open PR
 **Status: Buildable now, no external dependency.**
 
-14 Blade view files exist against 196 registered routes. Dashboard,
-Invoices, and VAT Returns/Periods (built this session) have real
-screens. Everything else is JSON-API-only, reachable only by a direct
-HTTP client, not a browser: disputes, refunds, audit cases,
-communications, notifications, licensing & entitlements, organisation
-administration, the whole business/accounting/expenses/inventory/projects
-suite, reports & analytics, access governance, the workflow engine.
+11 Blade view files exist on `main` against 196 registered routes:
+Dashboard, Invoices, and VAT Returns/Periods have real screens.
+[PR #2](https://github.com/pigeonpreception-coder/VAT---MSA/pull/2)
+(open, not yet merged as of this writing) adds a vertical sidebar nav
+plus two more full modules -- VAT Returns/Periods' real write actions
+(generate/adjust/approve/submit) and Refund claims (request/review/
+dispute) -- bringing it to 5 of ~20+ once merged. Everything else is
+still JSON-API-only, reachable only by a direct HTTP client, not a
+browser: disputes, audit cases, communications, notifications,
+licensing & entitlements, organisation administration, the whole
+business/accounting/expenses/inventory/projects suite, reports &
+analytics, access governance, the workflow engine.
 
 No taxpayer or NamRA officer can use any of those through the actual
 application yet -- a "launch" today would only cover invoice
