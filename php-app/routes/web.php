@@ -38,6 +38,7 @@ use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Document\DocumentController;
+use App\Http\Controllers\Document\DocumentViewController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
@@ -165,6 +166,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         ->name('administration.employees.store')->middleware('password.confirm');
     Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
         ->name('administration.roles.store')->middleware('password.confirm');
+
+    // Ported from the source's own app/documents/page.tsx +
+    // DocumentUploadForm.tsx -- see DocumentViewController's own doc
+    // comment for why supersede/scan-decision/retention-hold/download
+    // have no UI here either (the source's own page has none of them).
+    // No step-up gate, matching the source's own /api/v1/documents
+    // upload route (no password.confirm there either).
+    Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
+    Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.

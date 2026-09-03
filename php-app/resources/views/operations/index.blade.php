@@ -92,7 +92,7 @@
                                         <div class="text-muted small">{{ $expense['receipt']['scan_status'] }} / {{ $expense['receipt']['status'] }}</div>
                                     @else
                                         <div class="{{ $expense['requires_receipt'] ? 'text-warning' : 'text-muted' }} small">{{ $expense['requires_receipt'] ? 'Receipt required' : 'Receipt optional' }}</div>
-                                        <div class="text-muted small">Upload via Documents (not yet available in this UI)</div>
+                                        <a href="{{ route('documents.index', ['owner_domain' => 'EXPENSE', 'owner_resource_id' => $expense['id']]) }}" class="small">Upload receipt</a>
                                     @endif
                                 </td>
                                 <td>

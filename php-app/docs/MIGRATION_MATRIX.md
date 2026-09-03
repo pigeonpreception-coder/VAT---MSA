@@ -1958,9 +1958,9 @@ Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
 -- and business parties, quotations, accounting, operations
-(expenses/inventory/projects) and licensing/administration closed out
-further below):
-documents, reports, analytics,
+(expenses/inventory/projects), licensing/administration and documents
+closed out further below):
+reports, analytics,
 platform config, the workflow engine's own dedicated authoring UI (its
 read-only register is already part of Administration -- see below),
 and import declarations (a genuinely separate, not-yet-built backend
@@ -3174,6 +3174,91 @@ fresh step-up and landing on the genuine confirm-password screen,
 confirming and having the same submission then succeed (the new
 employee appearing in the register as `INVITED`), and creating an
 organisation role that appears immediately with its permissions listed.
+
+### Documents (evidence register and governed upload)
+
+Ports the source's own `app/documents/page.tsx` +
+`DocumentUploadForm.tsx` -- the evidence register and a real, governed
+multipart upload-to-quarantine form. New:
+`App\Http\Controllers\Document\DocumentViewController` (`index`/
+`store`) and `resources/views/documents/index.blade.php`. The upload
+reuses `App\Services\Document\DocumentService::upload` directly --
+the exact same method `App\Http\Controllers\Document\DocumentController::store`
+already serves at `POST /api/v1/documents`, including its real MIME
+allow-list, 1-byte-to-10-MiB size bound, magic-byte content-sniffing
+(never trusting a client-declared MIME type alone) and SHA-256
+checksum. None of that is re-implemented here. The register is a
+direct `App\Models\DocumentMetadata` read scoped to the actor's own
+organisation, matching the exact `$documents` sub-query already inside
+`App\Services\Platform\PlatformSnapshotService::getSnapshot` (the
+source's own combined `getPlatformSnapshot`, which the source's
+`/documents` page itself calls) rather than pulling in that whole
+dozen-table integrations/sync/reports aggregate for a page that only
+ever needed one slice of it -- the same "simple real query, not the
+source's fixed list" call already made for accounting, business
+parties and every list this initiative has built since.
+
+Confirmed, not assumed: the source's own page has **no UI at all** for
+scan-decision, supersede, retention-hold, or download -- its own
+subtitle even says so explicitly ("Downloads are unavailable while
+malware scanning is not configured"). None of those four are built
+here either. This isn't a gap this slice introduces; all four commands
+remain fully built and reachable at their existing JSON routes
+(`/api/v1/documents/{id}/{scan-result,supersession,retention-hold,download}`)
+for whichever future admin/national-scope screen needs them -- this
+slice faithfully matches the source's own scope for this specific
+page, nothing more.
+
+Closes the loop this initiative's own Operations slice left open: its
+expense register's receipt column previously read "Upload receipt
+(not yet available in this UI)" -- a placeholder note written at the
+time because Documents didn't exist yet. `resources/views/operations/index.blade.php`
+now links that "Upload receipt" text straight to
+`/documents?owner_domain=EXPENSE&owner_resource_id={expense_id}`,
+matching the source's own `DocumentUploadForm`'s `defaultOwnerDomain`/
+`defaultOwnerResourceId` prefill behaviour exactly (confirmed live:
+following the link from an unreceipted expense correctly pre-selects
+"Expense" and pre-fills the resource ID field).
+
+A genuine, unrelated flaky test was found and fixed during this
+slice's own full-suite verification, not shipped: running the whole
+suite (not `BusinessPartyViewTest.php` alone) intermittently failed
+`test_a_party_can_be_created_as_both_a_customer_and_a_supplier_at_once`'s
+own `$editing['relationships'] === ['CUSTOMER', 'SUPPLIER']` assertion
+-- `App\Services\Business\BusinessPartyService::present()`'s
+relationships read had no `orderBy` at all, so MySQL's row order for
+that query was genuinely unspecified (the source's own `GROUP_CONCAT`
+carries the identical lack of a guarantee) and could shift under a
+different query plan once the full, much larger suite was in play.
+Fixed with an explicit `orderBy('relationship')` (alphabetical,
+matching every other `present()` method's own ordering conventions in
+that file) -- confirmed stable across four consecutive full-suite runs
+after the fix, byte-for-byte identical failing set each time.
+
+Verified by `tests/Feature/Document/DocumentViewTest.php` (7 tests):
+the page requires authentication; a role without `documents:read`
+(`SELLER_VIEWER`) is denied `403`; the register and upload form render
+correctly with accessible table markup; a valid PDF (real magic bytes,
+not just a `.pdf` extension) uploads successfully into `QUARANTINED`/
+`PENDING_EXTERNAL_SCANNER`; a role without `documents:upload`
+(`TAXPAYER_VIEWER`) is denied `403`; a file whose content doesn't
+match its declared MIME type is rejected with a clear form error
+rather than a 500 or a silently-accepted forgery; and the upload
+form's domain/resource-id fields correctly prefill from the
+`?owner_domain=EXPENSE&owner_resource_id=` query string. 387 tests
+total (357 passing), 0 new regressions -- the failing set is
+byte-for-byte identical to the pre-slice baseline (confirmed stable
+across four consecutive full-suite runs, per the flaky-test fix
+above), run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end as `owner@demo-trading.test`: starting from a
+seeded unreceipted expense on the Operations page, following its real
+"Upload receipt" link into Documents with the domain/resource ID
+already correctly filled in, uploading a real minimal PDF fixture, and
+confirming it appears in the register as `QUARANTINED`/
+`PENDING_EXTERNAL_SCANNER` with its SHA-256 checksum shown and the
+metrics (documents/quarantined/clean/legal holds) all updating
+correctly.
 
 ## Legacy D1 importer (Phase 14)
 
