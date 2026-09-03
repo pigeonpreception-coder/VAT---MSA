@@ -2193,6 +2193,50 @@ visually over a real HTTP session (PILOT_ADMIN, screenshot + rendered-
 text inspection, all six cards present with working links, no console
 errors).
 
+### Brand palette (teal/navy), applied app-wide
+
+A follow-on to the portal switchboard slice above, at the user's own
+request after comparing the migrated UI's default Bootstrap blue/gray
+against the source's own teal/navy `app/globals.css` design (screenshot
+comparison, not a written spec). Applied as targeted overrides in
+`resources/css/app.css` on top of Bootstrap 5.3, not a parallel design
+system: the source's five colour tokens (`--navy #09243a`, `--teal
+#0a776f`, `--teal-bright #18a39a`, `--amber #c6861a`, `--red #b44343`,
+plus their `green`/pale variants) are ported as `--vatmsa-*` custom
+properties, then wired into the handful of Bootstrap component classes
+every Blade view actually composes (`.navbar.bg-dark` -> the source's own
+navy sidebar gradient; `.btn-primary`/`.btn-outline-secondary` -> teal/
+navy, overriding Bootstrap's own component-local `--bs-btn-*` variables
+since those are compiled with literal hex values, not inherited from a
+root variable; `.text-bg-success/info/warning/danger` -> green/teal/
+amber/red, which *do* read the root `--bs-{color}-rgb` variables Bootstrap
+compiles utility classes against; `.alert-success/info/danger`; `.card`
+given the source's own rounder corners and softer shadow).
+
+`resources/views/components/status-badge.blade.php`'s colour maps were
+corrected alongside this, not just recoloured: the source's own
+`components/PageHeader.tsx` `StatusBadge` lowercases/hyphenates the raw
+value into a `status-*` class, and `app/globals.css` groups those
+classes into exactly four colours -- reproduced here verbatim
+(certified/matched/filed/active green; exception/high/critical/open/
+denied/failed red; processing/medium/draft/under-review/investigating/
+pending amber; low/received/success teal). Two real fidelity gaps this
+caught: `MATCHED` was rendering as Bootstrap's default info-blue instead
+of the source's green, and risk `HIGH` was rendering amber instead of
+the source's red (the source deliberately groups HIGH with CRITICAL as
+one red, not a separate shade -- reproduced as-is, not "fixed" into a
+finer gradient the source doesn't have).
+
+No HTML/Blade markup structure changed -- every existing `.card`/
+`.table`/`.badge`/`.alert` composition stays exactly as each slice's own
+view left it; only the CSS/component-color layer changed. Verified: same
+278 tests, same 273 passing/28 pre-existing failures as the portal-
+switchboard slice above (a pure CSS change touches no test-asserted
+behaviour), a clean `npm run build`, and a live HTTP session (PILOT_ADMIN,
+screenshots of `/portals`, `/dashboard` and `/cases`) confirming the navy
+navbar, teal buttons/links, and corrected status colours render
+consistently across every screen this initiative has shipped so far.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

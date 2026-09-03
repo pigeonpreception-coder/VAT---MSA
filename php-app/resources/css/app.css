@@ -1,16 +1,142 @@
 @import "bootstrap/dist/css/bootstrap.min.css";
 
+/*
+ * VAT-MSA brand palette, ported from the source's own app/globals.css
+ * :root tokens -- applied here as targeted Bootstrap component overrides
+ * rather than a parallel design system, since every Blade view in this
+ * port already composes plain Bootstrap classes (.card, .table, .btn,
+ * .badge, .alert) and a second class vocabulary (the source's own
+ * .panel/.metric/.portal-card) would be the first inconsistency in an
+ * otherwise uniform frontend.
+ */
 :root {
-    --vatmsa-brand: #0b5ed7;
+    --vatmsa-navy: #09243a;
+    --vatmsa-teal: #0a776f;
+    --vatmsa-teal-bright: #18a39a;
+    --vatmsa-teal-pale: #e8f7f5;
+    --vatmsa-green: #287557;
+    --vatmsa-green-pale: #ecf8f1;
+    --vatmsa-amber: #c6861a;
+    --vatmsa-amber-pale: #fff6df;
+    --vatmsa-red: #b44343;
+    --vatmsa-red-pale: #fff0ef;
+    --vatmsa-canvas: #f3f6f8;
+    --vatmsa-line: #dbe4ea;
+    /* Kept for the skip-link's own colour/box-shadow below. */
+    --vatmsa-brand: var(--vatmsa-teal);
+
+    /* Bootstrap's own root-level theme variables -- .bg-primary,
+       .text-primary, .border-primary and .text-bg-* all read these
+       directly, so overriding them here recolours every one of those
+       utilities app-wide without touching each Blade file. */
+    --bs-primary: var(--vatmsa-teal);
+    --bs-primary-rgb: 10, 119, 111;
+    --bs-success-rgb: 40, 117, 87;
+    --bs-info-rgb: 24, 163, 154;
+    --bs-warning-rgb: 198, 134, 26;
+    --bs-danger-rgb: 180, 67, 67;
+    --bs-link-color: var(--vatmsa-teal);
+    --bs-link-color-rgb: 10, 119, 111;
+    --bs-link-hover-color: #08675f;
+    --bs-link-hover-color-rgb: 8, 103, 95;
 }
 
 body {
     min-height: 100vh;
-    background-color: #f5f7fa;
+    background-color: var(--vatmsa-canvas);
 }
 
 .navbar-brand {
     font-weight: 600;
+}
+
+/* The top navbar recoloured to the source's own navy sidebar gradient
+   -- this port uses a top navbar rather than the source's vertical
+   sidebar (an established structural difference since the dashboard
+   slice), but carries the same brand colour. */
+.navbar.bg-dark {
+    background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%) !important;
+}
+
+/* .btn-primary's own background/border/focus-ring are Bootstrap
+   component-local custom properties (baked in at compile time inside
+   the bundled bootstrap.min.css, not inherited from the root --bs-primary
+   above) -- redeclared here, same selector and specificity, so this
+   later rule wins in source order. */
+.btn-primary {
+    --bs-btn-bg: var(--vatmsa-teal);
+    --bs-btn-border-color: var(--vatmsa-teal);
+    --bs-btn-hover-bg: #08675f;
+    --bs-btn-hover-border-color: #08675f;
+    --bs-btn-active-bg: #08675f;
+    --bs-btn-active-border-color: #08675f;
+    --bs-btn-focus-shadow-rgb: 24, 163, 154;
+}
+
+.btn-outline-secondary {
+    --bs-btn-color: var(--vatmsa-navy);
+    --bs-btn-border-color: var(--vatmsa-line);
+    --bs-btn-hover-color: var(--vatmsa-navy);
+    --bs-btn-hover-bg: #f7fafb;
+    --bs-btn-hover-border-color: var(--vatmsa-line);
+    --bs-btn-active-color: var(--vatmsa-navy);
+    --bs-btn-active-bg: #f7fafb;
+    --bs-btn-active-border-color: var(--vatmsa-line);
+}
+
+/* Cards rounded and shadowed a little closer to the source's own
+   .panel/.metric look, without changing Bootstrap's markup structure. */
+.card {
+    border-radius: 0.8rem;
+    border-color: var(--vatmsa-line);
+    box-shadow: 0 4px 16px rgba(14, 37, 55, .035);
+}
+
+.card-header {
+    background-color: #fbfcfd;
+}
+
+/* text-bg-* badge colours, remapped from Bootstrap's default palette to
+   the source's own four status colours (green/teal/amber/red).
+   x-status-badge.blade.php routes every status/risk value to one of
+   these four utility classes, matching the source's own StatusBadge
+   component's className -> app/globals.css `.status-*` colour groups. */
+.text-bg-success {
+    color: #fff !important;
+    background-color: var(--vatmsa-green) !important;
+}
+
+.text-bg-info {
+    color: #fff !important;
+    background-color: var(--vatmsa-teal-bright) !important;
+}
+
+.text-bg-warning {
+    color: #5c4508 !important;
+    background-color: var(--vatmsa-amber) !important;
+}
+
+.text-bg-danger {
+    color: #fff !important;
+    background-color: var(--vatmsa-red) !important;
+}
+
+.alert-success {
+    color: #226448;
+    background-color: var(--vatmsa-green-pale);
+    border-color: #cce8d8;
+}
+
+.alert-info {
+    color: #245a6d;
+    background-color: #edf7fa;
+    border-color: #cde6ed;
+}
+
+.alert-danger {
+    color: #863737;
+    background-color: var(--vatmsa-red-pale);
+    border-color: #f1cfcc;
 }
 
 /* Skip-to-content link (WCAG 2.1 SC 2.4.1) -- Bootstrap's
@@ -23,15 +149,19 @@ body {
     z-index: 1080;
     padding: 0.5rem 1rem;
     background-color: #fff;
-    color: var(--vatmsa-brand);
+    color: var(--vatmsa-teal);
     border-radius: 0.375rem;
-    box-shadow: 0 0 0 0.25rem rgba(11, 94, 215, 0.35);
+    box-shadow: 0 0 0 0.25rem rgba(10, 119, 111, 0.35);
     text-decoration: none;
     font-weight: 600;
 }
 
 /* :focus-visible keeps a visible outline for keyboard users (WCAG 2.4.7)
    without adding one on every mouse click. */
+:focus-visible {
+    outline-color: var(--vatmsa-teal-bright);
+}
+
 main:focus-visible {
     outline: none;
 }
