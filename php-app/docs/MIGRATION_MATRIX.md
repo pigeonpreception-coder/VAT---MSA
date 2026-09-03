@@ -2213,6 +2213,71 @@ checks with real rationale text, and an officer approving it with the
 transition history correctly recording the real actor, timestamp, and
 findings.
 
+### Risk indicators module (the fifth UI slice, Module 4 Phases A-B)
+
+Ports the source's own risk-indicator screens over `RiskService`.
+Unlike every module built so far, there is **no taxpayer-facing
+counterpart to any of this at all** -- `RiskService::restricted()`
+itself documents risk indicators as carrying a NamRA-restricted
+classification, never taxpayer-visible; this UI is purely officer-
+facing, and `risk:read`/`risk:review` are held only by national-scope
+roles in this app's RBAC.
+
+New: `App\Http\Controllers\Compliance\RiskViewController`. Unlike
+Refunds (no JSON list endpoint at all) or VAT Returns (a snapshot
+covering everything), Risk Indicators' JSON API already has a real,
+filterable, paginated list (`RiskService::restricted()`), so
+`index()`/`show()` reuse it directly rather than querying
+`RiskIndicator` from scratch -- the first module UI in this build-out
+with genuine server-side pagination (Prev/Next controls over
+limit/offset) rather than the client-side JS filtering every read-only
+list so far has used, since this list can genuinely be large and
+`restricted()` already paginates it properly.
+
+A small "Evaluate a taxpayer" form (VAT number -> resolved to a
+taxpayer server-side) triggers `RiskService::evaluate()` on demand,
+redirecting to the list pre-filtered to that taxpayer so newly raised
+or refreshed indicators are immediately visible. The indicator detail
+page carries the assign-review and dismiss/escalate decision forms,
+gated to `risk:review` (read-only officers, who hold `risk:read` but
+not `risk:review`, see the record but no action forms) -- escalating
+shows the real, newly created audit case's own case number once
+created, a forward reference to the still-unbuilt Audit Cases UI
+(Module 4 Phases C-D, the larger remaining half of Module 4, left for
+a subsequent slice).
+
+One additive, non-colliding change to `<x-status-badge>`: a new
+`type="indicator"` map, kept separate from the general `type="status"`
+map on purpose -- `'OPEN'` means something genuinely different for a
+risk indicator (an unaddressed signal, needs attention) than for a VAT
+period (a normal, healthy state); sharing one badge colour across both
+contexts for the same string would have misled whichever context it
+didn't fit. Reuses the same four already-WCAG-AA-verified Bootstrap
+`text-bg-*` classes, no new contrast check needed.
+
+Verified by a new `tests/Feature/Compliance/RiskViewTest.php` (8 tests,
+reusing `ComplianceCaseTest`'s own makeTaxpayer/namraAuditor/
+TaxObligation fixture pattern, since a real indicator genuinely depends
+on live evidence the rule catalogue reads, not a fixture inserted
+directly): authentication and the never-taxpayer-visible rule (a
+taxpayer owner gets a real 403, not just a hidden nav item); evaluating
+a taxpayer with a genuine overdue obligation raises a real
+`OBLIGATION_OVERDUE` indicator and redirects to the pre-filtered list;
+an unknown VAT number shows a friendly form error; the list's
+status/severity filters work; a decision cannot be recorded before a
+review is assigned; the full assign -> escalate flow creates a real,
+traceable `audit_cases` row; and a read-only officer sees the record
+with no action forms and is correctly forbidden from evaluating.
+313 tests total, 0 regressions, run against real MySQL. Also verified
+live end-to-end in the browser: a real overdue obligation, an
+evaluation that raised a genuine `OBLIGATION_OVERDUE` indicator
+(severity High, score 65%), assigning review to self, and escalating
+to a real audit case with the real case number shown on the page
+afterward -- including confirming the decision form's dismiss/escalate
+toggle (a small vanilla-JS show/hide of the case-type/case-title
+fields) genuinely fires, not just that the markup for both states
+exists.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

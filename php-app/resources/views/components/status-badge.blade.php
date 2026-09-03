@@ -24,9 +24,22 @@
         'HIGH' => 'text-bg-warning',
         'CRITICAL' => 'text-bg-danger',
     ];
-    $class = $type === 'risk'
-        ? ($riskMap[$value] ?? 'text-bg-light')
-        : ($statusMap[$value] ?? 'text-bg-light');
+    // A separate map, not folded into $statusMap: 'OPEN' means something
+    // genuinely different for a risk indicator (an unaddressed signal --
+    // needs attention) than it does for a VAT period (a normal, healthy
+    // state) -- the same string can't share one badge colour across both
+    // without misleading whichever context it doesn't fit.
+    $indicatorMap = [
+        'OPEN' => 'text-bg-warning',
+        'UNDER_REVIEW' => 'text-bg-info',
+        'ESCALATED_TO_CASE' => 'text-bg-danger',
+        'DISMISSED' => 'text-bg-secondary',
+    ];
+    $class = match ($type) {
+        'risk' => $riskMap[$value] ?? 'text-bg-light',
+        'indicator' => $indicatorMap[$value] ?? 'text-bg-light',
+        default => $statusMap[$value] ?? 'text-bg-light',
+    };
     $label = ucwords(strtolower(str_replace('_', ' ', (string) $value)));
 @endphp
 

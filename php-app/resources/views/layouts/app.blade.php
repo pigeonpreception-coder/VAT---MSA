@@ -57,6 +57,11 @@
                                 <a class="nav-link {{ request()->routeIs('refunds.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>Refunds</a>
                             </li>
                         @endcan
+                        @can('permission', 'risk:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('risk-indicators.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('risk-indicators.index') }}" @if (request()->routeIs('risk-indicators.*')) aria-current="page" @endif>Risk Indicators</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">

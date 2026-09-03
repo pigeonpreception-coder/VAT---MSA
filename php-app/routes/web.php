@@ -29,6 +29,7 @@ use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
+use App\Http\Controllers\Compliance\RiskViewController;
 use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\Refund\RefundViewController;
@@ -108,6 +109,19 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/refunds/{id}', [RefundViewController::class, 'show'])->name('refunds.show');
     Route::post('/refunds/{id}/transition', [RefundViewController::class, 'storeTransition'])->name('refunds.transition.store');
     Route::post('/refunds/{id}/dispute', [RefundViewController::class, 'storeDispute'])->name('refunds.dispute.store');
+
+    // Real Blade UI for Module 4 Phases A-B (risk indicators), alongside
+    // the JSON API surface below -- see RiskViewController's own doc
+    // comment. Deliberately NOT taxpayer-visible at all (matching
+    // RiskService::restricted()'s own doc comment: risk indicators carry
+    // a NamRA-restricted classification), so unlike every other module
+    // built so far there is no taxpayer-facing counterpart to any of
+    // this -- purely an officer-facing screen.
+    Route::get('/risk-indicators', [RiskViewController::class, 'index'])->name('risk-indicators.index');
+    Route::get('/risk-indicators/{id}', [RiskViewController::class, 'show'])->name('risk-indicators.show');
+    Route::post('/risk-indicators/evaluation', [RiskViewController::class, 'storeEvaluation'])->name('risk-indicators.evaluation.store');
+    Route::post('/risk-indicators/{id}/assignment', [RiskViewController::class, 'storeAssignment'])->name('risk-indicators.assignment.store');
+    Route::post('/risk-indicators/{id}/decision', [RiskViewController::class, 'storeDecision'])->name('risk-indicators.decision.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
