@@ -52,6 +52,11 @@
                                 <a class="nav-link {{ request()->routeIs('vat-periods.*', 'vat-returns.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT Returns</a>
                             </li>
                         @endcan
+                        @can('permission', 'refunds:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('refunds.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>Refunds</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">

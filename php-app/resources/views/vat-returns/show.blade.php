@@ -129,6 +129,23 @@
             </div>
         @endif
     @endcan
+
+    @can('permission', 'refunds:request')
+        @if ($version['net_payable_cents'] < 0)
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h2 class="h6">Request a refund</h2>
+                        <p class="text-muted small">This return shows a negative net position -- a refund of {{ $money(abs($version['net_payable_cents'])) }} may be claimed against it.</p>
+                        <form method="POST" action="{{ route('vat-returns.refund-request.store', $version['id']) }}">
+                            @csrf
+                            <button type="submit" class="btn btn-primary btn-sm">Request refund</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endif
+    @endcan
 </div>
 
 <div class="card mt-3">

@@ -31,6 +31,7 @@ use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Refund\RefundController;
+use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
@@ -95,6 +96,18 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/vat-returns/{id}/approval-request', [VatLifecycleViewController::class, 'requestApproval'])->name('vat-returns.approval-request.store');
     Route::post('/vat-returns/{id}/submission', [VatLifecycleViewController::class, 'submit'])->name('vat-returns.submission.store');
     Route::post('/approval-tasks/{id}/decision', [VatLifecycleViewController::class, 'decideApproval'])->name('approval-tasks.decision.store');
+    Route::post('/vat-returns/{id}/refund-request', [RefundViewController::class, 'storeRequest'])->name('vat-returns.refund-request.store');
+
+    // Real Blade UI for refund claims, alongside the JSON API surface
+    // below -- see RefundViewController's own doc comment. The JSON API
+    // itself has no list/index endpoint at all (RefundController only
+    // ever exposes store/checks/transition/dispute -- confirmed by
+    // reading it directly), so this list genuinely has no JSON sibling
+    // to stay parallel with; it queries RefundClaim directly instead.
+    Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
+    Route::get('/refunds/{id}', [RefundViewController::class, 'show'])->name('refunds.show');
+    Route::post('/refunds/{id}/transition', [RefundViewController::class, 'storeTransition'])->name('refunds.transition.store');
+    Route::post('/refunds/{id}/dispute', [RefundViewController::class, 'storeDispute'])->name('refunds.dispute.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

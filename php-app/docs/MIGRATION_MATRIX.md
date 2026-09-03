@@ -2141,6 +2141,78 @@ cross-tenant version -- a pre-existing, narrower-than-Invoices privacy
 posture in the backend itself, not something newly introduced by this
 UI). 295 tests total, 0 regressions, run against real MySQL.
 
+### Refund claims module (the fourth UI slice)
+
+Ports the source's own refund-claim screens over `RefundService` (see
+that Phase 11 section above). The natural continuation of the VAT
+Returns slice: a filed return with a negative net position can now
+actually be claimed against, reviewed by an officer (maker-checker,
+same self-review and distinct-reviewer rules as VAT return approval),
+and disputed by the original requester if rejected.
+
+**A genuine gap found while building this, not introduced by it**: no
+application code anywhere ever sets a `vat_return_versions.status` to
+`FILED` -- confirmed by reading the whole codebase
+(`VatLifecycleService::submitReturn` updates the *submission* row's own
+status, never the version's). `RefundService::request()` requires
+`FILED` to reach `RECEIVED`; without it, every refund request is
+honestly reported as `BLOCKED_RETURN_NOT_FILED`, which is exactly what
+this UI's own live verification hit first, and what
+`tests/Feature/Refund/RefundClaimTest.php` already worked around with a
+direct DB write before this slice existed. `RefundViewTest.php` mirrors
+that same workaround rather than pretending it isn't needed. Worth a
+real fix (very plausibly: setting the version's own `status` to
+`FILED` when its ITAS submission reaches `ACKNOWLEDGED`) but that's a
+`VatLifecycleService`/`RefundService` business-logic change, not
+something to guess at while building a UI slice -- flagged here for a
+deliberate follow-up, not silently patched.
+
+New: `App\Http\Controllers\Refund\RefundViewController`. Unlike every
+other module ported so far, the JSON API here has no list/detail
+endpoint at all (`RefundController` only ever exposes
+`store`/`checks`/`transition`/`dispute` -- confirmed by reading it
+directly), so `index()`/`show()` query `RefundClaim` directly rather
+than reusing an existing snapshot, the same way
+`VatLifecycleViewController::periodAdjustments()` queried
+`VatAdjustment` directly where the JSON API's own snapshot didn't cover
+per-period detail. Every write action still reuses `RefundService`
+directly.
+
+Two small, additive backend changes this slice needed and made rather
+than working around: `ComplianceValidator::refundClaimActionsFor()`
+(a new public read-only accessor over the existing private
+`REFUND_CLAIM_TRANSITIONS` state table, so the officer's review
+dropdown only ever offers actions that would actually succeed, without
+duplicating that table into the UI layer and risking drift), and
+`RefundClaimTransition::actor()` (a `belongsTo(User::class, 'actor_id')`
+relation that simply didn't exist yet, needed to show who made each
+transition).
+
+A "Request refund" action was added to the VAT Returns detail page
+(`vat-returns/show.blade.php`), shown whenever a return's net position
+is negative, alongside a "Refunds" nav link.
+
+Verified by a new `tests/Feature/Refund/RefundViewTest.php` (10 tests,
+reusing `RefundClaimTest`'s own makeTradingParty/makeRefundableReturn
+fixture pattern, since a real refund claim genuinely depends on a
+certified-invoice-backed, approved VAT return with a negative net
+position): authentication and `refunds:read` permission gates;
+requesting a refund from the return page creates a real claim
+(`BLOCKED_RETURN_NOT_FILED` against the fixture as-is, `RECEIVED` once
+marked `FILED`); the list renders with a working link; a cross-tenant
+claim 404s; the detail page shows all 9 real eligibility checks and
+only the actions actually valid for the claim's current status;
+self-review is caught and shown as a friendly form error, not the
+RT-002 clean-403 page; an officer can reject a claim and the original
+requester can then dispute it; a duplicate refund request shows a
+friendly form error, not a raw JSON body. 305 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser: a real certified invoice, an approved and filed return
+with a genuine -15000 cent position, a submitted claim showing all 9
+checks with real rationale text, and an officer approving it with the
+transition history correctly recording the real actor, timestamp, and
+findings.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
