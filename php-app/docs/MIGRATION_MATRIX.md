@@ -1955,13 +1955,14 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds and the portal switchboard closed out further below):
-accounting, business parties, quotations, expenses, inventory, projects,
-licensing, the six per-portal dashboards (buyer/seller/namra/namra-admin/
-super-admin/developer -- the switchboard that lists them is done, each
-dashboard behind it is not), documents, reports, analytics, platform
-config, the workflow engine -- each its own comparable slice of this new
-initiative.
+cases, refunds, the portal switchboard and the Buyer portal dashboard
+closed out further below): accounting, business parties, quotations,
+expenses (each as their own standalone screen -- the Buyer portal
+dashboard surfaces expenses read-only, not a replacement for a dedicated
+expenses module UI), inventory, projects, licensing, the remaining five
+per-portal dashboards (seller/namra/namra-admin/super-admin/developer),
+documents, reports, analytics, platform config, the workflow engine --
+each its own comparable slice of this new initiative.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
 
@@ -2236,6 +2237,72 @@ behaviour), a clean `npm run build`, and a live HTTP session (PILOT_ADMIN,
 screenshots of `/portals`, `/dashboard` and `/cases`) confirming the navy
 navbar, teal buttons/links, and corrected status colours render
 consistently across every screen this initiative has shipped so far.
+
+### Buyer portal dashboard (the first of six)
+
+Ports the source's own `app/portal/buyer/page.tsx` -- the first of the
+six per-portal dashboards `PortalViewController`'s own doc comment
+tracked as not-yet-built. Deliberately scoped to exactly what this one
+page reads, not a port of `getBusinessPlatformSnapshot`'s full 12-query
+aggregate (parties/products/quotations/accounts/journals/expenses/
+balances/projects/imports/categories/warehouses) -- every one of those
+sub-reads already has its own dedicated, already-ported controller from
+earlier phases; porting the whole mega-snapshot here for a page that
+renders only `expenses` and `metrics.expense_value_cents` would
+duplicate all of them for zero UI consumer.
+
+New: `App\Services\Portal\BuyerPortalSnapshotService::snapshot()` --
+a page-specific composing service (the same role `DashboardSnapshotService`
+already plays for the main dashboard) that runs one new join query
+(`expenses` + `expense_categories` + `business_parties`, matching the
+source's own JOIN shape exactly) and otherwise reuses two already-ported
+services directly rather than re-querying: `App\Services\VatLifecycle\
+VatLifecycleService::snapshot()` for `vat.periods`/`vat.reconciliation`
+(this service already ports `getVatLifecycleSnapshot` in full -- Phase
+9's VAT-return-generation prerequisite) and `App\Services\Platform\
+PlatformSnapshotService::documentCustodySummary()` for
+`documents.quarantined` (already ported in the platform snapshot slice).
+`App\Http\Controllers\Portal\BuyerPortalController` (`GET /portal/buyer`,
+named `portal.buyer`) gates on `dashboard:read` (`PORTAL_PERMISSIONS.buyer`
+in the source) plus membership in `PortalService::getAvailablePortals()`
+-- reusing that computation rather than re-deriving the role/Buyer-
+capability check, so an actor who cannot see the Buyer card on the
+switchboard is refused this page too, thrown as a real
+`AuthorizationException` (not a bare `abort()`) so it renders through
+this app's own `errors/403.blade.php`, matching every other authorization
+denial in this port. The source's own further `requireLicensedPermission`
+entitlement/license check is not reproduced -- the same
+`dashboard:read`-alone precedent `DashboardController`'s own doc comment
+already established, and genuinely faithful: the source's own
+`BuyerPortalPage` calls `getVatLifecycleSnapshot`/`getBusinessPlatformSnapshot`
+directly after the portal gate passes, with no further per-field
+`returns:read`/`expenses:read` check -- reproduced exactly, not tightened
+into a stricter gate the source doesn't have (`BUYER_USER`, a legitimate
+buyer-portal role, holds `expenses:read` but not `returns:read`).
+
+`resources/views/portals/index.blade.php`'s "Open Buyer" button now
+links to `route('portal.buyer')` instead of the `route('dashboard')`
+fallback every other card still carries -- the first of the six to get
+its real destination.
+
+Verified by a new `tests/Feature/Portal/BuyerPortalTest.php` (5 tests,
+reusing `ExpenseTest`'s own "create/submit/approve via the real command
+chain" convention and `PortalViewTest`'s own capability-fixture
+convention): authentication is required; a role absent from the Buyer
+portal's list (`NAMRA_AUDITOR`) is denied; a taxpayer owner whose
+organisation holds no `BUYER` capability is denied even though
+`TAXPAYER_OWNER` is on the role list; a real approved expense (with its
+category, "Unassigned" supplier fallback, tax/total amounts) and a real
+VAT return version's `input_tax_cents` both render correctly with
+accessible table markup; and the page is scoped to the actor's own
+organisation. 283 tests total, 0 new regressions (the same 28
+pre-existing invoice-certification-dependent failures noted in the
+compliance/audit-cases/refunds section above), run against real
+MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
+visually over a real HTTP session (the demo `owner@demo-trading.test`
+actor, a real approved expense, screenshot + rendered-text inspection,
+plus clicking "Open Buyer" from the switchboard end to end to confirm
+the link actually resolves).
 
 ## Legacy D1 importer (Phase 14)
 

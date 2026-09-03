@@ -43,6 +43,7 @@ use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
+use App\Http\Controllers\Portal\BuyerPortalController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\VatRule\VatRuleController;
@@ -98,6 +99,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.
     Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
+
+    // The first of the six per-portal dashboards the switchboard above
+    // links to -- see BuyerPortalController's own doc comment. URL kept
+    // 1:1 with the source's own app/portal/buyer/page.tsx path and with
+    // PortalDefinitions::all()'s own 'buyer' href.
+    Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
