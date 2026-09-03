@@ -19,6 +19,7 @@ use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
+use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
@@ -101,6 +102,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/cases', [AuditCaseViewController::class, 'index'])->name('cases.index');
     Route::get('/compliance', [ComplianceViewController::class, 'index'])->name('compliance.index');
     Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
+
+    // Real Blade UI for the customer/supplier directory -- ported from the
+    // source's own app/commercial/parties/page.tsx + PartyManager.tsx, the
+    // first slice in this migration's frontend build-out with a genuine
+    // write form. See BusinessPartyViewController's own doc comment for
+    // what it reuses and what it deliberately omits.
+    Route::get('/parties', [BusinessPartyViewController::class, 'index'])->name('parties.index');
+    Route::post('/parties', [BusinessPartyViewController::class, 'store'])->name('parties.store');
+    Route::patch('/parties/{id}', [BusinessPartyViewController::class, 'update'])->name('parties.update');
+    Route::post('/parties/{id}/deactivation', [BusinessPartyViewController::class, 'deactivate'])->name('parties.deactivate');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.

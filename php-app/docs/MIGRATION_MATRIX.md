@@ -1955,13 +1955,13 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 `migrate:fresh --seed` cycle.
 
 Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard, and all six portal dashboards --
+cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
--- closed out further below): accounting, business parties, quotations,
-expenses (each as their own standalone screen -- the Buyer/Seller portal
-dashboards surface expenses/quotations read-only, not a replacement for
-a dedicated module UI), inventory, projects, licensing, documents,
-reports, analytics,
+-- and business parties closed out further below): accounting,
+quotations, expenses (each as their own standalone screen -- the
+Buyer/Seller portal dashboards surface expenses/quotations read-only,
+not a replacement for a dedicated module UI), inventory, projects,
+licensing, documents, reports, analytics,
 platform config, the workflow engine --
 each its own comparable slice of this new initiative.
 
@@ -2705,6 +2705,76 @@ themselves: accounting, business parties, quotations, expenses,
 inventory, projects, licensing, documents, reports, analytics, platform
 config, and the workflow engine, each its own comparable slice --
 see the "Frontend UI build-out" section's own running list above.
+
+### Business parties (customers & suppliers directory, closes out the first slice outside the portals)
+
+Ports the source's own `app/commercial/parties/page.tsx` +
+`PartyManager.tsx` -- the shared customer/supplier register. New:
+`App\Http\Controllers\Business\BusinessPartyViewController` (`index`/
+`store`/`update`/`deactivate`) and `resources/views/parties/index.blade.php`,
+reusing `App\Services\Business\BusinessPartyService` directly -- the
+same `search`/`create`/`update`/`deactivate` methods
+`App\Http\Controllers\Business\BusinessPartyController` already serves
+at `/api/v1/business-parties`, not a second query or command path.
+`parties:manage` gates the page, matching the source's own gate for
+this screen; the nav link (`Customers & suppliers`) is likewise
+`@can`-gated.
+
+This is the first screen in the whole frontend build-out initiative
+with a genuine write form rather than a read-only dashboard: create and
+edit share one server-rendered Blade `<form>` (edit reached via
+`?edit={id}`, since `BusinessPartyService::update` shares the same
+`BusinessValidator::party` validator `create` uses and requires the
+party still be `ACTIVE`), plus a small per-row deactivate form
+collecting the required 5-500 character reason. Unlike the source's
+own client-side `fetch()`-driven `PartyManager`, this is a traditional
+POST + redirect flow, matching every other write path already built in
+this migration (Blade/session-driven, not a client-rendered SPA
+fragment). `BusinessValidationException`/`BusinessResourceException`/
+`RepositoryConflictException` all render JSON-only by default (their
+own `render()` methods), so the view controller catches each explicitly
+and converts it to `redirect()->back()->withErrors(...)->withInput()`
+rather than letting a web-form POST hit a raw JSON error body. The
+source's own `/api/v1/business-parties/**` writes carry no step-up
+(`password.confirm`) gate, so neither does this form.
+
+Two deliberate, documented omissions, both because the data they'd need
+isn't produced by `BusinessPartyService::search`/`present` at all (and
+adding it would mean a second, wider query path serving this screen
+alone, which this migration's own "no second query path" rule rejects):
+the source's "Trust" column/metric (a join against supplier-verification
+snapshots) is not rendered here, and the source's "Synthetic check"
+action (`App\Services\Business\SupplierVerificationService::verify`,
+already ported in full and reachable at
+`POST /api/v1/business-parties/{id}/verification` -- see "Supplier
+verification" above) has no UI on this screen yet. Both are tracked
+here, not silently dropped.
+
+Verified by a new `tests/Feature/Business/BusinessPartyViewTest.php`
+(10 tests): the page requires authentication; a role without
+`parties:manage` (`SELLER_VIEWER`) is denied `403`; the register and
+create form render with accessible table markup; a party can be
+created through the form (with the audit-event side effect verified);
+creating a party with no relationship selected fails validation and
+redisplays the form with its input preserved, writing nothing; a
+duplicate VAT number surfaces as a form error rather than a raw 500; the
+edit form is correctly prefilled from `?edit={id}`; an active party can
+be updated (including its relationship set) through the form; a party
+can be deactivated with a reason (status flips to `INACTIVE`, the audit
+event is recorded, the record itself is never deleted); and deactivating
+with too short a reason fails validation without changing the party's
+status. 348 tests total (319 passing), 0 new regressions (the same 29
+pre-existing `bcmath`-caused failures noted in the Seller portal section
+above), run against real MySQL/MariaDB, plus a clean
+`migrate:fresh --seed` cycle. Also verified visually over a real HTTP
+session end to end as `owner@demo-trading.test`: the empty register,
+creating a supplier party (metrics update from 0 to 1 active/1
+supplier), opening its edit form pre-filled with its saved data, saving
+an edited legal name, deactivating it with a reason (status badge flips
+to grey "Inactive", the Edit action remains, Deactivate disappears, and
+the metrics drop back to 0), and a rejected submission (missing
+relationship) redisplaying the form with its accessible error summary
+and the entered display name preserved.
 
 ## Legacy D1 importer (Phase 14)
 

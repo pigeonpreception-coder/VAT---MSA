@@ -47,6 +47,11 @@
                                 <a class="nav-link" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>Refunds</a>
                             </li>
                         @endcan
+                        @can('permission', 'parties:manage')
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ route('parties.index') }}" @if (request()->routeIs('parties.*')) aria-current="page" @endif>Customers &amp; suppliers</a>
+                            </li>
+                        @endcan
                     </ul>
                     <span class="navbar-text text-white-50 me-3">
                         {{ auth()->user()->name }}
