@@ -23,15 +23,19 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
 use App\Http\Controllers\Compliance\RiskController;
+use App\Http\Controllers\Compliance\RiskViewController;
 use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Refund\RefundController;
+use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
+use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
@@ -79,6 +83,63 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // ambiguity: this is a genuinely different URL (no api/v1 prefix).
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
+
+    // Real Blade UI for the VAT returns lifecycle, alongside the JSON API
+    // surface below -- see VatLifecycleViewController's own doc comment.
+    // Unlike invoices (read-only so far), this slice includes real write
+    // actions (generate/adjust/approve/submit), each a plain POST->redirect
+    // form reusing App\Services\VatLifecycle\VatLifecycleService directly,
+    // the same service the JSON API controller calls.
+    Route::get('/vat-periods', [VatLifecycleViewController::class, 'index'])->name('vat-periods.index');
+    Route::get('/vat-periods/{id}', [VatLifecycleViewController::class, 'show'])->name('vat-periods.show');
+    Route::post('/vat-periods/{id}/adjustments', [VatLifecycleViewController::class, 'storeAdjustment'])->name('vat-periods.adjustments.store');
+    Route::post('/vat-periods/{id}/return', [VatLifecycleViewController::class, 'storeReturn'])->name('vat-periods.return.store');
+    Route::get('/vat-returns/{id}', [VatLifecycleViewController::class, 'showReturn'])->name('vat-returns.show');
+    Route::post('/vat-returns/{id}/approval-request', [VatLifecycleViewController::class, 'requestApproval'])->name('vat-returns.approval-request.store');
+    Route::post('/vat-returns/{id}/submission', [VatLifecycleViewController::class, 'submit'])->name('vat-returns.submission.store');
+    Route::post('/approval-tasks/{id}/decision', [VatLifecycleViewController::class, 'decideApproval'])->name('approval-tasks.decision.store');
+    Route::post('/vat-returns/{id}/refund-request', [RefundViewController::class, 'storeRequest'])->name('vat-returns.refund-request.store');
+
+    // Real Blade UI for refund claims, alongside the JSON API surface
+    // below -- see RefundViewController's own doc comment. The JSON API
+    // itself has no list/index endpoint at all (RefundController only
+    // ever exposes store/checks/transition/dispute -- confirmed by
+    // reading it directly), so this list genuinely has no JSON sibling
+    // to stay parallel with; it queries RefundClaim directly instead.
+    Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
+    Route::get('/refunds/{id}', [RefundViewController::class, 'show'])->name('refunds.show');
+    Route::post('/refunds/{id}/transition', [RefundViewController::class, 'storeTransition'])->name('refunds.transition.store');
+    Route::post('/refunds/{id}/dispute', [RefundViewController::class, 'storeDispute'])->name('refunds.dispute.store');
+
+    // Real Blade UI for Module 4 Phases A-B (risk indicators), alongside
+    // the JSON API surface below -- see RiskViewController's own doc
+    // comment. Deliberately NOT taxpayer-visible at all (matching
+    // RiskService::restricted()'s own doc comment: risk indicators carry
+    // a NamRA-restricted classification), so unlike every other module
+    // built so far there is no taxpayer-facing counterpart to any of
+    // this -- purely an officer-facing screen.
+    Route::get('/risk-indicators', [RiskViewController::class, 'index'])->name('risk-indicators.index');
+    Route::get('/risk-indicators/{id}', [RiskViewController::class, 'show'])->name('risk-indicators.show');
+    Route::post('/risk-indicators/evaluation', [RiskViewController::class, 'storeEvaluation'])->name('risk-indicators.evaluation.store');
+    Route::post('/risk-indicators/{id}/assignment', [RiskViewController::class, 'storeAssignment'])->name('risk-indicators.assignment.store');
+    Route::post('/risk-indicators/{id}/decision', [RiskViewController::class, 'storeDecision'])->name('risk-indicators.decision.store');
+
+    // Real Blade UI for Module 4 Phases C-D (audit cases), alongside the
+    // JSON API surface below -- see AuditCaseViewController's own doc
+    // comment. Unlike risk indicators, audit cases (once opened) ARE
+    // taxpayer-visible read-only (AuditCaseService::timeline()/evidence()/
+    // notes() each explicitly allow the case's own taxpayer, not just
+    // national-scope actors) -- this UI reflects that: every write action
+    // is officer-only, but the detail page itself is reachable by the
+    // taxpayer the case is about.
+    Route::get('/audit-cases', [AuditCaseViewController::class, 'index'])->name('audit-cases.index');
+    Route::get('/audit-cases/{id}', [AuditCaseViewController::class, 'show'])->name('audit-cases.show');
+    Route::post('/audit-cases', [AuditCaseViewController::class, 'store'])->name('audit-cases.store');
+    Route::post('/audit-cases/{id}/transition', [AuditCaseViewController::class, 'storeTransition'])->name('audit-cases.transition.store');
+    Route::post('/audit-cases/{id}/findings', [AuditCaseViewController::class, 'storeFinding'])->name('audit-cases.findings.store');
+    Route::post('/audit-cases/{id}/evidence', [AuditCaseViewController::class, 'storeEvidence'])->name('audit-cases.evidence.store');
+    Route::post('/audit-evidence/{id}/custody-events', [AuditCaseViewController::class, 'storeEvidenceCustodyEvent'])->name('audit-evidence.custody-events.store');
+    Route::post('/audit-cases/{id}/notes', [AuditCaseViewController::class, 'storeNote'])->name('audit-cases.notes.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

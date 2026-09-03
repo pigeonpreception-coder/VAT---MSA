@@ -2074,6 +2074,301 @@ session per the accessibility section above. 265 tests total, 0
 regressions, run against real MySQL, plus a clean `migrate:fresh --seed`
 cycle.
 
+### VAT returns & periods module (the third UI slice, and the first with real write actions)
+
+Ports the source's own VAT-return-lifecycle screens over
+`VatLifecycleService` (see that Phase 9/11 section above) -- unlike
+Dashboard and Invoices (read-only so far), this slice is genuinely
+interactive: generate a return, submit a VAT adjustment, request
+approval, decide it (maker-checker), and submit to ITAS, all as real
+POST-and-redirect Blade forms.
+
+New: `App\Http\Controllers\VatLifecycle\VatLifecycleViewController`,
+reusing `VatLifecycleService` directly -- the exact same service
+instance the JSON `VatLifecycleController` already calls, so behaviour,
+validation and the audit trail are identical regardless of which
+surface triggered a command. Routes (`GET /vat-periods`, `GET
+/vat-periods/{id}`, `GET /vat-returns/{id}`, plus five POST write
+routes), registered outside the `api/v1` prefix, matching the Invoices
+slice's own precedent. Three views: `vat-periods/index.blade.php`
+(periods table with search/status filter, plus pending-approvals/
+recent-submissions/ITAS-provider-status side panels),
+`vat-periods/show.blade.php` (period record, latest return summary,
+full adjustment history with an inline "submit a new adjustment" form
+and a "pending adjustment approvals" decide-inline section),
+`vat-returns/show.blade.php` (the four computed boxes, approval
+history, adjustments, submission history, and status-gated action
+cards for request-approval/decide/submit-to-ITAS).
+
+Each Blade form submission generates its own fresh idempotency key
+(`Str::uuid()`) rather than reading an `Idempotency-Key` header the way
+the JSON API does -- a real browser form POST is inherently a *new*
+user-initiated attempt each time, not a client retrying a prior request
+with the same key. Domain exceptions that already have their own clean
+`render()` (`VatLifecycleValidationException`,
+`VatLifecycleResourceException`, `RepositoryConflictException`, and
+`AuthorizationException` for the maker-checker self-approval case) are
+deliberately caught inline in each write action and turned into a
+normal `back()->withErrors(...)` redirect, rather than being let
+through to the global handler -- that would show a raw JSON body on
+what is otherwise a normal web form. The status-badge component
+(`resources/views/components/status-badge.blade.php`) gained mappings
+for every new status this module introduces (`OPEN`/`LOCKED`,
+`DRAFT`/`SUPERSEDED`, `AWAITING_PROVIDER`/`FILED`,
+`ACKNOWLEDGED`/`REJECTED_BY_PROVIDER`/`BLOCKED_CONFIGURATION`), all
+reusing the same six already-WCAG-AA-verified Bootstrap `text-bg-*`
+classes -- no new contrast check needed.
+
+Verified by a new `tests/Feature/VatLifecycle/VatLifecycleViewTest.php`
+(11 tests, reusing `VatReturnLifecycleTest`'s own
+makeTradingParty/invoicePayload/certifyInvoice/openPeriod fixture
+pattern, since a real return position genuinely depends on certified-
+invoice ledger entries): authentication and `returns:read` permission
+gates; the periods list renders with a working link; a cross-tenant
+period 404s; generating a return from the period page creates a real
+draft and redirects to it; a permitted user can submit an adjustment
+(and an invalid one is rejected with field-level errors and creates no
+row); requesting approval moves a return to `PENDING_APPROVAL`; a
+same-user self-approval attempt is caught and shown as a friendly form
+error, *not* the RT-002 clean-403 error page (that page is reserved for
+authorization failures the controller doesn't expect and catch itself);
+a different user (a `PILOT_ADMIN`) can approve, which locks the period;
+submitting an approved return records a real `vat_return_submissions`
+row; and a cross-tenant return version correctly gets the RT-002
+clean-403 page (matching the JSON API's own behaviour for that specific
+method, which throws `AuthorizationException`, not a 404, for a
+cross-tenant version -- a pre-existing, narrower-than-Invoices privacy
+posture in the backend itself, not something newly introduced by this
+UI). 295 tests total, 0 regressions, run against real MySQL.
+
+### Refund claims module (the fourth UI slice)
+
+Ports the source's own refund-claim screens over `RefundService` (see
+that Phase 11 section above). The natural continuation of the VAT
+Returns slice: a filed return with a negative net position can now
+actually be claimed against, reviewed by an officer (maker-checker,
+same self-review and distinct-reviewer rules as VAT return approval),
+and disputed by the original requester if rejected.
+
+**A genuine gap found while building this, not introduced by it**: no
+application code anywhere ever sets a `vat_return_versions.status` to
+`FILED` -- confirmed by reading the whole codebase
+(`VatLifecycleService::submitReturn` updates the *submission* row's own
+status, never the version's). `RefundService::request()` requires
+`FILED` to reach `RECEIVED`; without it, every refund request is
+honestly reported as `BLOCKED_RETURN_NOT_FILED`, which is exactly what
+this UI's own live verification hit first, and what
+`tests/Feature/Refund/RefundClaimTest.php` already worked around with a
+direct DB write before this slice existed. `RefundViewTest.php` mirrors
+that same workaround rather than pretending it isn't needed. Worth a
+real fix (very plausibly: setting the version's own `status` to
+`FILED` when its ITAS submission reaches `ACKNOWLEDGED`) but that's a
+`VatLifecycleService`/`RefundService` business-logic change, not
+something to guess at while building a UI slice -- flagged here for a
+deliberate follow-up, not silently patched.
+
+New: `App\Http\Controllers\Refund\RefundViewController`. Unlike every
+other module ported so far, the JSON API here has no list/detail
+endpoint at all (`RefundController` only ever exposes
+`store`/`checks`/`transition`/`dispute` -- confirmed by reading it
+directly), so `index()`/`show()` query `RefundClaim` directly rather
+than reusing an existing snapshot, the same way
+`VatLifecycleViewController::periodAdjustments()` queried
+`VatAdjustment` directly where the JSON API's own snapshot didn't cover
+per-period detail. Every write action still reuses `RefundService`
+directly.
+
+Two small, additive backend changes this slice needed and made rather
+than working around: `ComplianceValidator::refundClaimActionsFor()`
+(a new public read-only accessor over the existing private
+`REFUND_CLAIM_TRANSITIONS` state table, so the officer's review
+dropdown only ever offers actions that would actually succeed, without
+duplicating that table into the UI layer and risking drift), and
+`RefundClaimTransition::actor()` (a `belongsTo(User::class, 'actor_id')`
+relation that simply didn't exist yet, needed to show who made each
+transition).
+
+A "Request refund" action was added to the VAT Returns detail page
+(`vat-returns/show.blade.php`), shown whenever a return's net position
+is negative, alongside a "Refunds" nav link.
+
+Verified by a new `tests/Feature/Refund/RefundViewTest.php` (10 tests,
+reusing `RefundClaimTest`'s own makeTradingParty/makeRefundableReturn
+fixture pattern, since a real refund claim genuinely depends on a
+certified-invoice-backed, approved VAT return with a negative net
+position): authentication and `refunds:read` permission gates;
+requesting a refund from the return page creates a real claim
+(`BLOCKED_RETURN_NOT_FILED` against the fixture as-is, `RECEIVED` once
+marked `FILED`); the list renders with a working link; a cross-tenant
+claim 404s; the detail page shows all 9 real eligibility checks and
+only the actions actually valid for the claim's current status;
+self-review is caught and shown as a friendly form error, not the
+RT-002 clean-403 page; an officer can reject a claim and the original
+requester can then dispute it; a duplicate refund request shows a
+friendly form error, not a raw JSON body. 305 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser: a real certified invoice, an approved and filed return
+with a genuine -15000 cent position, a submitted claim showing all 9
+checks with real rationale text, and an officer approving it with the
+transition history correctly recording the real actor, timestamp, and
+findings.
+
+### Risk indicators module (the fifth UI slice, Module 4 Phases A-B)
+
+Ports the source's own risk-indicator screens over `RiskService`.
+Unlike every module built so far, there is **no taxpayer-facing
+counterpart to any of this at all** -- `RiskService::restricted()`
+itself documents risk indicators as carrying a NamRA-restricted
+classification, never taxpayer-visible; this UI is purely officer-
+facing, and `risk:read`/`risk:review` are held only by national-scope
+roles in this app's RBAC.
+
+New: `App\Http\Controllers\Compliance\RiskViewController`. Unlike
+Refunds (no JSON list endpoint at all) or VAT Returns (a snapshot
+covering everything), Risk Indicators' JSON API already has a real,
+filterable, paginated list (`RiskService::restricted()`), so
+`index()`/`show()` reuse it directly rather than querying
+`RiskIndicator` from scratch -- the first module UI in this build-out
+with genuine server-side pagination (Prev/Next controls over
+limit/offset) rather than the client-side JS filtering every read-only
+list so far has used, since this list can genuinely be large and
+`restricted()` already paginates it properly.
+
+A small "Evaluate a taxpayer" form (VAT number -> resolved to a
+taxpayer server-side) triggers `RiskService::evaluate()` on demand,
+redirecting to the list pre-filtered to that taxpayer so newly raised
+or refreshed indicators are immediately visible. The indicator detail
+page carries the assign-review and dismiss/escalate decision forms,
+gated to `risk:review` (read-only officers, who hold `risk:read` but
+not `risk:review`, see the record but no action forms) -- escalating
+shows the real, newly created audit case's own case number once
+created, a forward reference to the still-unbuilt Audit Cases UI
+(Module 4 Phases C-D, the larger remaining half of Module 4, left for
+a subsequent slice).
+
+One additive, non-colliding change to `<x-status-badge>`: a new
+`type="indicator"` map, kept separate from the general `type="status"`
+map on purpose -- `'OPEN'` means something genuinely different for a
+risk indicator (an unaddressed signal, needs attention) than for a VAT
+period (a normal, healthy state); sharing one badge colour across both
+contexts for the same string would have misled whichever context it
+didn't fit. Reuses the same four already-WCAG-AA-verified Bootstrap
+`text-bg-*` classes, no new contrast check needed.
+
+Verified by a new `tests/Feature/Compliance/RiskViewTest.php` (8 tests,
+reusing `ComplianceCaseTest`'s own makeTaxpayer/namraAuditor/
+TaxObligation fixture pattern, since a real indicator genuinely depends
+on live evidence the rule catalogue reads, not a fixture inserted
+directly): authentication and the never-taxpayer-visible rule (a
+taxpayer owner gets a real 403, not just a hidden nav item); evaluating
+a taxpayer with a genuine overdue obligation raises a real
+`OBLIGATION_OVERDUE` indicator and redirects to the pre-filtered list;
+an unknown VAT number shows a friendly form error; the list's
+status/severity filters work; a decision cannot be recorded before a
+review is assigned; the full assign -> escalate flow creates a real,
+traceable `audit_cases` row; and a read-only officer sees the record
+with no action forms and is correctly forbidden from evaluating.
+313 tests total, 0 regressions, run against real MySQL. Also verified
+live end-to-end in the browser: a real overdue obligation, an
+evaluation that raised a genuine `OBLIGATION_OVERDUE` indicator
+(severity High, score 65%), assigning review to self, and escalating
+to a real audit case with the real case number shown on the page
+afterward -- including confirming the decision form's dismiss/escalate
+toggle (a small vanilla-JS show/hide of the case-type/case-title
+fields) genuinely fires, not just that the markup for both states
+exists.
+
+### Audit cases module (the sixth UI slice, Module 4 Phases C-D)
+
+Ports the source's own audit-case screens over `AuditCaseService` --
+the larger remaining half of Module 4, closing it out. By far the
+largest single service any UI slice in this build-out has sat on top
+of (620 lines: open a case, the full 11-status lifecycle transition,
+findings, evidence with custody/legal-hold/integrity-verification, and
+append-only notes) -- built as one slice rather than split further,
+since the detail page's whole point is showing all of it together.
+
+Unlike Risk Indicators (never taxpayer-visible at all), an audit case
+once opened **is** taxpayer-visible read-only --
+`AuditCaseService::timeline()`/`evidence()`/`notes()` each explicitly
+allow the case's own taxpayer, not just a national-scope actor (and
+throw the same `AuthorizationException` -- the RT-002 clean-403 page --
+for any other out-of-scope actor). Every write action stays
+officer-only (`cases:manage`, `cases:override-sod` for the
+segregation-of-duties override), enforced both in the controller and
+independently inside the service.
+
+New: `App\Http\Controllers\Compliance\AuditCaseViewController`. No
+`AuditFinding` read method exists on the service at all (only
+`issueFinding`, a write) -- confirmed by reading
+`AuditCaseController` directly, the same gap Refunds' missing list
+endpoint had; `show()` queries `AuditFinding` directly, the same
+precedent `RefundViewController` and `VatLifecycleViewController`
+already established. Actor display names (who transitioned/found/
+added/authored what) are resolved via one bulk `User::whereIn()`
+lookup in `show()`, a deliberate choice over adding an `actor()`/
+`author()` relation to five different models (`AuditCaseTransition`,
+`AuditFinding`, `AuditEvidence`, `AuditEvidenceCustodyEvent`,
+`AuditCaseNote`) the way `RefundClaimTransition` got one for a single
+relation -- five near-identical relations for one page's display need
+felt like more surface than the alternative.
+
+One additive, non-duplicating change to `ComplianceValidator`:
+`caseActionsFor()`, a public read-only accessor over the existing
+private `CASE_TRANSITIONS` state table (mirroring
+`refundClaimActionsFor()`'s identical rationale from the Refunds
+slice), so the officer's decision dropdown only ever offers actions
+that would actually succeed from the case's current status, without
+duplicating that table into the UI layer and risking drift from
+`assertCaseTransition()`'s own authoritative enforcement of it.
+`<x-status-badge>` gained mappings for every new case/finding/evidence
+status this module introduces (`PROPOSED`/`AUTHORIZED`/`ASSIGNED`/
+`PLANNING`/`EVIDENCE_COLLECTION`/`ANALYSIS`/`FINDINGS_REVIEW`/
+`PRELIMINARY`, `TAXPAYER_RESPONSE`/`DECISION`/`SUSPENDED`,
+`PRESERVED`), all reusing the same already-WCAG-AA-verified Bootstrap
+classes.
+
+Evidence citation deliberately takes a plain source-resource-ID text
+field rather than a real search/autocomplete picker over invoices,
+VAT returns, or Module 22's quarantine-scanned documents -- building
+three separate resource pickers was judged out of scope for this
+slice; an officer citing evidence today already has the ID from
+wherever the source itself was found (e.g. copied from the Invoice
+detail page's own URL), matching how `RefundViewController`'s evidence
+citations already work at the JSON-API layer this UI sits on top of.
+
+Verified by a new `tests/Feature/Compliance/AuditCaseViewTest.php` (12
+tests, reusing `ComplianceCaseTest`'s own makeTaxpayer/namraAuditor/
+namraSupervisor/openCase/advanceCaseTo fixture pattern, since a real
+case lifecycle genuinely depends on `AuditCaseService`'s own state
+machine and segregation-of-duties enforcement, not fixtures inserted
+directly): authentication and `compliance:read`/`cases:manage`
+permission gates (a taxpayer is correctly forbidden from opening a
+case); the list renders and filters by status; the detail page's
+decision dropdown shows only the actions valid at each real lifecycle
+step (PROPOSED -> AUTHORIZED -> ASSIGNED, confirmed by advancing a
+real case, not asserted from the state table alone); a case with no
+findings cannot be closed and shows a friendly form error, not a raw
+409; issuing a finding and closing both correctly deny the case's own
+opener with a friendly error even when they supply an override reason
+(they lack `cases:override-sod`), then succeed cleanly for a distinct
+supervisor; citing evidence and recording a legal-hold custody event
+persists and updates the real row; adding a note persists and renders;
+a taxpayer can view their own case read-only (sees no decision form)
+but is forbidden from transitioning it; and a cross-tenant taxpayer
+gets the RT-002 clean-403 page, not a 404 (matching the service's own
+`AuthorizationException`-not-404 behaviour here, the same
+narrower-than-Invoices posture already noted for VAT Returns).
+325 tests total, 0 regressions, run against real MySQL. Also verified
+live end-to-end in the browser, continuing the exact case Risk
+Indicators' own live verification escalated (CASE-2026-A307145B, from
+that session's real `OBLIGATION_OVERDUE` indicator) -- confirming the
+whole cross-module story genuinely works, not just each slice in
+isolation: Authorize, Assign (with the officer-field JS toggle firing),
+citing evidence (with its auto-logged ADDED custody event and correct
+truncated-checksum display), and adding a note, each producing a real
+row and rendering correctly afterward.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
