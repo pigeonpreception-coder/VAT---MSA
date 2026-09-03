@@ -2278,6 +2278,97 @@ toggle (a small vanilla-JS show/hide of the case-type/case-title
 fields) genuinely fires, not just that the markup for both states
 exists.
 
+### Audit cases module (the sixth UI slice, Module 4 Phases C-D)
+
+Ports the source's own audit-case screens over `AuditCaseService` --
+the larger remaining half of Module 4, closing it out. By far the
+largest single service any UI slice in this build-out has sat on top
+of (620 lines: open a case, the full 11-status lifecycle transition,
+findings, evidence with custody/legal-hold/integrity-verification, and
+append-only notes) -- built as one slice rather than split further,
+since the detail page's whole point is showing all of it together.
+
+Unlike Risk Indicators (never taxpayer-visible at all), an audit case
+once opened **is** taxpayer-visible read-only --
+`AuditCaseService::timeline()`/`evidence()`/`notes()` each explicitly
+allow the case's own taxpayer, not just a national-scope actor (and
+throw the same `AuthorizationException` -- the RT-002 clean-403 page --
+for any other out-of-scope actor). Every write action stays
+officer-only (`cases:manage`, `cases:override-sod` for the
+segregation-of-duties override), enforced both in the controller and
+independently inside the service.
+
+New: `App\Http\Controllers\Compliance\AuditCaseViewController`. No
+`AuditFinding` read method exists on the service at all (only
+`issueFinding`, a write) -- confirmed by reading
+`AuditCaseController` directly, the same gap Refunds' missing list
+endpoint had; `show()` queries `AuditFinding` directly, the same
+precedent `RefundViewController` and `VatLifecycleViewController`
+already established. Actor display names (who transitioned/found/
+added/authored what) are resolved via one bulk `User::whereIn()`
+lookup in `show()`, a deliberate choice over adding an `actor()`/
+`author()` relation to five different models (`AuditCaseTransition`,
+`AuditFinding`, `AuditEvidence`, `AuditEvidenceCustodyEvent`,
+`AuditCaseNote`) the way `RefundClaimTransition` got one for a single
+relation -- five near-identical relations for one page's display need
+felt like more surface than the alternative.
+
+One additive, non-duplicating change to `ComplianceValidator`:
+`caseActionsFor()`, a public read-only accessor over the existing
+private `CASE_TRANSITIONS` state table (mirroring
+`refundClaimActionsFor()`'s identical rationale from the Refunds
+slice), so the officer's decision dropdown only ever offers actions
+that would actually succeed from the case's current status, without
+duplicating that table into the UI layer and risking drift from
+`assertCaseTransition()`'s own authoritative enforcement of it.
+`<x-status-badge>` gained mappings for every new case/finding/evidence
+status this module introduces (`PROPOSED`/`AUTHORIZED`/`ASSIGNED`/
+`PLANNING`/`EVIDENCE_COLLECTION`/`ANALYSIS`/`FINDINGS_REVIEW`/
+`PRELIMINARY`, `TAXPAYER_RESPONSE`/`DECISION`/`SUSPENDED`,
+`PRESERVED`), all reusing the same already-WCAG-AA-verified Bootstrap
+classes.
+
+Evidence citation deliberately takes a plain source-resource-ID text
+field rather than a real search/autocomplete picker over invoices,
+VAT returns, or Module 22's quarantine-scanned documents -- building
+three separate resource pickers was judged out of scope for this
+slice; an officer citing evidence today already has the ID from
+wherever the source itself was found (e.g. copied from the Invoice
+detail page's own URL), matching how `RefundViewController`'s evidence
+citations already work at the JSON-API layer this UI sits on top of.
+
+Verified by a new `tests/Feature/Compliance/AuditCaseViewTest.php` (12
+tests, reusing `ComplianceCaseTest`'s own makeTaxpayer/namraAuditor/
+namraSupervisor/openCase/advanceCaseTo fixture pattern, since a real
+case lifecycle genuinely depends on `AuditCaseService`'s own state
+machine and segregation-of-duties enforcement, not fixtures inserted
+directly): authentication and `compliance:read`/`cases:manage`
+permission gates (a taxpayer is correctly forbidden from opening a
+case); the list renders and filters by status; the detail page's
+decision dropdown shows only the actions valid at each real lifecycle
+step (PROPOSED -> AUTHORIZED -> ASSIGNED, confirmed by advancing a
+real case, not asserted from the state table alone); a case with no
+findings cannot be closed and shows a friendly form error, not a raw
+409; issuing a finding and closing both correctly deny the case's own
+opener with a friendly error even when they supply an override reason
+(they lack `cases:override-sod`), then succeed cleanly for a distinct
+supervisor; citing evidence and recording a legal-hold custody event
+persists and updates the real row; adding a note persists and renders;
+a taxpayer can view their own case read-only (sees no decision form)
+but is forbidden from transitioning it; and a cross-tenant taxpayer
+gets the RT-002 clean-403 page, not a 404 (matching the service's own
+`AuthorizationException`-not-404 behaviour here, the same
+narrower-than-Invoices posture already noted for VAT Returns).
+325 tests total, 0 regressions, run against real MySQL. Also verified
+live end-to-end in the browser, continuing the exact case Risk
+Indicators' own live verification escalated (CASE-2026-A307145B, from
+that session's real `OBLIGATION_OVERDUE` indicator) -- confirming the
+whole cross-module story genuinely works, not just each slice in
+isolation: Authorize, Assign (with the officer-field JS toggle firing),
+citing evidence (with its auto-logged ADDED custody event and correct
+truncated-checksum display), and adding a note, each producing a real
+row and rendering correctly afterward.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

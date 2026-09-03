@@ -23,6 +23,7 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Compliance\AuditCaseController;
+use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
@@ -122,6 +123,23 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/risk-indicators/evaluation', [RiskViewController::class, 'storeEvaluation'])->name('risk-indicators.evaluation.store');
     Route::post('/risk-indicators/{id}/assignment', [RiskViewController::class, 'storeAssignment'])->name('risk-indicators.assignment.store');
     Route::post('/risk-indicators/{id}/decision', [RiskViewController::class, 'storeDecision'])->name('risk-indicators.decision.store');
+
+    // Real Blade UI for Module 4 Phases C-D (audit cases), alongside the
+    // JSON API surface below -- see AuditCaseViewController's own doc
+    // comment. Unlike risk indicators, audit cases (once opened) ARE
+    // taxpayer-visible read-only (AuditCaseService::timeline()/evidence()/
+    // notes() each explicitly allow the case's own taxpayer, not just
+    // national-scope actors) -- this UI reflects that: every write action
+    // is officer-only, but the detail page itself is reachable by the
+    // taxpayer the case is about.
+    Route::get('/audit-cases', [AuditCaseViewController::class, 'index'])->name('audit-cases.index');
+    Route::get('/audit-cases/{id}', [AuditCaseViewController::class, 'show'])->name('audit-cases.show');
+    Route::post('/audit-cases', [AuditCaseViewController::class, 'store'])->name('audit-cases.store');
+    Route::post('/audit-cases/{id}/transition', [AuditCaseViewController::class, 'storeTransition'])->name('audit-cases.transition.store');
+    Route::post('/audit-cases/{id}/findings', [AuditCaseViewController::class, 'storeFinding'])->name('audit-cases.findings.store');
+    Route::post('/audit-cases/{id}/evidence', [AuditCaseViewController::class, 'storeEvidence'])->name('audit-cases.evidence.store');
+    Route::post('/audit-evidence/{id}/custody-events', [AuditCaseViewController::class, 'storeEvidenceCustodyEvent'])->name('audit-evidence.custody-events.store');
+    Route::post('/audit-cases/{id}/notes', [AuditCaseViewController::class, 'storeNote'])->name('audit-cases.notes.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

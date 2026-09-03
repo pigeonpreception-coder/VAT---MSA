@@ -8,15 +8,18 @@
     $statusMap = [
         'CERTIFIED' => 'text-bg-success', 'ACTIVE' => 'text-bg-success', 'APPROVED' => 'text-bg-success', 'APPLIED' => 'text-bg-success',
         'OPEN' => 'text-bg-success', 'ACKNOWLEDGED' => 'text-bg-success', 'FILED' => 'text-bg-success',
-        'PASS' => 'text-bg-success', 'PAYMENT_PENDING' => 'text-bg-success',
+        'PASS' => 'text-bg-success', 'PAYMENT_PENDING' => 'text-bg-success', 'PRESERVED' => 'text-bg-success',
         'MATCHED' => 'text-bg-info', 'PENDING' => 'text-bg-info', 'PENDING_APPROVAL' => 'text-bg-info', 'AWAITING_PROVIDER' => 'text-bg-info',
         'RECEIVED' => 'text-bg-info', 'RISK_REVIEW' => 'text-bg-info', 'OFFICER_REVIEW' => 'text-bg-info', 'PAYMENT_AUTHORISATION' => 'text-bg-info',
+        'PROPOSED' => 'text-bg-info', 'AUTHORIZED' => 'text-bg-info', 'ASSIGNED' => 'text-bg-info', 'PLANNING' => 'text-bg-info',
+        'EVIDENCE_COLLECTION' => 'text-bg-info', 'ANALYSIS' => 'text-bg-info', 'FINDINGS_REVIEW' => 'text-bg-info', 'PRELIMINARY' => 'text-bg-info',
         'EXCEPTION' => 'text-bg-danger', 'REJECTED' => 'text-bg-danger', 'REJECTED_BY_PROVIDER' => 'text-bg-danger', 'FAIL' => 'text-bg-danger',
         'CANCELLED' => 'text-bg-secondary', 'RETIRED' => 'text-bg-secondary', 'LOCKED' => 'text-bg-secondary',
         'DRAFT' => 'text-bg-secondary', 'SUPERSEDED' => 'text-bg-secondary', 'ON_HOLD' => 'text-bg-secondary',
         'CLOSED' => 'text-bg-secondary', 'NOT_CONFIGURED' => 'text-bg-secondary',
         'BLOCKED_CONFIGURATION' => 'text-bg-warning', 'BLOCKED_RETURN_NOT_FILED' => 'text-bg-warning',
         'EVIDENCE_REQUESTED' => 'text-bg-warning', 'DISPUTED' => 'text-bg-warning',
+        'TAXPAYER_RESPONSE' => 'text-bg-warning', 'DECISION' => 'text-bg-warning', 'SUSPENDED' => 'text-bg-warning',
     ];
     $riskMap = [
         'LOW' => 'text-bg-success',

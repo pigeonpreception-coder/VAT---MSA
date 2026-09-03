@@ -131,6 +131,21 @@ class ComplianceValidator
         return $rule[$action];
     }
 
+    /**
+     * Read-only view of which actions are legal from a given case status --
+     * lets a UI build a real "only the actions that would actually
+     * succeed" control (e.g. a transition dropdown) without duplicating
+     * CASE_TRANSITIONS's own state table, which would risk drifting out of
+     * sync with assertCaseTransition's own authoritative enforcement of
+     * it. Mirrors refundClaimActionsFor()'s identical rationale.
+     *
+     * @return list<string>
+     */
+    public static function caseActionsFor(string $currentStatus): array
+    {
+        return array_keys(self::CASE_TRANSITIONS[$currentStatus] ?? []);
+    }
+
     /** @return array{schema_version: string, action: string, reason: string, officerId: ?string, appealReference: ?string, overrideReason: ?string} */
     public static function caseTransition(array $input): array
     {
