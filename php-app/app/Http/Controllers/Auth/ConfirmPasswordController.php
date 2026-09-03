@@ -22,9 +22,11 @@ use Illuminate\View\View;
  */
 class ConfirmPasswordController extends Controller
 {
-    public function show(): View
+    public function show(Request $request): View
     {
-        return view('auth.confirm-password');
+        return view('auth.confirm-password', [
+            'redirectTo' => $this->safeRedirectTarget($request, url()->previous(route('dashboard'))),
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -35,6 +37,33 @@ class ConfirmPasswordController extends Controller
 
         $request->session()->put('auth.password_confirmed_at', time());
 
-        return redirect()->intended();
+        // Deliberately not redirect()->intended(): that replays the *blocked*
+        // request's own URL as a GET, which is fine for a step-up-gated GET
+        // but 404s/405s for this app's step-up-gated actions (membership
+        // assignment, taxpayer suspension), which are POST-only forms with
+        // no GET handler at that same path. Redirecting instead to wherever
+        // the user actually was -- the page containing the form, captured
+        // via url()->previous() at render time in show() above, before this
+        // request's own URL overwrites it -- lands them somewhere real, so
+        // they can resubmit the action now that the session is freshly
+        // confirmed. safeRedirectTarget() keeps this same-origin: the value
+        // travels through a hidden form field, so a tampered submission
+        // could otherwise turn this into an open redirect straight after a
+        // real authentication check.
+        return redirect()->to($this->safeRedirectTarget($request, $request->input('redirect_to')));
+    }
+
+    private function safeRedirectTarget(Request $request, ?string $candidate): string
+    {
+        if (! $candidate) {
+            return route('dashboard');
+        }
+
+        $host = parse_url($candidate, PHP_URL_HOST);
+        if ($host !== null && $host !== $request->getHost()) {
+            return route('dashboard');
+        }
+
+        return $candidate;
     }
 }
