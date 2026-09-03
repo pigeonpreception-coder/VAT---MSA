@@ -50,6 +50,7 @@ use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
+use App\Http\Controllers\Platform\ReportViewController;
 use App\Http\Controllers\Portal\BuyerPortalController;
 use App\Http\Controllers\Portal\DeveloperPortalController;
 use App\Http\Controllers\Portal\NamraAdminPortalController;
@@ -175,6 +176,26 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // upload route (no password.confirm there either).
     Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
     Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
+
+    // Frontend UI build-out: the Reports & Analytics console, reusing
+    // ReportExportService/DataProductService directly (see
+    // App\Http\Controllers\Platform\ReportViewController's own doc
+    // comment). Deliberately distinct path segments from the JSON API
+    // routes under api/v1/reports and api/v1/analytics below (run vs
+    // runs, file vs download, run-model/publish vs model-runs/
+    // publications) so the two route sets never collide on the same
+    // method+path even though they share a path prefix. requestExport/
+    // approveExport carry no password.confirm middleware -- their
+    // step-up is data-conditional, handled inline by the controller.
+    Route::get('/reports', [ReportViewController::class, 'index'])->name('reports.index');
+    Route::post('/reports/{code}/run', [ReportViewController::class, 'run'])->name('reports.run');
+    Route::post('/reports/runs/{id}/publish', [ReportViewController::class, 'publish'])->name('reports.publish');
+    Route::post('/reports/runs/{id}/export', [ReportViewController::class, 'requestExport'])->name('reports.export.request');
+    Route::post('/reports/exports/{id}/approve', [ReportViewController::class, 'approveExport'])->name('reports.export.approve');
+    Route::post('/reports/exports/{id}/cancel', [ReportViewController::class, 'cancelExport'])->name('reports.export.cancel');
+    Route::get('/reports/exports/{id}/file', [ReportViewController::class, 'downloadExport'])->name('reports.export.download');
+    Route::post('/analytics/data-products/{id}/run-model', [ReportViewController::class, 'runModel'])->name('reports.analytics.run-model');
+    Route::post('/analytics/data-products/{id}/publish', [ReportViewController::class, 'publishDataProduct'])->name('reports.analytics.publish');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.

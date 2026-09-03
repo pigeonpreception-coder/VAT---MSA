@@ -332,6 +332,74 @@ class DemoSeeder extends Seeder
             ],
         );
 
+        // Reports/analytics/platform-config demo data: a 2026-08-26 audit
+        // (see docs/MIGRATION_MATRIX.md's Report exports/Data products &
+        // analytics/Platform config sections) found `report_definitions`/
+        // `data_products`/`metrics`/`feature_flags`/`platform_config`/
+        // `access_policies` are all seed-only by design (defining a new
+        // governed report/metric/flag/config key is a governance action,
+        // out of scope for a runtime command) -- but nothing had ever
+        // actually seeded one for local/staging use, silently leaving the
+        // real Reports/Analytics/Platform config UI with an empty catalogue
+        // to browse and nothing runnable. Audiences below are chosen so
+        // $admin (PILOT_ADMIN, national scope, reports:executive, and --
+        // via the delegations row above -- an active PRACTITIONER
+        // delegation for the demo taxpayer) can exercise every guardrail
+        // tier end to end; CASE_EVIDENCE_SUMMARY still needs a real
+        // case_id typed in by whoever runs it, matching the source's own
+        // per-case scoping (no case is auto-created here).
+        $reportDefinitions = [
+            ['code' => 'VAT_POSITION', 'name' => 'VAT position summary', 'audience' => 'TAXPAYER', 'classification' => 'CONFIDENTIAL', 'freshness_tier' => 'DAILY', 'guardrail' => 'Own-organisation scope only.'],
+            ['code' => 'SALES_VAT_SUMMARY', 'name' => 'Sales VAT summary', 'audience' => 'TAXPAYER', 'classification' => 'TAX_CONFIDENTIAL', 'freshness_tier' => 'DAILY', 'guardrail' => 'Own-organisation scope only.'],
+            ['code' => 'COMPLIANCE_CASELOAD', 'name' => 'Compliance caseload', 'audience' => 'NAMRA_OPERATIONS', 'classification' => 'TAX_CONFIDENTIAL', 'freshness_tier' => 'DAILY', 'guardrail' => 'Restricted to NamRA operations roles.'],
+            ['code' => 'PORTFOLIO_EXCEPTIONS', 'name' => 'Practitioner portfolio exceptions', 'audience' => 'PRACTITIONER', 'classification' => 'RESTRICTED', 'freshness_tier' => 'DAILY', 'guardrail' => 'Scoped to the practitioner\'s own active delegated taxpayers.'],
+            ['code' => 'REVENUE_COMPLIANCE_TRENDS', 'name' => 'Revenue and compliance trends', 'audience' => 'EXECUTIVE', 'classification' => 'CONFIDENTIAL', 'freshness_tier' => 'WEEKLY', 'guardrail' => 'National scope and reports:executive required.'],
+            ['code' => 'CASE_EVIDENCE_SUMMARY', 'name' => 'Case evidence summary', 'audience' => 'AUDITOR_LEGAL', 'classification' => 'RESTRICTED', 'freshness_tier' => 'ON_DEMAND', 'guardrail' => 'Requires audit case authority (audit:read or cases:manage).'],
+            ['code' => 'NATIONAL_VAT_AGGREGATE', 'name' => 'National VAT aggregate', 'audience' => 'OPEN_DATA', 'classification' => 'PUBLIC', 'freshness_tier' => 'WEEKLY', 'guardrail' => 'Minimum-cell suppressed below 10 invoices.'],
+        ];
+        $reportDefinitionIds = [];
+        foreach ($reportDefinitions as $definition) {
+            $existingId = DB::table('report_definitions')->where('code', $definition['code'])->value('id');
+            $id = $existingId ?: (string) Str::uuid();
+            DB::table('report_definitions')->updateOrInsert(
+                ['code' => $definition['code']],
+                [
+                    'id' => $id, 'name' => $definition['name'], 'audience' => $definition['audience'],
+                    'description' => "{$definition['name']} -- seeded demo report definition.", 'classification' => $definition['classification'],
+                    'query_version' => '1.0.0', 'status' => 'ACTIVE', 'created_at' => now(),
+                    'freshness_tier' => $definition['freshness_tier'], 'guardrail' => $definition['guardrail'],
+                ],
+            );
+            $reportDefinitionIds[$definition['code']] = $id;
+        }
+
+        $dataProductId = DB::table('data_products')->where('code', 'VAT_TRENDS')->value('id') ?: (string) Str::uuid();
+        DB::table('data_products')->updateOrInsert(
+            ['code' => 'VAT_TRENDS'],
+            [
+                'id' => $dataProductId, 'name' => 'VAT sales trends', 'description' => 'Certified invoice/tax metrics governed by the published SALES_VAT_SUMMARY report.',
+                'source_report_definition_id' => $reportDefinitionIds['SALES_VAT_SUMMARY'], 'status' => 'ACTIVE', 'created_at' => now(),
+            ],
+        );
+        DB::table('data_product_lineage')->updateOrInsert(
+            ['data_product_id' => $dataProductId, 'source_id' => $reportDefinitionIds['SALES_VAT_SUMMARY']],
+            ['id' => (string) Str::uuid(), 'source_type' => 'REPORT_DEFINITION', 'source_label' => 'SALES_VAT_SUMMARY', 'recorded_at' => now()],
+        );
+        $metrics = [
+            ['code' => 'DEMO_INVOICE_COUNT', 'name' => 'Certified invoice count', 'field' => 'invoices', 'unit' => 'COUNT', 'threshold' => 25.0],
+            ['code' => 'DEMO_TAX_TOTAL', 'name' => 'Total tax collected', 'field' => 'tax_cents', 'unit' => 'NAD_CENTS', 'threshold' => 15.0],
+        ];
+        foreach ($metrics as $metric) {
+            DB::table('metrics')->updateOrInsert(
+                ['code' => $metric['code']],
+                [
+                    'id' => DB::table('metrics')->where('code', $metric['code'])->value('id') ?: (string) Str::uuid(),
+                    'name' => $metric['name'], 'data_product_id' => $dataProductId, 'field' => $metric['field'],
+                    'unit' => $metric['unit'], 'status' => 'CERTIFIED', 'anomaly_threshold_pct' => $metric['threshold'], 'created_at' => now(),
+                ],
+            );
+        }
+
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
         $this->command?->info("Admin login: admin@vat-msa.test / password (PILOT_ADMIN, national scope)");

@@ -1958,9 +1958,8 @@ Still NOT STARTED (invoices closed out just below; compliance/audit
 cases, refunds, the portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
 -- and business parties, quotations, accounting, operations
-(expenses/inventory/projects), licensing/administration and documents
-closed out further below):
-reports, analytics,
+(expenses/inventory/projects), licensing/administration, documents and
+reports/analytics closed out further below):
 platform config, the workflow engine's own dedicated authoring UI (its
 read-only register is already part of Administration -- see below),
 and import declarations (a genuinely separate, not-yet-built backend
@@ -3259,6 +3258,128 @@ confirming it appears in the register as `QUARANTINED`/
 `PENDING_EXTERNAL_SCANNER` with its SHA-256 checksum shown and the
 metrics (documents/quarantined/clean/legal holds) all updating
 correctly.
+
+### Reports & analytics (governed reporting console)
+
+Ports the source's own reports/analytics screens onto `App\Services\
+Platform\ReportExportService` (all 7 methods -- `runInline`, `publish`,
+`requestExport`, `approveExport`, `cancelExport`, `getExport`,
+`downloadExport`) and `App\Services\Platform\DataProductService` (all 5
+methods -- `list`, `runModel`, `publish`, `approvedMetrics`,
+`anomalyCandidates`) directly, both already fully covered end to end
+(every audience-tier guardrail, the publish reconciliation gate, the
+anomaly-detection maths) by `tests/Feature/Platform/ReportExportTest.php`
+(24 tests) and `DataProductTest.php` (11 tests) from Phase 13's fourth and
+fifth slices. New: `App\Http\Controllers\Platform\ReportViewController`
+(`index`/`run`/`publish`/`requestExport`/`approveExport`/`cancelExport`/
+`downloadExport`/`runModel`/`publishDataProduct`) and
+`resources/views/reports/index.blade.php`. This view adds no query of
+its own for anything either service already exposes; the catalogue read
+(`report_definitions`) and the "my runs"/"my exports"/"pending
+approvals"/"publishable model runs" lists are direct supporting reads
+with no command precedent to reuse, the same "no second query path for
+business logic, a listing read is fine" posture Document/Inventory's own
+view controllers already established.
+
+**Distinct URL shapes from the JSON API, on purpose**: the Blade routes
+(`/reports`, `/reports/{code}/run`, `/reports/runs/{id}/publish`,
+`/reports/runs/{id}/export`, `/reports/exports/{id}/approve`,
+`/reports/exports/{id}/cancel`, `/reports/exports/{id}/file`,
+`/analytics/data-products/{id}/run-model`, `/analytics/data-products/{id}/
+publish`) live outside the `api/v1` prefix entirely (a first pass
+accidentally nested them inside the `Route::prefix('api/v1')->group()`
+alongside `ReportController`/`DataProductController`'s own JSON routes --
+caught immediately by every new feature test 404ing, moved out to sit
+beside `/documents` instead) and use deliberately different path segments
+from their JSON counterparts even where both now share a prefix-free
+base (`run` vs `runs`, `file` vs `download`, `run-model`/`publish` vs
+`model-runs`/`publications`) so the two route sets never collide on the
+same method+path.
+
+**Data-conditional step-up, handled inline, not via route middleware**:
+`requestExport`/`approveExport` are the one pair of write commands in
+this whole migration whose step-up requirement is data-conditional (only
+when the report's classification is `TAX_CONFIDENTIAL`/`RESTRICTED`, or
+the export's own `requires_step_up` flag is set -- see `App\Support\
+Access\StepUp`'s own doc comment), not route-wide like every other
+`password.confirm`-gated Blade route this initiative has built so far
+(Administration's employee/role invitations, Licensing's state changes,
+Platform config's `provisionStaff`). Gating the whole route would
+over-restrict the non-sensitive case the source itself exempts, so the
+controller instead passes `StepUp::isFresh($request)` through to the
+service and, if it still refuses for exactly that reason (detected by
+matching `'step-up'` in the thrown `AuthorizationException`'s message,
+never by re-deriving sensitivity itself), stores the reports page as
+`url.intended` and redirects to the real `password.confirm` screen with a
+flash message asking the actor to confirm and retry. This migration's
+Blade forms are plain POSTs with no client-side replay anywhere in this
+initiative, so a manual retry (now with a satisfied freshness window) is
+the honest UX here, not a silently-swallowed failure or a first
+JS-driven auto-resubmit. Verified live through a real browser session:
+requesting an export for a `TAX_CONFIDENTIAL` run redirects to
+`/confirm-password` with nothing written to `report_exports`; confirming
+and retrying the identical action succeeds, landing the export in
+`PENDING_APPROVAL` with a visible "Step-up" badge.
+
+**No JS anywhere on this page, matching every other screen in this
+initiative**: the two per-data-product "run analytics model"/"publish
+snapshot" mini-forms could have used a single shared dropdown-driven form
+with a JS `onchange` handler rewriting the form's `action` -- the first
+draft did exactly that -- but this codebase's entire Blade UI build-out
+has never shipped a line of inline JavaScript, so it was reworked into
+one small, plain per-card form pair instead (one for `run-model`, one for
+`publish`), matching the established "an inline form per row/card, no
+shared dynamic state" convention already used everywhere else (Quotations'
+register, this same page's own "my report runs" table).
+
+**Demo seed gap closed**: a full-repo check found `report_definitions`/
+`data_products`/`data_product_lineage`/`metrics` were all genuinely
+seed-only by design (Phase 13's own documented posture -- defining a new
+governed report/metric is a governance/config action, out of scope for a
+runtime command) but nothing had ever actually seeded one, leaving this
+screen's catalogue and analytics section permanently empty for any real
+login. `DemoSeeder` now seeds the 7 report codes this migration
+implements (`VAT_POSITION`, `SALES_VAT_SUMMARY`, `COMPLIANCE_CASELOAD`,
+`PORTFOLIO_EXCEPTIONS`, `REVENUE_COMPLIANCE_TRENDS`,
+`CASE_EVIDENCE_SUMMARY`, `NATIONAL_VAT_AGGREGATE`) with audiences chosen
+so the demo `admin@vat-msa.test` login (`PILOT_ADMIN`, national scope,
+`reports:executive`, and -- via the pre-existing demo `delegations` row --
+an active `PRACTITIONER` delegation) can exercise every audience-tier
+guardrail end to end, plus one `VAT_TRENDS` data product sourced from
+`SALES_VAT_SUMMARY` with two certified metrics (`DEMO_INVOICE_COUNT`,
+`DEMO_TAX_TOTAL`). `CASE_EVIDENCE_SUMMARY` still needs a real `case_id`
+typed in by whoever runs it -- no case is auto-seeded, matching the
+source's own per-case scoping rather than fabricating a fake evidence
+trail.
+
+Verified by a new `tests/Feature/Platform/ReportViewTest.php` (14 tests):
+the page requires authentication; a role without `reports:read` is
+denied `403`; the catalogue renders with accessible table markup; running
+a report requires `reports:run`; a `TAXPAYER`-audience run completes
+inline; `CASE_EVIDENCE_SUMMARY` without a `case_id` is refused with a
+flashed error rather than a 500; a completed run publishes; a
+non-sensitive export auto-approves and downloads with the correct
+`Content-Type`; a sensitive export without a fresh step-up redirects to
+`/confirm-password` with nothing persisted, and with one succeeds into
+`PENDING_APPROVAL`; the requester can cancel their own pending export; a
+national reviewer can approve a colleague's pending export but is refused
+(with a flashed error, not a 500) attempting to approve their own; running
+and publishing an analytics model snapshot end to end produces a real
+`data_product_snapshots` row and the product's card then shows it; and
+running an analytics model is refused for a non-national actor. 401 tests
+total, 0 new regressions -- the failing set (30 tests, all pre-existing
+`bcmath`-dependent invoice-certification/VAT-return/refund failures) is
+the same class already documented throughout this initiative, confirmed
+by the failure list carrying no `Report`/`DataProduct`/`Platform` test
+among it, run against real MySQL/MariaDB, plus a clean `migrate:fresh
+--seed` cycle. Also verified visually over a real HTTP session as
+`admin@vat-msa.test`: the catalogue, running and publishing
+`SALES_VAT_SUMMARY`, the step-up redirect and its confirm-then-retry
+flow landing the export in `PENDING_APPROVAL` with a "Step-up" badge, and
+running a model then publishing a snapshot for the `VAT_TRENDS` data
+product, after which its certified metrics show real (`0`, since this
+migrate:fresh cycle seeded no invoices) values with `AVAILABLE` status
+instead of "No Data".
 
 ## Legacy D1 importer (Phase 14)
 
