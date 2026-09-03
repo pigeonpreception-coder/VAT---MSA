@@ -50,12 +50,87 @@ body {
     font-weight: 600;
 }
 
-/* The top navbar recoloured to the source's own navy sidebar gradient
-   -- this port uses a top navbar rather than the source's vertical
-   sidebar (an established structural difference since the dashboard
-   slice), but carries the same brand colour. */
-.navbar.bg-dark {
+/* The left sidebar, matching the source's own vertical navigation
+   (this port used a top navbar through the dashboard slice and every
+   slice after it; the sidebar below brings it back in line with the
+   source's own layout). Bootstrap's .offcanvas-lg makes it a normal,
+   always-visible column at the lg breakpoint and up, and a sliding
+   off-canvas drawer below it -- but its own >=992px rule forces
+   `.offcanvas-lg` (and `.offcanvas-lg .offcanvas-body`) to a fully
+   transparent background with !important, which otherwise leaves this
+   sidebar's white nav text invisible against the light page canvas
+   showing through. `.sidebar.offcanvas-lg`'s own two-class selector
+   already out-specifies Bootstrap's plain single-class one, so the
+   !important below only has to beat Bootstrap's !important, not also
+   fight specificity. */
+.sidebar {
+    --bs-offcanvas-width: 260px;
     background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%) !important;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.sidebar .offcanvas-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-brand {
+    padding: 1rem 1.25rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: #fff;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-brand:hover {
+    color: #fff;
+}
+
+.sidebar-nav {
+    padding: 0.75rem;
+    gap: 0.15rem;
+    overflow-y: auto;
+}
+
+.sidebar-nav .nav-link {
+    color: rgba(255, 255, 255, 0.75);
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.9rem;
+}
+
+.sidebar-nav .nav-link:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-nav .nav-link[aria-current="page"] {
+    color: #fff;
+    background-color: var(--vatmsa-teal);
+    font-weight: 600;
+}
+
+.sidebar-user {
+    padding: 1rem 1.25rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.mobile-topbar {
+    background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%);
+}
+
+@media (min-width: 992px) {
+    .sidebar.offcanvas-lg {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 1030;
+        width: var(--bs-offcanvas-width);
+    }
+
+    body.has-sidebar main {
+        margin-left: var(--bs-offcanvas-width, 260px);
+    }
 }
 
 /* .btn-primary's own background/border/focus-ring are Bootstrap

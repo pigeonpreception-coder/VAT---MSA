@@ -3569,6 +3569,56 @@ seeing it appear in both the versioned-workflows and draft-versions
 cards, and running "Test routing" to see a real `start → approve → end`
 /`COMPLETED` result rendered on the page.
 
+### Sidebar navigation (replaces the top navbar)
+
+A follow-up polish pass across the shared layout, not a new backend
+slice: `resources/views/layouts/app.blade.php`'s primary navigation
+moved from a top `navbar` to a left sidebar, using Bootstrap's own
+`.offcanvas-lg` responsive component -- an always-visible, fixed-width
+column at the `lg` breakpoint and up, collapsing to a slide-out drawer
+(toggled by a slim mobile top bar) below it. This brings the port back
+in line with the source's own vertical sidebar; `resources/css/app.css`
+had carried an explicit comment documenting the top-navbar-instead-of-
+sidebar choice as a deliberate structural difference since the
+dashboard slice, now stale and removed along with the navbar-specific
+CSS it described. The nav item list itself (all 15 links, each still
+gated by its own `@can('permission', ...)` check) and the "signed in
+as"/log-out block are unchanged in substance, just re-laid-out
+vertically; `aria-current="page"` items now get a real visible
+highlight (the teal active-page background), not just the
+screen-reader-only semantic the navbar left it as.
+
+**Two real Bootstrap pitfalls hit and fixed while building this, not
+just a markup rewrite**: (1) `.offcanvas-lg`'s own `>=992px` rule sets
+`background-color: transparent !important` on both itself and its
+`.offcanvas-body`, which otherwise leaves the sidebar's white nav text
+invisible against the light page canvas showing through -- fixed with
+a `!important` of the sidebar's own gradient background, whose
+`.sidebar.offcanvas-lg` two-class selector already out-specifies
+Bootstrap's plain one so the `!important` only has to beat Bootstrap's,
+not also fight specificity. (2) The sidebar `<div>` initially carried
+both the plain `.offcanvas` class and the responsive `.offcanvas-lg`
+one together (copying habit from the mobile-only patterns used
+elsewhere); Bootstrap's plain `.offcanvas.offcanvas-start` rule is
+*unconditional* (no media query at all) and kept the sidebar
+permanently `transform: translateX(-100%)`/`visibility: hidden` even
+at desktop widths where `.offcanvas-lg`'s own `>=992px` override
+correctly matched -- confirmed live via `getComputedStyle`/
+`matchMedia` in a real browser session, not guessed from the CSS alone.
+Fixed by dropping the redundant plain `.offcanvas` class, matching
+Bootstrap's own documented responsive-offcanvas pattern (`offcanvas-lg`
+alone, never combined with bare `offcanvas`).
+
+No new routes, permissions, or tests -- the full 424-test suite passes
+unchanged (same 30 pre-existing `bcmath`-dependent failures), and every
+existing view's own feature tests (which assert on nav link text via
+`assertSee`, not navbar-specific markup) still pass without
+modification. Verified visually over real browser sessions at both a
+1440px desktop width (sidebar fixed, active-page highlight correct
+across two different pages) and a 420px mobile width (collapsed by
+default behind a hamburger toggle in the mobile top bar; opens as a
+proper off-canvas drawer with its own close button and backdrop).
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
