@@ -2977,6 +2977,53 @@ certification pipeline, confirming the full cross-module chain (this
 new slice, Business Parties, and Invoice certification) works
 end-to-end together, not just in isolation.
 
+### Accounting dashboard (the fourteenth UI slice, the eighth fresh smaller PR)
+
+Ports the source's own `app/accounting/page.tsx` -- a read-only
+general ledger dashboard -- over `App\Models\ChartOfAccount` and
+`App\Models\JournalEntry`, both already present on `main` with zero
+model changes needed. Like Quotations, this one is extracted from PR
+#3 rather than written fresh (see the "Authority Governance" section
+above for that PR's full provenance and why it was never merged as a
+unit), but unlike every other extraction so far it needed **no
+adaptation at all**: no stale route names, no signature drift against
+`main`, nothing. `App\Http\Controllers\Business\AccountingController`
+(the existing JSON API, reachable at `/api/v1/accounting/**`) already
+fully supports posting journals, creating accounts, reversals, period
+close, trial balance and financial statements, so this slice is a UI
+gap only, not a backend one -- and the source's own scope for this
+specific screen is genuinely read-only (its own closing note, quoted
+verbatim in the view: "Interactive journal authoring and approval
+queues will be expanded with the VAT close workflow"), so this port
+stays read-only too rather than inventing forms the source doesn't
+have.
+
+New: `App\Http\Controllers\Business\AccountingViewController` (a
+single `index` action, gated on `accounting:read`, resolving the
+active organisation via the same `OrganisationResolver` every other
+slice already uses). Two new `<x-status-badge>` entries added to the
+shared map (`POSTED` success, `REVERSED` secondary) -- the real status
+literals `App\Services\Business\AccountingService` actually writes
+(confirmed by grepping the service directly rather than guessing from
+the view), alongside `ACTIVE` which the shared map already covered.
+No collision risk with any per-context map, since neither value
+appears in `indicator`/`taxpayer`/`license`.
+
+Verified by the ported `tests/Feature/Business/AccountingViewTest.php`
+(4 tests, passing unmodified): the page requires authentication; a
+role without `accounting:read` (`SELLER_VIEWER`) is forbidden; the
+ledger and chart of accounts render real seeded rows with the correct
+`postedCount`; an empty ledger renders its zero-state rows rather than
+erroring. 414 tests total, 0 regressions, run against real MySQL.
+Also verified live in the browser against the real
+`owner@demo-trading.test` demo organisation: posted a real balanced
+journal and created a real chart-of-accounts entry through the
+already-existing JSON API (`POST /api/v1/accounting/accounts` and
+`/api/v1/accounting/journals`, both idempotency-key-gated), then
+confirmed the dashboard's stat cards, journal register and chart of
+accounts all reflect that real data with the correct badge colours
+(`Posted` green, `Active` green) -- not just a zero-state render.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
