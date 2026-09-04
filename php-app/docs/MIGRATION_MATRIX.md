@@ -2651,6 +2651,99 @@ badge flipped to a red "Suspended" via the new `type="taxpayer"` map,
 with the suspend form correctly replaced by "This taxpayer is already
 suspended." afterward.
 
+### Business parties & supplier verification module (the tenth UI slice, the fourth fresh smaller PR)
+
+Ports the source's own business-party screens over
+`BusinessPartyService` (customers/suppliers: create, deactivate,
+search -- 238 lines) bundled with `SupplierVerificationService`
+(verify + history -- 124 lines), alongside the JSON API surface
+`BusinessPartyController` already exposes.
+
+Built as one slice deliberately, the same reasoning already applied
+to Disputes/Obligations/Organisations: `SupplierVerificationService`
+alone has no read surface of its own beyond `history()`, which needs
+a party to already exist -- a "verify supplier" page with no way to
+see or pick which party to verify would not be a usable screen.
+`BusinessPartyService::update()` was the one write action left out of
+scope: create and deactivate plus verification cover the module's
+real workflow (register a party, verify it, retire it), and
+`update()` is materially the same form as `create()` with
+upsert-relationship semantics that would add real complexity without
+a correspondingly strong need for this slice.
+
+`OfflineSyncService` (116 lines, technically the smaller candidate at
+this point in the backlog) was deliberately passed over for this
+slot: its own doc comment is explicit that the source never actually
+wired up real device-signature verification, so every batch is
+written `status='REJECTED'` regardless of content -- there is no
+read/list method at all (only `receive()`), and the payload itself
+(device signatures, hash chains, sequence numbers) is a
+machine-to-machine sync-client protocol, not a realistic browser form
+for a human to fill in. No UI was built for it, the same reasoning
+already applied to Disputes' missing decide path: building one would
+imply a capability that does not exist.
+
+New: `App\Http\Controllers\Business\BusinessPartyViewController`
+(index/show/store/storeVerification/storeDeactivation). No new
+backend accessor or model relation was needed --
+`BusinessParty::relationships()`/`PartyVerificationSnapshot::party()`
+already existed. `parties:manage` gates every route here, read and
+write alike, matching `BusinessPartyController` exactly (it has no
+separate lighter read permission either) -- held broadly by
+business-facing roles (PILOT_ADMIN, taxpayer roles, seller/buyer
+portal roles), never by NamRA roles, confirmed against
+`Permissions::ROLE_PERMISSIONS` before writing any UI: customers/
+suppliers are the taxpayer's own commercial data, not a compliance
+concern.
+
+The detail page's "Verify against national taxpayer register" button
+is disabled with an explanatory hint, not just left to fail server-side,
+whenever the party lacks either an active SUPPLIER relationship or a
+VAT number -- `SupplierVerificationService::verify()`'s own two
+`BusinessResourceException` guard clauses, mirrored client-side so a
+customer-only party doesn't invite a click that can only ever 409. The
+real enforcement still lives entirely in the service; the disabled
+button is UX only, not a security boundary a crafted POST could rely
+on being absent.
+
+One small, deliberate correctness fix to shared infrastructure,
+surfaced by this slice's `storeVerification()`/`storeDeactivation()`
+error paths: both originally used Laravel's `back()` helper on
+failure, which depends on the session's tracked "previous URL"
+actually being the show page. A direct POST with no prior GET (or any
+other path that leaves that tracking unset) would fall back to the
+site root instead of back to the party's own page. Fixed by
+redirecting explicitly to `route('business-parties.show', $id)` on
+every error branch instead of relying on `back()`'s implicit
+assumption -- the same class of bug the Organisations & Identity
+slice's `ConfirmPasswordController` fix addressed for
+`redirect()->intended()`, caught here by a failing test rather than
+live verification.
+
+Verified by a new `tests/Feature/Business/BusinessPartyViewTest.php`
+(12 tests, reusing `SupplierVerificationTest`'s and
+`BusinessPartyAndQuotationTest`'s own `makeOrganisation` fixture
+pattern): a role lacking `parties:manage` (`SELLER_VIEWER`, which
+holds `commercial:read` but not the manage permission) is forbidden
+on every route; registering a party with a relationship creates a
+real row; registering with no relationship selected or a duplicate
+VAT number are friendly field/form errors, not raw validation-shaped
+or 409 JSON; the show page renders an empty verification history and
+the live verify button; a customer-only party shows the disabled hint
+instead; verifying a real supplier (backed by a second demo
+organisation with `SELLER` capability, matching
+`SupplierVerificationTest`'s own two-organisation setup) writes a
+real snapshot visible in the history table; verifying a customer-only
+party is a friendly form error, not a raw 409; deactivating an active
+party flips its status and the deactivate card correctly disappears
+afterward; a cross-tenant party 404s; and the list's relationship
+filter renders. 337 tests total, 0 regressions, run against real
+MySQL. Also verified live end-to-end in the browser: registered a
+real supplier party against the `VAT-REFUND-SUP` demo taxpayer's own
+VAT number, then verified it and confirmed a real snapshot rendered
+(`Yes/Yes/Yes`, `BUYER, SELLER` capabilities) against the live
+database.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
