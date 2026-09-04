@@ -2419,6 +2419,48 @@ proxy) -- not fixable from inside this session. `SellerPortalTest`'s own
 one invoice-rendering test joins the same 28 as a 29th, for the identical
 reason, not a new defect.
 
+**Update, same session, later**: the `ondrej/php` PPA route stayed
+blocked, but `bcmath` is a bundled PHP extension, not a separate PECL
+package, so it doesn't need that PPA at all -- only `ext/bcmath`'s own
+source tree, matching the running PHP 8.4.19 build exactly. That source
+was reachable: `raw.githubusercontent.com` (unlike `codeload.github.com`
+and `api.github.com`) and `github.com`'s own git smart-HTTP endpoint
+(unlike `www.php.net`/`downloads.php.net`) were both allowed by this
+session's egress policy, so `git clone --depth 1 --branch php-8.4.19
+https://github.com/php/php-src.git` pulled the exact matching source.
+`phpize`/`php-config` were already present (the `php8.4-dev` package),
+so `cd ext/bcmath && phpize && ./configure --enable-bcmath && make`
+built `bcmath.so` directly against this sandbox's own installed PHP
+headers -- no PPA, no apt, no network access to `bcmath` itself required.
+Copying the built `.so` into `php -r 'echo ini_get("extension_dir");'`
+and enabling it via a `conf.d/20-bcmath.ini` made `function_exists
+('bcadd')` `true` and `bcadd('1.1','2.2',2)` return the correct
+`'3.30'`. Re-running the full suite with `bcmath` genuinely present:
+**437 of 437 tests pass, zero failures** -- all 29 tests documented
+above as `bcmath`-caused now pass outright, proving the root-cause
+finding above precisely (nothing else was ever wrong).
+
+**One of those 29 was hiding a real, independent bug**, only visible
+once `bcmath` stopped masking it with a validation error first:
+`SellerPortalTest::test_the_seller_portal_renders_invoices_quotations_and_vat_metrics`
+asserted `quoted_value_cents === 100_000` (the fixture quotation's net
+line amount), but `SellerPortalSnapshotService::snapshot` correctly sums
+`total_cents` (tax-inclusive: 100,000 net + 15,000 tax at the fixture's
+15% `STANDARD` rate = 115,000) -- verified against the source's own
+`business-repository.ts` line `SUM(total_cents) ... AS
+quoted_value_cents`, which is tax-inclusive too. The test's expected
+value was simply wrong; the production code was always correct. Fixed
+by correcting the assertion to `115_000`, not by changing
+`SellerPortalSnapshotService`.
+
+This sandbox-local `bcmath` build is not part of this repository and
+does not travel with it -- it only fixes verification inside this one
+session's container, which is rebuilt from a fresh image on the next
+session. The documented target environment (PHP 8.2.12, which bundles
+`bcmath` by default) was never affected by this gap either way; this
+update exists so a reader of this document sees the gap closed for
+*this session's own verification*, not left as an open question.
+
 ### NamRA portal dashboard (the third of six)
 
 Ports the source's own `app/portal/namra/page.tsx` -- the third

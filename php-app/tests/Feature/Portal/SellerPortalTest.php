@@ -173,7 +173,9 @@ class SellerPortalTest extends TestCase
         $snapshot = $response->viewData('snapshot');
         $this->assertSame(1, $snapshot['dashboard']['metrics']['invoice_count']);
         $this->assertSame(1, $snapshot['quotations']['count']);
-        $this->assertSame(100000, $snapshot['quotations']['quoted_value_cents']); // ACCEPTED status counts toward the pipeline
+        // 100_000 net + 15_000 tax (15% STANDARD rate) -- quoted_value_cents sums total_cents
+        // (tax-inclusive), matching business-repository.ts's own SUM(total_cents) exactly.
+        $this->assertSame(115000, $snapshot['quotations']['quoted_value_cents']); // ACCEPTED status counts toward the pipeline
     }
 
     public function test_the_seller_portals_quotation_metrics_are_scoped_to_the_actors_own_organisation(): void
