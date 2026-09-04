@@ -15,6 +15,7 @@
         'RECEIVED' => 'text-bg-info', 'RISK_REVIEW' => 'text-bg-info', 'OFFICER_REVIEW' => 'text-bg-info', 'PAYMENT_AUTHORISATION' => 'text-bg-info',
         'PROPOSED' => 'text-bg-info', 'AUTHORIZED' => 'text-bg-info', 'ASSIGNED' => 'text-bg-info', 'PLANNING' => 'text-bg-info',
         'EVIDENCE_COLLECTION' => 'text-bg-info', 'ANALYSIS' => 'text-bg-info', 'FINDINGS_REVIEW' => 'text-bg-info', 'PRELIMINARY' => 'text-bg-info',
+        'SUBMITTED' => 'text-bg-info',
         'EXCEPTION' => 'text-bg-danger', 'REJECTED' => 'text-bg-danger', 'REJECTED_BY_PROVIDER' => 'text-bg-danger', 'FAIL' => 'text-bg-danger',
         'CANCELLED' => 'text-bg-secondary', 'RETIRED' => 'text-bg-secondary', 'LOCKED' => 'text-bg-secondary', 'INACTIVE' => 'text-bg-secondary',
         'DRAFT' => 'text-bg-secondary', 'SUPERSEDED' => 'text-bg-secondary', 'ON_HOLD' => 'text-bg-secondary', 'EXPIRED' => 'text-bg-secondary',
@@ -22,6 +23,7 @@
         'BLOCKED_CONFIGURATION' => 'text-bg-warning', 'BLOCKED_RETURN_NOT_FILED' => 'text-bg-warning',
         'EVIDENCE_REQUESTED' => 'text-bg-warning', 'DISPUTED' => 'text-bg-warning', 'UNREAD' => 'text-bg-warning',
         'TAXPAYER_RESPONSE' => 'text-bg-warning', 'DECISION' => 'text-bg-warning', 'SUSPENDED' => 'text-bg-warning',
+        'EVIDENCE_REQUIRED' => 'text-bg-warning',
     ];
     $riskMap = [
         'LOW' => 'text-bg-success',

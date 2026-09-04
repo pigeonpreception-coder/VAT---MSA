@@ -23,6 +23,7 @@ use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
+use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
@@ -222,6 +223,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
     Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
     Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
+
+    Route::get('/operations', [OperationsViewController::class, 'index'])->name('operations.index');
+    Route::post('/operations/expenses', [OperationsViewController::class, 'store'])->name('operations.store');
+    Route::post('/operations/expenses/{id}/submission', [OperationsViewController::class, 'submit'])->name('operations.submit');
+    Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
+    Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

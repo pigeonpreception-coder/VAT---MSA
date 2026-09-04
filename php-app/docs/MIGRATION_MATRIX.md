@@ -2977,6 +2977,82 @@ certification pipeline, confirming the full cross-module chain (this
 new slice, Business Parties, and Invoice certification) works
 end-to-end together, not just in isolation.
 
+### Business operations (the fourteenth UI slice, the eighth fresh smaller PR)
+
+Ports the source's own `app/operations/page.tsx` +
+`ExpenseDecisionActions.tsx` + `ExpenseReceiptActions.tsx` -- the
+expense register (with receipt evidence and independent maker-checker
+decisions), inventory balances and project control, plus a read-only
+fourth panel for customs import declarations. Extracted from PR #3
+(see the "Authority Governance" section above for that PR's full
+provenance). Reuses `App\Services\Business\ExpenseService` for every
+write and direct `InventoryBalance`/`Project(+Budget/Cost)` reads,
+mirroring `InventoryController`/`ProjectController`'s own existing
+inline-query precedent -- no second query/command path anywhere in
+this controller.
+
+**One genuine gap found and closed while extracting this slice:** the
+migration for `import_records` already existed on `main` (an earlier
+phase), but no `App\Models\ImportRecord` Eloquent model had ever been
+built for it -- a plain read-only model, ported verbatim from PR #3,
+closes that gap. A full-repo grep of the TypeScript source (reproduced
+in the model's own doc comment) confirms `import_records` is only ever
+read, never written by any command, so a plain read-only model is all
+any caller needs -- not a backend gap, matching the same posture
+already established for `report_definitions`/`data_products`/
+`feature_flags` elsewhere in this migration.
+
+**One real cross-slice dependency found and guarded:** the expense
+register's "Upload receipt" link points at `documents.index` --
+Documents ships as its own independently-mergeable PR (see the
+"Documents register" section above) and may not have landed on `main`
+yet when this PR merges. Wrapped in the same `Route::has()` guard
+`ComplianceOverviewViewController`'s own view already established for
+exactly this situation: the link renders once Documents lands, and
+degrades to plain text with no broken route until then. Verified live
+in the browser (this PR's own branch predates Documents on `main`):
+the link is correctly absent and "Receipt optional"/"Receipt required"
+render as plain text with no 500.
+
+One deliberate, documented deviation from the source, closing a
+confirmed dead end the same way the Quotations slice's "Send" action
+did: the source's own operations page has no create-expense form and
+no `DRAFT -> SUBMITTED` action anywhere (confirmed by a full-repo grep
+of the TypeScript source for "submission"/"submitExpense", reproduced
+in the controller's own doc comment), even though
+`ExpenseService::create`/`submit` are fully built. Without either, no
+expense created through this application could ever reach the
+maker-checker decision this same page's own UI is built around. This
+port adds both, the same way Quotations added "Send".
+
+New: `App\Http\Controllers\Business\OperationsViewController`
+(index/store/submit/approve/reject, gated on
+`expenses:read`/`expenses:manage`, both already wired to the correct
+roles). Two new `<x-status-badge>` entries added to the shared map --
+`SUBMITTED` info and `EVIDENCE_REQUIRED` warning, the real literals
+`ExpenseService`/`ImportRecord` rows actually carry -- alongside
+`DRAFT`/`APPROVED`/`REJECTED`/`ACTIVE`, all already present from
+earlier slices.
+
+Verified by the ported `tests/Feature/Business/OperationsViewTest.php`
+(9 tests, passing unmodified): the page requires authentication; a
+role without `expenses:read` (`SELLER_VIEWER`) is forbidden; all four
+panels render real seeded rows; import records are correctly scoped
+to the organisation; an expense can be recorded through the real
+form; a role without `expenses:manage` (`TAXPAYER_VIEWER`) cannot
+record one; a draft expense can be submitted then approved by an
+independent reviewer; the creator cannot approve their own submitted
+expense (a real `403`, `Illuminate\Auth\Access\AuthorizationException`
+propagating unmodified from `ExpenseService::approve`, not caught by
+this controller); a submitted expense can be rejected with a reason.
+419 tests total, 0 regressions, run against real MySQL. Also verified
+live in the browser against the real `owner@demo-trading.test` demo
+organisation: created a real expense category and a real expense
+through the actual form, submitted it, and confirmed the owner's own
+attempt to approve their own expense returns a real `403` -- the exact
+maker-checker rule the source's own UI is built around, enforced
+end-to-end, not just asserted by a test.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
