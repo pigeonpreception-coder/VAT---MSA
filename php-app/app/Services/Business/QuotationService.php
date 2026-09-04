@@ -442,6 +442,28 @@ class QuotationService
         return $fraction !== '' ? "{$whole}.{$fraction}" : (string) $whole;
     }
 
+    /**
+     * Ported from lib/data/business-repository.ts's getQuotationForEdit --
+     * a single-record read, exposed as a public service method the same way
+     * App\Services\Invoice\InvoiceService::find is (this file's own
+     * findOrFail/present already did all the work; this just makes them
+     * reachable for the new Blade edit view, matching the source's own
+     * server-component-only, non-JSON-API data function). Includes
+     * revision_count, matching the source's own COUNT(*) subquery -- search()
+     * deliberately does not carry it, matching source (searchQuotations
+     * itself never selects it either).
+     *
+     * @return array<string, mixed>
+     */
+    public function find(string $id, User $actor, ?string $requestedOrganisationId = null): array
+    {
+        $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
+        $quotation = $this->findOrFail($id, $organisation->id);
+        $quotation['revision_count'] = QuotationRevision::where('quotation_id', $id)->count();
+
+        return $quotation;
+    }
+
     /** @return array<string, mixed> */
     private function findOrFail(string $id, string $organisationId): array
     {
@@ -453,12 +475,21 @@ class QuotationService
         return $this->present($quotation);
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Ported from lib/data/business-repository.ts's searchQuotations/
+     * getQuotationForEdit -- both join business_parties for `customer_name`
+     * (`p.display_name AS customer_name`), a field this port's present()
+     * omitted until now; closing that gap here benefits every caller
+     * (JSON API and the new Blade views alike), not a second query path.
+     *
+     * @return array<string, mixed>
+     */
     private function present(Quotation $quotation): array
     {
         return [
             'id' => $quotation->id, 'organisation_id' => $quotation->organisation_id, 'branch_id' => $quotation->branch_id,
-            'customer_party_id' => $quotation->customer_party_id, 'quotation_number' => $quotation->quotation_number,
+            'customer_party_id' => $quotation->customer_party_id, 'customer_name' => optional($quotation->customer)->display_name,
+            'quotation_number' => $quotation->quotation_number,
             'currency' => $quotation->currency, 'issue_date' => $quotation->issue_date->toDateString(),
             'valid_until' => $quotation->valid_until->toDateString(), 'status' => $quotation->status,
             'subtotal_cents' => (int) $quotation->subtotal_cents, 'tax_cents' => (int) $quotation->tax_cents, 'total_cents' => (int) $quotation->total_cents,

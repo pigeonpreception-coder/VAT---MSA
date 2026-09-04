@@ -97,6 +97,11 @@
                                 <a class="nav-link {{ request()->routeIs('licensing.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('licensing.index') }}" @if (request()->routeIs('licensing.*')) aria-current="page" @endif>Licensing</a>
                             </li>
                         @endcan
+                        @can('permission', 'commercial:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('quotations.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Quotations</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">
