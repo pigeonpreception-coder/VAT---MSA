@@ -49,10 +49,25 @@
         'ACTIVE' => 'text-bg-success',
         'SUSPENDED' => 'text-bg-danger',
     ];
+    // Another separate map, same reason again: a licence actually being
+    // suspended is more severe than either of the above two
+    // (LicensingService::changeState blocks the organisation), so it gets
+    // its own map rather than reusing 'SUSPENDED' from $statusMap or
+    // $taxpayerMap.
+    $licenseMap = [
+        'TRIAL' => 'text-bg-info',
+        'ACTIVE' => 'text-bg-success',
+        'GRACE_PERIOD' => 'text-bg-warning',
+        'PENDING_RENEWAL' => 'text-bg-warning',
+        'SUSPENDED' => 'text-bg-danger',
+        'EXPIRED' => 'text-bg-danger',
+        'CANCELLED' => 'text-bg-secondary',
+    ];
     $class = match ($type) {
         'risk' => $riskMap[$value] ?? 'text-bg-light',
         'indicator' => $indicatorMap[$value] ?? 'text-bg-light',
         'taxpayer' => $taxpayerMap[$value] ?? 'text-bg-light',
+        'license' => $licenseMap[$value] ?? 'text-bg-light',
         default => $statusMap[$value] ?? 'text-bg-light',
     };
     $label = ucwords(strtolower(str_replace('_', ' ', (string) $value)));

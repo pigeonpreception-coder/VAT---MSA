@@ -42,6 +42,7 @@ use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
+use App\Http\Controllers\Licensing\LicensingViewController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
@@ -195,6 +196,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // comment. Purely read-only: getSnapshot() is the service's only
     // method, so there is exactly one route here.
     Route::get('/compliance-overview', [ComplianceOverviewViewController::class, 'index'])->name('compliance-overview.index');
+
+    // Real Blade UI for LicensingService (Phase 12 slice 1), alongside the
+    // JSON API surface below -- see LicensingViewController's own doc
+    // comment for why upgrade() has no UI action here. State changes carry
+    // the same 'password.confirm' step-up middleware as the JSON route.
+    Route::get('/licensing', [LicensingViewController::class, 'index'])->name('licensing.index');
+    Route::post('/licensing/state', [LicensingViewController::class, 'storeState'])->name('licensing.state.store')->middleware('password.confirm');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

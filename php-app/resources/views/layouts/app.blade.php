@@ -92,6 +92,11 @@
                                 <a class="nav-link {{ request()->routeIs('compliance-overview.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('compliance-overview.index') }}" @if (request()->routeIs('compliance-overview.*')) aria-current="page" @endif>Compliance Overview</a>
                             </li>
                         @endcan
+                        @can('permission', 'licensing:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('licensing.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('licensing.index') }}" @if (request()->routeIs('licensing.*')) aria-current="page" @endif>Licensing</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">
