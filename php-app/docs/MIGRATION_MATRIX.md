@@ -2446,6 +2446,80 @@ taxpayer's behalf by VAT number (`DSP-2026-7B74478F`, NAD 199.99) --
 confirming both the taxpayer-initiated and national-officer-on-behalf-of
 paths genuinely work against the live database, not just in tests.
 
+### Tax obligations module (the eighth UI slice, Module 3 Phase D, the second fresh smaller PR)
+
+Ports the source's own obligation screens over `ObligationService` --
+one of the smallest services any UI slice in this build-out has sat on
+top of (129 lines: `create()`, `markSatisfied()`, `search()`), the
+second module built as its own fresh, smaller PR (after Disputes),
+chosen next specifically because it's compliance-domain and small,
+fitting naturally alongside Risk Indicators/Audit Cases/Disputes.
+
+Like Risk Indicators (officer-only writes) but *unlike* Disputes
+(taxpayer-initiated): `ObligationService::create()` and
+`::markSatisfied()` both independently throw `AuthorizationException`
+unless the actor is national-scope, regardless of what the controller
+checks -- `obligations:manage` is confirmed (against
+`Permissions::ROLE_PERMISSIONS`) to be held only by `PILOT_ADMIN` and
+the `NAMRA_*` national roles, never by a taxpayer role. The list
+itself stays readable by a taxpayer for their own obligations though
+(`ObligationService::search()` scopes by tenant like every other
+`search()` in this build-out), so the Blade view shows the create form
+and the per-row "Mark satisfied" action only when the actor holds
+`obligations:manage`, while the read-only list underneath is visible
+to both.
+
+New: `App\Http\Controllers\Compliance\ObligationViewController`.
+Deliberately a **single-page module with no separate detail route** --
+unlike Risk Indicators or Audit Cases, an obligation carries no
+timeline, evidence, or notes of its own for a second page to show;
+`present()` already returns everything there is, and both real actions
+(create, mark satisfied) read naturally as inline row/toolbar forms on
+one list. This is the same "don't build UI surface the backend doesn't
+need" reasoning already applied to Disputes' missing decide path and
+Audit Cases' missing findings-read method. No new backend accessor or
+model relation was needed (`TaxObligation::taxpayer()` already
+existed); the create form resolves a taxpayer by VAT number in the
+controller exactly like Risk Indicators' evaluation form and Disputes'
+national-actor path. No new `<x-status-badge>` mapping needed beyond
+adding `'SATISFIED'` (success) -- `'PENDING'` was already mapped
+(info) from the VAT-lifecycle slice.
+
+One observation worth recording, not a bug: `markSatisfied()`'s
+required `notes` field (bounded 10-2000 chars) is never persisted to
+the `tax_obligations` row itself -- it only reaches the outbox event
+and the audit log, matching the original source exactly (`present()`
+never included a notes column, and the migration's schema has none).
+The satisfaction form still requires it, because the validator does,
+but there is nowhere on the obligation itself to read it back
+afterward; the audit trail is the only durable record.
+
+Verified by a new `tests/Feature/Compliance/ObligationViewTest.php`
+(10 tests, reusing `RiskViewTest`'s own makeTaxpayer/namraAuditor/
+taxpayerOwner/namraRefundOfficer fixture pattern): authentication is
+required; a taxpayer can read their own obligations but sees neither
+the create form nor any "Mark satisfied" action; a taxpayer never sees
+another taxpayer's obligation; a national officer sees the create form
+and can create a real obligation by VAT number (type is normalised
+uppercase, cents conversion is correct); creating against an unknown
+VAT number is a friendly form error, not a 500; creating a duplicate
+obligation for the same taxpayer/type/period is a friendly form error,
+not a raw 409 (`RepositoryConflictException` caught); marking an
+obligation satisfied updates its real status and the action
+disappears from that row; notes below the validator's 10-character
+minimum is a friendly field error and leaves the obligation `PENDING`;
+an officer holding `compliance:read` but not `obligations:manage`
+(`NAMRA_REFUND_OFFICER`) sees neither form and is forbidden from
+posting either action; and the list's status filter works. 335 tests
+total, 0 regressions, run against real MySQL. Also verified live
+end-to-end in the browser: created a real PAYE obligation for the
+`VAT-REFUND-SUP` demo taxpayer (NAD 365.40, correctly normalised type,
+correct due-date/overdue display against the pre-existing overdue
+`VAT-REFUND-CUS` demo obligation from the Risk Indicators slice), then
+marked it satisfied and confirmed the status badge flipped to
+`Satisfied` and its row's action correctly disappeared while the
+still-pending row's action remained.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

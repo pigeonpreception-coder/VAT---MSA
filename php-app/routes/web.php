@@ -30,6 +30,7 @@ use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\DisputeViewController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
+use App\Http\Controllers\Compliance\ObligationViewController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Compliance\RiskViewController;
 use App\Http\Controllers\Document\DocumentController;
@@ -151,6 +152,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/disputes', [DisputeViewController::class, 'index'])->name('disputes.index');
     Route::get('/disputes/{id}', [DisputeViewController::class, 'show'])->name('disputes.show');
     Route::post('/disputes', [DisputeViewController::class, 'store'])->name('disputes.store');
+
+    // Real Blade UI for Module 3 Phase D (tax obligations), alongside the
+    // JSON API surface below -- see ObligationViewController's own doc
+    // comment. Single-page module: no detail route, since an obligation
+    // carries no timeline/evidence/notes of its own for a second page to
+    // show -- create and mark-satisfied both act inline on the list.
+    Route::get('/obligations', [ObligationViewController::class, 'index'])->name('obligations.index');
+    Route::post('/obligations', [ObligationViewController::class, 'store'])->name('obligations.store');
+    Route::post('/obligations/{id}/satisfaction', [ObligationViewController::class, 'storeSatisfaction'])->name('obligations.satisfaction.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
