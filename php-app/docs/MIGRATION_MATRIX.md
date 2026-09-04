@@ -3761,6 +3761,101 @@ preserved rather than silently patched over (the third):
   real migration work ahead is porting those domain/validation functions
   into Laravel `Requests`/`Services`, not writing exotic SQL.
 
+## Authority Governance (a genuinely new module, backend-only for now)
+
+Ports `lib/data/authority-governance-repository.ts`'s
+`getAuthorityGovernanceSnapshot`/`createAuthorityOnboardingCase`/
+`decideAuthorityOnboardingCase` -- the backend the source's own NamRA
+Administration portal (`app/portal/namra-admin/page.tsx`) needs. This
+module had never been touched anywhere in this migration before now:
+no prior phase's own MIGRATION_MATRIX entry mentions it, and none of
+its 12 tables (`countries`, `tax_jurisdictions`, `tax_authorities`,
+`tax_authority_units`, `tax_authority_role_definitions`,
+`tax_authority_role_assignments`,
+`tax_authority_federation_connections`,
+`tax_authority_onboarding_cases`, `tax_authority_onboarding_decisions`,
+`tax_authority_governance_events`, `tax_authority_access_reviews`,
+`tax_authority_administrators`) existed anywhere in this schema
+before this slice.
+
+**Provenance, stated plainly:** this port's own code (migrations,
+models, validator, exceptions, service, controller, seeder, tests) was
+not written fresh in this session -- it was extracted verbatim from a
+much larger, independent 100-file/~13,000-line PR (`#3`,
+`claude/next-key-task-7q98el`) that branched off `main` on 2026-09-02,
+*before* this session's entire frontend UI build-out (PRs #2, #4-#9)
+existed. That PR was never merged: a review found it reimplemented
+`AuditCaseViewController`, `RefundViewController`, and
+`BusinessPartyViewController` as shallow read-only stubs that would
+have silently regressed the real, fully-featured versions of those
+same classes already on `main`, plus extensive conflicts across
+`routes/web.php`/`layouts/app.blade.php`/`status-badge.blade.php`/
+`DemoSeeder.php` from having diverged so early. Authority Governance
+was the one genuinely new, zero-overlap, self-contained piece of that
+PR -- no Blade view, no shared-file collision risk, nothing else on
+`main` touches any of its 12 tables -- so it was cherry-picked out on
+its own merits rather than discarded with the rest. The other
+non-overlapping modules in that PR (Quotations, Business Operations,
+the six portal dashboards, an Administration command centre,
+Accounting, a Documents register) remain candidates for the same
+treatment as their own future slices; the overlapping pieces should
+not be revived at all.
+
+**One real bug caught and fixed during this port, before it ever
+shipped:** `AuthorityGovernanceValidationException`'s constructor
+declared `private readonly string $code` -- a fatal PHP error, since
+`\Exception` (its ultimate parent) already declares a non-readonly
+`$code` property, and PHP does not allow a subclass to redeclare an
+inherited property as `readonly`. Caught by `php -l` before this ever
+reached a test run. Renamed to `$errorCode`, matching
+`LicensingValidationException`'s own already-correct, already-working
+name for the identical `{code, message}` exception shape -- the
+sibling class this one should have matched from the start.
+
+Deliberately backend-only, no Blade UI: the source's own NamRA
+Administration portal page is where this data gets a screen, and that
+portal (along with the other five portal dashboards) is exactly the
+kind of Blade UI slice this migration's frontend build-out has been
+shipping incrementally -- a natural future slice, not bundled in here.
+This mirrors how every original numbered phase (8 through 13) shipped
+its JSON API surface first, with Blade UI following later as a
+separate initiative.
+
+`authority-governance:read`/`authority-governance:manage` are the one
+exception to this codebase's own "every permission traces to
+`lib/domain/access.ts`'s static map" rule -- see
+`App\Support\Access\Permissions`'s own doc comment for why (the source
+grants these two through a `role_permission_grants` table row this
+migration's `Permissions::roleHas()` was never wired to read, not
+through the static map at all); reproduced as a direct, targeted
+transcription of that table's effective grant (`PILOT_ADMIN` and
+`NAMRA_SYSTEM_ADMIN` only), not a new permission mechanism.
+
+Verified by the ported `tests/Feature/AuthorityGovernance/AuthorityGovernanceTest.php`
+(11 tests, unchanged from the original PR beyond the exception fix
+above): permission gating; an actor with no administrator-scope row
+sees nothing at all (matching the source's own `AccessDeniedError`);
+the snapshot returns the actor's administered authorities and the
+fixed 9-role catalogue; a `LOCAL_STAGING` onboarding case can be
+created; a `PRODUCTION` one is created pre-blocked (production
+activation has no command anywhere in the source, `productionActivationEnabled`
+is hardcoded `false`, reproduced identically); creating without
+administrator scope is denied; a duplicate open case for the same
+authority/environment is a conflict; creating without step-up
+confirmation is denied (423); the requester cannot decide their own
+case (self-approval denial); a distinct reviewer can approve local
+staging; a decision without a current quarterly access review for
+that authority is denied. All 12 migrations run cleanly against real
+MySQL; 399 tests total, 0 regressions. Also verified live end-to-end
+over real HTTP against the actual dev server: granted
+`admin@vat-msa.test` a real `tax_authority_administrators` row,
+confirmed the snapshot endpoint returns the real NAMRA authority
+joined through its jurisdiction and country plus all 9 seeded roles,
+then created a real `LOCAL_STAGING` onboarding case through the
+step-up-confirmed session and confirmed a real `SUBMITTED` row came
+back -- left in place afterward as harmless local demo data, alongside
+this session's other real cross-slice fixtures.
+
 ## Cloudflare/D1/R2/Vinext dependencies remaining
 
 None have been introduced in `php-app/` (it is a clean Laravel project with

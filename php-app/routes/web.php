@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
+use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
@@ -478,6 +479,23 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/refunds/{id}/checks', [RefundController::class, 'checks']);
         Route::post('/refunds/{id}/transition', [RefundController::class, 'transition']);
         Route::post('/refunds/{id}/disputes', [RefundController::class, 'dispute']);
+
+        // Authority Governance (lib/data/authority-governance-repository.ts's
+        // getAuthorityGovernanceSnapshot/createAuthorityOnboardingCase/
+        // decideAuthorityOnboardingCase) -- the backend the NamRA
+        // Administration portal needed, a genuinely new module for this
+        // migration (see AuthorityGovernanceService's own doc comment).
+        // Kept 1:1 with the source's own
+        // app/api/v1/tax-authority-onboarding-cases/** shape; both write
+        // commands are step-up gated, matching the source's own
+        // requireStepUp. Backend-only for now, the same JSON-API-first
+        // pattern every other phase in this migration used before its own
+        // Blade UI slice followed later -- see docs/MIGRATION_MATRIX.md.
+        Route::get('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'show']);
+        Route::post('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'store'])
+            ->middleware('password.confirm');
+        Route::post('/tax-authority-onboarding-cases/{id}/decisions', [AuthorityGovernanceController::class, 'decide'])
+            ->middleware('password.confirm');
 
         // Phase 12 (portals/licensing/governance), slice 1: Licensing &
         // Entitlements (lib/data/control-plane-repository.ts's
