@@ -26,6 +26,7 @@ use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Compliance\AuditCaseController;
 use App\Http\Controllers\Compliance\AuditCaseViewController;
+use App\Http\Controllers\Compliance\ComplianceOverviewViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
@@ -188,6 +189,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/business-parties', [BusinessPartyViewController::class, 'store'])->name('business-parties.store');
     Route::post('/business-parties/{id}/verification', [BusinessPartyViewController::class, 'storeVerification'])->name('business-parties.verification.store');
     Route::post('/business-parties/{id}/deactivation', [BusinessPartyViewController::class, 'storeDeactivation'])->name('business-parties.deactivation.store');
+
+    // Real Blade UI for ComplianceSnapshotService, alongside the JSON API
+    // surface below -- see ComplianceOverviewViewController's own doc
+    // comment. Purely read-only: getSnapshot() is the service's only
+    // method, so there is exactly one route here.
+    Route::get('/compliance-overview', [ComplianceOverviewViewController::class, 'index'])->name('compliance-overview.index');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
