@@ -11,6 +11,7 @@ use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
 use App\Http\Controllers\Identity\MembershipController;
 use App\Http\Controllers\Identity\OrganisationController;
+use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
@@ -161,6 +162,20 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/obligations', [ObligationViewController::class, 'index'])->name('obligations.index');
     Route::post('/obligations', [ObligationViewController::class, 'store'])->name('obligations.store');
     Route::post('/obligations/{id}/satisfaction', [ObligationViewController::class, 'storeSatisfaction'])->name('obligations.satisfaction.store');
+
+    // Real Blade UI bundling Module 1's own Organisations/Branches/
+    // Memberships/Taxpayer-suspension/Identity-snapshot services, alongside
+    // the JSON API surface below -- see OrganisationViewController's own
+    // doc comment for why these five small services were built as one
+    // slice rather than split further. Membership assignment and taxpayer
+    // suspension carry the same 'password.confirm' step-up middleware as
+    // their JSON API siblings.
+    Route::get('/organisations', [OrganisationViewController::class, 'index'])->name('organisations.index');
+    Route::get('/organisations/{id}', [OrganisationViewController::class, 'show'])->name('organisations.show');
+    Route::post('/organisations/{organisation}/branches', [OrganisationViewController::class, 'storeBranch'])->name('organisations.branches.store');
+    Route::patch('/organisations/{organisation}/branches/{branch}', [OrganisationViewController::class, 'updateBranch'])->name('organisations.branches.update');
+    Route::post('/organisations/{organisation}/memberships', [OrganisationViewController::class, 'storeMembership'])->name('organisations.memberships.store')->middleware('password.confirm');
+    Route::post('/organisations/{organisation}/taxpayer-suspension', [OrganisationViewController::class, 'storeSuspension'])->name('organisations.taxpayer-suspension.store')->middleware('password.confirm');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);

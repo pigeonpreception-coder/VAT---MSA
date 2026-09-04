@@ -10,11 +10,12 @@
         'OPEN' => 'text-bg-success', 'ACKNOWLEDGED' => 'text-bg-success', 'FILED' => 'text-bg-success',
         'PASS' => 'text-bg-success', 'PAYMENT_PENDING' => 'text-bg-success', 'PRESERVED' => 'text-bg-success', 'SATISFIED' => 'text-bg-success',
         'MATCHED' => 'text-bg-info', 'PENDING' => 'text-bg-info', 'PENDING_APPROVAL' => 'text-bg-info', 'AWAITING_PROVIDER' => 'text-bg-info',
+        'PENDING_VERIFICATION' => 'text-bg-info', 'UNDER_REVIEW' => 'text-bg-info', 'VERIFIED' => 'text-bg-info',
         'RECEIVED' => 'text-bg-info', 'RISK_REVIEW' => 'text-bg-info', 'OFFICER_REVIEW' => 'text-bg-info', 'PAYMENT_AUTHORISATION' => 'text-bg-info',
         'PROPOSED' => 'text-bg-info', 'AUTHORIZED' => 'text-bg-info', 'ASSIGNED' => 'text-bg-info', 'PLANNING' => 'text-bg-info',
         'EVIDENCE_COLLECTION' => 'text-bg-info', 'ANALYSIS' => 'text-bg-info', 'FINDINGS_REVIEW' => 'text-bg-info', 'PRELIMINARY' => 'text-bg-info',
         'EXCEPTION' => 'text-bg-danger', 'REJECTED' => 'text-bg-danger', 'REJECTED_BY_PROVIDER' => 'text-bg-danger', 'FAIL' => 'text-bg-danger',
-        'CANCELLED' => 'text-bg-secondary', 'RETIRED' => 'text-bg-secondary', 'LOCKED' => 'text-bg-secondary',
+        'CANCELLED' => 'text-bg-secondary', 'RETIRED' => 'text-bg-secondary', 'LOCKED' => 'text-bg-secondary', 'INACTIVE' => 'text-bg-secondary',
         'DRAFT' => 'text-bg-secondary', 'SUPERSEDED' => 'text-bg-secondary', 'ON_HOLD' => 'text-bg-secondary',
         'CLOSED' => 'text-bg-secondary', 'NOT_CONFIGURED' => 'text-bg-secondary',
         'BLOCKED_CONFIGURATION' => 'text-bg-warning', 'BLOCKED_RETURN_NOT_FILED' => 'text-bg-warning',
@@ -38,9 +39,20 @@
         'ESCALATED_TO_CASE' => 'text-bg-danger',
         'DISMISSED' => 'text-bg-secondary',
     ];
+    // Another separate map, for the same reason: 'SUSPENDED' already means
+    // an audit case paused mid-workflow (text-bg-warning, in $statusMap
+    // above) -- a taxpayer's own vat_status='SUSPENDED' is a more severe,
+    // genuinely different thing (VAT-status enforcement, TaxpayerService's
+    // own doc comment), and sharing the bare key would silently pick
+    // whichever mapping's array entry happened to be declared last.
+    $taxpayerMap = [
+        'ACTIVE' => 'text-bg-success',
+        'SUSPENDED' => 'text-bg-danger',
+    ];
     $class = match ($type) {
         'risk' => $riskMap[$value] ?? 'text-bg-light',
         'indicator' => $indicatorMap[$value] ?? 'text-bg-light',
+        'taxpayer' => $taxpayerMap[$value] ?? 'text-bg-light',
         default => $statusMap[$value] ?? 'text-bg-light',
     };
     $label = ucwords(strtolower(str_replace('_', ' ', (string) $value)));

@@ -2520,6 +2520,137 @@ marked it satisfied and confirmed the status badge flipped to
 `Satisfied` and its row's action correctly disappeared while the
 still-pending row's action remained.
 
+### Organisations & identity module (the ninth UI slice, Module 1, the third fresh smaller PR)
+
+Bundles Module 1's own smallest, most tightly-coupled services --
+`OrganisationService`, `BranchService`, `MembershipService`,
+`TaxpayerService`, and `IdentityFoundationSnapshotService` (49-166
+lines each) -- into one coherent slice, the third fresh, smaller PR
+after Disputes and Obligations. Built as one slice deliberately, not
+five: splitting these into five separate one-service PRs would have
+fragmented what a user actually experiences as a single screen (an
+organisation's own profile -- its taxpayer record, branches, staff
+memberships, trading capabilities), the same "don't fragment one
+coherent page" reasoning already applied to Audit Cases (620 lines,
+kept as one slice for the opposite reason: too large to split
+meaningfully).
+
+`identity:read` is held broadly (confirmed against
+`Permissions::ROLE_PERMISSIONS`: almost every role in the system), so
+the organisations list/detail stays readable widely. `organisations:manage`
+(branch create/update, membership assignment) is held by an
+organisation's own `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` as well as
+`PILOT_ADMIN`/`NAMRA_SYSTEM_ADMIN` -- genuinely self-service
+organisation administration, not officer-only, confirmed before
+writing any UI. `taxpayers:suspend` is rarer still (`PILOT_ADMIN`/
+`NAMRA_SYSTEM_ADMIN` only) and, like membership assignment, already
+carries its own step-up requirement in the JSON API
+(`password.confirm` middleware, RT-005's `ConfirmPasswordController`)
+-- applied identically to the two equivalent Blade routes here, no new
+re-auth mechanism needed.
+
+**A real bug found and fixed, not routed around**: this slice is the
+first Blade-rendered, plain-HTML-form consumer of the `password.confirm`
+step-up flow anywhere in this build-out. `ConfirmPasswordController::store()`
+previously called `redirect()->intended()`, which replays the *blocked*
+request's own URL as a GET -- correct for a step-up-gated GET, but this
+app's step-up-gated actions are POST-only forms with no GET handler at
+that same path, so confirming from a blocked membership-assignment or
+taxpayer-suspension submission used to redirect straight into a
+404/405. Fixed in `ConfirmPasswordController` itself (shared
+infrastructure, not duplicated per-route): `show()` now captures
+`url()->previous()` -- the page the form was actually rendered on,
+read before this request's own URL overwrites it in Laravel's session
+tracking -- and passes it through the confirm form as a hidden
+`redirect_to` field; `store()` honours that instead of `intended()`,
+guarded same-origin by a new `safeRedirectTarget()` helper (a raw
+hidden field is otherwise a textbook open-redirect vector immediately
+after a real authentication check). Verified live in the browser end
+to end (blocked -> confirm -> landed back on the real organisation
+page, not a 404) and covered by a new dedicated
+`tests/Feature/Auth/ConfirmPasswordTest.php` (4 tests: the fixed
+redirect, an external `redirect_to` rejected in favour of the
+dashboard, a missing one falling back to the dashboard, and a wrong
+password still producing the existing friendly field error) --
+previously untested despite already gating several JSON API routes.
+
+New: `App\Http\Controllers\Identity\OrganisationViewController`
+(index/show/storeBranch/updateBranch/storeMembership/storeSuspension).
+`show()` calls `OrganisationService::get()` directly, which throws
+`AuthorizationException` (the RT-002 clean-403 page) for an
+out-of-scope organisation that genuinely exists via its own
+`TenantScope::requireTaxpayer()` -- the same service-level-exception
+precedent already established for VAT Returns and Audit Cases, not the
+self-built pre-scoped-query 404 Invoices/Disputes/Obligations use,
+since `OrganisationService` already has its own dedicated single-read
+method here. No new model relation was needed anywhere (`Organisation`,
+`Branch`, `OrganisationMembership`, and `Taxpayer` already had every
+relation this page needed). `AssignMembershipRequest::ASSIGNABLE_ROLES`
+intentionally excludes NamRA/platform/portal roles (its own doc
+comment: granting those here would be a privilege-escalation path).
+Membership assignment resolves its target by email rather than the
+JSON API's raw `user_id`, so it can't reuse `AssignMembershipRequest`
+for validation the way branch create/update do (which type-hint
+`CreateBranchRequest`/`UpdateBranchRequest` directly, letting Laravel's
+own FormRequest auto-validation redirect back with errors before the
+method body even runs) -- the role allowlist is therefore enforced
+directly against that same public constant in `storeMembership()`,
+never duplicated as a fresh list that could drift from it.
+
+New badge mappings: `INACTIVE`/`SUSPENDED`(warning, an audit case's
+own suspend transition)/`PENDING_VERIFICATION`/`UNDER_REVIEW`/
+`VERIFIED` in the shared `$statusMap`. A taxpayer's own
+`vat_status='SUSPENDED'` deliberately did **not** join that map as a
+bare key: `'SUSPENDED'` there already means an audit case paused
+mid-workflow (warning), a materially milder thing than an actual
+suspended taxpayer account -- sharing the key would have silently
+picked whichever mapping happened to be declared last. Given its own
+new `type="taxpayer"` map instead (`ACTIVE`=success, `SUSPENDED`=danger),
+the same "don't let one string mean two things under one badge colour"
+precedent `type="indicator"` already established for risk indicators'
+own `'OPEN'`.
+
+Deliberately out of scope: `RegistrationService`'s own submit/decide
+commands (a taxpayer/organisation doesn't exist until an approved
+registration materialises it -- genuinely its own workflow, and
+`decide()` touches the still-deferred ITAS integration point) and
+`OrganisationAdminController::storeCapability` (Phase 12, a different
+service). Both render read-only here -- the index page's snapshot
+shows recent registration applications, and an organisation's trading
+capabilities render on its own detail page -- but neither gets a write
+action in this slice.
+
+Verified by two new test files. `tests/Feature/Identity/
+OrganisationViewTest.php` (14 tests, reusing `BranchManagementTest`'s
+and `TaxpayerSuspensionTest`'s own fixture patterns): authentication is
+required; the index page renders the identity snapshot (real seeded
+identity-provider rows, including an honestly-rendered "Pending /
+Requires ITAS Confirmation" for the still-deferred ITAS provider) and
+the organisations list; a taxpayer can view their own organisation
+with its branches/memberships; a read-only viewer sees no management
+forms at all; a taxpayer cannot view another taxpayer's organisation
+(the RT-002 403, not a 404); creating and deactivating a non-head-office
+branch both work; a duplicate branch code and an attempt to deactivate
+the head office are both friendly form errors, not raw 409s/422s;
+membership assignment with an already-confirmed session creates a real
+row; the same action without a confirmed session correctly redirects
+through step-up and back to the real organisation page (the regression
+test for the bug above); assigning a national role or an unknown email
+are both friendly field errors; a PILOT_ADMIN can suspend a taxpayer
+from the page and a taxpayer owner never even sees that card. 343
+tests total, 0 regressions, run against real MySQL.
+
+Also verified live end-to-end in the browser: as `owner@demo-trading.test`
+(TAXPAYER_OWNER), created a real branch (`SW-01`, code normalised
+uppercase) and, after being correctly bounced through the step-up
+screen on the first attempt and landing back on the real organisation
+page (not a 404), assigned a real membership to a fresh demo user; as
+`admin@vat-msa.test` (PILOT_ADMIN), suspended a real demo taxpayer
+(Red Team Outsider Co) through the same step-up flow and confirmed the
+badge flipped to a red "Suspended" via the new `type="taxpayer"` map,
+with the suspend form correctly replaced by "This taxpayer is already
+suspended." afterward.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
