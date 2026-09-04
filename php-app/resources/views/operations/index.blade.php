@@ -9,11 +9,11 @@
 @section('content')
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Operational domains</div>
-    <h1 class="h3 mb-1">Expenses, inventory and projects</h1>
+    <h1 class="h3 mb-1">Expenses, inventory, projects and imports</h1>
     <p class="text-muted mb-0">Operational evidence remains linked to the organisation, branch, project and source document so VAT treatment and accounting postings can be reconstructed rather than inferred.</p>
 </div>
 
-<div class="row row-cols-1 row-cols-sm-3 g-3 mb-4">
+<div class="row row-cols-1 row-cols-sm-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100"><div class="card-body">
             <div class="text-muted small text-uppercase">Expenses</div>
@@ -33,6 +33,13 @@
             <div class="text-muted small text-uppercase">Active projects</div>
             <div class="fs-2 fw-semibold">{{ number_format($projects->count()) }}</div>
             <div class="small text-muted">Budget-to-cost traceability</div>
+        </div></div>
+    </div>
+    <div class="col">
+        <div class="card h-100"><div class="card-body">
+            <div class="text-muted small text-uppercase">Import declarations</div>
+            <div class="fs-2 fw-semibold">{{ number_format($importRecords->count()) }}</div>
+            <div class="small text-warning">Evidence-gated input VAT</div>
         </div></div>
     </div>
 </div>
@@ -279,9 +286,43 @@
     </div>
 </div>
 
-<div class="alert alert-info mt-3" role="status">
-    <strong>Import VAT evidence is not yet available in this UI.</strong><br>
-    Customs declaration records have no backing module in this migration yet (only their database table exists) -- tracked separately in the migration matrix, not silently included here.
+<div class="card mt-3">
+    <div class="card-header">
+        <div class="fw-semibold">Import VAT evidence</div>
+        <div class="text-muted small">Customs claims cannot be treated as verified without evidence</div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <caption class="visually-hidden">Customs import declarations, their supplier/origin, customs value, import VAT, date and status</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Declaration</th>
+                    <th scope="col">Supplier / origin</th>
+                    <th scope="col">Customs value</th>
+                    <th scope="col">Import VAT</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @forelse ($importRecords as $record)
+                    <tr>
+                        <td class="font-monospace"><strong>{{ $record->declaration_number }}</strong></td>
+                        <td>
+                            {{ $record->supplier_name }}
+                            <div class="text-muted small">{{ $record->country_of_origin }}</div>
+                        </td>
+                        <td>{{ $record->currency }} {{ number_format($record->customs_value_cents / 100, 2) }}</td>
+                        <td>{{ $record->currency }} {{ number_format($record->import_vat_cents / 100, 2) }}</td>
+                        <td>{{ $record->declaration_date->toDateString() }}</td>
+                        <td><x-status-badge :value="$record->status" type="status" /></td>
+                    </tr>
+                @empty
+                    <tr><td colspan="6" class="text-center text-muted py-4">No import declarations on record.</td></tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <script>

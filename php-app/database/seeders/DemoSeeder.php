@@ -153,6 +153,23 @@ class DemoSeeder extends Seeder
             ],
         );
 
+        // Import VAT evidence demo row -- import_records is seed/read-only
+        // by design (see docs/MIGRATION_MATRIX.md's "Import VAT evidence,
+        // closed as a follow-up" note), the same class of gap as the
+        // report_definitions/platform_config rows above: nothing had ever
+        // seeded one, leaving Operations' own fourth panel permanently
+        // empty for a real demo login. Values mirror the source's own
+        // db/runtime.ts seed row ('NAMCUS-2026-0001'/'EVIDENCE_REQUIRED').
+        DB::table('import_records')->updateOrInsert(
+            ['organisation_id' => $organisation->id, 'declaration_number' => 'NAMCUS-2026-0001'],
+            [
+                'id' => (string) Str::uuid(), 'customs_office' => 'Walvis Bay', 'supplier_name' => 'Cape Office Manufacturing',
+                'country_of_origin' => 'ZA', 'currency' => 'NAD', 'customs_value_cents' => 7_500_000, 'import_vat_cents' => 1_125_000,
+                'declaration_date' => now()->subDays(5)->toDateString(), 'evidence_document_id' => null, 'status' => 'EVIDENCE_REQUIRED',
+                'created_by' => $owner->id, 'created_at' => now()->subDays(5),
+            ],
+        );
+
         // A second demo taxpayer purely as a registered-buyer counterparty, so a
         // demo invoice can be certified against a real customer (status MATCHED)
         // rather than only the unregistered-buyer path (status CERTIFIED, risk+15).

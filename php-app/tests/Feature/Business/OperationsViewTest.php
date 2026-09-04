@@ -4,6 +4,7 @@ namespace Tests\Feature\Business;
 
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
+use App\Models\ImportRecord;
 use App\Models\InventoryBalance;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
@@ -94,7 +95,7 @@ class OperationsViewTest extends TestCase
         $this->actingAs($viewer)->get('/operations')->assertForbidden();
     }
 
-    public function test_the_operations_page_renders_all_three_panels(): void
+    public function test_the_operations_page_renders_all_four_panels(): void
     {
         $org = $this->makeOrganisation('VAT-SELLER-0001');
         $category = $this->makeCategory($org['organisation']);
@@ -121,6 +122,12 @@ class OperationsViewTest extends TestCase
             'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'code' => 'PRJ-001', 'name' => 'Warehouse Fitout',
             'currency' => 'NAD', 'start_date' => now()->toDateString(), 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
         ]);
+        ImportRecord::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'declaration_number' => 'DECL-0001',
+            'customs_office' => 'Walvis Bay', 'supplier_name' => 'Global Parts Ltd', 'country_of_origin' => 'ZA', 'currency' => 'NAD',
+            'customs_value_cents' => 500000, 'import_vat_cents' => 75000, 'declaration_date' => now()->toDateString(),
+            'status' => 'EVIDENCE_REQUIRED', 'created_by' => $org['owner']->id, 'created_at' => now(),
+        ]);
 
         $response = $this->actingAs($org['owner'])->get('/operations');
 
@@ -132,9 +139,29 @@ class OperationsViewTest extends TestCase
         $response->assertSee('Packing Boxes');
         $response->assertSee('PRJ-001');
         $response->assertSee('Warehouse Fitout');
-        $response->assertSee('Import VAT evidence is not yet available');
+        $response->assertSee('DECL-0001');
+        $response->assertSee('Global Parts Ltd');
         $response->assertSee('<caption class="visually-hidden">', false);
         $response->assertSee('scope="col"', false);
+    }
+
+    public function test_import_records_are_scoped_to_the_organisation(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0002');
+        $otherOrg = $this->makeOrganisation('VAT-SELLER-0003');
+        ImportRecord::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $otherOrg['organisation']->id, 'declaration_number' => 'DECL-OTHER-0001',
+            'customs_office' => 'Walvis Bay', 'supplier_name' => 'Other Org Supplier', 'country_of_origin' => 'ZA', 'currency' => 'NAD',
+            'customs_value_cents' => 200000, 'import_vat_cents' => 30000, 'declaration_date' => now()->toDateString(),
+            'status' => 'EVIDENCE_REQUIRED', 'created_by' => $otherOrg['owner']->id, 'created_at' => now(),
+        ]);
+
+        $response = $this->actingAs($org['owner'])->get('/operations');
+
+        $response->assertOk();
+        $response->assertDontSee('DECL-OTHER-0001');
+        $response->assertDontSee('Other Org Supplier');
+        $response->assertSee('No import declarations on record.');
     }
 
     public function test_an_expense_can_be_recorded_through_the_form(): void

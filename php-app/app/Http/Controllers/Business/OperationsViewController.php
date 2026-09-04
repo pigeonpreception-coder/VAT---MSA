@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Models\DocumentMetadata;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
+use App\Models\ImportRecord;
 use App\Models\InventoryBalance;
 use App\Models\Project;
 use App\Models\ProjectBudget;
@@ -34,14 +35,18 @@ use Illuminate\View\View;
  * service method, so this doesn't add a second, competing one) -- no
  * second query/command path anywhere in this controller.
  *
- * Two confirmed, documented scope boundaries against the source (see
- * docs/MIGRATION_MATRIX.md's own note for both):
- *  - The source's fourth panel, "Import VAT evidence" (customs
- *    declarations), is not rendered here at all -- unlike every other gap
- *    in this migration, `import_records` has no backing model or service
- *    whatsoever (a migration-only table, per Phase 4's own "not yet built"
- *    list), a genuinely separate backend module this slice does not
- *    invent.
+ * The source's fourth panel, "Import VAT evidence" (customs
+ * declarations), is now rendered read-only via App\Models\ImportRecord --
+ * a plain direct read (`ImportRecord::where('organisation_id', ...)`, the
+ * same inline-query precedent as InventoryBalance/Project above), never a
+ * write: a full-repo grep of the TypeScript source confirms `import_records`
+ * is only ever read (by this same page and by `getBusinessPlatformSnapshot`)
+ * and no command anywhere creates or updates a row. Building a "record an
+ * import declaration" command would be inventing backend capability the
+ * source itself never implements, not porting one -- see
+ * docs/MIGRATION_MATRIX.md's own note.
+ *
+ * One remaining confirmed, documented scope boundary against the source:
  *  - Receipt handling stays read-only: the source's own
  *    ExpenseReceiptActions.tsx calls `POST /api/v1/expenses/{id}/receipt`
  *    to link an already-uploaded, already-scanned-clean document, but that
@@ -107,6 +112,8 @@ class OperationsViewController extends Controller
         $partiesSnapshot = $this->parties->search($user, $organisation->id, []);
         $suppliers = collect($partiesSnapshot['parties'])->filter(fn ($p) => $p['status'] === 'ACTIVE' && in_array('SUPPLIER', $p['relationships'], true))->values();
 
+        $importRecords = ImportRecord::where('organisation_id', $organisation->id)->orderByDesc('declaration_date')->limit(100)->get();
+
         return view('operations.index', [
             'expenses' => $expenses,
             'expenseValueCents' => $expenses->sum('total_cents'),
@@ -114,6 +121,7 @@ class OperationsViewController extends Controller
             'suppliers' => $suppliers,
             'balances' => $balances,
             'projects' => $projects,
+            'importRecords' => $importRecords,
             'canDecideExpenses' => $user->hasAppPermission('expenses:manage'),
             'canManageExpenses' => $user->hasAppPermission('expenses:manage'),
             'actorId' => $user->id,

@@ -1954,16 +1954,20 @@ checked that way, not just via `curl`/JSON assertions. 256 tests total,
 0 regressions, run against real MySQL, plus a clean
 `migrate:fresh --seed` cycle.
 
-Still NOT STARTED (invoices closed out just below; compliance/audit
-cases, refunds, the portal switchboard, all six portal dashboards --
+**Every screen this initiative originally scoped is now built**
+(invoices closed out just below; compliance/audit cases, refunds, the
+portal switchboard, all six portal dashboards --
 Buyer/Seller/NamRA/Super Administration/Developer/NamRA Administration
 -- and business parties, quotations, accounting, operations
-(expenses/inventory/projects), licensing/administration, documents,
-reports/analytics, platform config and the workflow engine's own
-dedicated authoring UI closed out further below): import declarations
-(a genuinely separate, not-yet-built backend module -- see the
-"Operations" section above) -- its own comparable slice of this new
-initiative.
+(expenses/inventory/projects/imports), licensing/administration,
+documents, reports/analytics, platform config and the workflow engine's
+own dedicated authoring UI all closed out below). "Import declarations"
+-- once tracked here as its own separate not-yet-built backend module --
+turned out, on the same full-repo-grep scrutiny every other gap in this
+migration got, to be a read-only dashboard field with no backend module
+to build at all (see the "Operations" section's own "Import VAT
+evidence, closed as a follow-up to this slice" note); closed alongside a
+sidebar-navigation polish pass, not a comparably-sized slice of its own.
 
 ### Accessibility baseline: WCAG 2.1 Level AA
 
@@ -2982,28 +2986,47 @@ query joins `expense_categories`/`business_parties` for the first two;
 `receipt_document_id` was simply never selected despite being a real
 column since the table's creation).
 
-Two confirmed, deliberately **not** ported scope boundaries, each
-documented rather than silently faked:
-- **Import VAT evidence** -- the source's fourth panel (customs
-  declaration evidence) is not rendered at all. Unlike every other gap
-  this migration has closed, `import_records` has no backing model,
-  service, or controller whatsoever -- only its migration exists (Phase
-  4's own "not yet built" list). Building it would mean inventing an
-  entire new backend domain (customs declarations, evidence-gated input
-  VAT) under an "expenses" UI slice, not porting an existing one; the
-  view instead shows an explicit "not yet available" notice.
+One confirmed, deliberately **not** ported scope boundary, documented
+rather than silently faked:
 - **Receipt linking stays read-only.** The source's own
   `ExpenseReceiptActions.tsx` calls `POST /api/v1/expenses/{id}/receipt`
   to link an already-uploaded, already-scanned-clean document to a
   `DRAFT` expense -- but that command was never ported to
   `ExpenseService` (no method, no route registered, confirmed by
-  reading the file in full), and its own "Upload receipt" action
-  depends on the Documents module's own upload UI, which also has no
-  Blade screen yet (`documents` remains in this initiative's own
-  not-yet-started list). This view reads and displays a linked
+  reading the file in full). This view reads and displays a linked
   receipt's real state directly from `App\Models\DocumentMetadata`
   (file name, scan status, availability) -- a genuine, working read --
-  but does not invent the missing link/upload commands themselves.
+  but does not invent the missing link command itself. (The other half
+  of the original reasoning here -- that Documents' own upload UI
+  didn't exist yet either -- no longer holds; that UI shipped in this
+  initiative's own "Documents" slice below. `linkReceipt` remains
+  unported on its own separate merits: a genuinely missing command, not
+  a missing screen to call it from.)
+
+**Import VAT evidence, closed as a follow-up to this slice**: the
+source's fourth panel (customs declaration evidence) originally
+rendered an explicit "not yet available" notice here instead, since
+`import_records` had no backing model at all -- only its migration
+existed (Phase 4's own "not yet built" list). A full-repo grep of the
+TypeScript source settles what "not yet built" actually means here:
+`import_records` is read exactly once in the entire source
+(`business-repository.ts`'s `getBusinessPlatformSnapshot`, plus this
+same page) and **written by no command anywhere** -- the same seed/
+read-only posture already established for `report_definitions`/
+`data_products`/`feature_flags` elsewhere in this migration, not a
+missing write feature. New: `App\Models\ImportRecord` (a plain
+read-only model, no service -- nothing writes here so there is nothing
+for a service to do) and a direct `ImportRecord::where('organisation_id',
+...)->orderByDesc('declaration_date')->limit(100)` read in
+`OperationsViewController::index`, mirroring the same inline-query
+precedent `InventoryBalance`/`Project` already established in this same
+controller. The Blade view's fourth KPI tile ("Import declarations",
+previously omitted) and the real evidence table (declaration number,
+supplier/origin, customs value, import VAT, date, status -- matching
+the source's own column set exactly) replace the placeholder notice.
+Building a "record an import declaration" write command remains out of
+scope: the source itself has none to port, and inventing one would be
+speculative backend capability, not porting an existing feature.
 
 One deliberate, documented deviation from source, closing a confirmed
 dead end the same way the quotations slice's own "Send" action did:
