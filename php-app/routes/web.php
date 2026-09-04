@@ -19,6 +19,7 @@ use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
 use App\Http\Controllers\Business\BusinessPartyController;
+use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
@@ -176,6 +177,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::patch('/organisations/{organisation}/branches/{branch}', [OrganisationViewController::class, 'updateBranch'])->name('organisations.branches.update');
     Route::post('/organisations/{organisation}/memberships', [OrganisationViewController::class, 'storeMembership'])->name('organisations.memberships.store')->middleware('password.confirm');
     Route::post('/organisations/{organisation}/taxpayer-suspension', [OrganisationViewController::class, 'storeSuspension'])->name('organisations.taxpayer-suspension.store')->middleware('password.confirm');
+
+    // Real Blade UI bundling BusinessPartyService (customers/suppliers)
+    // with SupplierVerificationService (verify + history), alongside the
+    // JSON API surface below -- see BusinessPartyViewController's own doc
+    // comment for why these two were built together, and why
+    // OfflineSyncService (smaller) was passed over for this slot.
+    Route::get('/business-parties', [BusinessPartyViewController::class, 'index'])->name('business-parties.index');
+    Route::get('/business-parties/{id}', [BusinessPartyViewController::class, 'show'])->name('business-parties.show');
+    Route::post('/business-parties', [BusinessPartyViewController::class, 'store'])->name('business-parties.store');
+    Route::post('/business-parties/{id}/verification', [BusinessPartyViewController::class, 'storeVerification'])->name('business-parties.verification.store');
+    Route::post('/business-parties/{id}/deactivation', [BusinessPartyViewController::class, 'storeDeactivation'])->name('business-parties.deactivation.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
