@@ -2818,6 +2818,91 @@ guard's actual effect -- Audit Cases/Risk Indicators/Refunds rendered
 as real `<a>` links, Obligations/Disputes as plain unlinked `<div>`
 cards, exactly as designed.
 
+### Licensing & entitlements module (the twelfth UI slice, the sixth fresh smaller PR)
+
+Ports the source's own licensing screen over `LicensingService` (166
+lines: `entitlementsSnapshot()`, `usageSnapshot()`, `changeState()`,
+`upgrade()`) -- Phase 12 slice 1, the second-smallest remaining
+standalone candidate after Administration Snapshot. Administration
+Snapshot (136 lines) was deliberately passed over for this slot: it
+aggregates across five separate substantial sub-modules (employees,
+roles, workflows/tasks, access requests/reviews, administrators),
+none of which have any UI anywhere in this build-out yet, unlike
+Compliance Overview's own snapshot slice where six of eleven fields
+already had a real page to link out to -- a genuinely useful
+Administration Overview page would need at least a few of those five
+modules built first, not just a thin aggregate over data nothing else
+lets a user reach.
+
+`upgrade()` is deliberately not given a UI action: `LicensePlanSeeder`
+seeds exactly one plan (`PILOT_PROFESSIONAL`), and nothing anywhere in
+this migration ever creates a second one -- confirmed by grep before
+writing any UI. Every possible `upgrade()` call in this environment
+either targets the organisation's own current plan
+(`LICENSE_PLAN_UNCHANGED`) or a plan that doesn't exist
+(`LICENSE_PLAN_NOT_FOUND`); it can never actually succeed against any
+real data here. Building a button for it would be the same mistake
+already avoided for `OfflineSyncService` and Disputes' missing decide
+path. `changeState()` (activate/suspend/renew) has no such problem --
+it operates on the organisation's existing licence and is fully
+exercisable -- so it's the one write action this slice ships.
+
+A genuine, necessary infrastructure gap this slice had to close
+before it could be tested against anything real: neither
+`subscriptions` nor an organisation's *first* `organisation_licenses`
+row has any application write path anywhere in this migration (each
+table's own migration doc comment says so explicitly, the same
+provisioned-out-of-band pattern `tax_rule_sets` already established).
+Every organisation in the dev database -- including every demo
+fixture used throughout this entire build-out -- had no licence row
+at all until now, and `EntitlementGate`/`LicenseResolver` throw "the
+organisation has no configured licence" without one. `DemoSeeder` now
+seeds a real subscription + `PILOT_PROFESSIONAL` licence for the
+primary demo organisation, matching the exact shape this migration's
+own `LicensingTest` already provisions per-test, and matching what
+that migration's own doc comment says the *source's* demo seed
+already does -- completing a piece of the port that was simply never
+carried over, not inventing new functionality.
+
+New: `App\Http\Controllers\Licensing\LicensingViewController`
+(index/storeState). One additive, non-duplicating change to
+`LicensingValidator`: `actionsFor()`, a public read-only accessor over
+the existing private `STATE_TRANSITIONS` table (mirroring
+`ComplianceValidator::refundClaimActionsFor()`'s identical rationale),
+so the state-change dropdown only ever offers actions that would
+actually succeed from the licence's current state. A new
+`<x-status-badge type="license">` map was added rather than reusing
+the shared one: `'SUSPENDED'` already means an audit case paused
+mid-workflow there (warning) -- a licence actually being suspended is
+materially more severe (it blocks the organisation), and sharing the
+bare key would silently pick whichever mapping was declared last,
+the same collision already avoided once for Organisations &
+Identity's own `taxpayer` map.
+
+Verified by a new `tests/Feature/Licensing/LicensingViewTest.php` (9
+tests, reusing `LicensingTest`'s own `makeLicensedOrganisation`
+fixture pattern): authentication and `licensing:read`/`licensing:manage`
+permission gates; the page renders the real plan, all ten seeded
+entitlements, and usage; a read-only role (`TAXPAYER_ACCOUNTANT`, which
+holds `licensing:read` via the shared `WORKSPACE_READ` set but not
+`licensing:manage`) sees the page but no state-change form; the state
+dropdown correctly offers only Suspend/Renew from Active, never
+Activate; suspending with a confirmed session updates the real row;
+state changes are step-up gated (a blocked attempt redirects to
+`password.confirm`); an invalid transition posted directly is a
+friendly form error, not a raw 422; and a role lacking
+`licensing:manage` is forbidden from posting. 334 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser against the real `owner@demo-trading.test` demo
+organisation: the seeded licence and all ten entitlements rendered
+correctly; suspending correctly triggered the step-up flow (redirected
+to confirm-password, landed back on the real Licensing page rather
+than a 404 -- the `ConfirmPasswordController` fix from the
+Organisations & Identity slice doing its job here too), and, once
+confirmed, resubmitting genuinely flipped the licence to `Suspended`
+(badge and dropdown both updating correctly); reactivated afterward
+to leave the demo data in a healthy state.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

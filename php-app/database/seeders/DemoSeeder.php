@@ -3,10 +3,13 @@
 namespace Database\Seeders;
 
 use App\Models\Branch;
+use App\Models\LicensePlan;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
+use App\Models\OrganisationLicense;
 use App\Models\OrganisationMembership;
 use App\Models\SodRule;
+use App\Models\Subscription;
 use App\Models\Taxpayer;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -188,6 +191,34 @@ class DemoSeeder extends Seeder
                 'id' => (string) Str::uuid(), 'taxpayer_id' => $taxpayer->id, 'scopes' => json_encode(['returns:read', 'audit:read']),
                 'status' => 'ACTIVE', 'valid_from' => now()->subMonth(), 'valid_to' => now()->addMonths(3),
                 'approved_by' => $owner->id, 'approved_at' => now()->subMonth(), 'created_at' => now()->subMonth(),
+            ],
+        );
+
+        // Phase 12 slice 1 gap: subscriptions/organisation_licenses are both
+        // out-of-band, application-never-writes-the-first-row tables (see
+        // each table's own migration doc comment, the same
+        // provisioned-outside-this-codebase pattern VatLifecycleService's
+        // tax_rule_sets already established) -- without a seeded row here,
+        // EntitlementGate::assert and LicenseResolver::getLicense would
+        // throw "no configured licence" for every organisation, and no
+        // command anywhere could ever create the first one. One
+        // subscription + licence row on the single seeded PILOT_PROFESSIONAL
+        // plan (LicensePlanSeeder), matching the source's own demo seed per
+        // that migration's comment.
+        $subscription = Subscription::updateOrCreate(
+            ['provider' => 'MANUAL', 'provider_reference' => 'demo-trading-0001'],
+            [
+                'organisation_id' => $organisation->id, 'status' => 'ACTIVE', 'activated_at' => now()->subMonth(),
+                'current_period_start' => now()->subMonth()->toDateString(), 'current_period_end' => now()->addMonths(11)->toDateString(),
+                'created_at' => now()->subMonth(), 'updated_at' => now(),
+            ],
+        );
+        OrganisationLicense::updateOrCreate(
+            ['organisation_id' => $organisation->id, 'effective_to' => null],
+            [
+                'subscription_id' => $subscription->id, 'license_plan_id' => LicensePlan::where('code', 'PILOT_PROFESSIONAL')->value('id'),
+                'state' => 'ACTIVE', 'state_version' => 1, 'effective_from' => now()->subMonth(),
+                'grace_ends_at' => null, 'retention_policy' => 'NON_DESTRUCTIVE_TAX_RETENTION', 'updated_at' => now(),
             ],
         );
 

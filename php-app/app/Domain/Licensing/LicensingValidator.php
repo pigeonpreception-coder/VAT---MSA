@@ -26,6 +26,21 @@ class LicensingValidator
 
     private const PLAN_CODE_PATTERN = '/^[A-Z][A-Z0-9_-]{1,39}$/';
 
+    /**
+     * Small, additive, read-only accessor over STATE_TRANSITIONS -- lets a
+     * UI dropdown offer only the actions that would actually succeed from
+     * a licence's current state, without duplicating this table (and
+     * risking drift from assertStateTransition's own authoritative
+     * enforcement of it). Same pattern already established for
+     * ComplianceValidator::refundClaimActionsFor()/caseActionsFor().
+     *
+     * @return list<string>
+     */
+    public static function actionsFor(string $currentState): array
+    {
+        return array_values(array_filter(self::ACTIONS, fn (string $action) => in_array($currentState, self::STATE_TRANSITIONS[$action] ?? [], true)));
+    }
+
     /** @return array{action: string, reason: string} */
     public static function stateChange(mixed $input): array
     {
