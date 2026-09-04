@@ -102,6 +102,11 @@
                                 <a class="nav-link {{ request()->routeIs('quotations.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Quotations</a>
                             </li>
                         @endcan
+                        @can('permission', 'documents:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('documents.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">

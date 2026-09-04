@@ -2977,6 +2977,68 @@ certification pipeline, confirming the full cross-module chain (this
 new slice, Business Parties, and Invoice certification) works
 end-to-end together, not just in isolation.
 
+### Documents register (the fourteenth UI slice, the eighth fresh smaller PR)
+
+Ports the source's own `app/documents/page.tsx` +
+`DocumentUploadForm.tsx` -- the evidence register and the real,
+governed upload-to-quarantine form -- over
+`App\Services\Document\DocumentService::upload`, the same method
+`App\Http\Controllers\Document\DocumentController::store` already
+serves at `POST /api/v1/documents`, including its real MIME allow-list,
+size bound, magic-byte content-sniffing and SHA-256 checksum -- none
+of that is re-implemented here. Extracted from PR #3 (see the
+"Authority Governance" section above for that PR's full provenance),
+and unlike every prior extraction so far, this one needed **no
+adaptation at all** -- `DocumentService::upload`'s signature and
+`App\Models\DocumentMetadata` were both untouched since PR #3
+branched.
+
+The source's own page has no UI at all for scan-decision, supersede,
+retention-hold or download (confirmed by reading the source's own
+`app/documents/page.tsx` in full -- its own subtitle even says
+"Downloads are unavailable while malware scanning is not configured",
+reproduced verbatim in the ported view), so none of those are built
+here either -- not a gap, a faithful match of the source's own scope
+for this specific screen. All four remain reachable at their existing
+JSON routes for whichever future admin/national-scope screen needs
+them.
+
+New: `App\Http\Controllers\Document\DocumentViewController`
+(index/store, gated on `documents:read`/`documents:upload`
+respectively -- both permissions already wired to the same roles the
+existing JSON `DocumentController` uses). Six new `<x-status-badge>`
+entries added to the shared map, all the real literals
+`DocumentService`/`DocumentValidator` actually write (confirmed by
+grep, not guessed): `QUARANTINED` warning, `PENDING_EXTERNAL_SCANNER`
+info, `CLEAN` success, `INFECTED` danger (the scan lifecycle), plus
+`TAX_CONFIDENTIAL` warning, `CONFIDENTIAL` info, `RESTRICTED` danger
+and `INTERNAL` secondary (the classification levels, using increasing
+severity rather than a workflow-state meaning -- the first time this
+map has mixed sensitivity levels alongside state, but no collision
+risk since none of those four strings were used by anything else in
+the map). `ACTIVE`, `REJECTED` and `SUPERSEDED` were already present
+from earlier slices and needed no change.
+
+Verified by the ported `tests/Feature/Document/DocumentViewTest.php`
+(7 tests, passing unmodified): the page requires authentication; a
+role without `documents:read` (`SELLER_VIEWER`) is forbidden; the
+register and upload form render a real seeded document; a valid PDF
+can be uploaded to quarantine through the real multipart form; a role
+without `documents:upload` (`TAXPAYER_VIEWER`) is forbidden from
+uploading even though it can view; a file whose content doesn't match
+its declared MIME type is rejected by the real magic-byte check; the
+upload form is prefilled from an `owner_domain`/`owner_resource_id`
+query string (the deep-link an Expenses screen would use). 417 tests
+total, 0 regressions, run against real MySQL. Also verified live in
+the browser against the real `owner@demo-trading.test` demo
+organisation: uploaded a real minimal PDF through the actual multipart
+form (`fetch()` with a real `FormData`/`Blob`, not a stub), landed in
+`QUARANTINED` with `scan_status=PENDING_EXTERNAL_SCANNER` exactly as
+the service produces it, and confirmed the register renders it with
+the correct badge colours (`Tax Confidential` amber, `Pending External
+Scanner` blue, `Quarantined` amber) and the `Documents`/`Quarantined`
+stat cards both increment from the same real row.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

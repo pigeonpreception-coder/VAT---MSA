@@ -39,6 +39,7 @@ use App\Http\Controllers\Compliance\ObligationViewController;
 use App\Http\Controllers\Compliance\RiskController;
 use App\Http\Controllers\Compliance\RiskViewController;
 use App\Http\Controllers\Document\DocumentController;
+use App\Http\Controllers\Document\DocumentViewController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
@@ -222,6 +223,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
     Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
     Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
+
+    Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
+    Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
