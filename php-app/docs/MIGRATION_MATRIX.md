@@ -1841,15 +1841,58 @@ gate: `requestChange()` stages a proposed value as a `PENDING`
 `change_requests` row (snapshotting the previous value so the diff is
 always reconstructable); `decideChange()` applies or rejects it,
 refusing self-decision the same way every other maker-checker command in
-this codebase does. These seeded config values are illustrative/
-documentary today -- changing a row here does not yet feed back into any
-other module's own hardcoded constants (the step-up window, export size
-cap, minimum-cell suppression threshold, rate-limit defaults are all
-still the real hardcoded values those other modules enforce); wiring
-every consumer to read live from `platform_config` is a larger,
-cross-module change deliberately left for when a second consumer
-actually needs it -- reproduced exactly as the source's own comment on
-this states, not silently pretended-complete.
+this codebase does. **Three of these seeded config values now feed back
+into a real downstream consumer** -- see "Platform config now feeds three
+real consumers" immediately below -- the step-up window, the export size
+cap and the minimum-cell suppression threshold are read live from their
+seeded row when an `ACTIVE` one exists. Rate-limit defaults remain
+illustrative only: there is no rate-limiting code anywhere in this
+codebase for that row to feed into (confirmed by
+`grep -rln "RateLimiter::for\|throttle:"` returning nothing), so wiring it
+is left, honestly, for whenever a rate-limiter is actually built. Every
+other seeded `feature_flags`/`platform_config`/`access_policies` row
+remains illustrative/documentary too, for the same reason the source's
+own comment gives: wiring a consumer is a change made when that consumer
+actually needs it, not before.
+
+### Platform config now feeds three real consumers
+
+`App\Support\Platform\PlatformConfigReader` (new) is the first code to
+read `platform_config`/`access_policies` values outside
+`PlatformChangeService`'s own read/propose/decide command surface. Two
+static, uncached reads -- `int(string $key, int $default)` against
+`platform_config.value`, `policyInt(string $code, string $field, int
+$default)` against one field of an `access_policies.parameters` JSON blob
+-- each falling back to the caller's own pre-existing hardcoded literal
+if no `ACTIVE` row exists or the stored value isn't numeric, so a test
+suite or install that never seeds these rows keeps the exact behaviour it
+already had.
+
+Three call sites now use it instead of a bare constant:
+- `App\Services\Platform\ReportExportService::requestExport` --
+  `reports.export_size_limit_bytes` (falls back to the same 200KiB it
+  always enforced).
+- `App\Services\Platform\ReportExportService::computeReportResult`'s
+  `NATIONAL_VAT_AGGREGATE` branch -- `reports.min_cell_suppression_threshold`
+  (falls back to the same threshold of 10).
+- `App\Support\Access\StepUp::isFresh` -- the `STEP_UP_WINDOW` access
+  policy's own `window_seconds` (falls back to Laravel's own
+  `auth.password_timeout` config, exactly as before).
+
+`DemoSeeder` seeds all three rows with the same values these constants
+already hardcoded (200KiB, 10, 10800 seconds), so the demo environment's
+observable behaviour is unchanged; only a real `decideChange()` applying
+a different value now has an actual effect. Verified by a new
+`tests/Feature/Platform/PlatformConfigReaderTest.php` (9 tests covering
+the reader class directly: default/seeded/non-numeric/inactive-row cases
+for both `int()` and `policyInt()`) and three new tests in
+`tests/Feature/Platform/ReportExportTest.php` proving each of the three
+call sites actually changes behaviour once a smaller/larger seeded value
+is in place (an export that fits under the 200KiB default is refused once
+the seeded limit is 1 byte; 14 invoices that were not suppressed under
+the default minimum-cell threshold of 10 are suppressed once the seeded
+threshold is 20; a step-up confirmation that is fresh under the default
+3-hour window is stale once the seeded window is 60 seconds).
 
 **`provisionPlatformStaff` and the `users.password` column**: the
 source's own account here is federated-identity-only (an
@@ -3463,14 +3506,14 @@ each (`offline_sync.enabled`, `reports.export_size_limit_bytes`,
 `infra-admin@vat-msa.test` as `INFRASTRUCTURE_ADMIN`) so the
 maker-checker decide step is genuinely demonstrable between two real
 accounts, not just readable -- the same reasoning that already justified
-a second Authority Governance login earlier in this initiative. Both
+a second Authority Governance login earlier in this initiative. The
 seeded config rows document, in their own `description`, that
-`ReportExportService`'s export size limit and `StepUp`'s freshness
-window are still the real hardcoded values those modules enforce --
-changing the seeded row does not yet feed back into either, exactly as
-Phase 13's own "Platform config & change-management" section above
-already stated and reproduced faithfully here, not silently implied
-otherwise by a UI that lets you "change" a number nothing reads.
+`ReportExportService`'s export size/suppression limits and `StepUp`'s
+freshness window are now read live from these rows via
+`App\Support\Platform\PlatformConfigReader` -- see Phase 13's own
+"Platform config now feeds three real consumers" section above -- so a
+maker-checker change made here through this page's own decide step has a
+real, observable effect, not a documentary one.
 
 Verified by a new `tests/Feature/Platform/PlatformConfigViewTest.php`
 (12 tests): the page requires authentication; a role without
@@ -3736,9 +3779,11 @@ cutover runbook (Phase 14, above), a storage section (why no
 to run the test suite safely (against a disposable database, never a
 real one -- `RefreshDatabase` truncates), and an honest "what is not
 done yet" section that does not let a real production rollout discover
-gaps by surprise: no password-reset flow, no full TOTP step-up parity,
-platform-config values not yet wired to any real downstream consumer,
-no real object-storage driver configured.
+gaps by surprise: no full TOTP step-up parity, three platform-config/
+access-policy values wired to a real downstream consumer with every
+other seeded row still illustrative only, no real object-storage driver
+configured. (Self-service password reset -- previously listed here as a
+gap -- was closed 2026-09-02 per red team finding RT-005.)
 
 No test suite applies to a documentation-only phase; verification here
 is that every factual claim in the document (version numbers, config
@@ -4543,9 +4588,12 @@ away by a fully-green test suite:
   Laravel's `password.confirm` re-authentication rather than the
   source's own server-verified TOTP (Phase 6; the
   `step_up_events`/`mfa_totp_credentials` tables exist, schema-only),
-  platform-config values are not yet wired to any real downstream
-  consumer (Phase 13's "Platform config & change-management" above),
-  and no real S3/R2-compatible object-storage driver is
+  three platform-config/access-policy values are now wired to a real
+  downstream consumer via `App\Support\Platform\PlatformConfigReader`
+  (Phase 13's "Platform config now feeds three real consumers" above);
+  every other seeded row remains illustrative only, wired only when a
+  real consumer needs it, and no real S3/R2-compatible object-storage
+  driver is
   configured (`docs/DEPLOYMENT.md`'s "Storage" section) -- a config
   change only, given every service already goes through Laravel's
   `Storage::disk(...)` interface. (Self-service password reset -- once

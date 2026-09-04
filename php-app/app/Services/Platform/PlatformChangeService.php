@@ -34,11 +34,17 @@ use Illuminate\Support\Str;
  * row (capturing a snapshot of the previous value so the diff is always
  * reconstructable); `decideChange()` applies or rejects it, refusing
  * self-decision the same way every other maker-checker command in this
- * codebase does. These seeded config values are illustrative/documentary
- * today -- changing a row here does not yet feed back into any other
- * module's own hardcoded constants; wiring every consumer to read live
- * from `platform_config` is a larger, cross-module change deliberately
- * left for when a second consumer actually needs it.
+ * codebase does. Three seeded config values now feed back into a real
+ * consumer via App\Support\Platform\PlatformConfigReader --
+ * `reports.export_size_limit_bytes`/`reports.min_cell_suppression_threshold`
+ * (both read by `ReportExportService`) and the `STEP_UP_WINDOW` access
+ * policy's own `window_seconds` (read by `App\Support\Access\StepUp`) --
+ * so changing one of these three rows through `decideChange()` now has a
+ * real, observable effect, not just a documentary one. Every other seeded
+ * row (every `feature_flags` row, every other `platform_config`/
+ * `access_policies` row) remains illustrative only; wiring each one to its
+ * own consumer is left for whenever that consumer actually needs it,
+ * exactly as before.
  *
  * No Eloquent model for any of the four tables this service touches
  * (`feature_flags`/`platform_config`/`access_policies`/

@@ -476,8 +476,16 @@ class DemoSeeder extends Seeder
         DB::table('platform_config')->updateOrInsert(
             ['key' => 'reports.export_size_limit_bytes'],
             [
-                'id' => $configId, 'category' => 'REPORTS', 'description' => 'Documentary value only today -- ReportExportService::requestExport still enforces its own hardcoded 200KiB limit (see docs/MIGRATION_MATRIX.md).',
+                'id' => $configId, 'category' => 'REPORTS', 'description' => 'The maximum byte size a generated report export may reach before ReportExportService::requestExport refuses it -- read live by App\Support\Platform\PlatformConfigReader (see docs/MIGRATION_MATRIX.md).',
                 'value' => '204800', 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
+            ],
+        );
+        $suppressionConfigId = DB::table('platform_config')->where('key', 'reports.min_cell_suppression_threshold')->value('id') ?: (string) Str::uuid();
+        DB::table('platform_config')->updateOrInsert(
+            ['key' => 'reports.min_cell_suppression_threshold'],
+            [
+                'id' => $suppressionConfigId, 'category' => 'REPORTS', 'description' => 'Below this many invoices, NATIONAL_VAT_AGGREGATE suppresses its own figures rather than reveal a near-identifiable small cell -- read live by App\Support\Platform\PlatformConfigReader (see docs/MIGRATION_MATRIX.md).',
+                'value' => '10', 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
             ],
         );
         $policyId = DB::table('access_policies')->where('code', 'STEP_UP_WINDOW')->value('id') ?: (string) Str::uuid();
@@ -485,7 +493,7 @@ class DemoSeeder extends Seeder
             ['code' => 'STEP_UP_WINDOW'],
             [
                 'id' => $policyId, 'name' => 'Step-up freshness window', 'policy_type' => 'AUTHENTICATION',
-                'description' => 'Documentary value only today -- App\Support\Access\StepUp::isFresh still reads config(\'auth.password_timeout\') directly (see docs/MIGRATION_MATRIX.md).',
+                'description' => 'How long a password confirmation stays fresh before App\Support\Access\StepUp::isFresh requires another one -- read live via its own window_seconds parameter (see docs/MIGRATION_MATRIX.md).',
                 'parameters' => json_encode(['window_seconds' => 10800]), 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
             ],
         );
