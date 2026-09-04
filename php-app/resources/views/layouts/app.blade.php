@@ -87,6 +87,11 @@
                                 <a class="nav-link {{ request()->routeIs('business-parties.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('business-parties.index') }}" @if (request()->routeIs('business-parties.*')) aria-current="page" @endif>Business Parties</a>
                             </li>
                         @endcan
+                        @can('permission', 'compliance:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('compliance-overview.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('compliance-overview.index') }}" @if (request()->routeIs('compliance-overview.*')) aria-current="page" @endif>Compliance Overview</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">

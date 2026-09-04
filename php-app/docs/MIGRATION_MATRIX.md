@@ -2744,6 +2744,80 @@ VAT number, then verified it and confirmed a real snapshot rendered
 (`Yes/Yes/Yes`, `BUYER, SELLER` capabilities) against the live
 database.
 
+### Compliance overview module (the eleventh UI slice, the fifth fresh smaller PR)
+
+Ports the source's own compliance-list landing screen over
+`ComplianceSnapshotService` (130 lines: `getSnapshot()`, its only
+method) -- purely read-only, unlike every other slice in this
+build-out: no form, no write route, no permission gate finer than
+`compliance:read`.
+
+Six of the snapshot's eleven fields already have their own dedicated,
+fuller pages elsewhere in this build-out (obligations, cases,
+findings, disputes, risks, refunds/refundTransitions) -- this page
+deliberately does not re-render those as full tables a second time;
+it shows a count and a link to the real page instead, the same "don't
+duplicate a table that already has a home" reasoning the Organisations
+index page's own snapshot cards already established. The four fields
+with no page anywhere else (communications, notifications,
+consent_grants, delegations) get real tables here, since this is
+their only UI. Two of those four (`consent_grants`, `delegations`)
+have no Eloquent model and no writer command anywhere in this
+migration -- confirmed by each table's own migration doc comment (a
+full-repo grep of the TypeScript source found no GrantConsent/
+CreateDelegation command, only demo seed data) -- so read-only is the
+correct, complete UI for them, not a gap.
+
+A genuine cross-branch correctness concern this slice had to solve
+that no prior one did: two of the five stat-card links
+(`obligations.index`, `disputes.index`) point at routes that live on
+their own separate, unmerged PRs (this build-out's now-established
+practice of shipping each module as an independently-mergeable
+fresh, smaller PR off `main` -- see the "PR lifecycle" notes
+elsewhere in this document). A hard `route(...)` call to either would
+have 500'd this page on `main` until those specific PRs happened to
+merge, in whichever order they actually do. Fixed by guarding every
+stat-card link with `Route::has()`: a card renders as a real link the
+moment its own route exists, and degrades to a plain, unlinked count
+card otherwise -- correct regardless of merge order, with no
+follow-up change needed once Disputes/Obligations do land.
+
+New: `App\Http\Controllers\Compliance\ComplianceOverviewViewController`.
+No new backend accessor or model relation was needed. Actor names for
+communications/consent_grants/delegations are resolved via one bulk
+`User::whereIn()` lookup, the same precedent Audit Cases established,
+rather than adding relations to raw `DB::table()` reads that
+intentionally have no Eloquent model backing them. Two new
+`<x-status-badge>` mappings were added (`DELIVERED` for communications,
+success; `UNREAD`/`READ` for notifications, warning/secondary) --
+`ACTIVE` (consents/delegations) and `MEDIUM`/`HIGH` severities were
+already mapped.
+
+Verified by a new `tests/Feature/Compliance/ComplianceOverviewViewTest.php`
+(7 tests, reusing `ComplianceSnapshotTest`'s own makeTaxpayer/
+namraAuditor/namraComplianceOfficer/insertConsentAndDelegation fixture
+pattern): authentication is required; a role lacking `compliance:read`
+is forbidden; a real cross-domain fixture chain (obligation, dispute,
+audit case, notice against that case, notification, consent grant,
+delegation) renders correctly with real counts and resolved names; the
+snapshot is scoped to the actor's own taxpayer; an empty snapshot shows
+friendly empty states rather than blank tables; stat cards for domains
+already merged to `main` (audit cases, risk indicators, refunds) render
+as real links; and -- the direct regression test for the `Route::has()`
+fix above -- stat cards for the not-yet-merged domains (obligations,
+disputes) render as plain text without a 500, with an explicit
+assertion that those routes genuinely don't exist yet on this branch
+(so the test stops proving anything, rather than silently passing for
+the wrong reason, once they do). 332 tests total, 0 regressions, run
+against real MySQL. Also verified live end-to-end in the browser: the
+page correctly rendered real cross-session data left over from earlier
+slices' own live verification (the PAYE obligation and both disputes
+filed against the `VAT-REFUND-SUP` demo taxpayer), scoped correctly to
+that taxpayer; and a direct DOM inspection confirmed the Route::has()
+guard's actual effect -- Audit Cases/Risk Indicators/Refunds rendered
+as real `<a>` links, Obligations/Disputes as plain unlinked `<div>`
+cards, exactly as designed.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
