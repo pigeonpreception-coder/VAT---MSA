@@ -2369,6 +2369,83 @@ citing evidence (with its auto-logged ADDED custody event and correct
 truncated-checksum display), and adding a note, each producing a real
 row and rendering correctly afterward.
 
+### Disputes module (the seventh UI slice, the first fresh smaller PR after PR #2 merged)
+
+Ports the source's own dispute-filing screens over `DisputeService` --
+by far the smallest service any UI slice in this build-out has sat on
+top of (106 lines: `file()` and `search()` only), deliberately chosen
+as the first "fresh, smaller PR" module once PR #2 (VAT Returns,
+Refunds, Risk Indicators, Audit Cases) merged to `main`, per the
+explicit instruction to keep history clean and `main` current going
+forward.
+
+Unlike every other compliance module built so far -- Risk Indicators
+(officer-only), Audit Cases (officer-initiated, taxpayer-visible
+read-only) -- disputes are **taxpayer-initiated**:
+`DisputeService::file()`'s own doc comment is explicit that, unlike
+obligations, "a taxpayer may self-file a dispute against their own
+case/finding/return/decision," and `disputes:manage` is genuinely held
+by taxpayer roles (`TAXPAYER_OWNER`, `TAXPAYER_ADMIN`) in this app's
+RBAC, not just officer ones -- confirmed against
+`Permissions::ROLE_PERMISSIONS` before writing any UI. The filing form
+reflects that split directly: a taxpayer-scoped actor never sees a
+taxpayer picker at all (their own scope is implicit, exactly like
+`TaxpayerResolver::resolve()` defaults it), while a national-scope
+actor filing on a taxpayer's behalf sees a VAT-number field, mirroring
+the picker already used on Risk Indicators and Audit Cases.
+
+New: `App\Http\Controllers\Compliance\DisputeViewController`. No
+read/decide/transition path exists on `DisputeService` at all beyond
+`file()`/`search()` -- confirmed by reading `DisputeController`
+directly. The `disputes` table's own `status`/`assigned_officer_id`/
+`decided_at`/`decision_summary` columns exist in the schema, but
+nothing in this migration's application code -- ported faithfully from
+the original source -- ever writes to them beyond the initial
+`'FILED'` row at creation. This is a genuine, confirmed gap, not
+introduced by this UI: the detail page shows those columns whenever
+they happen to be populated, but there is no decide/assign action
+anywhere to populate them, and none was built here -- a fake "assign"
+or "decide" button the backend can't actually service would have been
+worse than the honest "awaiting review assignment" note the detail
+page shows instead. No new backend accessor or model relation was
+needed for this slice (`Dispute::taxpayer()`/`auditCase()` already
+existed); the `show()` tenant-scope check uses the same self-built
+pre-scoped-query 404-not-403 precedent Invoices/VAT-periods/Refunds
+use, since (unlike Audit Cases) there's no service-level read method
+with its own `AuthorizationException` to defer to here.
+
+No new `<x-status-badge>` mapping was needed: `'FILED'` was already
+mapped to `text-bg-success` from the VAT-lifecycle slice, and a filed
+dispute reads correctly as a successfully-submitted one under that
+colour -- unlike the Risk Indicators' `'OPEN'` case, there's no
+competing semantic here worth a second `type=` map for a field that
+only ever takes one value in current application code.
+
+Verified by a new `tests/Feature/Compliance/DisputeViewTest.php` (8
+tests, reusing `RiskViewTest`'s own makeTaxpayer/taxpayerOwner/
+namraAuditor/namraRefundOfficer fixture pattern): authentication is
+required; a taxpayer owner sees no VAT-number picker and can self-file
+successfully (status `FILED`, correct cents conversion); a national
+auditor sees the picker and can file on a taxpayer's behalf by VAT
+number; filing against an unknown VAT number is a friendly form error,
+not a 500, and creates no row; grounds below the validator's 20-character
+minimum is a friendly field error; an officer holding `compliance:read`
+but not `disputes:manage` (`NAMRA_REFUND_OFFICER`) sees no filing form
+and is forbidden from posting; a taxpayer cannot view another
+taxpayer's dispute (404, matching the Invoices/VAT-periods precedent);
+and the list page's status filter works. 333 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser: logged in as the `vat-refund-sup-owner@demo.test` taxpayer
+owner, confirmed no VAT-number field renders, filed a real dispute
+against the demo certified invoice's resource (`DSP-2026-9B950FC8`,
+NAD 842.75, `Filed` badge, correct grounds and resource type rendered
+on the detail page); then logged in as `auditor@demo.test` (national),
+confirmed the VAT-number picker renders and the taxpayer's prior
+dispute is visible in the list, and filed a second real dispute on the
+taxpayer's behalf by VAT number (`DSP-2026-7B74478F`, NAD 199.99) --
+confirming both the taxpayer-initiated and national-officer-on-behalf-of
+paths genuinely work against the live database, not just in tests.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
