@@ -2903,6 +2903,80 @@ confirmed, resubmitting genuinely flipped the licence to `Suspended`
 (badge and dropdown both updating correctly); reactivated afterward
 to leave the demo data in a healthy state.
 
+### Quotations module (the thirteenth UI slice, the seventh fresh smaller PR)
+
+Ports the source's own quotation register, issue form, full lifecycle
+actions (send/accept/reject/expire/convert) and multi-line revision
+editor over `App\Services\Business\QuotationService` -- a service that
+already existed on `main` (Phase 10 slice 1), never touched by this
+build-out until now. Unlike every prior slice, this one wasn't written
+fresh in this session: it's extracted from PR #3 (see the "Authority
+Governance" section above for that PR's full provenance and why it
+was never merged as a unit), adapted for the two things that changed
+since it branched.
+
+**Adaptation 1, a real route-name fix:** the ported view originally
+linked to `route('parties.index')` -- PR #3's own (shallow, discarded)
+`BusinessPartyViewController` used that name. This build-out's own
+real `BusinessPartyViewController` (PR #7, already on `main`) uses
+`business-parties.index` instead. Both occurrences in
+`quotations/index.blade.php` were updated to point at the real route;
+verified live in the browser that "Manage customers & suppliers"
+correctly resolves to `/business-parties`, not a 404.
+
+**Adaptation 2, applied cleanly with no conflict:** `QuotationService`
+gained two small, additive changes this PR's own diff already carried
+cleanly (no merge conflict, since nothing else has touched this file
+this session): a public `find()` method (a single-record read for the
+new edit view, the same precedent `InvoiceService::find` already
+set), and `present()` now includes `customer_name` (joined from
+`BusinessParty` via the model's own pre-existing `customer()`
+relation -- a gap the original port's `present()` had that benefits
+every caller, JSON API included, not a second query path).
+
+One deliberate, already-documented deviation from the source, kept
+as-is: the source's own `createQuotation` always creates a `DRAFT`
+quotation, but no screen anywhere in the source ever surfaces a way to
+reach the already-built `sendQuotation` (DRAFT -> ISSUED) transition
+-- a genuine dead end in the original (confirmed by a full-repo grep
+for "sendQuotation" in the TypeScript source, per
+`QuotationViewController`'s own doc comment). This port's "Send"
+button closes that gap, calling `QuotationService::send` -- already
+fully built and already reachable via the JSON API -- so a quotation
+created through this screen can actually be used.
+
+New: `App\Http\Controllers\Business\QuotationViewController`
+(index/store/edit/update/send/accept/reject/expire/convert). No new
+model or relation was needed (`Product`, `Quotation`,
+`QuotationRevision`, and `BusinessParty::customer()` all already
+existed). Two new `<x-status-badge>` entries added to the shared map
+(`ISSUED` info, `ACCEPTED`/`CONVERTED` success, `EXPIRED` secondary)
+-- no collision risk with any of this build-out's own per-context maps
+(`indicator`/`taxpayer`/`license`), since none of those five values
+appear in any of them.
+
+Verified by the ported `tests/Feature/Business/QuotationViewTest.php`
+(11 tests, passing unmodified -- the `parties.index` fix wasn't even
+exercised by any assertion, confirming it was a real latent bug in the
+original PR, not something the tests happened to catch): permission
+gating (`commercial:read` to view, `quotations:manage` to write); the
+register and issue form render; a quotation can be created through
+the form; the full DRAFT -> ISSUED -> ACCEPTED -> CONVERTED lifecycle,
+closing the source's own dead end; rejection with a reason; expiring
+an overdue issued quotation; the edit form renders prefilled lines
+with the correct revision count; a two-line edit recalculates totals
+and appends a real revision; an accepted quotation correctly refuses
+to be edited. 399 tests total, 0 regressions, run against real MySQL.
+Also verified live end-to-end in the browser against the real
+`owner@demo-trading.test` demo organisation: registered a real
+customer party, issued a real quotation (`QUO-LIVE-0001`, NAD
+1,150.00 correctly including 15% VAT), sent it, accepted it, and
+converted it -- landing on a genuinely certified fiscal invoice
+(`INV-LIVE-QUOTE-0001`) through the already-existing invoice
+certification pipeline, confirming the full cross-module chain (this
+new slice, Business Parties, and Invoice certification) works
+end-to-end together, not just in isolation.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

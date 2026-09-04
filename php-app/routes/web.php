@@ -24,6 +24,7 @@ use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
+use App\Http\Controllers\Business\QuotationViewController;
 use App\Http\Controllers\Compliance\AuditCaseController;
 use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceOverviewViewController;
@@ -203,6 +204,23 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // the same 'password.confirm' step-up middleware as the JSON route.
     Route::get('/licensing', [LicensingViewController::class, 'index'])->name('licensing.index');
     Route::post('/licensing/state', [LicensingViewController::class, 'storeState'])->name('licensing.state.store')->middleware('password.confirm');
+
+    // Real Blade UI for the quotation register/lifecycle/edit, alongside
+    // the JSON API surface below -- see QuotationViewController's own doc
+    // comment, including its one deliberate deviation from source (a
+    // "Send" action for a DRAFT quotation, closing a genuine dead end in
+    // the original -- see docs/MIGRATION_MATRIX.md). Reuses
+    // App\Services\Business\BusinessPartyService and its own
+    // business-parties.index route from the Business Parties slice.
+    Route::get('/quotations', [QuotationViewController::class, 'index'])->name('quotations.index');
+    Route::post('/quotations', [QuotationViewController::class, 'store'])->name('quotations.store');
+    Route::get('/quotations/{id}/edit', [QuotationViewController::class, 'edit'])->name('quotations.edit');
+    Route::patch('/quotations/{id}', [QuotationViewController::class, 'update'])->name('quotations.update');
+    Route::post('/quotations/{id}/sending', [QuotationViewController::class, 'send'])->name('quotations.send');
+    Route::post('/quotations/{id}/accept', [QuotationViewController::class, 'accept'])->name('quotations.accept');
+    Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
+    Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
+    Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
