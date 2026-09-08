@@ -14,6 +14,7 @@ import {
   createProject,
   createQuotation,
   createWarehouse,
+  decideExpense,
   getBusinessPlatformSnapshot,
   getExpenseReport,
   getFinancialStatements,
@@ -35,6 +36,7 @@ import {
   searchQuotations,
   sendQuotation,
   submitExpense,
+  syntheticallyVerifyBusinessParty,
   transferStock,
   updateBusinessParty,
   updateQuotation,
@@ -48,7 +50,7 @@ import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts" | "categories" | "products" | "warehouses";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "SEND_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER" | "CREATE_PRODUCT" | "CREATE_WAREHOUSE" | "TRANSFER_STOCK";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "SYNTHETIC_VERIFY_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "SEND_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "LINK_EXPENSE_RECEIPT" | "DECIDE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER" | "CREATE_PRODUCT" | "CREATE_WAREHOUSE" | "TRANSFER_STOCK";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -336,7 +338,7 @@ export async function handleBusinessPost(request: Request, permission: string, c
     }
     if (!resource) throw new RepositoryConflictError("The idempotent resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "SEND_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "APPROVE_PROJECT_BUDGET", "VERIFY_SUPPLIER"].includes(command) ? 200 : 201;
+    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "SYNTHETIC_VERIFY_BUSINESS_PARTY", "UPDATE_QUOTATION", "SEND_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "DECIDE_EXPENSE", "LINK_EXPENSE_RECEIPT", "APPROVE_PROJECT_BUDGET", "VERIFY_SUPPLIER"].includes(command) ? 200 : 201;
     return Response.json({ resource }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });
