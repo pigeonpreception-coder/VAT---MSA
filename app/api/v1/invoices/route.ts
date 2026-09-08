@@ -1,4 +1,5 @@
 import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import type { InvoiceSubmission } from "@/lib/domain/types";
 import { explainInvoiceVat, listInvoices, RepositoryConflictError, submitInvoice } from "@/lib/data/repository";

@@ -1,7 +1,6 @@
 import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError, isNationalScope } from "@/lib/auth";
 import {
-  evaluateExpenseDecision,
   evaluateQuotationLifecycle,
   normalizeAndValidateAccount,
   normalizeAndValidateBusinessParty,
@@ -30,8 +29,6 @@ import {
   type BusinessPartyRelationship,
   type BusinessPartySubmission,
   type ExpenseSubmission,
-  type ExpenseDecisionSubmission,
-  type ExpenseReceiptLinkSubmission,
   type JournalSubmission,
   type NormalizedQuotation,
   type ProjectSubmission,
@@ -53,19 +50,6 @@ import { getInvoiceById, RepositoryConflictError, submitInvoice } from "./reposi
 
 type OrganisationContext = { id: string; taxpayer_id: string; legal_name: string; vat_number: string };
 type IdempotencyRow = { request_hash: string; resource_id: string };
-
-type ExpenseRecord = {
-  id: string;
-  organisation_id: string;
-  expense_number: string;
-  status: string;
-  total_cents: number;
-  created_by: string;
-  requires_receipt: number;
-  receipt_document_id: string | null;
-  receipt_scan_status: string | null;
-  receipt_status: string | null;
-};
 
 type QuotationRecord = {
   id: string;
