@@ -755,11 +755,11 @@ paths:
       responses:
         '201': { description: Refund request recorded as eligible for review or explicitly blocked. }
         '409': { $ref: '#/components/responses/Conflict' }
-  /v1/refunds/{refund_claim_id}/reviews:
+  /v1/refunds/{refund_claim_id}/transition:
     post:
       tags: [Refunds]
-      operationId: reviewRefund
-      summary: Record a staged human refund review.
+      operationId: transitionRefundClaim
+      summary: Record a staged human refund review/transition.
       security: [{ oauth2: [refunds.review] }]
       parameters:
         - name: refund_claim_id
