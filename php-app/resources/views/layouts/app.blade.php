@@ -112,6 +112,11 @@
                                 <a class="nav-link {{ request()->routeIs('documents.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents</a>
                             </li>
                         @endcan
+                        @can('permission', 'expenses:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('operations.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.*')) aria-current="page" @endif>Operations</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">
