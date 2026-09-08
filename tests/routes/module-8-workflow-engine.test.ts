@@ -83,8 +83,8 @@ async function seedFixture(): Promise<void> {
     ...[OWNER, ADMIN, ROLE_HOLDER, MANAGER_USER, DELEGATE_USER, ACCOUNTANT].map((user) =>
       db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
         VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${user.userId}`, user.userId, "idp-wf-workspace", user.externalUserId, user.email, "PILOT", "ACTIVE", now, now)),
-    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at)
-      VALUES (?,?,?,?,?,?,NULL,?)`).bind("plan-wf-test", "WF_TEST_PLAN", "Workflow Test Plan", 1, "ACTIVE", now, now),
+    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain)
+      VALUES (?,?,?,?,?,?,NULL,?,?)`).bind("plan-wf-test", "WF_TEST_PLAN", "Workflow Test Plan", 1, "ACTIVE", now, now, "COMMERCIAL_SAAS"),
     db.prepare(`INSERT INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','WORKFLOWS',1,?)`).bind(now),
     db.prepare(`INSERT INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','USER_SEATS',0,?)`).bind(now),
     db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-wf-test','plan-wf-test','ADVANCED_WORKFLOW',1,NULL,'{}')`),

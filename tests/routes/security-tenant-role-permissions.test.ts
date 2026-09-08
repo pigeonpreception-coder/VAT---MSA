@@ -54,8 +54,8 @@ async function seedFixture(): Promise<void> {
       VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${OWNER.userId}`, OWNER.userId, "idp-role-workspace", OWNER.externalUserId, OWNER.email, "PILOT", "ACTIVE", now, now),
     // createOrganisationRole is an ADMIN_WRITE control-plane operation: it requires the organisation to hold an
     // enabled ADMINISTRATION entitlement *and* a current-quarter access review on record (assertEntitledOperation).
-    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at)
-      VALUES (?,?,?,?,?,?,NULL,?)`).bind("plan-role-test", "ROLE_TEST_PLAN", "Role Test Plan", 1, "ACTIVE", now, now),
+    db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain)
+      VALUES (?,?,?,?,?,?,NULL,?,?)`).bind("plan-role-test", "ROLE_TEST_PLAN", "Role Test Plan", 1, "ACTIVE", now, now, "COMMERCIAL_SAAS"),
     db.prepare(`INSERT INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','USER_SEATS',1,?)`).bind(now),
     db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-role-admin','plan-role-test','ADMINISTRATION',1,NULL,'{}')`),
     db.prepare(`INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,activated_at,current_period_start,current_period_end,created_at,updated_at)

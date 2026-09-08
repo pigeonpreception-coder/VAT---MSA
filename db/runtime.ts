@@ -2691,6 +2691,20 @@ const LICENSE_TAX_REFERENCE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO tax_authorities VALUES ('tax-authority-na-namra','tax-jurisdiction-na-national','NAMRA','Namibia Revenue Agency','ACTIVE','2026-08-23T12:00:00Z')`,
   `INSERT OR IGNORE INTO tax_subscriptions VALUES ('tax-sub-na-synthetic','tax-authority-na-namra','plan-tax-na-synthetic-v1','ACTIVE','LOCAL_STAGING','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','2026-08-23T12:00:00Z')`,
   `INSERT OR IGNORE INTO tax_subscription_features VALUES ('tax-sub-feature-na-core','tax-sub-na-synthetic','CORE_VAT','ACTIVE','2026-08-23T12:00:00Z')`,
+  // resolveLicensedOrganisation's national-scope fallback ("pick any active
+  // organisation") needs at least one to exist — several fixtures exercise
+  // only national-scope actors (PILOT_ADMIN, NAMRA_*) against
+  // organisation-independent permissions (administration:manage, audit:read)
+  // and never create an organisation of their own at all. A single always-
+  // present synthetic one covers that fallback without requiring every such
+  // fixture to invent an organisation it has no other use for. Inserted
+  // last in this array (not right after its own reference rows above) so
+  // the license_plans/tax_subscriptions rows the auto-provision triggers
+  // below depend on already exist when this insert fires them.
+  `INSERT OR IGNORE INTO taxpayers (id,vat_number,tin,legal_name,trading_name,taxpayer_type,vat_status,return_frequency,address,email,created_at)
+    VALUES ('tp-auto-provision-system','VAT-AUTO-PROVISION-SYSTEM','TIN-AUTO-PROVISION-SYSTEM','Auto-Provisioning Reference Organisation',NULL,'PRIVATE_COMPANY','ACTIVE','MONTHLY','N/A','auto-provision-system@vat-msa.local','2026-01-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO organisations (id,taxpayer_id,legal_name,trading_name,status,created_at,updated_at)
+    VALUES ('org-auto-provision-system','tp-auto-provision-system','Auto-Provisioning Reference Organisation',NULL,'ACTIVE','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
   ...LICENSE_PERMISSION_POLICIES.map(([permission]) =>
     `INSERT OR IGNORE INTO access_permissions (code,resource,action,description,classification,created_at)
       VALUES ('${permission}','REFERENCE_CATALOGUE','USE','Licence permission policy reference','RESTRICTED','2026-08-23T08:00:00Z')`),
