@@ -3260,6 +3260,137 @@ invited a real employee (`EMP-LIVE-01`, rendering with the new
 VAT Reviewer`, scoped to `invoices:read, returns:read`) through the
 real step-up-gated forms.
 
+### The six portal dashboards + switchboard (extracted from PR #3, closing out the frontend build-out's own PR #3 salvage effort)
+
+Ports the source's own `app/portals/page.tsx` ("Portal switchboard")
+plus its six per-portal dashboards (`app/portal/{buyer,seller,namra,
+namra-admin,super-admin,developer}/page.tsx`) -- the last, largest and
+most interconnected candidate from PR #3 (`claude/next-key-task-7q98el`,
+see the "Authority Governance" section above for that PR's full
+provenance). Built as one PR rather than six: every dashboard shares
+the same gate precedent (`PortalService::getAvailablePortals()` role/
+capability membership, reused not re-derived) and the switchboard
+itself is the natural landing page linking to all six, so splitting
+them would have meant six PRs each briefly leaving the switchboard's
+own links half-broken depending on merge order.
+
+`App\Domain\Portal\PortalDefinitions` (already on `main`, Phase 12)
+already declared exactly six portals -- `buyer`, `seller`, `namra`,
+`namra-admin`, `super-admin`, `developer` -- so this slice's own scope
+was never in question. Four of the six dashboards need zero new
+backend query at all, only composition of already-existing snapshot
+services: NamRA (`IdentityFoundationSnapshotService`,
+`ComplianceSnapshotService`, `VatLifecycleService`), NamRA
+Administration (`AuthorityGovernanceService::getSnapshot`, the exact
+JSON read already covered by `tests/Feature/AuthorityGovernance/
+AuthorityGovernanceTest.php` -- this is that module's own first UI
+surface, closing the "backend-only for now" note in its own section
+above), Super Administration and Developer (both
+`PlatformSnapshotService`, whose `getTechnicalSnapshot`/
+`developerPortalSnapshot` methods already existed on `main` but had no
+Blade UI consumer before this). Buyer and Seller each needed one new,
+small snapshot service (`BuyerPortalSnapshotService`,
+`SellerPortalSnapshotService`) composing existing reads
+(`VatLifecycleService`, `DashboardSnapshotService`,
+`PlatformSnapshotService::documentCustodySummary`) plus one own-domain
+query each (expenses; quotation count/value) -- not a second copy of
+any other slice's own already-built query. Every method signature this
+slice depends on (nine across five existing services) was confirmed
+unchanged since PR #3 branched -- no adaptation needed there, unlike
+every prior extraction this build-out has done.
+
+**One genuine, additive gap-close applied to the existing
+`App\Services\Portal\PortalService`, not introduced fresh:** the
+source's own `lib/portals.ts` checks *both* role/capability membership
+*and* a `PORTAL_PERMISSIONS` map (`requireLicensedPermission`) before
+listing a portal; this port's `PortalService::getAvailablePortals()`
+had only ever reproduced the first half. Two of the six portal
+controllers make the gap concrete: `SuperAdminPortalController` gates
+on `platform:read` specifically (not the `dashboard:read` every other
+sibling controller uses, since `dashboard:read` is unconditional for
+every role and would make the check redundant with role/capability
+membership alone), and `SECURITY_ANALYST` is on `PortalDefinitions`'
+own `super-admin` role list but does not hold `platform:read` --
+`PortalService::getAvailablePortals()` alone would have kept showing
+that role a card that then always 403s. Same pattern for
+`DeveloperPortalController` (`developer:read`, `SELLER_ADMIN` the role
+that's listed but under-permissioned). Folding the same
+`PORTAL_PERMISSIONS` filter into `PortalService` itself (not just each
+portal controller) is what makes the switchboard stop showing those
+dead cards too. Every permission the map references
+(`dashboard:read`, `authority-governance:read`, `platform:read`,
+`developer:read`) already existed on `main` before this PR touched
+anything -- `authority-governance:read` specifically from the
+Authority Governance extraction (this build-out's own earlier PR),
+confirmed by grep before relying on it.
+
+New `<x-status-badge>` entries added to the shared map, every one
+confirmed against a real column enum or a real seeded/service-written
+literal (not guessed from the view, per this build-out's own
+established discipline): `SUBMITTED` (info, an expense awaiting
+approval -- `ExpenseService`), `PRODUCTION_APPROVED`/`REVOKED`/
+`CONTRACT_PENDING`/`CONFIGURATION_PENDING`/`CONFORMANCE_PENDING`/
+`LOCAL_STAGING_READY` (the real `tax_authority_federation_connections.
+status` DB enum), `COMPLETED`/`OVERDUE` (the real
+`tax_authority_access_reviews.status` DB enum, alongside the already-
+mapped `OPEN`), `CONFIGURED`/`REQUIRES_ITAS_CONFIRMATION`/
+`REQUIRES_SECURITY_DECISION` (the real `identity_providers.
+configuration_status` values `IdentityProviderSeeder` actually writes
+-- confirmed live: NamRA Administration's own identity-provider table
+renders exactly these three, correctly coloured, against the real
+seeded rows). Two fields were deliberately left unmapped rather than
+guessed: `service_components.{configuration_status,operational_status}`
+and `api_clients.status` -- neither table has a single command or
+seeder anywhere in this migration that writes to it yet (confirmed by
+grep), so there is no real literal to confirm against; both fall back
+to the shared map's existing neutral `text-bg-light` default, and both
+portal views' own `@empty` blocks render correctly in the meantime
+(verified live, not assumed).
+
+Verified by all seven ported test files (`BuyerPortalTest`,
+`SellerPortalTest`, `NamraPortalTest`, `NamraAdminPortalTest`,
+`SuperAdminPortalTest`, `DeveloperPortalTest`, `PortalViewTest` -- 31
+tests, passing unmodified): authentication is required on every
+portal; a role absent from a portal's own role list is forbidden; a
+role present on the list but missing that portal's specific
+`PORTAL_PERMISSIONS` entry is forbidden too (the exact gap this PR
+closes, covered for both `super-admin`/`SECURITY_ANALYST` and
+`developer`/`SELLER_ADMIN`); a taxpayer owner without the Buyer/Seller
+capability is denied that specific portal; an administrator with no
+governed Tax Authority scope is denied NamRA Administration
+specifically (`AuthorityGovernanceService::getSnapshot`'s own
+fail-closed `AuthorizationException`, not a bug); each dashboard
+renders its real snapshot data, correctly scoped to the actor's own
+organisation; an unlinked `DEVELOPER_PARTNER` sees the empty
+application registry rather than erroring; the switchboard shows
+exactly the portals a given role/capability combination is entitled
+to, from the empty state through to a `PILOT_ADMIN` seeing all six.
+441 tests total, 0 regressions, run against real MySQL.
+
+Also verified live end-to-end against the real dev database: logged in
+as `admin@vat-msa.test` (`PILOT_ADMIN`, already holding a real
+`tax_authority_administrators` row from the Authority Governance
+slice's own live verification) via `curl` with an explicit cookie jar
+-- the switchboard listed all six "Open X" buttons, and all six portal
+routes returned real `200` rendered pages with no PHP warnings in the
+response body. Confirmed real data throughout, not just a zero state:
+the Buyer portal's expense register showed a genuine `Submitted`
+badge; the Seller portal showed a certified invoice and five matched
+reconciliation rows; the NamRA portal showed a `High`-risk audit case;
+the NamRA Administration portal's identity-provider table showed all
+three real seeded providers with the correct `Active`/`Pending` status
+and `Configured`/`Requires Itas Confirmation`/`Requires Security
+Decision` configuration badges; the empty-state tables (authority
+units, federation, protected assignments, access reviews, service
+components, applications) all rendered their own correct "No X on
+record" copy rather than erroring on genuinely empty tables. Also
+confirmed visually in the browser as `owner@demo-trading.test`
+(`TAXPAYER_OWNER`): the switchboard correctly showed only the three
+portals that role/capability combination is entitled to (Buyer,
+Seller, Developer -- not NamRA/NamRA Administration/Super
+Administration), and the Buyer portal itself rendered with the same
+real `Submitted`-badged expense.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`

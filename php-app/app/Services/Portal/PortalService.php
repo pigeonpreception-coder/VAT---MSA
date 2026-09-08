@@ -15,6 +15,31 @@ use Illuminate\Support\Facades\DB;
 class PortalService
 {
     /**
+     * The source's own `lib/portals.ts` `PORTAL_PERMISSIONS` map --
+     * `getAvailablePortals` there checks *both* `portalRoleAllows` (role/
+     * capability membership, `PortalDefinitions::roleAllows` above) *and*
+     * this permission, via `requireLicensedPermission`. Not reproduced
+     * here until now: adding it required `authority-governance:read`
+     * to exist as a real grantable permission first (it didn't, until
+     * this same change set -- see `Permissions::ROLE_PERMISSIONS`'s own
+     * doc comment), and `super-admin`/`developer`'s controllers
+     * (`SuperAdminPortalController`/`DeveloperPortalController`) had
+     * already independently proven the gap was real and narrow enough
+     * to close per-controller first (`SECURITY_ANALYST`/`SELLER_ADMIN`
+     * on a portal's own role list but missing that portal's specific
+     * permission) before folding the fix back in here, once every
+     * portal actually built could be verified not to regress. Filtering
+     * here too (not just in each portal controller) is what makes the
+     * switchboard itself stop showing a card that then always 403s.
+     *
+     * @var array<string, string>
+     */
+    private const PORTAL_PERMISSIONS = [
+        'buyer' => 'dashboard:read', 'seller' => 'dashboard:read', 'namra' => 'dashboard:read',
+        'namra-admin' => 'authority-governance:read', 'super-admin' => 'platform:read', 'developer' => 'developer:read',
+    ];
+
+    /**
      * `capabilitySet` in the source: PILOT_ADMIN gets both BUYER and
      * SELLER unconditionally (a national actor isn't scoped to one
      * organisation's own held capabilities); every other role without a
@@ -56,7 +81,8 @@ class PortalService
 
         return array_values(array_filter(
             PortalDefinitions::all(),
-            fn ($portal) => PortalDefinitions::roleAllows($portal['key'], $actor->role, $capabilities),
+            fn ($portal) => PortalDefinitions::roleAllows($portal['key'], $actor->role, $capabilities)
+                && $actor->hasAppPermission(self::PORTAL_PERMISSIONS[$portal['key']]),
         ));
     }
 }
