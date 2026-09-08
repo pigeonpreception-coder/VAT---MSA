@@ -1740,20 +1740,20 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO taxpayers VALUES ('tp-0004','VAT1000987','TIN-1000987','Kalahari Consulting (Pty) Ltd','Kalahari Consulting','PRIVATE_COMPANY','ACTIVE','BIMONTHLY','19 Robert Mugabe Avenue, Windhoek','admin@kalahariconsulting.example','2026-03-01T07:45:00Z')`,
   `INSERT OR IGNORE INTO app_users VALUES ('usr-local-admin','local-demo-user','admin@vat-msa.local','Pilot Administrator','PILOT_ADMIN',NULL,'ACTIVE','2026-08-01T08:00:00Z')`,
 
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0001','INV-2026-0182','TAX_INVOICE','ERP-NAMIB-01','ERP-182','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789','2026-08-08','NAD',11450000,1717500,13167500,'MATCHED','LOW','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0001','cert-0001','vfy_1a92c57e41f84b89a601d982be634a81','2026-08-08T08:12:44Z','2026-08-08T08:12:45Z')`,
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0002','DL-8842','TAX_INVOICE','API-DL-01','DL-8842','tp-0002','Desert Logistics CC','VAT1000456','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-07','NAD',5200000,780000,5980000,'MATCHED','LOW','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0002','cert-0002','vfy_2b13d68f52a94c90b712e093cf745b92','2026-08-07T14:21:19Z','2026-08-07T14:21:20Z')`,
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0003','AR-7719','SIMPLIFIED_TAX_INVOICE','POS-ATL-22','POS-7719','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789',NULL,'Walk-in customer',NULL,'2026-08-07','NAD',850000,127500,977500,'CERTIFIED','LOW','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0003','cert-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','2026-08-07T12:04:03Z','2026-08-07T12:04:04Z')`,
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0004','KC-1041','TAX_INVOICE','PORTAL','PORTAL-KC-1041','tp-0004','Kalahari Consulting (Pty) Ltd','VAT1000987','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-06','NAD',120000000,18000000,138000000,'EXCEPTION','CRITICAL','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0004','cert-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','2026-08-06T09:32:10Z','2026-08-06T09:32:11Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0001','INV-2026-0182','TAX_INVOICE','ERP-NAMIB-01','ERP-182','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789','2026-08-08',NULL,'NAD',11450000,1717500,13167500,'MATCHED','LOW','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0001','cert-0001','vfy_1a92c57e41f84b89a601d982be634a81','2026-08-08T08:12:44Z','2026-08-08T08:12:45Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0002','DL-8842','TAX_INVOICE','API-DL-01','DL-8842','tp-0002','Desert Logistics CC','VAT1000456','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-07',NULL,'NAD',5200000,780000,5980000,'MATCHED','LOW','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0002','cert-0002','vfy_2b13d68f52a94c90b712e093cf745b92','2026-08-07T14:21:19Z','2026-08-07T14:21:20Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0003','AR-7719','SIMPLIFIED_TAX_INVOICE','POS-ATL-22','POS-7719','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789',NULL,'Walk-in customer',NULL,'2026-08-07',NULL,'NAD',850000,127500,977500,'CERTIFIED','LOW','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0003','cert-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','2026-08-07T12:04:03Z','2026-08-07T12:04:04Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0004','KC-1041','TAX_INVOICE','PORTAL','PORTAL-KC-1041','tp-0004','Kalahari Consulting (Pty) Ltd','VAT1000987','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-06',NULL,'NAD',120000000,18000000,138000000,'EXCEPTION','CRITICAL','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0004','cert-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','2026-08-06T09:32:10Z','2026-08-06T09:32:11Z')`,
 
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0001','inv-0001',1,'Office equipment and consumables','1','EA',11450000,11450000,1500,'STANDARD',1717500,'vrule-standard-na')`,
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0002','inv-0002',1,'Regional freight services','1','EA',5200000,5200000,1500,'STANDARD',780000,'vrule-standard-na')`,
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0003','inv-0003',1,'Retail merchandise','1','EA',850000,850000,1500,'STANDARD',127500,'vrule-standard-na')`,
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0004','inv-0004',1,'Enterprise transformation advisory','1','EA',120000000,120000000,1500,'STANDARD',18000000,'vrule-standard-na')`,
 
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0001','inv-0001','vfy_1a92c57e41f84b89a601d982be634a81','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.13a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-08T08:12:45Z')`,
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0002','inv-0002','vfy_2b13d68f52a94c90b712e093cf745b92','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.23a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-07T14:21:20Z')`,
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0003','inv-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.33a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-07T12:04:04Z')`,
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0004','inv-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.43a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-06T09:32:11Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0001','inv-0001','vfy_1a92c57e41f84b89a601d982be634a81','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.13a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-08T08:12:45Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0002','inv-0002','vfy_2b13d68f52a94c90b712e093cf745b92','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.23a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-07T14:21:20Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0003','inv-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.33a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-07T12:04:04Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0004','inv-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.43a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-06T09:32:11Z')`,
 
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0001a','txn-0001','inv-0001','tp-0001','OUTPUT_VAT','CREDIT',1717500,'2026-08','2026-08-08T08:12:45Z')`,
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0001b','txn-0001','inv-0001','tp-0003','INPUT_VAT','DEBIT',1717500,'2026-08','2026-08-08T08:12:45Z')`,
@@ -1971,7 +1971,7 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO journal_lines VALUES ('journal-line-0002','journal-0001',2,'acct-4000','br-0001',NULL,'Opening balance offset',0,5000000,NULL)`,
   `INSERT OR IGNORE INTO expenses
     (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
-    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-tp1-owner','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO project_costs (id,project_id,cost_type,source_id,amount_cents,currency,occurred_at,created_at)
     VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO inventory_balances
@@ -3198,13 +3198,28 @@ export async function ensureDatabase(): Promise<D1Database> {
 }
 
 async function initialize(db: D1Database): Promise<void> {
-  if (process.env.NODE_ENV === "production") {
+  /*
+   * Route-level tests (tests/routes/**) deliberately stub NODE_ENV to
+   * "production" before calling ensureDatabase(), purely to get real,
+   * header-only auth and skip this file's own noisy pilot/demo seed data —
+   * see e.g. tests/routes/module-1-access-control.test.ts's file-level
+   * comment. That predates assertProductionSchema below, which was added
+   * for a genuinely different reason (never silently create schema or run
+   * local seed/compatibility upgrades against a real, live Cloudflare D1 in
+   * an actual production deployment — refuse instead, so a missed real
+   * migration is caught rather than papered over). Both are real NODE_ENV
+   * === "production" needs, but only one of them is ever running against an
+   * actual unmigrated production database, and Vitest's own process.env.VITEST
+   * (set automatically for every test run, never in a real deployment) is
+   * exactly the signal that tells them apart.
+   */
+  if (process.env.NODE_ENV === "production" && process.env.VITEST !== "true") {
     await assertProductionSchema(db);
     return;
   }
   await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
   await applyLocalCompatibilityColumns(db);
-  {
+  if (process.env.NODE_ENV !== "production") {
     const existing = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("pilot-v1").first();
     if (!existing) await db.batch(SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const securitySeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("security-v1").first();

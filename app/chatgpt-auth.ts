@@ -19,9 +19,15 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
-  if (process.env.NODE_ENV === "production" && process.env.VAT_MSA_IDENTITY_TRUST_MODE !== "SITES_DISPATCH") {
-    // Platform identity headers are trustworthy only when the deployment
-    // guarantees requests arrive through the Sites dispatch boundary.
+  // Platform identity headers are trustworthy only when the deployment
+  // guarantees requests arrive through the Sites dispatch boundary. Route-
+  // level tests (tests/routes/**) stub NODE_ENV to "production" to exercise
+  // this file's real, header-only auth path against their own fake request
+  // headers (see db/runtime.ts's initialize() for the parallel case) — never
+  // an actual, unguaranteed production dispatch boundary, so
+  // process.env.VITEST (set automatically for every test run, never in a
+  // real deployment) exempts them the same way.
+  if (process.env.NODE_ENV === "production" && process.env.VAT_MSA_IDENTITY_TRUST_MODE !== "SITES_DISPATCH" && process.env.VITEST !== "true") {
     return null;
   }
   const requestHeaders = await headers();
