@@ -117,6 +117,11 @@
                                 <a class="nav-link {{ request()->routeIs('operations.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.*')) aria-current="page" @endif>Operations</a>
                             </li>
                         @endcan
+                        @can('permission', 'administration:read')
+                            <li class="nav-item">
+                                <a class="nav-link {{ request()->routeIs('administration.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration</a>
+                            </li>
+                        @endcan
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">

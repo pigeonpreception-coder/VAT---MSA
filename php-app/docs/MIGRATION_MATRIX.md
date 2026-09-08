@@ -3162,6 +3162,104 @@ attempt to approve their own expense returns a real `403` -- the exact
 maker-checker rule the source's own UI is built around, enforced
 end-to-end, not just asserted by a test.
 
+### Administration command centre (extracted from PR #3, alongside Accounting/Documents/Operations)
+
+Ports the source's own `app/administration/page.tsx` +
+`AdministrationActions.tsx` -- licence entitlements/usage, employees and
+employment structure, organisation roles, versioned workflows, access
+governance, and this page's only two interactive actions: inviting an
+employee and creating a least-privilege organisation role. Extracted
+from PR #3 (`claude/next-key-task-7q98el`, see the "Authority
+Governance" section above for that PR's full provenance), branched in
+parallel alongside the Accounting, Documents and Operations
+extractions -- exact PR ordinal numbers among those four will settle
+once they're merged in whatever order actually happens; this section
+doesn't claim one.
+
+Reuses `App\Services\Administration\AdministrationSnapshotService::
+getAdministrationSnapshot` directly for the entire read (the same
+fixed-list aggregate every one of Phase 12's own five sub-domain
+slices already bundles into, confirmed unchanged since PR #3 branched
+-- signatures matched verbatim) and `App\Services\OrganisationAdmin\
+OrganisationAdminService::inviteEmployee`/`createOrganisationRole` for
+the two writes, the exact methods `OrganisationAdminController`
+already serves at `/api/v1/organisations/{employees,roles}`. Finally
+gives `AdministrationSnapshotService` its first UI anywhere in this
+migration -- it was explicitly passed over for the Licensing slice
+(PR #9) for exactly this reason, documented there at the time.
+
+One deliberate substitution carried over unchanged from PR #3, not
+introduced here: the source's own `AdministrationActions.tsx` gates
+both actions behind a client-side checkbox and a custom header the
+server trusts blindly -- theatre, not a real check. Both write routes
+here use the `password.confirm` middleware instead, the same
+server-enforced step-up every other sensitive command in this
+migration already uses.
+
+**Two real, adapted bugs, both caught by reading `LicenseResolver::
+getEntitlements` directly rather than trusting the ported view:**
+
+1. The view referenced `$entitlement['capacity_mode']` (and
+   `$seat['capacity_mode']`) throughout -- a field `getEntitlements`
+   has never returned (confirmed by reading it in full: `feature_key`,
+   `name`, `description`, `metric_key`, `enabled`, `limit_value`,
+   `used_value`, `reserved_value`, nothing else). This would have been
+   a PHP undefined-array-key warning on every single row. Fixed by
+   reusing the exact `limit_value === null` convention the Licensing
+   slice (PR #9, `resources/views/licensing/index.blade.php`) already
+   established for the identical "is this entitlement unlimited"
+   question, via a small `$capacityMode` closure local to this view,
+   rather than inventing a second convention or growing the shared
+   service's public contract for one caller.
+2. Both `<x-status-badge>` calls for the licence state used
+   `type="status"` (the default map) instead of `type="license"` --
+   the same "a licence being suspended is more severe than the default
+   map's own SUSPENDED" distinction `<x-status-badge>`'s own doc
+   comment already documents and the Licensing slice already
+   established. Fixed to `type="license"` in both places (the stat
+   card and the entitlements table header).
+
+New `<x-status-badge>` entries added to the shared map (real literals
+confirmed by grep against `OrganisationAdminService` and
+`WorkflowService`, not guessed from the view): `INVITED` (info, an
+employee record before their first login), `TERMINATED` (secondary,
+matching the CANCELLED/RETIRED "no longer active" grouping),
+`PUBLISHED` (success, a workflow version that's live), `COMPLETED`
+(success, an access review that finished), `DISABLED` (secondary, an
+entitlement toggled off). No collision risk with any existing entry or
+per-context map.
+
+Verified by the ported `tests/Feature/Administration/
+AdministrationViewTest.php` (8 tests, passing unmodified): the page
+requires authentication; a role without `administration:read`
+(`TAXPAYER_STAFF`) is forbidden; the full snapshot renders (licence,
+seats, employees, roles, workflows, access reviews, entitlements); an
+employee can be invited once step-up is confirmed; inviting without
+step-up redirects to `password.confirm`; a role without
+`employees:manage` (`TAXPAYER_ACCOUNTANT`) is forbidden from inviting;
+an organisation role can be created with step-up confirmed; creating a
+role with a protected permission (`security:manage`) fails validation
+without touching the database. 418 tests total, 0 regressions, run
+against real MySQL.
+
+Also verified live end-to-end against the real
+`owner@demo-trading.test` demo organisation (via `curl` with an
+explicit cookie jar, after an initial browser-tool `fetch()`-based
+attempt produced a false-positive "logs out on confirm" result traced
+to the tool's own `redirect: 'manual'` handling, not the app --
+cross-checked and ruled out before touching any code): confirmed the
+`capacity_mode` fix renders correctly against real entitlement rows
+(`Unlimited`/`Fixed` per feature, matching each one's real
+`limit_value`) with no PHP warnings in the response body; confirmed
+the licence badge renders `Active` in the correct green; opened a real
+quarterly access review (a genuine precondition `EntitlementGate::
+assert` enforces for administrative writes, not a bug -- the ported
+test file's own `openReview()` helper does the same thing), then
+invited a real employee (`EMP-LIVE-01`, rendering with the new
+`Invited` info badge) and created a real organisation role (`Branch
+VAT Reviewer`, scoped to `invoices:read, returns:read`) through the
+real step-up-gated forms.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
