@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { updateBranch } from "@/lib/data/identity-repository";
 import { readBoundedJson, requestContext } from "@/lib/security/request";
 
@@ -7,7 +8,7 @@ export async function PATCH(request: Request, contextValue: { params: Promise<{ 
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "organisations:manage");
+    await requireLicensedPermission(actor, "organisations:manage", { operationClass: "ADMIN_WRITE" });
     const { id, branchId } = await contextValue.params;
     const payload = await readBoundedJson(request, 4_096);
     const branch = await updateBranch(actor, id, branchId, payload, context.correlationId);

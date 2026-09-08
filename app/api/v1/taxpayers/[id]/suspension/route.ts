@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { suspendTaxpayer } from "@/lib/data/identity-repository";
 import { readBoundedJson, requestContext } from "@/lib/security/request";
 import { requireStepUp } from "@/lib/security/step-up";
@@ -8,7 +9,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "taxpayers:suspend");
+    await requireLicensedPermission(actor, "taxpayers:suspend", { operationClass: "ADMIN_WRITE" });
     await requireStepUp(request, actor);
     const { id } = await contextValue.params;
     const payload = await readBoundedJson(request, 4_096);

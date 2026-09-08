@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { listIdentityLinks } from "@/lib/data/identity-repository";
 import { getMfaStatus } from "@/lib/data/mfa-repository";
 import { requestContext } from "@/lib/security/request";
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "identity:read");
+    await requireLicensedPermission(actor, "identity:read", { operationClass: "READ" });
     const [links, mfaStatus] = await Promise.all([
       listIdentityLinks(actor.userId).then((all) => all.filter((link) => link.status === "ACTIVE")),
       getMfaStatus(actor.userId),

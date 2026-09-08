@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { approveIntegration, getIntegrationHealth, IntegrationResourceError, registerIntegration, startSync, suspendIntegration } from "@/lib/data/integration-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { IntegrationValidationError } from "@/lib/domain/integration";
@@ -18,7 +19,7 @@ export async function handleIntegrationCommand(request: Request, command: Integr
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "integrations:manage");
+    await requireLicensedPermission(user, "integrations:manage", { operationClass: "BUSINESS_WRITE" });
     await enforceRateLimits([
       { key: `integrations:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
       { key: `integrations:${command}:global`, limit: 1_000, windowSeconds: 60 },
@@ -66,7 +67,7 @@ export async function handleIntegrationHealth(request: Request, resourceId: stri
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "integrations:read");
+    await requireLicensedPermission(user, "integrations:read", { operationClass: "READ" });
     const result = await getIntegrationHealth(resourceId, user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {

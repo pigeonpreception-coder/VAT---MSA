@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { enrollTotp } from "@/lib/data/mfa-repository";
 import { requestContext } from "@/lib/security/request";
 
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "identity:read");
+    await requireLicensedPermission(actor, "identity:read", { operationClass: "READ" });
     const enrollment = await enrollTotp(actor, context.correlationId);
     return identityJson({ enrollment }, context, 201);
   } catch (error) {

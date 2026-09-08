@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { verifyTaxpayerIdentifiers } from "@/lib/data/identity-repository";
 import { requestContext } from "@/lib/security/request";
 
@@ -13,7 +14,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "taxpayers:read");
+    await requireLicensedPermission(actor, "taxpayers:read", { operationClass: "READ" });
     const { id } = await contextValue.params;
     const verification = await verifyTaxpayerIdentifiers(actor, id, context.correlationId);
     return identityJson({ verification }, context);

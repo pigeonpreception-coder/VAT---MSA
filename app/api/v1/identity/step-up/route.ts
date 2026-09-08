@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { confirmStepUp } from "@/lib/data/mfa-repository";
 import { readBoundedJson, requestContext } from "@/lib/security/request";
 
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "identity:read");
+    await requireLicensedPermission(actor, "identity:read", { operationClass: "READ" });
     const payload = await readBoundedJson(request, 256);
     const stepUp = await confirmStepUp(actor, payload, context.correlationId);
     return identityJson({ step_up: stepUp }, context, 201);

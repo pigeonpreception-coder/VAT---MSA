@@ -1,5 +1,5 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { listRegistrationApplications, submitRegistrationApplication } from "@/lib/data/identity-repository";
 import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "registrations:read");
+    await requireLicensedPermission(user, "registrations:read", { operationClass: "READ" });
     return identityJson({ registrations: await listRegistrationApplications(user) }, context);
   } catch (error) {
     return identityProblem(error, context);

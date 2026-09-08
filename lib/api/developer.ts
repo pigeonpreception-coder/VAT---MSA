@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { createClient, DeveloperResourceError, revokeCredential, rotateCredential, runConformance } from "@/lib/data/developer-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { DeveloperValidationError } from "@/lib/domain/developer";
@@ -18,7 +19,7 @@ export async function handleDeveloperCommand(request: Request, command: Develope
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "developer:manage");
+    await requireLicensedPermission(user, "developer:manage", { operationClass: "BUSINESS_WRITE" });
     await enforceRateLimits([
       { key: `developer:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
       { key: `developer:${command}:global`, limit: 1_000, windowSeconds: 60 },

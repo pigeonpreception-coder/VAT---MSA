@@ -1,5 +1,6 @@
 import { reconciliationJson, reconciliationProblem } from "@/lib/api/reconciliation";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getWorkQueue } from "@/lib/data/reconciliation-repository";
 import { requestContext } from "@/lib/security/request";
 
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "exceptions:read");
+    await requireLicensedPermission(actor, "exceptions:read", { operationClass: "READ" });
     const workQueue = await getWorkQueue(actor, new URL(request.url).searchParams);
     return reconciliationJson({ workQueue }, context);
   } catch (error) {

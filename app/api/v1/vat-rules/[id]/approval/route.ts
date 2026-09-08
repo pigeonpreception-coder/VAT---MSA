@@ -1,5 +1,6 @@
 import { vatRuleJson, vatRuleProblem } from "@/lib/api/vat-rules";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { approveVatRule } from "@/lib/data/vat-rule-repository";
 import { enforceVatRuleRateLimits, readBoundedJson, requestContext } from "@/lib/security/request";
 import { requireStepUp } from "@/lib/security/step-up";
@@ -9,7 +10,7 @@ export async function POST(request: Request, contextValue: { params: Promise<{ i
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "vat-rules:manage");
+    await requireLicensedPermission(actor, "vat-rules:manage", { operationClass: "COMPLIANCE_WRITE" });
     await enforceVatRuleRateLimits("APPROVE_VAT_RULE", actor);
     await requireStepUp(request, actor);
     const { id } = await contextValue.params;

@@ -2519,7 +2519,7 @@ const LICENSE_PERMISSION_POLICIES = [
   ['compliance:read','CORE_VAT','READ'], ['cases:manage','CORE_VAT','COMPLIANCE_WRITE'], ['disputes:manage','CORE_VAT','COMPLIANCE_WRITE'],
   ['refunds:read','CORE_VAT','READ'], ['refunds:request','CORE_VAT','COMPLIANCE_WRITE'], ['refunds:review','CORE_VAT','COMPLIANCE_WRITE'],
   ['risk:read','CORE_VAT','READ'], ['risk:review','CORE_VAT','COMPLIANCE_WRITE'], ['communications:manage','CORE_VAT','COMPLIANCE_WRITE'],
-  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','CORE_VAT','READ'], ['integrations:manage','CORE_VAT','COMPLIANCE_WRITE'],
+  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','CORE_VAT','READ'], ['integrations:manage','CORE_VAT','BUSINESS_WRITE'],
   ['developer:read','API_ACCESS','READ'], ['developer:manage','API_ACCESS','BUSINESS_WRITE'], ['offline:read','CORE_VAT','READ'],
   ['offline:sync','CORE_VAT','BUSINESS_WRITE'], ['reports:read','CORE_VAT','READ'], ['reports:run','CORE_VAT','EXPORT'],
   ['platform:read','PLATFORM_SECURITY','READ'], ['platform:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['payments:read','CORE_VAT','READ'],
@@ -2529,6 +2529,11 @@ const LICENSE_PERMISSION_POLICIES = [
   ['roles:manage','ADMINISTRATION','ADMIN_WRITE'], ['workflows:read','ADVANCED_WORKFLOW','READ'], ['workflows:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
   ['workflows:decide','ADVANCED_WORKFLOW','BUSINESS_WRITE'], ['access-governance:read','ADVANCED_WORKFLOW','READ'], ['access-governance:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
   ['authority-governance:read','CORE_VAT','READ'], ['authority-governance:manage','CORE_VAT','ADMIN_WRITE'],
+  ['taxpayers:suspend','CORE_VAT','ADMIN_WRITE'], ['registrations:approve','CORE_VAT','COMPLIANCE_WRITE'], ['invoices:cancel','CORE_VAT','CORRECTION_WRITE'],
+  ['vat-rules:read','CORE_VAT','READ'], ['vat-rules:manage','CORE_VAT','COMPLIANCE_WRITE'], ['cases:override-sod','CORE_VAT','ADMIN_WRITE'],
+  ['obligations:manage','CORE_VAT','COMPLIANCE_WRITE'], ['notifications:manage','CORE_VAT','BUSINESS_WRITE'], ['reports:executive','CORE_VAT','READ'],
+  ['payments:record','CORE_VAT','BUSINESS_WRITE'], ['security:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['accounting:close-period','ACCOUNTING','BUSINESS_WRITE'],
+  ['documents:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['communications:respond','CORE_VAT','COMPLIANCE_WRITE'], ['licensing:manage','ADMINISTRATION','ADMIN_WRITE'],
 ] as const;
 
 const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
@@ -2612,6 +2617,162 @@ const EXPENSE_RECEIPT_TRIGGER_STATEMENTS = [
     BEGIN
       SELECT RAISE(ABORT,'EXPENSE_CLEAN_RECEIPT_REQUIRED');
   END`,
+];
+
+/**
+ * The licensing/tax-authorization *reference catalogue* (license_features,
+ * license_plans, license_plan_entitlements, license_permission_policies,
+ * access_permissions, countries/tax_jurisdictions/tax_authorities/
+ * tax_subscriptions/tax_subscription_features) is genuinely global, static
+ * data — in a real deployment it comes from the drizzle migrations
+ * (0012/0014/0019/0020), never from demo seeding. The JS-side copies below
+ * historically lived only inside the "not production" demo-seed block
+ * alongside actual demo *business* records (a specific org-0001/tp-0001,
+ * their invoices, etc.) — but every route-level test stubs NODE_ENV to
+ * "production" specifically to skip that demo business data (see
+ * tests/routes/module-1-access-control.test.ts's file comment), which also
+ * skipped this catalogue as an unintended side effect: with it empty,
+ * requireLicensedPermission fails every single permission with
+ * LICENSE_POLICY_MISSING regardless of any organisation's own license/tax
+ * state. Re-seeded here, unconditionally (INSERT OR IGNORE/REPLACE, so this
+ * is harmless when the conditional block below also seeds the same rows),
+ * so the catalogue exists exactly like it would from real migrations.
+ */
+const LICENSE_TAX_REFERENCE_SEED_STATEMENTS = [
+  // A synthetic, always-present system user purely to satisfy the
+  // authorized_by/created_by NOT NULL FK columns the auto-provisioning
+  // triggers below need to write — usr-local-admin (used for the same
+  // purpose in the demo dataset) is only seeded conditionally, and route
+  // tests stub NODE_ENV=production specifically to skip that, often before
+  // their own fixture creates any app_users row at all.
+  `INSERT OR IGNORE INTO app_users VALUES ('usr-auto-provision-system','auto-provision-system','auto-provision-system@vat-msa.local','Auto-Provisioning System','SYSTEM_SERVICE',NULL,'ACTIVE','2026-01-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('PILOT_ADMIN','Pilot Administrator','PLATFORM','CRITICAL','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_OWNER','Taxpayer Owner','TAXPAYER','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_ADMIN','Taxpayer Administrator','TAXPAYER','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_ACCOUNTANT','Taxpayer Accountant','TAXPAYER','MEDIUM','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_STAFF','Taxpayer Staff','TAXPAYER','MEDIUM','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_VIEWER','Taxpayer Viewer','TAXPAYER','LOW','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_COMPLIANCE_OFFICER','NamRA Compliance Officer','NAMRA','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_AUDITOR','NamRA Auditor','NAMRA','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('INTERNAL_AUDITOR','Internal Auditor','ASSURANCE','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('SECURITY_ANALYST','Security Analyst','SECURITY','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_REFUND_OFFICER','NamRA Refund Officer','NAMRA','HIGH','ACTIVE','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_SUPERVISOR','NamRA Supervisor','NAMRA','CRITICAL','ACTIVE','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_SYSTEM_ADMIN','NamRA System Administrator','NAMRA_ADMIN','CRITICAL','ACTIVE','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,plan_domain,status,effective_from,effective_to,created_at)
+    VALUES ('plan-pilot-professional-v1','PILOT_PROFESSIONAL','Professional Pilot',1,'COMMERCIAL_SAAS','ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,plan_domain,status,effective_from,effective_to,created_at)
+    VALUES ('plan-tax-na-synthetic-v1','NA_GOVERNMENT_TAX','Namibia Government Tax Services',1,'GOVERNMENT_TAX','ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('CORE_VAT','Core VAT management','Controlled invoice VAT reconciliation and return workspaces','GOVERNMENT_TAX',NULL,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','COMMERCIAL_SAAS','USER_SEATS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','COMMERCIAL_SAAS','USER_SEATS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BRANCHES','Branches','Active operating branches','COMMERCIAL_SAAS','BRANCHES',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','COMMERCIAL_SAAS','WORKFLOWS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ACCOUNTING','Accounting','General ledger and financial controls','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BUSINESS_OPERATIONS','Business operations','Expenses quotations parties imports and business documents','COMMERCIAL_SAAS',NULL,1,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('INVENTORY','Inventory','Inventory and warehouse controls','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PROJECTS','Projects','Project costing budgets and reports','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ANALYTICS','Analytics','Advanced governed reports and analytics','COMMERCIAL_SAAS','REPORT_RUNS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('API_ACCESS','API access','Scoped API clients webhooks and usage','COMMERCIAL_SAAS','API_REQUESTS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PLATFORM_SECURITY','Platform control','Global platform security and operational control','PLATFORM_CONTROL',NULL,1,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-tax-core','plan-tax-na-synthetic-v1','CORE_VAT',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-admin','plan-pilot-professional-v1','ADMINISTRATION',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-seats','plan-pilot-professional-v1','USER_SEATS',1,'FINITE',25,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-branches','plan-pilot-professional-v1','BRANCHES',1,'FINITE',5,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-workflow','plan-pilot-professional-v1','ADVANCED_WORKFLOW',1,'FINITE',20,'{"max_nodes":30}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-accounting','plan-pilot-professional-v1','ACCOUNTING',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-business','plan-pilot-professional-v1','BUSINESS_OPERATIONS',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-inventory','plan-pilot-professional-v1','INVENTORY',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-projects','plan-pilot-professional-v1','PROJECTS',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-analytics','plan-pilot-professional-v1','ANALYTICS',1,'FINITE',1000,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-api','plan-pilot-professional-v1','API_ACCESS',1,'FINITE',100000,'{}')`,
+  `INSERT OR IGNORE INTO countries VALUES ('NA','NAM','Namibia','NAD','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_jurisdictions VALUES ('tax-jurisdiction-na-national','NA','NA-NATIONAL','Namibia national tax jurisdiction','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_authorities VALUES ('tax-authority-na-namra','tax-jurisdiction-na-national','NAMRA','Namibia Revenue Agency','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_subscriptions VALUES ('tax-sub-na-synthetic','tax-authority-na-namra','plan-tax-na-synthetic-v1','ACTIVE','LOCAL_STAGING','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_subscription_features VALUES ('tax-sub-feature-na-core','tax-sub-na-synthetic','CORE_VAT','ACTIVE','2026-08-23T12:00:00Z')`,
+  ...LICENSE_PERMISSION_POLICIES.map(([permission]) =>
+    `INSERT OR IGNORE INTO access_permissions (code,resource,action,description,classification,created_at)
+      VALUES ('${permission}','REFERENCE_CATALOGUE','USE','Licence permission policy reference','RESTRICTED','2026-08-23T08:00:00Z')`),
+  ...LICENSE_PERMISSION_POLICIES.map(([permission, feature, operation]) =>
+    `INSERT OR REPLACE INTO license_permission_policies VALUES ('${permission}','${feature}','${operation}','ACTIVE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
+];
+
+/**
+ * Local/test-only convenience: every route-level test creates its own
+ * organisation/taxpayer/actor fixtures rather than reusing org-0001/tp-0001,
+ * and requireLicensedPermission (added when the licensing gate went from
+ * "framework demo org only" to genuinely universal) denies any organisation
+ * with no organisation_licenses row (COMMERCIAL_SAAS features) and any
+ * taxpayer-scoped or national-scope actor with no tax authorization
+ * (GOVERNMENT_TAX features, e.g. CORE_VAT) exactly as it should in
+ * production. These triggers auto-provision the same synthetic grants
+ * org-0001/tp-0001/usr-local-admin already get by hand, for every
+ * organisation/actor a test creates — mirroring the shared
+ * tax-sub-na-synthetic/tax-authority-na-namra fixture already seeded above.
+ * Like every other trigger in this file, these only ever get CREATEd on the
+ * non-production path (initialize() returns before reaching here in real
+ * production — see assertProductionSchema), so they can never fire against
+ * a real, live deployment.
+ */
+const AUTO_PROVISION_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_organisation_license
+    AFTER INSERT ON organisations
+    WHEN NOT EXISTS (SELECT 1 FROM organisation_licenses WHERE organisation_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM license_plans WHERE id='plan-pilot-professional-v1')
+    BEGIN
+      INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,subscription_domain,payment_mode,activated_at,current_period_start,current_period_end,created_at,updated_at)
+      VALUES ('sub-auto-'||NEW.id,NEW.id,'LOCAL_TEST_FIXTURE','sub-auto-'||NEW.id,'ACTIVE','COMMERCIAL_SAAS','DISABLED','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2027-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
+      INSERT INTO organisation_licenses (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
+      VALUES ('lic-auto-'||NEW.id,NEW.id,'sub-auto-'||NEW.id,'plan-pilot-professional-v1','ACTIVE',1,'2026-01-01T00:00:00Z',NULL,NULL,'NON_DESTRUCTIVE_TAX_RETENTION','2026-01-01T00:00:00Z');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_taxpayer_authorization
+    AFTER INSERT ON organisations
+    WHEN NOT EXISTS (SELECT 1 FROM taxpayer_authorizations WHERE organisation_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM tax_subscriptions WHERE id='tax-sub-na-synthetic')
+    BEGIN
+      INSERT INTO taxpayer_authorizations (id,tax_subscription_id,tax_authority_id,jurisdiction_id,organisation_id,taxpayer_id,status,vat_registration_status,effective_from,effective_to,authorization_reference,authorized_by,created_at)
+      VALUES ('tax-authz-auto-'||NEW.id,'tax-sub-na-synthetic','tax-authority-na-namra','tax-jurisdiction-na-national',NEW.id,NEW.taxpayer_id,'ACTIVE','ACTIVE','2026-01-01T00:00:00Z',NULL,'AUTO-'||NEW.id,'usr-auto-provision-system','2026-01-01T00:00:00Z');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_tax_authority_user
+    AFTER INSERT ON app_users
+    WHEN NEW.taxpayer_id IS NULL
+      AND NEW.role IN ('PILOT_ADMIN','NAMRA_COMPLIANCE_OFFICER','NAMRA_AUDITOR','NAMRA_REFUND_OFFICER','NAMRA_SUPERVISOR','NAMRA_SYSTEM_ADMIN','INTERNAL_AUDITOR','SECURITY_ANALYST')
+      AND NOT EXISTS (SELECT 1 FROM tax_authority_users WHERE user_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM tax_authorities WHERE id='tax-authority-na-namra')
+    BEGIN
+      INSERT INTO tax_authority_users (id,tax_authority_id,user_id,authority_role,status,effective_from,effective_to)
+      VALUES ('tax-user-auto-'||NEW.id,'tax-authority-na-namra',NEW.id,'SYNTHETIC_PILOT_OPERATOR','ACTIVE','2026-01-01T00:00:00Z',NULL);
+    END`,
+  // resolveLicensedOrganisation (lib/data/licensing-repository.ts) resolves
+  // a taxpayer-scoped actor's organisation via actor.organisationId, which
+  // buildUserContext (lib/auth.ts) computes from organisation_memberships —
+  // not from app_users.taxpayer_id directly. Fixtures that only set
+  // taxpayer_id (the pre-licensing norm) leave that membership missing.
+  // Two triggers cover both fixture orderings (org before user, or user
+  // before org) by linking each taxpayer-scoped user to their taxpayer's
+  // organisation the moment both rows exist.
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_membership_on_user
+    AFTER INSERT ON app_users
+    WHEN NEW.taxpayer_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM organisation_memberships WHERE user_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM organisations WHERE taxpayer_id=NEW.taxpayer_id)
+      AND EXISTS (SELECT 1 FROM access_roles WHERE code=NEW.role)
+    BEGIN
+      INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      SELECT 'mem-auto-'||NEW.id, o.id, NEW.id, NEW.role, NULL, 'ACTIVE', '2026-01-01T00:00:00Z', NULL, 'usr-auto-provision-system', '2026-01-01T00:00:00Z'
+      FROM organisations o WHERE o.taxpayer_id=NEW.taxpayer_id LIMIT 1;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_membership_on_organisation
+    AFTER INSERT ON organisations
+    BEGIN
+      INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      SELECT 'mem-auto-'||u.id, NEW.id, u.id, u.role, NULL, 'ACTIVE', '2026-01-01T00:00:00Z', NULL, 'usr-auto-provision-system', '2026-01-01T00:00:00Z'
+      FROM app_users u
+      WHERE u.taxpayer_id=NEW.taxpayer_id
+        AND NOT EXISTS (SELECT 1 FROM organisation_memberships m WHERE m.user_id=u.id)
+        AND EXISTS (SELECT 1 FROM access_roles r WHERE r.code=u.role);
+    END`,
 ];
 
 const LOCAL_COMPATIBILITY_COLUMNS = [
@@ -3219,6 +3380,7 @@ async function initialize(db: D1Database): Promise<void> {
   }
   await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
   await applyLocalCompatibilityColumns(db);
+  await db.batch(LICENSE_TAX_REFERENCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   if (process.env.NODE_ENV !== "production") {
     const existing = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("pilot-v1").first();
     if (!existing) await db.batch(SEED_STATEMENTS.map((statement) => db.prepare(statement)));
@@ -3255,6 +3417,7 @@ async function initialize(db: D1Database): Promise<void> {
   await db.batch(ISSUE2_IDENTITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE4_AUTHORITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(AUTO_PROVISION_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   const foreignKeyViolations = await db.prepare("PRAGMA foreign_key_check").all<Record<string, unknown>>();
   if (foreignKeyViolations.results.length > 0) throw new Error("VAT-MSA local compatibility upgrade left foreign-key violations.");
   await db.prepare("PRAGMA optimize").run();

@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { closeIncident, containIncident, createIncident, getIncidentDetail, getSOCQueue, revokeIncidentAccess, SecurityResourceError } from "@/lib/data/security-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { SecurityValidationError } from "@/lib/domain/security";
@@ -28,7 +29,7 @@ export async function handleSOCQueue(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "security:read");
+    await requireLicensedPermission(user, "security:read", { operationClass: "READ" });
     const params = new URL(request.url).searchParams;
     const result = await getSOCQueue({ status: params.get("status")?.trim().toUpperCase() || undefined, severity: params.get("severity")?.trim().toUpperCase() || undefined });
     return Response.json({ incidents: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -39,7 +40,7 @@ export async function handleIncidentDetail(request: Request, incidentId: string)
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "security:read");
+    await requireLicensedPermission(user, "security:read", { operationClass: "READ" });
     const result = await getIncidentDetail(incidentId);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context); }
@@ -53,7 +54,7 @@ export async function handleIncidentCreate(request: Request) {
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "security:manage");
+    await requireLicensedPermission(user, "security:manage", { operationClass: "ADMIN_WRITE" });
     await enforceRateLimits([{ key: `security-incident:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "security-incident:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -74,7 +75,7 @@ export async function handleIncidentContainment(request: Request, incidentId: st
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "security:manage");
+    await requireLicensedPermission(user, "security:manage", { operationClass: "ADMIN_WRITE" });
     await enforceRateLimits([{ key: `security-contain:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "security-contain:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -95,7 +96,7 @@ export async function handleIncidentRevocation(request: Request, incidentId: str
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "security:manage");
+    await requireLicensedPermission(user, "security:manage", { operationClass: "ADMIN_WRITE" });
     await requireStepUp(request, user);
     await enforceRateLimits([{ key: `security-revoke:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "security-revoke:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
@@ -117,7 +118,7 @@ export async function handleIncidentClosure(request: Request, incidentId: string
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "security:manage");
+    await requireLicensedPermission(user, "security:manage", { operationClass: "ADMIN_WRITE" });
     await enforceRateLimits([{ key: `security-close:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "security-close:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);

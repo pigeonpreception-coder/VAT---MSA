@@ -1,4 +1,4 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { approveReportExport, cancelReportExport, completeDocumentScan, decidePlatformChange, downloadDocument, downloadReportExport, getDocumentVersionHistory, getPlatformConfig, getPlatformSnapshot, getReportExport, getTechnicalPlatformSnapshot, listAnomalyCandidates, listDataProducts, listPlatformChangeRequests, PlatformResourceError, provisionPlatformStaff, publishDataProduct, publishReportRun, queryApprovedMetrics, receiveOfflineBatch, requestPlatformChange, requestReportExport, runAnalyticsModel, runInlineReport, setDocumentRetentionHold, supersedeDocument, uploadDocument } from "@/lib/data/platform-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { requireLicensedPermission } from "@/lib/data/licensing-repository";
@@ -59,7 +59,7 @@ export async function handlePlatformList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "platform:read");
+    await requireLicensedPermission(user, "platform:read", { operationClass: "READ" });
     const result = TECHNICAL_ONLY_ROLES.has(user.role) ? await getTechnicalPlatformSnapshot() : await getPlatformSnapshot(user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context); }
@@ -120,7 +120,7 @@ export async function handleDocumentScanResult(request: Request, documentId: str
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "documents:manage");
+    await requireLicensedPermission(user, "documents:manage", { operationClass: "BUSINESS_WRITE" });
     await enforceRateLimits([{ key: `documents-scan:actor:${user.userId}`, limit: 60, windowSeconds: 60 }, { key: "documents-scan:global", limit: 1_000, windowSeconds: 60 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -137,7 +137,7 @@ export async function handleDocumentSupersession(request: Request, documentId: s
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "documents:upload");
+    await requireLicensedPermission(user, "documents:upload", { operationClass: "BUSINESS_WRITE" });
     const contentType = request.headers.get("content-type") ?? "";
     if (!contentType.toLowerCase().startsWith("multipart/form-data")) throw new PlatformResourceError("Content-Type must be multipart/form-data.", 415);
     const length = Number(request.headers.get("content-length") ?? "0");
@@ -157,7 +157,7 @@ export async function handleDocumentVersionHistory(request: Request, documentId:
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "documents:read");
+    await requireLicensedPermission(user, "documents:read", { operationClass: "READ" });
     const result = await getDocumentVersionHistory(documentId, user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context); }
@@ -171,7 +171,7 @@ export async function handleDocumentRetentionHold(request: Request, documentId: 
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "documents:manage");
+    await requireLicensedPermission(user, "documents:manage", { operationClass: "BUSINESS_WRITE" });
     await enforceRateLimits([{ key: `documents-hold:actor:${user.userId}`, limit: 60, windowSeconds: 60 }, { key: "documents-hold:global", limit: 1_000, windowSeconds: 60 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -188,7 +188,7 @@ export async function handleDocumentDownload(request: Request, documentId: strin
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "documents:read");
+    await requireLicensedPermission(user, "documents:read", { operationClass: "READ" });
     await enforceRateLimits([{ key: `documents-download:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: `documents-download:scope:${user.taxpayerId ?? user.role}`, limit: 200, windowSeconds: 300 }]);
     const result = await downloadDocument(documentId, user, context.correlationId);
     return new Response(result.bytes, {
@@ -211,7 +211,7 @@ export async function handleReportRunPublication(request: Request, reportRunId: 
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run", { operationClass: "EXPORT" });
     await enforceRateLimits([{ key: `reports-publish:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "reports-publish:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -231,7 +231,7 @@ export async function handleReportExportRequest(request: Request, reportRunId: s
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run", { operationClass: "EXPORT" });
     await enforceRateLimits([{ key: `reports-export:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "reports-export:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -251,7 +251,7 @@ export async function handleReportExportApproval(request: Request, exportId: str
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run", { operationClass: "EXPORT" });
     await enforceRateLimits([{ key: `reports-export-approve:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-approve:global", limit: 1_000, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -271,7 +271,7 @@ export async function handleReportExportCancellation(request: Request, exportId:
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run", { operationClass: "EXPORT" });
     await enforceRateLimits([{ key: `reports-export-cancel:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-cancel:global", limit: 1_000, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -288,7 +288,7 @@ export async function handleReportExportStatus(request: Request, exportId: strin
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "reports:read");
+    await requireLicensedPermission(user, "reports:read", { operationClass: "READ" });
     const result = await getReportExport(exportId, user);
     return Response.json({ report_export: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context); }
@@ -299,7 +299,7 @@ export async function handleReportExportDownload(request: Request, exportId: str
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "reports:read");
+    await requireLicensedPermission(user, "reports:read", { operationClass: "READ" });
     await enforceRateLimits([{ key: `reports-export-download:actor:${user.userId}`, limit: 60, windowSeconds: 300 }, { key: "reports-export-download:global", limit: 1_000, windowSeconds: 300 }]);
     const result = await downloadReportExport(exportId, user, context.correlationId);
     return new Response(result.bytes, {
@@ -319,7 +319,7 @@ export async function handleAnalyticsDataProducts(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "reports:read");
+    await requireLicensedPermission(user, "reports:read", { operationClass: "READ" });
     const result = await listDataProducts();
     return Response.json({ data_products: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context); }
@@ -333,7 +333,7 @@ export async function handleAnalyticsModelRun(request: Request, dataProductId: s
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run", { operationClass: "EXPORT" });
     await enforceRateLimits([{ key: `analytics-model-run:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "analytics-model-run:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -353,7 +353,7 @@ export async function handleAnalyticsDataProductPublication(request: Request, da
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "reports:run");
+    await requireLicensedPermission(user, "reports:run", { operationClass: "EXPORT" });
     await enforceRateLimits([{ key: `analytics-publish:actor:${user.userId}`, limit: 20, windowSeconds: 300 }, { key: "analytics-publish:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -370,7 +370,7 @@ export async function handleAnalyticsMetrics(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "reports:read");
+    await requireLicensedPermission(user, "reports:read", { operationClass: "READ" });
     const params = new URL(request.url).searchParams;
     const result = await queryApprovedMetrics({ dataProductId: params.get("data_product_id")?.trim() || undefined, code: params.get("code")?.trim() || undefined });
     return Response.json({ metrics: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -382,7 +382,7 @@ export async function handleAnalyticsAnomalies(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "reports:read");
+    await requireLicensedPermission(user, "reports:read", { operationClass: "READ" });
     const params = new URL(request.url).searchParams;
     const result = await listAnomalyCandidates({ dataProductId: params.get("data_product_id")?.trim() || undefined });
     return Response.json({ anomalies: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -394,7 +394,7 @@ export async function handlePlatformConfig(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "platform:read");
+    await requireLicensedPermission(user, "platform:read", { operationClass: "READ" });
     const result = await getPlatformConfig();
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) { return failure(error, context); }
@@ -405,7 +405,7 @@ export async function handlePlatformChangeRequestList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "platform:read");
+    await requireLicensedPermission(user, "platform:read", { operationClass: "READ" });
     const status = new URL(request.url).searchParams.get("status")?.trim().toUpperCase() || undefined;
     const result = await listPlatformChangeRequests({ status });
     return Response.json({ change_requests: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -420,7 +420,7 @@ export async function handlePlatformChangeRequestCreate(request: Request) {
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "platform:manage");
+    await requireLicensedPermission(user, "platform:manage", { operationClass: "ADMIN_WRITE" });
     await enforceRateLimits([{ key: `platform-change:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "platform-change:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 8_192);
@@ -440,7 +440,7 @@ export async function handlePlatformChangeDecision(request: Request, changeReque
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "platform:manage");
+    await requireLicensedPermission(user, "platform:manage", { operationClass: "ADMIN_WRITE" });
     await enforceRateLimits([{ key: `platform-change-decide:actor:${user.userId}`, limit: 30, windowSeconds: 300 }, { key: "platform-change-decide:global", limit: 500, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<never>(request, 4_096);
@@ -466,7 +466,7 @@ export async function handleProvisionPlatformStaff(request: Request) {
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "platform:manage");
+    await requireLicensedPermission(user, "platform:manage", { operationClass: "ADMIN_WRITE" });
     await requireStepUp(request, user);
     await enforceRateLimits([{ key: `platform-staff:actor:${user.userId}`, limit: 10, windowSeconds: 300 }, { key: "platform-staff:global", limit: 100, windowSeconds: 300 }]);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";

@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { AuditResourceError, listAuditChainVerifications, runAuditChainVerification, searchAuditTrail } from "@/lib/data/audit-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { emitStructuredSecurityLog, enforceRateLimits, recordAuthorizationDenial, recordRateLimitBreach, requestContext, type RequestContext, RequestGuardError } from "@/lib/security/request";
@@ -28,7 +29,7 @@ export async function handleAuditTrailSearch(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "audit:read");
+    await requireLicensedPermission(user, "audit:read", { operationClass: "READ" });
     const params = new URL(request.url).searchParams;
     const result = await searchAuditTrail({
       resourceType: params.get("resource_type")?.trim().toUpperCase() || undefined,
@@ -47,7 +48,7 @@ export async function handleAuditChainVerificationList(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "audit:read");
+    await requireLicensedPermission(user, "audit:read", { operationClass: "READ" });
     const limitParam = new URL(request.url).searchParams.get("limit");
     const result = await listAuditChainVerifications(limitParam ? Number(limitParam) : undefined);
     return Response.json({ verifications: result }, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -62,7 +63,7 @@ export async function handleAuditChainVerificationTrigger(request: Request) {
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "audit:read");
+    await requireLicensedPermission(user, "audit:read", { operationClass: "READ" });
     await enforceRateLimits([{ key: `audit-chain-verify:actor:${user.userId}`, limit: 10, windowSeconds: 300 }, { key: "audit-chain-verify:global", limit: 100, windowSeconds: 300 }]);
     const result = await runAuditChainVerification(user, context.correlationId);
     emitStructuredSecurityLog({ level: result.status === "PASSED" ? "INFO" : "ERROR", event: "VERIFY_AUDIT_CHAIN", correlationId: context.correlationId, actorId, outcome: result.status, durationMs: Date.now() - startedAt });

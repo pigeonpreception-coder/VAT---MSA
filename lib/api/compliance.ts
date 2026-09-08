@@ -1,4 +1,4 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import {
   addCaseNote,
   addEvidence,
@@ -67,7 +67,7 @@ export async function handleCaseTimeline(request: Request, resourceId: string) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "compliance:read");
+    await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
     const timeline = await getCaseTimeline(resourceId, user);
     if (!timeline) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
     return Response.json(timeline, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -82,7 +82,7 @@ export async function handleRefundClaimChecks(request: Request, resourceId: stri
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "refunds:read");
+    await requireLicensedPermission(user, "refunds:read", { operationClass: "READ" });
     const result = await getRefundClaimChecks(resourceId, user);
     if (!result) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Refund claim was not found.", context.correlationId);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -97,7 +97,7 @@ export async function handleCaseEvidence(request: Request, resourceId: string) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "compliance:read");
+    await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
     const evidence = await getCaseEvidence(resourceId, user);
     if (!evidence) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
     return Response.json(evidence, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -112,7 +112,7 @@ export async function handleCaseNotes(request: Request, resourceId: string) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "compliance:read");
+    await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
     const notes = await getCaseNotes(resourceId, user);
     if (!notes) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Audit case was not found.", context.correlationId);
     return Response.json(notes, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -127,7 +127,7 @@ export async function handleRestrictedRiskQuery(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "risk:read");
+    await requireLicensedPermission(user, "risk:read", { operationClass: "READ" });
     const url = new URL(request.url);
     const result = await getRestrictedRisk(user, url.searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -143,7 +143,7 @@ export async function handleInbox(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "compliance:read");
+    await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
     const result = await getInbox(user, new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -158,7 +158,7 @@ export async function handleConversation(request: Request, resourceId: string) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "compliance:read");
+    await requireLicensedPermission(user, "compliance:read", { operationClass: "READ" });
     const conversation = await getConversation(resourceId, user);
     if (!conversation) return problem(404, "RESOURCE_NOT_FOUND", "Not found", "Correspondence thread was not found.", context.correlationId);
     return Response.json(conversation, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
@@ -173,7 +173,7 @@ export async function handleNotifications(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "dashboard:read");
+    await requireLicensedPermission(user, "dashboard:read", { operationClass: "READ" });
     const result = await getNotifications(user, new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {

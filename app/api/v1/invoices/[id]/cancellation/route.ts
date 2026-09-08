@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { cancelInvoice, RepositoryConflictError } from "@/lib/data/repository";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { readBoundedJson, requestContext, RequestGuardError } from "@/lib/security/request";
@@ -21,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "invoices:cancel");
+    await requireLicensedPermission(actor, "invoices:cancel", { operationClass: "CORRECTION_WRITE" });
     await requireStepUp(request, actor);
     const { id } = await params;
     const cancellation = await cancelInvoice(actor, id, await readBoundedJson(request, 4_096), context.correlationId);

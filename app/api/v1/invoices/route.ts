@@ -1,4 +1,4 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
 import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { InvoiceValidationError } from "@/lib/domain/invoice";
 import type { InvoiceSubmission } from "@/lib/domain/types";
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "invoices:submit");
+    await requireLicensedPermission(user, "invoices:submit", { operationClass: "BUSINESS_WRITE" });
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     const payload = await readBoundedJson<InvoiceSubmission>(request);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
