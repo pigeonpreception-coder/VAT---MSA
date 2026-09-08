@@ -13,7 +13,7 @@
         <h1 class="h3 mb-1">Parties, products and quotations</h1>
         <p class="text-muted mb-0">Tenant-scoped commercial records feed invoicing without bypassing fiscal certification. Quotation totals and VAT are calculated from immutable integer inputs.</p>
     </div>
-    <a href="{{ route('parties.index') }}" class="btn btn-secondary">Manage customers &amp; suppliers</a>
+    <a href="{{ route('business-parties.index') }}" class="btn btn-secondary">Manage customers &amp; suppliers</a>
 </div>
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
@@ -162,7 +162,7 @@
             </div>
             <div class="card-body">
                 @if ($customers->isEmpty())
-                    <p class="text-muted mb-0">Register an active customer before issuing a quotation. <a href="{{ route('parties.index') }}">Manage customers &amp; suppliers</a>.</p>
+                    <p class="text-muted mb-0">Register an active customer before issuing a quotation. <a href="{{ route('business-parties.index') }}">Manage customers &amp; suppliers</a>.</p>
                 @else
                     <form method="POST" action="{{ route('quotations.store') }}">
                         @csrf

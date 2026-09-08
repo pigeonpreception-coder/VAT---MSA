@@ -3,27 +3,28 @@
 namespace Tests\Feature\Refund;
 
 use App\Models\Organisation;
+use App\Models\OrganisationCapability;
+use App\Models\RefundClaim;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Models\VatPeriod;
 use App\Models\VatReturnVersion;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\TaxRuleSetSeeder;
+use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Covers the real Blade UI for the refund claim register
+ * Covers the real Blade UI for refund claims
  * (App\Http\Controllers\Refund\RefundViewController /
- * resources/views/refunds/index.blade.php) -- ported from the source's
- * own app/refunds/page.tsx. Reuses ComplianceSnapshotTest's own
- * "insert refund_claims/refund_claim_transitions directly, via a real
- * vat_periods/vat_return_versions row" fixture convention -- see that
- * class's own doc comment for why: RefundClaimTest already covers the
- * RequestRefund command chain end to end, so this file's own job is
- * proving the view renders that data and is gated correctly.
+ * resources/views/refunds/**) -- the frontend UI build-out's fourth
+ * slice, after Dashboard, Invoices, and VAT Returns. Reuses
+ * RefundClaimTest's own makeTradingParty/makeRefundableReturn fixture
+ * pattern, since a real refund claim genuinely depends on a certified-
+ * invoice-backed, approved VAT return with a negative net position, not
+ * a fixture inserted directly.
  */
 class RefundViewTest extends TestCase
 {
@@ -33,11 +34,12 @@ class RefundViewTest extends TestCase
     {
         parent::setUp();
         $this->seed(RoleSeeder::class);
+        $this->seed(VatRuleSeeder::class);
         $this->seed(TaxRuleSetSeeder::class);
     }
 
-    /** @return array{taxpayer: Taxpayer, organisation: Organisation} */
-    private function makeTaxpayer(string $vatNumber): array
+    /** @return array{taxpayer: Taxpayer, organisation: Organisation, owner: User} */
+    private function makeTradingParty(string $vatNumber, array $capabilities = ['BUYER', 'SELLER']): array
     {
         $taxpayer = Taxpayer::create([
             'id' => (string) Str::uuid(), 'vat_number' => $vatNumber, 'tin' => "TIN-{$vatNumber}",
@@ -47,97 +49,239 @@ class RefundViewTest extends TestCase
         $organisation = Organisation::create([
             'id' => (string) Str::uuid(), 'taxpayer_id' => $taxpayer->id, 'legal_name' => $taxpayer->legal_name, 'status' => 'ACTIVE',
         ]);
+        foreach ($capabilities as $capability) {
+            OrganisationCapability::create([
+                'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'capability' => $capability,
+                'status' => 'ACTIVE', 'effective_from' => now()->subDay(), 'created_at' => now(),
+            ]);
+        }
+        $owner = User::create([
+            'id' => (string) Str::uuid(), 'name' => "{$vatNumber} Owner", 'email' => strtolower($vatNumber).'-owner@test.test',
+            'password' => bcrypt('password'), 'role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $taxpayer->id, 'status' => 'ACTIVE',
+        ]);
 
-        return compact('taxpayer', 'organisation');
+        return compact('taxpayer', 'organisation', 'owner');
     }
 
-    private function taxpayerOwner(string $taxpayerId, string $email): User
+    private function makeRefundOfficer(): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Taxpayer Owner', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $taxpayerId, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'Refund Officer', 'email' => 'refund-officer-'.Str::random(8).'@test.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_REFUND_OFFICER', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
+    private function makePilotAdmin(): User
+    {
+        return User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => 'pilot-admin-'.Str::random(8).'@test.test',
+            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+    }
+
+    /** Holds neither refunds:read/request/review -- the fully-denied fixture. */
     private function developerPartner(): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Developer Partner', 'email' => 'developer-'.Str::random(8).'@refundview.test',
+            'id' => (string) Str::uuid(), 'name' => 'Developer Partner', 'email' => 'developer-'.Str::random(8).'@test.test',
             'password' => bcrypt('password'), 'role' => 'DEVELOPER_PARTNER', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
-    /** @return array{claimId: string} */
-    private function insertRefundFixture(Organisation $organisation, Taxpayer $taxpayer, User $actor, int $amountCents = 200000): array
+    private function invoicePayload(array $overrides = []): array
     {
-        $periodId = (string) Str::uuid();
-        VatPeriod::create([
-            'id' => $periodId, 'organisation_id' => $organisation->id, 'taxpayer_id' => $taxpayer->id,
-            'period_code' => '2026-08', 'period_start' => '2026-08-01', 'period_end' => '2026-08-31', 'due_date' => '2026-09-25',
-            'status' => 'OPEN', 'lock_version' => 0, 'created_at' => now(), 'updated_at' => now(),
-        ]);
-        $versionId = (string) Str::uuid();
-        VatReturnVersion::create([
-            'id' => $versionId, 'vat_period_id' => $periodId, 'organisation_id' => $organisation->id, 'taxpayer_id' => $taxpayer->id,
-            'version_number' => 1, 'parent_version_id' => null, 'tax_rule_set_id' => 'taxrule-na-pilot-2026-1',
-            'output_tax_cents' => 0, 'input_tax_cents' => $amountCents, 'adjustment_cents' => 0, 'net_payable_cents' => -$amountCents,
-            'status' => 'FILED', 'ledger_snapshot_hash' => str_repeat('c', 64), 'generated_by' => $actor->id, 'generated_at' => now(),
-        ]);
-        $claimId = (string) Str::uuid();
-        $now = now();
-        DB::table('refund_claims')->insert([
-            'id' => $claimId, 'claim_number' => 'RFD-2026-'.mb_strtoupper(Str::random(8)), 'organisation_id' => $organisation->id,
-            'taxpayer_id' => $taxpayer->id, 'vat_return_version_id' => $versionId, 'amount_cents' => $amountCents, 'currency' => 'NAD',
-            'status' => 'RECEIVED', 'evidence_status' => 'PENDING_REVIEW', 'risk_tier' => 'MEDIUM', 'requested_by' => $actor->id,
-            'requested_at' => $now, 'offset_amount_cents' => 0,
-        ]);
-
-        return ['claimId' => $claimId];
+        return array_replace_recursive([
+            'schema_version' => '1.0.0', 'invoice_number' => 'INV-'.Str::random(8), 'document_type' => 'TAX_INVOICE',
+            'source' => ['system_id' => 'erp-test', 'document_id' => 'doc-'.Str::random(8), 'submitted_at' => '2026-09-01T09:00:00Z'],
+            'supplier' => ['name' => 'Supplier Co', 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => 'VAT-SUP-0001']]],
+            'customer' => ['name' => 'Customer Co', 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => 'VAT-CUS-0001']]],
+            'issue_date' => '2026-09-01', 'currency' => 'NAD',
+            'lines' => [['line_number' => 1, 'description' => 'Consulting services', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => '1000.00', 'net_amount' => '1000.00', 'tax' => ['category' => 'STANDARD', 'rate' => '15.00', 'taxable_amount' => '1000.00', 'tax_amount' => '150.00']]],
+            'totals' => ['line_net_amount' => '1000.00', 'tax_exclusive_amount' => '1000.00', 'tax_amount' => '150.00', 'tax_inclusive_amount' => '1150.00', 'payable_amount' => '1150.00'],
+        ], $overrides);
     }
 
-    public function test_the_refunds_page_requires_authentication(): void
+    /** Certifies a real invoice (supplier -> customer), then generates and approves a return for the customer's period -- a genuine negative-net-position (refund) return, read back from real ledger_entries. */
+    private function makeRefundableReturn(array $supplier, array $customer, string $periodCode = '2026-09'): VatReturnVersion
+    {
+        $this->actingAs($supplier['owner'])->postJson('/api/v1/invoices', $this->invoicePayload([
+            'supplier' => ['identifiers' => [['value' => $supplier['taxpayer']->vat_number]]],
+            'customer' => ['identifiers' => [['value' => $customer['taxpayer']->vat_number]]],
+        ]), ['Idempotency-Key' => 'inv-'.Str::random(20)])->assertStatus(201);
+
+        $period = VatPeriod::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $customer['organisation']->id, 'taxpayer_id' => $customer['taxpayer']->id,
+            'period_code' => $periodCode, 'period_start' => '2026-09-01', 'period_end' => '2026-09-30', 'due_date' => '2026-10-25',
+            'status' => 'OPEN', 'lock_version' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $generate = $this->actingAs($customer['owner'])->postJson("/api/v1/vat-periods/{$period->id}/returns", [], ['Idempotency-Key' => 'gen-'.Str::random(20)]);
+        $generate->assertStatus(201)->assertJsonPath('resource.net_payable_cents', -15000);
+        $versionId = $generate->json('resource.id');
+
+        $approvalRequest = $this->actingAs($customer['owner'])->postJson("/api/v1/vat-returns/{$versionId}/approval-requests", [], ['Idempotency-Key' => 'ar-'.Str::random(20)]);
+        $taskId = $approvalRequest->json('resource.id');
+        $this->actingAs($this->makePilotAdmin())->postJson("/api/v1/approval-tasks/{$taskId}/decision", [
+            'decision' => 'APPROVE', 'comment' => 'Verified against ledger evidence.',
+        ], ['Idempotency-Key' => 'decide-'.Str::random(20)])->assertStatus(200);
+
+        return VatReturnVersion::findOrFail($versionId);
+    }
+
+    public function test_the_refunds_list_requires_authentication(): void
     {
         $this->get('/refunds')->assertRedirect('/login');
     }
 
-    public function test_the_refunds_page_requires_the_refunds_read_permission(): void
+    public function test_the_refunds_list_requires_the_refunds_read_permission(): void
     {
         $this->actingAs($this->developerPartner())->get('/refunds')->assertForbidden();
     }
 
-    public function test_the_refunds_page_renders_a_refund_claim(): void
+    public function test_requesting_a_refund_from_the_return_page_shows_the_action_and_creates_a_real_claim(): void
     {
-        $tp = $this->makeTaxpayer('VAT-REFUNDVIEW-0001');
-        $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'owner@refundview.test');
-        $this->insertRefundFixture($tp['organisation'], $tp['taxpayer'], $owner, 200000);
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2001');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2001');
+        $version = $this->makeRefundableReturn($supplier, $customer);
 
-        $response = $this->actingAs($owner)->get('/refunds');
+        $returnPage = $this->actingAs($customer['owner'])->get(route('vat-returns.show', $version->id));
+        $returnPage->assertSee('Request a refund');
+        $returnPage->assertSee(route('vat-returns.refund-request.store', $version->id), false);
 
-        $response->assertOk()->assertViewIs('refunds.index');
-        $response->assertSee('Evidence, risk and payment authorisation');
-        // A taxpayer-scoped actor's own query never joins taxpayers (matching
-        // the source's own unscoped-vs-scoped branch) -- the taxpayer_id
-        // fallback is what actually renders here, not legal_name.
-        $response->assertSee($tp['taxpayer']->id);
-        $response->assertSee('2026-08');
-        $response->assertSee('NAD 2,000.00'); // requested value metric + claim amount
-        $response->assertSee('Payment execution remains disabled by design.');
-        $response->assertSee('<caption class="visually-hidden">', false);
-        $response->assertSee('scope="col"', false);
+        // RefundService::request() only reaches RECEIVED when the return's
+        // own status is 'FILED' -- confirmed by reading the whole codebase
+        // that no application command anywhere ever sets that (submitReturn
+        // updates the *submission* row's status, never the version's own),
+        // matching RefundClaimTest's own identical workaround. Requesting
+        // against the fixture as-is (still just APPROVED) is exercised on
+        // its own below as the honestly-more-common real path.
+        $response = $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+        $response->assertRedirect(route('refunds.show', $claim->id));
+        $this->assertSame('BLOCKED_RETURN_NOT_FILED', $claim->status);
+        $this->assertSame(15000, $claim->amount_cents);
     }
 
-    public function test_the_refunds_page_is_scoped_to_the_taxpayers_own_claims(): void
+    public function test_a_refund_claim_reaches_received_once_the_underlying_return_is_filed(): void
     {
-        $tpA = $this->makeTaxpayer('VAT-REFUNDVIEW-0002');
-        $tpB = $this->makeTaxpayer('VAT-REFUNDVIEW-0003');
-        $ownerA = $this->taxpayerOwner($tpA['taxpayer']->id, 'owner-a@refundview.test');
-        $ownerB = $this->taxpayerOwner($tpB['taxpayer']->id, 'owner-b@refundview.test');
-        $this->insertRefundFixture($tpA['organisation'], $tpA['taxpayer'], $ownerA, 100000);
-        $this->insertRefundFixture($tpB['organisation'], $tpB['taxpayer'], $ownerB, 100000);
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2001-B');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2001-B');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        VatReturnVersion::where('id', $version->id)->update(['status' => 'FILED']);
 
-        $response = $this->actingAs($ownerA)->get('/refunds');
+        $response = $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
 
-        $response->assertOk();
-        $this->assertSame(1, count($response->viewData('snapshot')['refunds']));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+        $response->assertRedirect(route('refunds.show', $claim->id));
+        $this->assertSame('RECEIVED', $claim->status);
+    }
+
+    public function test_the_refunds_list_renders_a_claim_with_a_working_link(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2002');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2002');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+
+        $response = $this->actingAs($customer['owner'])->get('/refunds');
+
+        $response->assertOk()->assertViewIs('refunds.index');
+        $response->assertSee($claim->claim_number);
+        $response->assertSee(route('refunds.show', $claim->id), false);
+    }
+
+    public function test_the_refund_detail_page_404s_for_a_claim_outside_the_actors_taxpayer_scope(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2003');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2003');
+        $outsider = $this->makeTradingParty('VAT-VIEW-OUT-2003');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+
+        $this->actingAs($outsider['owner'])->get(route('refunds.show', $claim->id))->assertNotFound();
+    }
+
+    public function test_the_refund_detail_page_shows_eligibility_checks_and_only_valid_actions_in_the_review_dropdown(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2004');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2004');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        VatReturnVersion::where('id', $version->id)->update(['status' => 'FILED']); // see the FILED-status note in the first test above
+        $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+
+        $response = $this->actingAs($this->makeRefundOfficer())->get(route('refunds.show', $claim->id));
+
+        $response->assertOk()->assertViewIs('refunds.show');
+        $response->assertSee('Eligibility checks');
+        $response->assertSee('Eligibility Negative Net Position');
+        // RECEIVED only offers APPROVE/REJECT/REQUEST_INFORMATION/HOLD --
+        // RESUME (an EVIDENCE_REQUESTED/ON_HOLD-only action) must not appear.
+        $response->assertSeeInOrder(['Approve', 'Reject', 'Request Information', 'Hold']);
+        $response->assertDontSee('>Resume<', false);
+    }
+
+    public function test_self_review_is_blocked_with_a_friendly_form_error_not_a_403_page(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2005');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2005');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        // The customer owner both requests the refund AND (implausibly, but
+        // exactly what the self-review guard exists to catch) attempts to
+        // review it -- refunds:review is officer-only in real RBAC, so this
+        // uses a pilot admin acting as their own requester to force the
+        // guard's own code path deterministically.
+        $officer = $this->makePilotAdmin();
+        VatReturnVersion::where('id', $version->id)->update(['status' => 'FILED']); // see the FILED-status note in the first test above
+        $this->actingAs($officer)->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+
+        $response = $this->actingAs($officer)->post(route('refunds.transition.store', $claim->id), [
+            'action' => 'APPROVE', 'findings' => 'Attempting to review my own request.',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors();
+        $this->assertSame('RECEIVED', $claim->fresh()->status);
+    }
+
+    public function test_an_officer_can_reject_a_claim_and_the_original_requester_can_then_dispute_it(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2006');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2006');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        VatReturnVersion::where('id', $version->id)->update(['status' => 'FILED']); // see the FILED-status note in the first test above
+        $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+
+        $reject = $this->actingAs($this->makeRefundOfficer())->post(route('refunds.transition.store', $claim->id), [
+            'action' => 'REJECT', 'findings' => 'Insufficient supporting evidence on file.',
+        ]);
+        $reject->assertRedirect(route('refunds.show', $claim->id));
+        $this->assertSame('REJECTED', $claim->fresh()->status);
+
+        $detail = $this->actingAs($customer['owner'])->get(route('refunds.show', $claim->id));
+        $detail->assertSee('Dispute this outcome');
+
+        $dispute = $this->actingAs($customer['owner'])->post(route('refunds.dispute.store', $claim->id), [
+            'findings' => 'The evidence was in fact submitted; disputing this outcome.',
+        ]);
+        $dispute->assertRedirect(route('refunds.show', $claim->id));
+        $this->assertSame('DISPUTED', $claim->fresh()->status);
+    }
+
+    public function test_a_duplicate_refund_request_shows_a_friendly_form_error_not_a_raw_json_body(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2007');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2007');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+
+        $duplicate = $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+
+        $duplicate->assertRedirect();
+        $duplicate->assertSessionHasErrors('form');
+        $this->assertSame(1, RefundClaim::where('vat_return_version_id', $version->id)->count());
     }
 }

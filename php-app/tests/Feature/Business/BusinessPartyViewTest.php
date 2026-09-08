@@ -14,14 +14,13 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Covers the real Blade UI for the customer/supplier directory
- * (App\Http\Controllers\Business\BusinessPartyViewController /
- * resources/views/parties/index.blade.php) -- ported from the source's own
- * app/commercial/parties/page.tsx + PartyManager.tsx. Reuses
- * App\Services\Business\BusinessPartyService directly (already covered end
- * to end by tests/Feature/Business/BusinessPartyAndQuotationTest.php), so
- * this file's own job is proving the page's access gate and its
- * server-rendered create/edit/deactivate form flows.
+ * Covers the real Blade UI bundling BusinessPartyService with
+ * SupplierVerificationService -- App\Http\Controllers\Business\
+ * BusinessPartyViewController / resources/views/business-parties/** -- the
+ * frontend UI build-out's tenth slice, the fourth fresh, smaller PR (after
+ * Disputes, Obligations, Organisations & Identity). Reuses
+ * SupplierVerificationTest's and BusinessPartyAndQuotationTest's own
+ * makeOrganisation fixture pattern.
  */
 class BusinessPartyViewTest extends TestCase
 {
@@ -34,7 +33,7 @@ class BusinessPartyViewTest extends TestCase
     }
 
     /** @return array{taxpayer: Taxpayer, organisation: Organisation, owner: User} */
-    private function makeOrganisation(string $vatNumber): array
+    private function makeOrganisation(string $vatNumber, array $capabilities = ['BUYER', 'SELLER']): array
     {
         $taxpayer = Taxpayer::create([
             'id' => (string) Str::uuid(), 'vat_number' => $vatNumber, 'tin' => "TIN-{$vatNumber}",
@@ -44,179 +43,193 @@ class BusinessPartyViewTest extends TestCase
         $organisation = Organisation::create([
             'id' => (string) Str::uuid(), 'taxpayer_id' => $taxpayer->id, 'legal_name' => $taxpayer->legal_name, 'status' => 'ACTIVE',
         ]);
-        foreach (['BUYER', 'SELLER'] as $capability) {
+        foreach ($capabilities as $capability) {
             OrganisationCapability::create([
                 'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'capability' => $capability,
                 'status' => 'ACTIVE', 'effective_from' => now()->subDay(), 'created_at' => now(),
             ]);
         }
         $owner = User::create([
-            'id' => (string) Str::uuid(), 'name' => "{$vatNumber} Owner", 'email' => strtolower($vatNumber).'-owner@partiesview.test',
+            'id' => (string) Str::uuid(), 'name' => "{$vatNumber} Owner", 'email' => strtolower($vatNumber).'-owner@test.test',
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $taxpayer->id, 'status' => 'ACTIVE',
         ]);
 
         return compact('taxpayer', 'organisation', 'owner');
     }
 
-    private function makeParty(Organisation $organisation, array $overrides = []): BusinessParty
+    /** @return array{party: BusinessParty} */
+    private function makeParty(Organisation $organisation, string $vatNumber, array $relationships, string $status = 'ACTIVE'): BusinessParty
     {
-        $party = BusinessParty::create(array_replace([
-            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => 'Existing Customer',
-            'legal_name' => 'Existing Customer (Pty) Ltd', 'vat_number' => 'VAT-EXIST-0001', 'status' => 'ACTIVE',
-            'source_system' => 'LOCAL', 'created_at' => now(), 'updated_at' => now(),
-        ], $overrides));
-        PartyRelationship::create([
-            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
-            'relationship' => 'CUSTOMER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
+        $party = BusinessParty::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => 'Counterparty Co',
+            'legal_name' => 'Counterparty Co (Pty) Ltd', 'vat_number' => $vatNumber ?: null, 'tin' => null, 'email' => 'cp@test.test',
+            'phone' => null, 'address' => null, 'source_system' => 'LOCAL', 'source_party_id' => null, 'status' => $status,
+            'created_at' => now(), 'updated_at' => now(),
         ]);
+        foreach ($relationships as $relationship) {
+            PartyRelationship::create([
+                'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
+                'relationship' => $relationship, 'status' => 'ACTIVE', 'effective_from' => now(), 'effective_to' => null, 'created_at' => now(),
+            ]);
+        }
 
         return $party;
     }
 
-    public function test_the_parties_page_requires_authentication(): void
+    /** Holds commercial:read but not parties:manage -- the read-only fixture. */
+    private function sellerViewer(string $taxpayerId): User
     {
-        $this->get('/parties')->assertRedirect('/login');
+        return User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Seller Viewer', 'email' => 'viewer-'.Str::random(8).'@test.test',
+            'password' => bcrypt('password'), 'role' => 'SELLER_VIEWER', 'taxpayer_id' => $taxpayerId, 'status' => 'ACTIVE',
+        ]);
     }
 
-    public function test_a_role_without_parties_manage_is_denied(): void
+    public function test_the_parties_list_requires_authentication(): void
     {
-        $seller = $this->makeOrganisation('VAT-DENY-0001');
-        $viewer = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Viewer', 'email' => 'viewer@partiesview.test',
-            'password' => bcrypt('password'), 'role' => 'SELLER_VIEWER', 'taxpayer_id' => $seller['taxpayer']->id, 'status' => 'ACTIVE',
+        $this->get('/business-parties')->assertRedirect('/login');
+    }
+
+    public function test_a_role_without_the_manage_permission_is_forbidden_everywhere(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0001');
+        $party = $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0001S', ['SUPPLIER']);
+        $viewer = $this->sellerViewer($org['taxpayer']->id);
+
+        $this->actingAs($viewer)->get('/business-parties')->assertForbidden();
+        $this->actingAs($viewer)->get(route('business-parties.show', $party->id))->assertForbidden();
+        $this->actingAs($viewer)->post(route('business-parties.store'), [])->assertForbidden();
+        $this->actingAs($viewer)->post(route('business-parties.verification.store', $party->id))->assertForbidden();
+    }
+
+    public function test_registering_a_party_with_a_relationship_creates_a_real_row(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0002');
+
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.store'), [
+            'display_name' => 'Acme Supplier', 'legal_name' => 'Acme Supplier (Pty) Ltd',
+            'vat_number' => 'VAT-VIEW-BP-0002S', 'email' => 'ap@acme.test', 'relationships' => ['SUPPLIER'],
         ]);
 
-        $this->actingAs($viewer)->get('/parties')->assertForbidden();
+        $party = BusinessParty::where('organisation_id', $org['organisation']->id)->where('display_name', 'Acme Supplier')->firstOrFail();
+        $response->assertRedirect(route('business-parties.show', $party->id));
+        $this->assertSame('ACTIVE', $party->status);
+        $this->assertContains('SUPPLIER', $party->relationships()->pluck('relationship')->all());
     }
 
-    public function test_the_parties_page_renders_the_register_and_create_form(): void
+    public function test_registering_a_party_with_no_relationship_selected_is_a_friendly_field_error(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0001');
-        $this->makeParty($seller['organisation']);
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0003');
 
-        $response = $this->actingAs($seller['owner'])->get('/parties');
-
-        $response->assertOk()->assertViewIs('parties.index');
-        $response->assertSee('Existing Customer');
-        $response->assertSee('Register a business party');
-        $response->assertSee('<caption class="visually-hidden">', false);
-        $response->assertSee('scope="col"', false);
-    }
-
-    public function test_a_business_party_can_be_created_through_the_form(): void
-    {
-        $seller = $this->makeOrganisation('VAT-SELLER-0002');
-
-        $response = $this->actingAs($seller['owner'])->post('/parties', [
-            'display_name' => 'New Form Customer', 'legal_name' => 'New Form Customer (Pty) Ltd',
-            'vat_number' => 'VAT-FORM-0001', 'email' => 'form@newcustomer.test', 'relationships' => ['CUSTOMER'],
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.store'), [
+            'display_name' => 'No Relationship Co',
         ]);
 
-        $response->assertRedirect('/parties');
-        $response->assertSessionHas('status', 'Business party created.');
-        $this->assertDatabaseHas('business_parties', [
-            'display_name' => 'New Form Customer', 'organisation_id' => $seller['organisation']->id, 'status' => 'ACTIVE',
-        ]);
-        $this->assertDatabaseHas('audit_events', ['action' => 'BUSINESS_PARTY_CREATED']);
+        $response->assertRedirect();
+        $response->assertSessionHasErrors('relationships');
+        $this->assertDatabaseCount('business_parties', 0);
     }
 
-    public function test_a_party_can_be_created_as_both_a_customer_and_a_supplier_at_once(): void
+    public function test_registering_a_party_with_a_duplicate_vat_number_is_a_friendly_form_error(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0009');
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0004');
+        $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0004D', ['CUSTOMER']);
 
-        $response = $this->actingAs($seller['owner'])->post('/parties', [
-            'display_name' => 'Dual Role Trading CC', 'relationships' => ['CUSTOMER', 'SUPPLIER'],
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.store'), [
+            'display_name' => 'Duplicate VAT Co', 'vat_number' => 'VAT-VIEW-BP-0004D', 'relationships' => ['CUSTOMER'],
         ]);
 
-        $response->assertRedirect('/parties');
-        $response->assertSessionHas('status', 'Business party created.');
-        $party = \App\Models\BusinessParty::where('display_name', 'Dual Role Trading CC')->firstOrFail();
-        $this->assertDatabaseHas('party_relationships', ['party_id' => $party->id, 'relationship' => 'CUSTOMER', 'status' => 'ACTIVE']);
-        $this->assertDatabaseHas('party_relationships', ['party_id' => $party->id, 'relationship' => 'SUPPLIER', 'status' => 'ACTIVE']);
-
-        $editResponse = $this->actingAs($seller['owner'])->get('/parties?edit='.$party->id);
-        $editResponse->assertOk();
-        $editResponse->assertViewHas('editing', fn ($editing) => $editing['relationships'] === ['CUSTOMER', 'SUPPLIER']);
+        $response->assertRedirect();
+        $response->assertSessionHasErrors('form');
+        $this->assertSame(1, BusinessParty::where('organisation_id', $org['organisation']->id)->count());
     }
 
-    public function test_creating_a_party_without_a_relationship_fails_validation_and_keeps_input(): void
+    public function test_the_show_page_renders_contact_details_and_an_empty_verification_history(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0003');
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0005');
+        $party = $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0005S', ['SUPPLIER']);
 
-        $response = $this->actingAs($seller['owner'])->post('/parties', [
-            'display_name' => 'No Relationship Co', 'relationships' => [],
-        ]);
+        $response = $this->actingAs($org['owner'])->get(route('business-parties.show', $party->id));
 
-        $response->assertRedirect('/parties');
-        $response->assertSessionHasErrors();
-        $this->assertDatabaseMissing('business_parties', ['display_name' => 'No Relationship Co']);
+        $response->assertOk()->assertViewIs('business-parties.show');
+        $response->assertSee('Not yet verified.');
+        $response->assertSee('Verify against national taxpayer register');
     }
 
-    public function test_a_duplicate_vat_number_surfaces_as_a_form_error_not_a_500(): void
+    public function test_a_customer_only_party_shows_a_disabled_verify_hint_instead_of_a_live_button(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0004');
-        $this->makeParty($seller['organisation'], ['vat_number' => 'VAT-DUPE-0001']);
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0006');
+        $party = $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0006C', ['CUSTOMER']);
 
-        $response = $this->actingAs($seller['owner'])->post('/parties', [
-            'display_name' => 'Duplicate VAT Co', 'vat_number' => 'VAT-DUPE-0001', 'relationships' => ['SUPPLIER'],
-        ]);
-
-        $response->assertRedirect('/parties');
-        $response->assertSessionHasErrors('party');
-        $this->assertDatabaseMissing('business_parties', ['display_name' => 'Duplicate VAT Co']);
-    }
-
-    public function test_the_edit_form_is_prefilled_from_the_query_parameter(): void
-    {
-        $seller = $this->makeOrganisation('VAT-SELLER-0005');
-        $party = $this->makeParty($seller['organisation'], ['display_name' => 'Edit Target Co']);
-
-        $response = $this->actingAs($seller['owner'])->get('/parties?edit='.$party->id);
+        $response = $this->actingAs($org['owner'])->get(route('business-parties.show', $party->id));
 
         $response->assertOk();
-        $response->assertSee('Edit business party');
-        $response->assertViewHas('editing', fn ($editing) => $editing['display_name'] === 'Edit Target Co');
+        $response->assertSee('Only a supplier relationship can be verified.');
     }
 
-    public function test_an_active_party_can_be_updated_through_the_form(): void
+    public function test_verifying_a_real_supplier_writes_a_snapshot_visible_in_the_history(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0006');
-        $party = $this->makeParty($seller['organisation']);
+        $this->makeOrganisation('VAT-VIEW-BP-0007S', ['SELLER']);
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0007');
+        $party = $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0007S', ['SUPPLIER']);
 
-        $response = $this->actingAs($seller['owner'])->patch("/parties/{$party->id}", [
-            'display_name' => 'Renamed Customer', 'relationships' => ['CUSTOMER', 'SUPPLIER'],
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.verification.store', $party->id));
+
+        $response->assertRedirect(route('business-parties.show', $party->id));
+        $this->assertDatabaseHas('party_verification_snapshots', ['party_id' => $party->id, 'can_act_as_seller' => 1]);
+
+        $show = $this->actingAs($org['owner'])->get(route('business-parties.show', $party->id));
+        $show->assertDontSee('Not yet verified.');
+        $show->assertSee('SELLER');
+    }
+
+    public function test_verifying_a_customer_only_party_is_a_friendly_form_error_not_a_raw_409(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0008');
+        $party = $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0008C', ['CUSTOMER']);
+
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.verification.store', $party->id));
+
+        $response->assertRedirect(route('business-parties.show', $party->id));
+        $response->assertSessionHasErrors('form');
+        $this->assertDatabaseCount('party_verification_snapshots', 0);
+    }
+
+    public function test_deactivating_an_active_party_flips_its_status_and_hides_the_card_afterward(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0009');
+        $party = $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0009S', ['SUPPLIER']);
+
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.deactivation.store', $party->id), [
+            'reason' => 'Supplier relationship ended.',
         ]);
 
-        $response->assertRedirect('/parties');
-        $response->assertSessionHas('status', 'Business party updated.');
-        $this->assertDatabaseHas('business_parties', ['id' => $party->id, 'display_name' => 'Renamed Customer']);
-        $this->assertDatabaseHas('party_relationships', ['party_id' => $party->id, 'relationship' => 'SUPPLIER', 'status' => 'ACTIVE']);
+        $response->assertRedirect(route('business-parties.show', $party->id));
+        $this->assertSame('INACTIVE', $party->fresh()->status);
+
+        $show = $this->actingAs($org['owner'])->get(route('business-parties.show', $party->id));
+        $show->assertDontSee('Deactivate party');
     }
 
-    public function test_a_party_can_be_deactivated_through_the_form_with_a_reason(): void
+    public function test_a_taxpayer_cannot_view_another_taxpayers_business_party(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0007');
-        $party = $this->makeParty($seller['organisation']);
+        $orgA = $this->makeOrganisation('VAT-VIEW-BP-0010');
+        $orgB = $this->makeOrganisation('VAT-VIEW-BP-0011');
+        $partyB = $this->makeParty($orgB['organisation'], 'VAT-VIEW-BP-0011S', ['SUPPLIER']);
 
-        $response = $this->actingAs($seller['owner'])->post("/parties/{$party->id}/deactivation", [
-            'reason' => 'Trading relationship ended by mutual agreement.',
-        ]);
-
-        $response->assertRedirect('/parties');
-        $response->assertSessionHas('status', 'Business party deactivated.');
-        $this->assertDatabaseHas('business_parties', ['id' => $party->id, 'status' => 'INACTIVE']);
-        $this->assertDatabaseHas('audit_events', ['action' => 'BUSINESS_PARTY_DEACTIVATED']);
+        $this->actingAs($orgA['owner'])->get(route('business-parties.show', $partyB->id))->assertNotFound();
     }
 
-    public function test_deactivating_with_too_short_a_reason_fails_validation(): void
+    public function test_the_list_page_filters_by_relationship(): void
     {
-        $seller = $this->makeOrganisation('VAT-SELLER-0008');
-        $party = $this->makeParty($seller['organisation']);
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0012');
+        $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0012C', ['CUSTOMER']);
+        $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0012S', ['SUPPLIER']);
 
-        $response = $this->actingAs($seller['owner'])->post("/parties/{$party->id}/deactivation", ['reason' => 'no']);
+        $suppliers = $this->actingAs($org['owner'])->get(route('business-parties.index', ['relationship' => 'SUPPLIER']));
+        $suppliers->assertOk();
 
-        $response->assertRedirect('/parties');
-        $response->assertSessionHasErrors();
-        $this->assertDatabaseHas('business_parties', ['id' => $party->id, 'status' => 'ACTIVE']);
+        $customers = $this->actingAs($org['owner'])->get(route('business-parties.index', ['relationship' => 'CUSTOMER']));
+        $customers->assertOk();
     }
 }

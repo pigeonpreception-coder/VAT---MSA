@@ -13,6 +13,7 @@ use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
 use App\Http\Controllers\Identity\MembershipController;
 use App\Http\Controllers\Identity\OrganisationController;
+use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
@@ -30,19 +31,24 @@ use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
 use App\Http\Controllers\Compliance\AuditCaseController;
 use App\Http\Controllers\Compliance\AuditCaseViewController;
+use App\Http\Controllers\Compliance\ComplianceOverviewViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
-use App\Http\Controllers\Compliance\ComplianceViewController;
 use App\Http\Controllers\Compliance\CommunicationController;
 use App\Http\Controllers\Compliance\DisputeController;
+use App\Http\Controllers\Compliance\DisputeViewController;
 use App\Http\Controllers\Compliance\NotificationController;
 use App\Http\Controllers\Compliance\ObligationController;
+use App\Http\Controllers\Compliance\ObligationViewController;
 use App\Http\Controllers\Compliance\RiskController;
+use App\Http\Controllers\Compliance\RiskViewController;
 use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Document\DocumentViewController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
+use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
+use App\Http\Controllers\Licensing\LicensingViewController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
@@ -100,35 +106,127 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
 
-    // Real Blade UI for the compliance/audit-cases/refunds domain -- ported
-    // from the source's own app/{cases,compliance,refunds}/page.tsx, each
-    // reusing App\Services\Compliance\ComplianceSnapshotService the same
-    // way the invoices view above reuses InvoiceService. See each view
-    // controller's own doc comment for why this is three routes (the
-    // source keeps /cases, /compliance and /refunds as three separate
-    // pages behind three separate permissions).
-    Route::get('/cases', [AuditCaseViewController::class, 'index'])->name('cases.index');
-    Route::get('/compliance', [ComplianceViewController::class, 'index'])->name('compliance.index');
+    // Real Blade UI for the VAT returns lifecycle, alongside the JSON API
+    // surface below -- see VatLifecycleViewController's own doc comment.
+    // Unlike invoices (read-only so far), this slice includes real write
+    // actions (generate/adjust/approve/submit), each a plain POST->redirect
+    // form reusing App\Services\VatLifecycle\VatLifecycleService directly,
+    // the same service the JSON API controller calls.
+    Route::get('/vat-periods', [VatLifecycleViewController::class, 'index'])->name('vat-periods.index');
+    Route::get('/vat-periods/{id}', [VatLifecycleViewController::class, 'show'])->name('vat-periods.show');
+    Route::post('/vat-periods/{id}/adjustments', [VatLifecycleViewController::class, 'storeAdjustment'])->name('vat-periods.adjustments.store');
+    Route::post('/vat-periods/{id}/return', [VatLifecycleViewController::class, 'storeReturn'])->name('vat-periods.return.store');
+    Route::get('/vat-returns/{id}', [VatLifecycleViewController::class, 'showReturn'])->name('vat-returns.show');
+    Route::post('/vat-returns/{id}/approval-request', [VatLifecycleViewController::class, 'requestApproval'])->name('vat-returns.approval-request.store');
+    Route::post('/vat-returns/{id}/submission', [VatLifecycleViewController::class, 'submit'])->name('vat-returns.submission.store');
+    Route::post('/approval-tasks/{id}/decision', [VatLifecycleViewController::class, 'decideApproval'])->name('approval-tasks.decision.store');
+    Route::post('/vat-returns/{id}/refund-request', [RefundViewController::class, 'storeRequest'])->name('vat-returns.refund-request.store');
+
+    // Real Blade UI for refund claims, alongside the JSON API surface
+    // below -- see RefundViewController's own doc comment. The JSON API
+    // itself has no list/index endpoint at all (RefundController only
+    // ever exposes store/checks/transition/dispute -- confirmed by
+    // reading it directly), so this list genuinely has no JSON sibling
+    // to stay parallel with; it queries RefundClaim directly instead.
     Route::get('/refunds', [RefundViewController::class, 'index'])->name('refunds.index');
+    Route::get('/refunds/{id}', [RefundViewController::class, 'show'])->name('refunds.show');
+    Route::post('/refunds/{id}/transition', [RefundViewController::class, 'storeTransition'])->name('refunds.transition.store');
+    Route::post('/refunds/{id}/dispute', [RefundViewController::class, 'storeDispute'])->name('refunds.dispute.store');
 
-    // Real Blade UI for the customer/supplier directory -- ported from the
-    // source's own app/commercial/parties/page.tsx + PartyManager.tsx, the
-    // first slice in this migration's frontend build-out with a genuine
-    // write form. See BusinessPartyViewController's own doc comment for
-    // what it reuses and what it deliberately omits.
-    Route::get('/parties', [BusinessPartyViewController::class, 'index'])->name('parties.index');
-    Route::post('/parties', [BusinessPartyViewController::class, 'store'])->name('parties.store');
-    Route::patch('/parties/{id}', [BusinessPartyViewController::class, 'update'])->name('parties.update');
-    Route::post('/parties/{id}/deactivation', [BusinessPartyViewController::class, 'deactivate'])->name('parties.deactivate');
+    // Real Blade UI for Module 4 Phases A-B (risk indicators), alongside
+    // the JSON API surface below -- see RiskViewController's own doc
+    // comment. Deliberately NOT taxpayer-visible at all (matching
+    // RiskService::restricted()'s own doc comment: risk indicators carry
+    // a NamRA-restricted classification), so unlike every other module
+    // built so far there is no taxpayer-facing counterpart to any of
+    // this -- purely an officer-facing screen.
+    Route::get('/risk-indicators', [RiskViewController::class, 'index'])->name('risk-indicators.index');
+    Route::get('/risk-indicators/{id}', [RiskViewController::class, 'show'])->name('risk-indicators.show');
+    Route::post('/risk-indicators/evaluation', [RiskViewController::class, 'storeEvaluation'])->name('risk-indicators.evaluation.store');
+    Route::post('/risk-indicators/{id}/assignment', [RiskViewController::class, 'storeAssignment'])->name('risk-indicators.assignment.store');
+    Route::post('/risk-indicators/{id}/decision', [RiskViewController::class, 'storeDecision'])->name('risk-indicators.decision.store');
 
-    // Real Blade UI for the quotation register/lifecycle/edit -- ported
-    // from the source's own app/commercial/page.tsx + QuotationForm.tsx +
-    // QuotationActions.tsx + app/commercial/quotations/[id]/edit/page.tsx +
-    // QuotationEditForm.tsx. See QuotationViewController's own doc comment
-    // for the one deliberate deviation from source (a "Send" action for a
-    // DRAFT quotation, closing a genuine dead end in the original). No
-    // step-up gate, matching the JSON API's own /api/v1/quotations/**
-    // routes below.
+    // Real Blade UI for Module 4 Phases C-D (audit cases), alongside the
+    // JSON API surface below -- see AuditCaseViewController's own doc
+    // comment. Unlike risk indicators, audit cases (once opened) ARE
+    // taxpayer-visible read-only (AuditCaseService::timeline()/evidence()/
+    // notes() each explicitly allow the case's own taxpayer, not just
+    // national-scope actors) -- this UI reflects that: every write action
+    // is officer-only, but the detail page itself is reachable by the
+    // taxpayer the case is about.
+    Route::get('/audit-cases', [AuditCaseViewController::class, 'index'])->name('audit-cases.index');
+    Route::get('/audit-cases/{id}', [AuditCaseViewController::class, 'show'])->name('audit-cases.show');
+    Route::post('/audit-cases', [AuditCaseViewController::class, 'store'])->name('audit-cases.store');
+    Route::post('/audit-cases/{id}/transition', [AuditCaseViewController::class, 'storeTransition'])->name('audit-cases.transition.store');
+    Route::post('/audit-cases/{id}/findings', [AuditCaseViewController::class, 'storeFinding'])->name('audit-cases.findings.store');
+    Route::post('/audit-cases/{id}/evidence', [AuditCaseViewController::class, 'storeEvidence'])->name('audit-cases.evidence.store');
+    Route::post('/audit-evidence/{id}/custody-events', [AuditCaseViewController::class, 'storeEvidenceCustodyEvent'])->name('audit-evidence.custody-events.store');
+    Route::post('/audit-cases/{id}/notes', [AuditCaseViewController::class, 'storeNote'])->name('audit-cases.notes.store');
+
+    // Real Blade UI for disputes, alongside the JSON API surface below --
+    // see DisputeViewController's own doc comment. Unlike every other
+    // compliance module built so far, this one is taxpayer-INITIATED:
+    // DisputeService::file() lets a taxpayer self-file against their own
+    // case/finding/return/decision (disputes:manage is held by taxpayer
+    // roles too, not just officer ones), matching the source's own design.
+    Route::get('/disputes', [DisputeViewController::class, 'index'])->name('disputes.index');
+    Route::get('/disputes/{id}', [DisputeViewController::class, 'show'])->name('disputes.show');
+    Route::post('/disputes', [DisputeViewController::class, 'store'])->name('disputes.store');
+
+    // Real Blade UI for Module 3 Phase D (tax obligations), alongside the
+    // JSON API surface below -- see ObligationViewController's own doc
+    // comment. Single-page module: no detail route, since an obligation
+    // carries no timeline/evidence/notes of its own for a second page to
+    // show -- create and mark-satisfied both act inline on the list.
+    Route::get('/obligations', [ObligationViewController::class, 'index'])->name('obligations.index');
+    Route::post('/obligations', [ObligationViewController::class, 'store'])->name('obligations.store');
+    Route::post('/obligations/{id}/satisfaction', [ObligationViewController::class, 'storeSatisfaction'])->name('obligations.satisfaction.store');
+
+    // Real Blade UI bundling Module 1's own Organisations/Branches/
+    // Memberships/Taxpayer-suspension/Identity-snapshot services, alongside
+    // the JSON API surface below -- see OrganisationViewController's own
+    // doc comment for why these five small services were built as one
+    // slice rather than split further. Membership assignment and taxpayer
+    // suspension carry the same 'password.confirm' step-up middleware as
+    // their JSON API siblings.
+    Route::get('/organisations', [OrganisationViewController::class, 'index'])->name('organisations.index');
+    Route::get('/organisations/{id}', [OrganisationViewController::class, 'show'])->name('organisations.show');
+    Route::post('/organisations/{organisation}/branches', [OrganisationViewController::class, 'storeBranch'])->name('organisations.branches.store');
+    Route::patch('/organisations/{organisation}/branches/{branch}', [OrganisationViewController::class, 'updateBranch'])->name('organisations.branches.update');
+    Route::post('/organisations/{organisation}/memberships', [OrganisationViewController::class, 'storeMembership'])->name('organisations.memberships.store')->middleware('password.confirm');
+    Route::post('/organisations/{organisation}/taxpayer-suspension', [OrganisationViewController::class, 'storeSuspension'])->name('organisations.taxpayer-suspension.store')->middleware('password.confirm');
+
+    // Real Blade UI bundling BusinessPartyService (customers/suppliers)
+    // with SupplierVerificationService (verify + history), alongside the
+    // JSON API surface below -- see BusinessPartyViewController's own doc
+    // comment for why these two were built together, and why
+    // OfflineSyncService (smaller) was passed over for this slot.
+    Route::get('/business-parties', [BusinessPartyViewController::class, 'index'])->name('business-parties.index');
+    Route::get('/business-parties/{id}', [BusinessPartyViewController::class, 'show'])->name('business-parties.show');
+    Route::post('/business-parties', [BusinessPartyViewController::class, 'store'])->name('business-parties.store');
+    Route::post('/business-parties/{id}/verification', [BusinessPartyViewController::class, 'storeVerification'])->name('business-parties.verification.store');
+    Route::post('/business-parties/{id}/deactivation', [BusinessPartyViewController::class, 'storeDeactivation'])->name('business-parties.deactivation.store');
+
+    // Real Blade UI for ComplianceSnapshotService, alongside the JSON API
+    // surface below -- see ComplianceOverviewViewController's own doc
+    // comment. Purely read-only: getSnapshot() is the service's only
+    // method, so there is exactly one route here.
+    Route::get('/compliance-overview', [ComplianceOverviewViewController::class, 'index'])->name('compliance-overview.index');
+
+    // Real Blade UI for LicensingService (Phase 12 slice 1), alongside the
+    // JSON API surface below -- see LicensingViewController's own doc
+    // comment for why upgrade() has no UI action here. State changes carry
+    // the same 'password.confirm' step-up middleware as the JSON route.
+    Route::get('/licensing', [LicensingViewController::class, 'index'])->name('licensing.index');
+    Route::post('/licensing/state', [LicensingViewController::class, 'storeState'])->name('licensing.state.store')->middleware('password.confirm');
+
+    // Real Blade UI for the quotation register/lifecycle/edit, alongside
+    // the JSON API surface below -- see QuotationViewController's own doc
+    // comment, including its one deliberate deviation from source (a
+    // "Send" action for a DRAFT quotation, closing a genuine dead end in
+    // the original -- see docs/MIGRATION_MATRIX.md). Reuses
+    // App\Services\Business\BusinessPartyService and its own
+    // business-parties.index route from the Business Parties slice.
     Route::get('/quotations', [QuotationViewController::class, 'index'])->name('quotations.index');
     Route::post('/quotations', [QuotationViewController::class, 'store'])->name('quotations.store');
     Route::get('/quotations/{id}/edit', [QuotationViewController::class, 'edit'])->name('quotations.edit');
@@ -535,11 +633,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // Authority Governance (lib/data/authority-governance-repository.ts's
         // getAuthorityGovernanceSnapshot/createAuthorityOnboardingCase/
         // decideAuthorityOnboardingCase) -- the backend the NamRA
-        // Administration portal needed, deferred out of every other
-        // portal dashboard's own slice (see docs/MIGRATION_MATRIX.md).
+        // Administration portal needed, a genuinely new module for this
+        // migration (see AuthorityGovernanceService's own doc comment).
         // Kept 1:1 with the source's own
-        // app/api/v1/tax-authority-onboarding-cases/** shape; both
-        // write commands are step-up gated, matching the source's own
+        // app/api/v1/tax-authority-onboarding-cases/** shape; both write
+        // commands are step-up gated, matching the source's own
         // requireStepUp.
         Route::get('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'show']);
         Route::post('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'store'])

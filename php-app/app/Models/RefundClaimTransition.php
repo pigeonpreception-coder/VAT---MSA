@@ -20,4 +20,12 @@ class RefundClaimTransition extends Model
     {
         return $this->belongsTo(RefundClaim::class, 'refund_claim_id');
     }
+
+    // Added for the refund-claim view slice (App\Http\Controllers\Refund\
+    // RefundViewController) to show who made each transition -- not
+    // previously needed since RefundService itself never reads this back.
+    public function actor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'actor_id');
+    }
 }

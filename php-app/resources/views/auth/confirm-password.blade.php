@@ -22,6 +22,7 @@
 
                 <form method="POST" action="{{ route('password.confirm') }}">
                     @csrf
+                    <input type="hidden" name="redirect_to" value="{{ $redirectTo }}">
                     <div class="mb-3">
                         <label for="password" class="form-label">Password</label>
                         <input id="password" type="password" name="password" class="form-control" required autofocus autocomplete="current-password">

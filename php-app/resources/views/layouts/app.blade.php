@@ -52,14 +52,9 @@
                             <a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>Invoices</a>
                         </li>
                     @endcan
-                    @can('permission', 'cases:manage')
+                    @can('permission', 'returns:read')
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ route('cases.index') }}" @if (request()->routeIs('cases.*')) aria-current="page" @endif>Audit cases</a>
-                        </li>
-                    @endcan
-                    @can('permission', 'compliance:read')
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ route('compliance.index') }}" @if (request()->routeIs('compliance.*')) aria-current="page" @endif>Compliance</a>
+                            <a class="nav-link" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT returns</a>
                         </li>
                     @endcan
                     @can('permission', 'refunds:read')
@@ -67,9 +62,44 @@
                             <a class="nav-link" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>Refunds</a>
                         </li>
                     @endcan
+                    @can('permission', 'risk:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('risk-indicators.index') }}" @if (request()->routeIs('risk-indicators.*')) aria-current="page" @endif>Risk indicators</a>
+                        </li>
+                    @endcan
+                    @can('permission', 'compliance:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('audit-cases.index') }}" @if (request()->routeIs('audit-cases.*')) aria-current="page" @endif>Audit cases</a>
+                        </li>
+                    @endcan
+                    @can('permission', 'compliance:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('disputes.index') }}" @if (request()->routeIs('disputes.*')) aria-current="page" @endif>Disputes</a>
+                        </li>
+                    @endcan
+                    @can('permission', 'compliance:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('obligations.index') }}" @if (request()->routeIs('obligations.*')) aria-current="page" @endif>Obligations</a>
+                        </li>
+                    @endcan
+                    @can('permission', 'compliance:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('compliance-overview.index') }}" @if (request()->routeIs('compliance-overview.*')) aria-current="page" @endif>Compliance overview</a>
+                        </li>
+                    @endcan
+                    @can('permission', 'identity:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('organisations.index') }}" @if (request()->routeIs('organisations.*')) aria-current="page" @endif>Organisations</a>
+                        </li>
+                    @endcan
                     @can('permission', 'parties:manage')
                         <li class="nav-item">
-                            <a class="nav-link" href="{{ route('parties.index') }}" @if (request()->routeIs('parties.*')) aria-current="page" @endif>Customers &amp; suppliers</a>
+                            <a class="nav-link" href="{{ route('business-parties.index') }}" @if (request()->routeIs('business-parties.*')) aria-current="page" @endif>Business parties</a>
+                        </li>
+                    @endcan
+                    @can('permission', 'licensing:read')
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ route('licensing.index') }}" @if (request()->routeIs('licensing.*')) aria-current="page" @endif>Licensing</a>
                         </li>
                     @endcan
                     @can('permission', 'commercial:read')

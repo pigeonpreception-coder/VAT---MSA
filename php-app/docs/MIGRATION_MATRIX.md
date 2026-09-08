@@ -3727,6 +3727,909 @@ across two different pages) and a 420px mobile width (collapsed by
 default behind a hamburger toggle in the mobile top bar; opens as a
 proper off-canvas drawer with its own close button and backdrop).
 
+### VAT returns & periods module (the third UI slice, and the first with real write actions)
+
+Ports the source's own VAT-return-lifecycle screens over
+`VatLifecycleService` (see that Phase 9/11 section above) -- unlike
+Dashboard and Invoices (read-only so far), this slice is genuinely
+interactive: generate a return, submit a VAT adjustment, request
+approval, decide it (maker-checker), and submit to ITAS, all as real
+POST-and-redirect Blade forms.
+
+New: `App\Http\Controllers\VatLifecycle\VatLifecycleViewController`,
+reusing `VatLifecycleService` directly -- the exact same service
+instance the JSON `VatLifecycleController` already calls, so behaviour,
+validation and the audit trail are identical regardless of which
+surface triggered a command. Routes (`GET /vat-periods`, `GET
+/vat-periods/{id}`, `GET /vat-returns/{id}`, plus five POST write
+routes), registered outside the `api/v1` prefix, matching the Invoices
+slice's own precedent. Three views: `vat-periods/index.blade.php`
+(periods table with search/status filter, plus pending-approvals/
+recent-submissions/ITAS-provider-status side panels),
+`vat-periods/show.blade.php` (period record, latest return summary,
+full adjustment history with an inline "submit a new adjustment" form
+and a "pending adjustment approvals" decide-inline section),
+`vat-returns/show.blade.php` (the four computed boxes, approval
+history, adjustments, submission history, and status-gated action
+cards for request-approval/decide/submit-to-ITAS).
+
+Each Blade form submission generates its own fresh idempotency key
+(`Str::uuid()`) rather than reading an `Idempotency-Key` header the way
+the JSON API does -- a real browser form POST is inherently a *new*
+user-initiated attempt each time, not a client retrying a prior request
+with the same key. Domain exceptions that already have their own clean
+`render()` (`VatLifecycleValidationException`,
+`VatLifecycleResourceException`, `RepositoryConflictException`, and
+`AuthorizationException` for the maker-checker self-approval case) are
+deliberately caught inline in each write action and turned into a
+normal `back()->withErrors(...)` redirect, rather than being let
+through to the global handler -- that would show a raw JSON body on
+what is otherwise a normal web form. The status-badge component
+(`resources/views/components/status-badge.blade.php`) gained mappings
+for every new status this module introduces (`OPEN`/`LOCKED`,
+`DRAFT`/`SUPERSEDED`, `AWAITING_PROVIDER`/`FILED`,
+`ACKNOWLEDGED`/`REJECTED_BY_PROVIDER`/`BLOCKED_CONFIGURATION`), all
+reusing the same six already-WCAG-AA-verified Bootstrap `text-bg-*`
+classes -- no new contrast check needed.
+
+Verified by a new `tests/Feature/VatLifecycle/VatLifecycleViewTest.php`
+(11 tests, reusing `VatReturnLifecycleTest`'s own
+makeTradingParty/invoicePayload/certifyInvoice/openPeriod fixture
+pattern, since a real return position genuinely depends on certified-
+invoice ledger entries): authentication and `returns:read` permission
+gates; the periods list renders with a working link; a cross-tenant
+period 404s; generating a return from the period page creates a real
+draft and redirects to it; a permitted user can submit an adjustment
+(and an invalid one is rejected with field-level errors and creates no
+row); requesting approval moves a return to `PENDING_APPROVAL`; a
+same-user self-approval attempt is caught and shown as a friendly form
+error, *not* the RT-002 clean-403 error page (that page is reserved for
+authorization failures the controller doesn't expect and catch itself);
+a different user (a `PILOT_ADMIN`) can approve, which locks the period;
+submitting an approved return records a real `vat_return_submissions`
+row; and a cross-tenant return version correctly gets the RT-002
+clean-403 page (matching the JSON API's own behaviour for that specific
+method, which throws `AuthorizationException`, not a 404, for a
+cross-tenant version -- a pre-existing, narrower-than-Invoices privacy
+posture in the backend itself, not something newly introduced by this
+UI). 295 tests total, 0 regressions, run against real MySQL.
+
+### Refund claims module (the fourth UI slice)
+
+Ports the source's own refund-claim screens over `RefundService` (see
+that Phase 11 section above). The natural continuation of the VAT
+Returns slice: a filed return with a negative net position can now
+actually be claimed against, reviewed by an officer (maker-checker,
+same self-review and distinct-reviewer rules as VAT return approval),
+and disputed by the original requester if rejected.
+
+**A genuine gap found while building this, not introduced by it**: no
+application code anywhere ever sets a `vat_return_versions.status` to
+`FILED` -- confirmed by reading the whole codebase
+(`VatLifecycleService::submitReturn` updates the *submission* row's own
+status, never the version's). `RefundService::request()` requires
+`FILED` to reach `RECEIVED`; without it, every refund request is
+honestly reported as `BLOCKED_RETURN_NOT_FILED`, which is exactly what
+this UI's own live verification hit first, and what
+`tests/Feature/Refund/RefundClaimTest.php` already worked around with a
+direct DB write before this slice existed. `RefundViewTest.php` mirrors
+that same workaround rather than pretending it isn't needed. Worth a
+real fix (very plausibly: setting the version's own `status` to
+`FILED` when its ITAS submission reaches `ACKNOWLEDGED`) but that's a
+`VatLifecycleService`/`RefundService` business-logic change, not
+something to guess at while building a UI slice -- flagged here for a
+deliberate follow-up, not silently patched.
+
+New: `App\Http\Controllers\Refund\RefundViewController`. Unlike every
+other module ported so far, the JSON API here has no list/detail
+endpoint at all (`RefundController` only ever exposes
+`store`/`checks`/`transition`/`dispute` -- confirmed by reading it
+directly), so `index()`/`show()` query `RefundClaim` directly rather
+than reusing an existing snapshot, the same way
+`VatLifecycleViewController::periodAdjustments()` queried
+`VatAdjustment` directly where the JSON API's own snapshot didn't cover
+per-period detail. Every write action still reuses `RefundService`
+directly.
+
+Two small, additive backend changes this slice needed and made rather
+than working around: `ComplianceValidator::refundClaimActionsFor()`
+(a new public read-only accessor over the existing private
+`REFUND_CLAIM_TRANSITIONS` state table, so the officer's review
+dropdown only ever offers actions that would actually succeed, without
+duplicating that table into the UI layer and risking drift), and
+`RefundClaimTransition::actor()` (a `belongsTo(User::class, 'actor_id')`
+relation that simply didn't exist yet, needed to show who made each
+transition).
+
+A "Request refund" action was added to the VAT Returns detail page
+(`vat-returns/show.blade.php`), shown whenever a return's net position
+is negative, alongside a "Refunds" nav link.
+
+Verified by a new `tests/Feature/Refund/RefundViewTest.php` (10 tests,
+reusing `RefundClaimTest`'s own makeTradingParty/makeRefundableReturn
+fixture pattern, since a real refund claim genuinely depends on a
+certified-invoice-backed, approved VAT return with a negative net
+position): authentication and `refunds:read` permission gates;
+requesting a refund from the return page creates a real claim
+(`BLOCKED_RETURN_NOT_FILED` against the fixture as-is, `RECEIVED` once
+marked `FILED`); the list renders with a working link; a cross-tenant
+claim 404s; the detail page shows all 9 real eligibility checks and
+only the actions actually valid for the claim's current status;
+self-review is caught and shown as a friendly form error, not the
+RT-002 clean-403 page; an officer can reject a claim and the original
+requester can then dispute it; a duplicate refund request shows a
+friendly form error, not a raw JSON body. 305 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser: a real certified invoice, an approved and filed return
+with a genuine -15000 cent position, a submitted claim showing all 9
+checks with real rationale text, and an officer approving it with the
+transition history correctly recording the real actor, timestamp, and
+findings.
+
+### Risk indicators module (the fifth UI slice, Module 4 Phases A-B)
+
+Ports the source's own risk-indicator screens over `RiskService`.
+Unlike every module built so far, there is **no taxpayer-facing
+counterpart to any of this at all** -- `RiskService::restricted()`
+itself documents risk indicators as carrying a NamRA-restricted
+classification, never taxpayer-visible; this UI is purely officer-
+facing, and `risk:read`/`risk:review` are held only by national-scope
+roles in this app's RBAC.
+
+New: `App\Http\Controllers\Compliance\RiskViewController`. Unlike
+Refunds (no JSON list endpoint at all) or VAT Returns (a snapshot
+covering everything), Risk Indicators' JSON API already has a real,
+filterable, paginated list (`RiskService::restricted()`), so
+`index()`/`show()` reuse it directly rather than querying
+`RiskIndicator` from scratch -- the first module UI in this build-out
+with genuine server-side pagination (Prev/Next controls over
+limit/offset) rather than the client-side JS filtering every read-only
+list so far has used, since this list can genuinely be large and
+`restricted()` already paginates it properly.
+
+A small "Evaluate a taxpayer" form (VAT number -> resolved to a
+taxpayer server-side) triggers `RiskService::evaluate()` on demand,
+redirecting to the list pre-filtered to that taxpayer so newly raised
+or refreshed indicators are immediately visible. The indicator detail
+page carries the assign-review and dismiss/escalate decision forms,
+gated to `risk:review` (read-only officers, who hold `risk:read` but
+not `risk:review`, see the record but no action forms) -- escalating
+shows the real, newly created audit case's own case number once
+created, a forward reference to the still-unbuilt Audit Cases UI
+(Module 4 Phases C-D, the larger remaining half of Module 4, left for
+a subsequent slice).
+
+One additive, non-colliding change to `<x-status-badge>`: a new
+`type="indicator"` map, kept separate from the general `type="status"`
+map on purpose -- `'OPEN'` means something genuinely different for a
+risk indicator (an unaddressed signal, needs attention) than for a VAT
+period (a normal, healthy state); sharing one badge colour across both
+contexts for the same string would have misled whichever context it
+didn't fit. Reuses the same four already-WCAG-AA-verified Bootstrap
+`text-bg-*` classes, no new contrast check needed.
+
+Verified by a new `tests/Feature/Compliance/RiskViewTest.php` (8 tests,
+reusing `ComplianceCaseTest`'s own makeTaxpayer/namraAuditor/
+TaxObligation fixture pattern, since a real indicator genuinely depends
+on live evidence the rule catalogue reads, not a fixture inserted
+directly): authentication and the never-taxpayer-visible rule (a
+taxpayer owner gets a real 403, not just a hidden nav item); evaluating
+a taxpayer with a genuine overdue obligation raises a real
+`OBLIGATION_OVERDUE` indicator and redirects to the pre-filtered list;
+an unknown VAT number shows a friendly form error; the list's
+status/severity filters work; a decision cannot be recorded before a
+review is assigned; the full assign -> escalate flow creates a real,
+traceable `audit_cases` row; and a read-only officer sees the record
+with no action forms and is correctly forbidden from evaluating.
+313 tests total, 0 regressions, run against real MySQL. Also verified
+live end-to-end in the browser: a real overdue obligation, an
+evaluation that raised a genuine `OBLIGATION_OVERDUE` indicator
+(severity High, score 65%), assigning review to self, and escalating
+to a real audit case with the real case number shown on the page
+afterward -- including confirming the decision form's dismiss/escalate
+toggle (a small vanilla-JS show/hide of the case-type/case-title
+fields) genuinely fires, not just that the markup for both states
+exists.
+
+### Audit cases module (the sixth UI slice, Module 4 Phases C-D)
+
+Ports the source's own audit-case screens over `AuditCaseService` --
+the larger remaining half of Module 4, closing it out. By far the
+largest single service any UI slice in this build-out has sat on top
+of (620 lines: open a case, the full 11-status lifecycle transition,
+findings, evidence with custody/legal-hold/integrity-verification, and
+append-only notes) -- built as one slice rather than split further,
+since the detail page's whole point is showing all of it together.
+
+Unlike Risk Indicators (never taxpayer-visible at all), an audit case
+once opened **is** taxpayer-visible read-only --
+`AuditCaseService::timeline()`/`evidence()`/`notes()` each explicitly
+allow the case's own taxpayer, not just a national-scope actor (and
+throw the same `AuthorizationException` -- the RT-002 clean-403 page --
+for any other out-of-scope actor). Every write action stays
+officer-only (`cases:manage`, `cases:override-sod` for the
+segregation-of-duties override), enforced both in the controller and
+independently inside the service.
+
+New: `App\Http\Controllers\Compliance\AuditCaseViewController`. No
+`AuditFinding` read method exists on the service at all (only
+`issueFinding`, a write) -- confirmed by reading
+`AuditCaseController` directly, the same gap Refunds' missing list
+endpoint had; `show()` queries `AuditFinding` directly, the same
+precedent `RefundViewController` and `VatLifecycleViewController`
+already established. Actor display names (who transitioned/found/
+added/authored what) are resolved via one bulk `User::whereIn()`
+lookup in `show()`, a deliberate choice over adding an `actor()`/
+`author()` relation to five different models (`AuditCaseTransition`,
+`AuditFinding`, `AuditEvidence`, `AuditEvidenceCustodyEvent`,
+`AuditCaseNote`) the way `RefundClaimTransition` got one for a single
+relation -- five near-identical relations for one page's display need
+felt like more surface than the alternative.
+
+One additive, non-duplicating change to `ComplianceValidator`:
+`caseActionsFor()`, a public read-only accessor over the existing
+private `CASE_TRANSITIONS` state table (mirroring
+`refundClaimActionsFor()`'s identical rationale from the Refunds
+slice), so the officer's decision dropdown only ever offers actions
+that would actually succeed from the case's current status, without
+duplicating that table into the UI layer and risking drift from
+`assertCaseTransition()`'s own authoritative enforcement of it.
+`<x-status-badge>` gained mappings for every new case/finding/evidence
+status this module introduces (`PROPOSED`/`AUTHORIZED`/`ASSIGNED`/
+`PLANNING`/`EVIDENCE_COLLECTION`/`ANALYSIS`/`FINDINGS_REVIEW`/
+`PRELIMINARY`, `TAXPAYER_RESPONSE`/`DECISION`/`SUSPENDED`,
+`PRESERVED`), all reusing the same already-WCAG-AA-verified Bootstrap
+classes.
+
+Evidence citation deliberately takes a plain source-resource-ID text
+field rather than a real search/autocomplete picker over invoices,
+VAT returns, or Module 22's quarantine-scanned documents -- building
+three separate resource pickers was judged out of scope for this
+slice; an officer citing evidence today already has the ID from
+wherever the source itself was found (e.g. copied from the Invoice
+detail page's own URL), matching how `RefundViewController`'s evidence
+citations already work at the JSON-API layer this UI sits on top of.
+
+Verified by a new `tests/Feature/Compliance/AuditCaseViewTest.php` (12
+tests, reusing `ComplianceCaseTest`'s own makeTaxpayer/namraAuditor/
+namraSupervisor/openCase/advanceCaseTo fixture pattern, since a real
+case lifecycle genuinely depends on `AuditCaseService`'s own state
+machine and segregation-of-duties enforcement, not fixtures inserted
+directly): authentication and `compliance:read`/`cases:manage`
+permission gates (a taxpayer is correctly forbidden from opening a
+case); the list renders and filters by status; the detail page's
+decision dropdown shows only the actions valid at each real lifecycle
+step (PROPOSED -> AUTHORIZED -> ASSIGNED, confirmed by advancing a
+real case, not asserted from the state table alone); a case with no
+findings cannot be closed and shows a friendly form error, not a raw
+409; issuing a finding and closing both correctly deny the case's own
+opener with a friendly error even when they supply an override reason
+(they lack `cases:override-sod`), then succeed cleanly for a distinct
+supervisor; citing evidence and recording a legal-hold custody event
+persists and updates the real row; adding a note persists and renders;
+a taxpayer can view their own case read-only (sees no decision form)
+but is forbidden from transitioning it; and a cross-tenant taxpayer
+gets the RT-002 clean-403 page, not a 404 (matching the service's own
+`AuthorizationException`-not-404 behaviour here, the same
+narrower-than-Invoices posture already noted for VAT Returns).
+325 tests total, 0 regressions, run against real MySQL. Also verified
+live end-to-end in the browser, continuing the exact case Risk
+Indicators' own live verification escalated (CASE-2026-A307145B, from
+that session's real `OBLIGATION_OVERDUE` indicator) -- confirming the
+whole cross-module story genuinely works, not just each slice in
+isolation: Authorize, Assign (with the officer-field JS toggle firing),
+citing evidence (with its auto-logged ADDED custody event and correct
+truncated-checksum display), and adding a note, each producing a real
+row and rendering correctly afterward.
+
+### Disputes module (the seventh UI slice, the first fresh smaller PR after PR #2 merged)
+
+Ports the source's own dispute-filing screens over `DisputeService` --
+by far the smallest service any UI slice in this build-out has sat on
+top of (106 lines: `file()` and `search()` only), deliberately chosen
+as the first "fresh, smaller PR" module once PR #2 (VAT Returns,
+Refunds, Risk Indicators, Audit Cases) merged to `main`, per the
+explicit instruction to keep history clean and `main` current going
+forward.
+
+Unlike every other compliance module built so far -- Risk Indicators
+(officer-only), Audit Cases (officer-initiated, taxpayer-visible
+read-only) -- disputes are **taxpayer-initiated**:
+`DisputeService::file()`'s own doc comment is explicit that, unlike
+obligations, "a taxpayer may self-file a dispute against their own
+case/finding/return/decision," and `disputes:manage` is genuinely held
+by taxpayer roles (`TAXPAYER_OWNER`, `TAXPAYER_ADMIN`) in this app's
+RBAC, not just officer ones -- confirmed against
+`Permissions::ROLE_PERMISSIONS` before writing any UI. The filing form
+reflects that split directly: a taxpayer-scoped actor never sees a
+taxpayer picker at all (their own scope is implicit, exactly like
+`TaxpayerResolver::resolve()` defaults it), while a national-scope
+actor filing on a taxpayer's behalf sees a VAT-number field, mirroring
+the picker already used on Risk Indicators and Audit Cases.
+
+New: `App\Http\Controllers\Compliance\DisputeViewController`. No
+read/decide/transition path exists on `DisputeService` at all beyond
+`file()`/`search()` -- confirmed by reading `DisputeController`
+directly. The `disputes` table's own `status`/`assigned_officer_id`/
+`decided_at`/`decision_summary` columns exist in the schema, but
+nothing in this migration's application code -- ported faithfully from
+the original source -- ever writes to them beyond the initial
+`'FILED'` row at creation. This is a genuine, confirmed gap, not
+introduced by this UI: the detail page shows those columns whenever
+they happen to be populated, but there is no decide/assign action
+anywhere to populate them, and none was built here -- a fake "assign"
+or "decide" button the backend can't actually service would have been
+worse than the honest "awaiting review assignment" note the detail
+page shows instead. No new backend accessor or model relation was
+needed for this slice (`Dispute::taxpayer()`/`auditCase()` already
+existed); the `show()` tenant-scope check uses the same self-built
+pre-scoped-query 404-not-403 precedent Invoices/VAT-periods/Refunds
+use, since (unlike Audit Cases) there's no service-level read method
+with its own `AuthorizationException` to defer to here.
+
+No new `<x-status-badge>` mapping was needed: `'FILED'` was already
+mapped to `text-bg-success` from the VAT-lifecycle slice, and a filed
+dispute reads correctly as a successfully-submitted one under that
+colour -- unlike the Risk Indicators' `'OPEN'` case, there's no
+competing semantic here worth a second `type=` map for a field that
+only ever takes one value in current application code.
+
+Verified by a new `tests/Feature/Compliance/DisputeViewTest.php` (8
+tests, reusing `RiskViewTest`'s own makeTaxpayer/taxpayerOwner/
+namraAuditor/namraRefundOfficer fixture pattern): authentication is
+required; a taxpayer owner sees no VAT-number picker and can self-file
+successfully (status `FILED`, correct cents conversion); a national
+auditor sees the picker and can file on a taxpayer's behalf by VAT
+number; filing against an unknown VAT number is a friendly form error,
+not a 500, and creates no row; grounds below the validator's 20-character
+minimum is a friendly field error; an officer holding `compliance:read`
+but not `disputes:manage` (`NAMRA_REFUND_OFFICER`) sees no filing form
+and is forbidden from posting; a taxpayer cannot view another
+taxpayer's dispute (404, matching the Invoices/VAT-periods precedent);
+and the list page's status filter works. 333 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser: logged in as the `vat-refund-sup-owner@demo.test` taxpayer
+owner, confirmed no VAT-number field renders, filed a real dispute
+against the demo certified invoice's resource (`DSP-2026-9B950FC8`,
+NAD 842.75, `Filed` badge, correct grounds and resource type rendered
+on the detail page); then logged in as `auditor@demo.test` (national),
+confirmed the VAT-number picker renders and the taxpayer's prior
+dispute is visible in the list, and filed a second real dispute on the
+taxpayer's behalf by VAT number (`DSP-2026-7B74478F`, NAD 199.99) --
+confirming both the taxpayer-initiated and national-officer-on-behalf-of
+paths genuinely work against the live database, not just in tests.
+
+### Tax obligations module (the eighth UI slice, Module 3 Phase D, the second fresh smaller PR)
+
+Ports the source's own obligation screens over `ObligationService` --
+one of the smallest services any UI slice in this build-out has sat on
+top of (129 lines: `create()`, `markSatisfied()`, `search()`), the
+second module built as its own fresh, smaller PR (after Disputes),
+chosen next specifically because it's compliance-domain and small,
+fitting naturally alongside Risk Indicators/Audit Cases/Disputes.
+
+Like Risk Indicators (officer-only writes) but *unlike* Disputes
+(taxpayer-initiated): `ObligationService::create()` and
+`::markSatisfied()` both independently throw `AuthorizationException`
+unless the actor is national-scope, regardless of what the controller
+checks -- `obligations:manage` is confirmed (against
+`Permissions::ROLE_PERMISSIONS`) to be held only by `PILOT_ADMIN` and
+the `NAMRA_*` national roles, never by a taxpayer role. The list
+itself stays readable by a taxpayer for their own obligations though
+(`ObligationService::search()` scopes by tenant like every other
+`search()` in this build-out), so the Blade view shows the create form
+and the per-row "Mark satisfied" action only when the actor holds
+`obligations:manage`, while the read-only list underneath is visible
+to both.
+
+New: `App\Http\Controllers\Compliance\ObligationViewController`.
+Deliberately a **single-page module with no separate detail route** --
+unlike Risk Indicators or Audit Cases, an obligation carries no
+timeline, evidence, or notes of its own for a second page to show;
+`present()` already returns everything there is, and both real actions
+(create, mark satisfied) read naturally as inline row/toolbar forms on
+one list. This is the same "don't build UI surface the backend doesn't
+need" reasoning already applied to Disputes' missing decide path and
+Audit Cases' missing findings-read method. No new backend accessor or
+model relation was needed (`TaxObligation::taxpayer()` already
+existed); the create form resolves a taxpayer by VAT number in the
+controller exactly like Risk Indicators' evaluation form and Disputes'
+national-actor path. No new `<x-status-badge>` mapping needed beyond
+adding `'SATISFIED'` (success) -- `'PENDING'` was already mapped
+(info) from the VAT-lifecycle slice.
+
+One observation worth recording, not a bug: `markSatisfied()`'s
+required `notes` field (bounded 10-2000 chars) is never persisted to
+the `tax_obligations` row itself -- it only reaches the outbox event
+and the audit log, matching the original source exactly (`present()`
+never included a notes column, and the migration's schema has none).
+The satisfaction form still requires it, because the validator does,
+but there is nowhere on the obligation itself to read it back
+afterward; the audit trail is the only durable record.
+
+Verified by a new `tests/Feature/Compliance/ObligationViewTest.php`
+(10 tests, reusing `RiskViewTest`'s own makeTaxpayer/namraAuditor/
+taxpayerOwner/namraRefundOfficer fixture pattern): authentication is
+required; a taxpayer can read their own obligations but sees neither
+the create form nor any "Mark satisfied" action; a taxpayer never sees
+another taxpayer's obligation; a national officer sees the create form
+and can create a real obligation by VAT number (type is normalised
+uppercase, cents conversion is correct); creating against an unknown
+VAT number is a friendly form error, not a 500; creating a duplicate
+obligation for the same taxpayer/type/period is a friendly form error,
+not a raw 409 (`RepositoryConflictException` caught); marking an
+obligation satisfied updates its real status and the action
+disappears from that row; notes below the validator's 10-character
+minimum is a friendly field error and leaves the obligation `PENDING`;
+an officer holding `compliance:read` but not `obligations:manage`
+(`NAMRA_REFUND_OFFICER`) sees neither form and is forbidden from
+posting either action; and the list's status filter works. 335 tests
+total, 0 regressions, run against real MySQL. Also verified live
+end-to-end in the browser: created a real PAYE obligation for the
+`VAT-REFUND-SUP` demo taxpayer (NAD 365.40, correctly normalised type,
+correct due-date/overdue display against the pre-existing overdue
+`VAT-REFUND-CUS` demo obligation from the Risk Indicators slice), then
+marked it satisfied and confirmed the status badge flipped to
+`Satisfied` and its row's action correctly disappeared while the
+still-pending row's action remained.
+
+### Organisations & identity module (the ninth UI slice, Module 1, the third fresh smaller PR)
+
+Bundles Module 1's own smallest, most tightly-coupled services --
+`OrganisationService`, `BranchService`, `MembershipService`,
+`TaxpayerService`, and `IdentityFoundationSnapshotService` (49-166
+lines each) -- into one coherent slice, the third fresh, smaller PR
+after Disputes and Obligations. Built as one slice deliberately, not
+five: splitting these into five separate one-service PRs would have
+fragmented what a user actually experiences as a single screen (an
+organisation's own profile -- its taxpayer record, branches, staff
+memberships, trading capabilities), the same "don't fragment one
+coherent page" reasoning already applied to Audit Cases (620 lines,
+kept as one slice for the opposite reason: too large to split
+meaningfully).
+
+`identity:read` is held broadly (confirmed against
+`Permissions::ROLE_PERMISSIONS`: almost every role in the system), so
+the organisations list/detail stays readable widely. `organisations:manage`
+(branch create/update, membership assignment) is held by an
+organisation's own `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` as well as
+`PILOT_ADMIN`/`NAMRA_SYSTEM_ADMIN` -- genuinely self-service
+organisation administration, not officer-only, confirmed before
+writing any UI. `taxpayers:suspend` is rarer still (`PILOT_ADMIN`/
+`NAMRA_SYSTEM_ADMIN` only) and, like membership assignment, already
+carries its own step-up requirement in the JSON API
+(`password.confirm` middleware, RT-005's `ConfirmPasswordController`)
+-- applied identically to the two equivalent Blade routes here, no new
+re-auth mechanism needed.
+
+**A real bug found and fixed, not routed around**: this slice is the
+first Blade-rendered, plain-HTML-form consumer of the `password.confirm`
+step-up flow anywhere in this build-out. `ConfirmPasswordController::store()`
+previously called `redirect()->intended()`, which replays the *blocked*
+request's own URL as a GET -- correct for a step-up-gated GET, but this
+app's step-up-gated actions are POST-only forms with no GET handler at
+that same path, so confirming from a blocked membership-assignment or
+taxpayer-suspension submission used to redirect straight into a
+404/405. Fixed in `ConfirmPasswordController` itself (shared
+infrastructure, not duplicated per-route): `show()` now captures
+`url()->previous()` -- the page the form was actually rendered on,
+read before this request's own URL overwrites it in Laravel's session
+tracking -- and passes it through the confirm form as a hidden
+`redirect_to` field; `store()` honours that instead of `intended()`,
+guarded same-origin by a new `safeRedirectTarget()` helper (a raw
+hidden field is otherwise a textbook open-redirect vector immediately
+after a real authentication check). Verified live in the browser end
+to end (blocked -> confirm -> landed back on the real organisation
+page, not a 404) and covered by a new dedicated
+`tests/Feature/Auth/ConfirmPasswordTest.php` (4 tests: the fixed
+redirect, an external `redirect_to` rejected in favour of the
+dashboard, a missing one falling back to the dashboard, and a wrong
+password still producing the existing friendly field error) --
+previously untested despite already gating several JSON API routes.
+
+New: `App\Http\Controllers\Identity\OrganisationViewController`
+(index/show/storeBranch/updateBranch/storeMembership/storeSuspension).
+`show()` calls `OrganisationService::get()` directly, which throws
+`AuthorizationException` (the RT-002 clean-403 page) for an
+out-of-scope organisation that genuinely exists via its own
+`TenantScope::requireTaxpayer()` -- the same service-level-exception
+precedent already established for VAT Returns and Audit Cases, not the
+self-built pre-scoped-query 404 Invoices/Disputes/Obligations use,
+since `OrganisationService` already has its own dedicated single-read
+method here. No new model relation was needed anywhere (`Organisation`,
+`Branch`, `OrganisationMembership`, and `Taxpayer` already had every
+relation this page needed). `AssignMembershipRequest::ASSIGNABLE_ROLES`
+intentionally excludes NamRA/platform/portal roles (its own doc
+comment: granting those here would be a privilege-escalation path).
+Membership assignment resolves its target by email rather than the
+JSON API's raw `user_id`, so it can't reuse `AssignMembershipRequest`
+for validation the way branch create/update do (which type-hint
+`CreateBranchRequest`/`UpdateBranchRequest` directly, letting Laravel's
+own FormRequest auto-validation redirect back with errors before the
+method body even runs) -- the role allowlist is therefore enforced
+directly against that same public constant in `storeMembership()`,
+never duplicated as a fresh list that could drift from it.
+
+New badge mappings: `INACTIVE`/`SUSPENDED`(warning, an audit case's
+own suspend transition)/`PENDING_VERIFICATION`/`UNDER_REVIEW`/
+`VERIFIED` in the shared `$statusMap`. A taxpayer's own
+`vat_status='SUSPENDED'` deliberately did **not** join that map as a
+bare key: `'SUSPENDED'` there already means an audit case paused
+mid-workflow (warning), a materially milder thing than an actual
+suspended taxpayer account -- sharing the key would have silently
+picked whichever mapping happened to be declared last. Given its own
+new `type="taxpayer"` map instead (`ACTIVE`=success, `SUSPENDED`=danger),
+the same "don't let one string mean two things under one badge colour"
+precedent `type="indicator"` already established for risk indicators'
+own `'OPEN'`.
+
+Deliberately out of scope: `RegistrationService`'s own submit/decide
+commands (a taxpayer/organisation doesn't exist until an approved
+registration materialises it -- genuinely its own workflow, and
+`decide()` touches the still-deferred ITAS integration point) and
+`OrganisationAdminController::storeCapability` (Phase 12, a different
+service). Both render read-only here -- the index page's snapshot
+shows recent registration applications, and an organisation's trading
+capabilities render on its own detail page -- but neither gets a write
+action in this slice.
+
+Verified by two new test files. `tests/Feature/Identity/
+OrganisationViewTest.php` (14 tests, reusing `BranchManagementTest`'s
+and `TaxpayerSuspensionTest`'s own fixture patterns): authentication is
+required; the index page renders the identity snapshot (real seeded
+identity-provider rows, including an honestly-rendered "Pending /
+Requires ITAS Confirmation" for the still-deferred ITAS provider) and
+the organisations list; a taxpayer can view their own organisation
+with its branches/memberships; a read-only viewer sees no management
+forms at all; a taxpayer cannot view another taxpayer's organisation
+(the RT-002 403, not a 404); creating and deactivating a non-head-office
+branch both work; a duplicate branch code and an attempt to deactivate
+the head office are both friendly form errors, not raw 409s/422s;
+membership assignment with an already-confirmed session creates a real
+row; the same action without a confirmed session correctly redirects
+through step-up and back to the real organisation page (the regression
+test for the bug above); assigning a national role or an unknown email
+are both friendly field errors; a PILOT_ADMIN can suspend a taxpayer
+from the page and a taxpayer owner never even sees that card. 343
+tests total, 0 regressions, run against real MySQL.
+
+Also verified live end-to-end in the browser: as `owner@demo-trading.test`
+(TAXPAYER_OWNER), created a real branch (`SW-01`, code normalised
+uppercase) and, after being correctly bounced through the step-up
+screen on the first attempt and landing back on the real organisation
+page (not a 404), assigned a real membership to a fresh demo user; as
+`admin@vat-msa.test` (PILOT_ADMIN), suspended a real demo taxpayer
+(Red Team Outsider Co) through the same step-up flow and confirmed the
+badge flipped to a red "Suspended" via the new `type="taxpayer"` map,
+with the suspend form correctly replaced by "This taxpayer is already
+suspended." afterward.
+
+### Business parties & supplier verification module (the tenth UI slice, the fourth fresh smaller PR)
+
+Ports the source's own business-party screens over
+`BusinessPartyService` (customers/suppliers: create, deactivate,
+search -- 238 lines) bundled with `SupplierVerificationService`
+(verify + history -- 124 lines), alongside the JSON API surface
+`BusinessPartyController` already exposes.
+
+Built as one slice deliberately, the same reasoning already applied
+to Disputes/Obligations/Organisations: `SupplierVerificationService`
+alone has no read surface of its own beyond `history()`, which needs
+a party to already exist -- a "verify supplier" page with no way to
+see or pick which party to verify would not be a usable screen.
+`BusinessPartyService::update()` was the one write action left out of
+scope: create and deactivate plus verification cover the module's
+real workflow (register a party, verify it, retire it), and
+`update()` is materially the same form as `create()` with
+upsert-relationship semantics that would add real complexity without
+a correspondingly strong need for this slice.
+
+`OfflineSyncService` (116 lines, technically the smaller candidate at
+this point in the backlog) was deliberately passed over for this
+slot: its own doc comment is explicit that the source never actually
+wired up real device-signature verification, so every batch is
+written `status='REJECTED'` regardless of content -- there is no
+read/list method at all (only `receive()`), and the payload itself
+(device signatures, hash chains, sequence numbers) is a
+machine-to-machine sync-client protocol, not a realistic browser form
+for a human to fill in. No UI was built for it, the same reasoning
+already applied to Disputes' missing decide path: building one would
+imply a capability that does not exist.
+
+New: `App\Http\Controllers\Business\BusinessPartyViewController`
+(index/show/store/storeVerification/storeDeactivation). No new
+backend accessor or model relation was needed --
+`BusinessParty::relationships()`/`PartyVerificationSnapshot::party()`
+already existed. `parties:manage` gates every route here, read and
+write alike, matching `BusinessPartyController` exactly (it has no
+separate lighter read permission either) -- held broadly by
+business-facing roles (PILOT_ADMIN, taxpayer roles, seller/buyer
+portal roles), never by NamRA roles, confirmed against
+`Permissions::ROLE_PERMISSIONS` before writing any UI: customers/
+suppliers are the taxpayer's own commercial data, not a compliance
+concern.
+
+The detail page's "Verify against national taxpayer register" button
+is disabled with an explanatory hint, not just left to fail server-side,
+whenever the party lacks either an active SUPPLIER relationship or a
+VAT number -- `SupplierVerificationService::verify()`'s own two
+`BusinessResourceException` guard clauses, mirrored client-side so a
+customer-only party doesn't invite a click that can only ever 409. The
+real enforcement still lives entirely in the service; the disabled
+button is UX only, not a security boundary a crafted POST could rely
+on being absent.
+
+One small, deliberate correctness fix to shared infrastructure,
+surfaced by this slice's `storeVerification()`/`storeDeactivation()`
+error paths: both originally used Laravel's `back()` helper on
+failure, which depends on the session's tracked "previous URL"
+actually being the show page. A direct POST with no prior GET (or any
+other path that leaves that tracking unset) would fall back to the
+site root instead of back to the party's own page. Fixed by
+redirecting explicitly to `route('business-parties.show', $id)` on
+every error branch instead of relying on `back()`'s implicit
+assumption -- the same class of bug the Organisations & Identity
+slice's `ConfirmPasswordController` fix addressed for
+`redirect()->intended()`, caught here by a failing test rather than
+live verification.
+
+Verified by a new `tests/Feature/Business/BusinessPartyViewTest.php`
+(12 tests, reusing `SupplierVerificationTest`'s and
+`BusinessPartyAndQuotationTest`'s own `makeOrganisation` fixture
+pattern): a role lacking `parties:manage` (`SELLER_VIEWER`, which
+holds `commercial:read` but not the manage permission) is forbidden
+on every route; registering a party with a relationship creates a
+real row; registering with no relationship selected or a duplicate
+VAT number are friendly field/form errors, not raw validation-shaped
+or 409 JSON; the show page renders an empty verification history and
+the live verify button; a customer-only party shows the disabled hint
+instead; verifying a real supplier (backed by a second demo
+organisation with `SELLER` capability, matching
+`SupplierVerificationTest`'s own two-organisation setup) writes a
+real snapshot visible in the history table; verifying a customer-only
+party is a friendly form error, not a raw 409; deactivating an active
+party flips its status and the deactivate card correctly disappears
+afterward; a cross-tenant party 404s; and the list's relationship
+filter renders. 337 tests total, 0 regressions, run against real
+MySQL. Also verified live end-to-end in the browser: registered a
+real supplier party against the `VAT-REFUND-SUP` demo taxpayer's own
+VAT number, then verified it and confirmed a real snapshot rendered
+(`Yes/Yes/Yes`, `BUYER, SELLER` capabilities) against the live
+database.
+
+### Compliance overview module (the eleventh UI slice, the fifth fresh smaller PR)
+
+Ports the source's own compliance-list landing screen over
+`ComplianceSnapshotService` (130 lines: `getSnapshot()`, its only
+method) -- purely read-only, unlike every other slice in this
+build-out: no form, no write route, no permission gate finer than
+`compliance:read`.
+
+Six of the snapshot's eleven fields already have their own dedicated,
+fuller pages elsewhere in this build-out (obligations, cases,
+findings, disputes, risks, refunds/refundTransitions) -- this page
+deliberately does not re-render those as full tables a second time;
+it shows a count and a link to the real page instead, the same "don't
+duplicate a table that already has a home" reasoning the Organisations
+index page's own snapshot cards already established. The four fields
+with no page anywhere else (communications, notifications,
+consent_grants, delegations) get real tables here, since this is
+their only UI. Two of those four (`consent_grants`, `delegations`)
+have no Eloquent model and no writer command anywhere in this
+migration -- confirmed by each table's own migration doc comment (a
+full-repo grep of the TypeScript source found no GrantConsent/
+CreateDelegation command, only demo seed data) -- so read-only is the
+correct, complete UI for them, not a gap.
+
+A genuine cross-branch correctness concern this slice had to solve
+that no prior one did: two of the five stat-card links
+(`obligations.index`, `disputes.index`) point at routes that live on
+their own separate, unmerged PRs (this build-out's now-established
+practice of shipping each module as an independently-mergeable
+fresh, smaller PR off `main` -- see the "PR lifecycle" notes
+elsewhere in this document). A hard `route(...)` call to either would
+have 500'd this page on `main` until those specific PRs happened to
+merge, in whichever order they actually do. Fixed by guarding every
+stat-card link with `Route::has()`: a card renders as a real link the
+moment its own route exists, and degrades to a plain, unlinked count
+card otherwise -- correct regardless of merge order, with no
+follow-up change needed once Disputes/Obligations do land.
+
+New: `App\Http\Controllers\Compliance\ComplianceOverviewViewController`.
+No new backend accessor or model relation was needed. Actor names for
+communications/consent_grants/delegations are resolved via one bulk
+`User::whereIn()` lookup, the same precedent Audit Cases established,
+rather than adding relations to raw `DB::table()` reads that
+intentionally have no Eloquent model backing them. Two new
+`<x-status-badge>` mappings were added (`DELIVERED` for communications,
+success; `UNREAD`/`READ` for notifications, warning/secondary) --
+`ACTIVE` (consents/delegations) and `MEDIUM`/`HIGH` severities were
+already mapped.
+
+Verified by a new `tests/Feature/Compliance/ComplianceOverviewViewTest.php`
+(7 tests, reusing `ComplianceSnapshotTest`'s own makeTaxpayer/
+namraAuditor/namraComplianceOfficer/insertConsentAndDelegation fixture
+pattern): authentication is required; a role lacking `compliance:read`
+is forbidden; a real cross-domain fixture chain (obligation, dispute,
+audit case, notice against that case, notification, consent grant,
+delegation) renders correctly with real counts and resolved names; the
+snapshot is scoped to the actor's own taxpayer; an empty snapshot shows
+friendly empty states rather than blank tables; stat cards for domains
+already merged to `main` (audit cases, risk indicators, refunds) render
+as real links; and -- the direct regression test for the `Route::has()`
+fix above -- stat cards for the not-yet-merged domains (obligations,
+disputes) render as plain text without a 500, with an explicit
+assertion that those routes genuinely don't exist yet on this branch
+(so the test stops proving anything, rather than silently passing for
+the wrong reason, once they do). 332 tests total, 0 regressions, run
+against real MySQL. Also verified live end-to-end in the browser: the
+page correctly rendered real cross-session data left over from earlier
+slices' own live verification (the PAYE obligation and both disputes
+filed against the `VAT-REFUND-SUP` demo taxpayer), scoped correctly to
+that taxpayer; and a direct DOM inspection confirmed the Route::has()
+guard's actual effect -- Audit Cases/Risk Indicators/Refunds rendered
+as real `<a>` links, Obligations/Disputes as plain unlinked `<div>`
+cards, exactly as designed.
+
+### Licensing & entitlements module (the twelfth UI slice, the sixth fresh smaller PR)
+
+Ports the source's own licensing screen over `LicensingService` (166
+lines: `entitlementsSnapshot()`, `usageSnapshot()`, `changeState()`,
+`upgrade()`) -- Phase 12 slice 1, the second-smallest remaining
+standalone candidate after Administration Snapshot. Administration
+Snapshot (136 lines) was deliberately passed over for this slot: it
+aggregates across five separate substantial sub-modules (employees,
+roles, workflows/tasks, access requests/reviews, administrators),
+none of which have any UI anywhere in this build-out yet, unlike
+Compliance Overview's own snapshot slice where six of eleven fields
+already had a real page to link out to -- a genuinely useful
+Administration Overview page would need at least a few of those five
+modules built first, not just a thin aggregate over data nothing else
+lets a user reach.
+
+`upgrade()` is deliberately not given a UI action: `LicensePlanSeeder`
+seeds exactly one plan (`PILOT_PROFESSIONAL`), and nothing anywhere in
+this migration ever creates a second one -- confirmed by grep before
+writing any UI. Every possible `upgrade()` call in this environment
+either targets the organisation's own current plan
+(`LICENSE_PLAN_UNCHANGED`) or a plan that doesn't exist
+(`LICENSE_PLAN_NOT_FOUND`); it can never actually succeed against any
+real data here. Building a button for it would be the same mistake
+already avoided for `OfflineSyncService` and Disputes' missing decide
+path. `changeState()` (activate/suspend/renew) has no such problem --
+it operates on the organisation's existing licence and is fully
+exercisable -- so it's the one write action this slice ships.
+
+A genuine, necessary infrastructure gap this slice had to close
+before it could be tested against anything real: neither
+`subscriptions` nor an organisation's *first* `organisation_licenses`
+row has any application write path anywhere in this migration (each
+table's own migration doc comment says so explicitly, the same
+provisioned-out-of-band pattern `tax_rule_sets` already established).
+Every organisation in the dev database -- including every demo
+fixture used throughout this entire build-out -- had no licence row
+at all until now, and `EntitlementGate`/`LicenseResolver` throw "the
+organisation has no configured licence" without one. `DemoSeeder` now
+seeds a real subscription + `PILOT_PROFESSIONAL` licence for the
+primary demo organisation, matching the exact shape this migration's
+own `LicensingTest` already provisions per-test, and matching what
+that migration's own doc comment says the *source's* demo seed
+already does -- completing a piece of the port that was simply never
+carried over, not inventing new functionality.
+
+New: `App\Http\Controllers\Licensing\LicensingViewController`
+(index/storeState). One additive, non-duplicating change to
+`LicensingValidator`: `actionsFor()`, a public read-only accessor over
+the existing private `STATE_TRANSITIONS` table (mirroring
+`ComplianceValidator::refundClaimActionsFor()`'s identical rationale),
+so the state-change dropdown only ever offers actions that would
+actually succeed from the licence's current state. A new
+`<x-status-badge type="license">` map was added rather than reusing
+the shared one: `'SUSPENDED'` already means an audit case paused
+mid-workflow there (warning) -- a licence actually being suspended is
+materially more severe (it blocks the organisation), and sharing the
+bare key would silently pick whichever mapping was declared last,
+the same collision already avoided once for Organisations &
+Identity's own `taxpayer` map.
+
+Verified by a new `tests/Feature/Licensing/LicensingViewTest.php` (9
+tests, reusing `LicensingTest`'s own `makeLicensedOrganisation`
+fixture pattern): authentication and `licensing:read`/`licensing:manage`
+permission gates; the page renders the real plan, all ten seeded
+entitlements, and usage; a read-only role (`TAXPAYER_ACCOUNTANT`, which
+holds `licensing:read` via the shared `WORKSPACE_READ` set but not
+`licensing:manage`) sees the page but no state-change form; the state
+dropdown correctly offers only Suspend/Renew from Active, never
+Activate; suspending with a confirmed session updates the real row;
+state changes are step-up gated (a blocked attempt redirects to
+`password.confirm`); an invalid transition posted directly is a
+friendly form error, not a raw 422; and a role lacking
+`licensing:manage` is forbidden from posting. 334 tests total, 0
+regressions, run against real MySQL. Also verified live end-to-end in
+the browser against the real `owner@demo-trading.test` demo
+organisation: the seeded licence and all ten entitlements rendered
+correctly; suspending correctly triggered the step-up flow (redirected
+to confirm-password, landed back on the real Licensing page rather
+than a 404 -- the `ConfirmPasswordController` fix from the
+Organisations & Identity slice doing its job here too), and, once
+confirmed, resubmitting genuinely flipped the licence to `Suspended`
+(badge and dropdown both updating correctly); reactivated afterward
+to leave the demo data in a healthy state.
+
+### Quotations module (the thirteenth UI slice, the seventh fresh smaller PR)
+
+Ports the source's own quotation register, issue form, full lifecycle
+actions (send/accept/reject/expire/convert) and multi-line revision
+editor over `App\Services\Business\QuotationService` -- a service that
+already existed on `main` (Phase 10 slice 1), never touched by this
+build-out until now. Unlike every prior slice, this one wasn't written
+fresh in this session: it's extracted from PR #3 (see the "Authority
+Governance" section above for that PR's full provenance and why it
+was never merged as a unit), adapted for the two things that changed
+since it branched.
+
+**Adaptation 1, a real route-name fix:** the ported view originally
+linked to `route('parties.index')` -- PR #3's own (shallow, discarded)
+`BusinessPartyViewController` used that name. This build-out's own
+real `BusinessPartyViewController` (PR #7, already on `main`) uses
+`business-parties.index` instead. Both occurrences in
+`quotations/index.blade.php` were updated to point at the real route;
+verified live in the browser that "Manage customers & suppliers"
+correctly resolves to `/business-parties`, not a 404.
+
+**Adaptation 2, applied cleanly with no conflict:** `QuotationService`
+gained two small, additive changes this PR's own diff already carried
+cleanly (no merge conflict, since nothing else has touched this file
+this session): a public `find()` method (a single-record read for the
+new edit view, the same precedent `InvoiceService::find` already
+set), and `present()` now includes `customer_name` (joined from
+`BusinessParty` via the model's own pre-existing `customer()`
+relation -- a gap the original port's `present()` had that benefits
+every caller, JSON API included, not a second query path).
+
+One deliberate, already-documented deviation from the source, kept
+as-is: the source's own `createQuotation` always creates a `DRAFT`
+quotation, but no screen anywhere in the source ever surfaces a way to
+reach the already-built `sendQuotation` (DRAFT -> ISSUED) transition
+-- a genuine dead end in the original (confirmed by a full-repo grep
+for "sendQuotation" in the TypeScript source, per
+`QuotationViewController`'s own doc comment). This port's "Send"
+button closes that gap, calling `QuotationService::send` -- already
+fully built and already reachable via the JSON API -- so a quotation
+created through this screen can actually be used.
+
+New: `App\Http\Controllers\Business\QuotationViewController`
+(index/store/edit/update/send/accept/reject/expire/convert). No new
+model or relation was needed (`Product`, `Quotation`,
+`QuotationRevision`, and `BusinessParty::customer()` all already
+existed). Two new `<x-status-badge>` entries added to the shared map
+(`ISSUED` info, `ACCEPTED`/`CONVERTED` success, `EXPIRED` secondary)
+-- no collision risk with any of this build-out's own per-context maps
+(`indicator`/`taxpayer`/`license`), since none of those five values
+appear in any of them.
+
+Verified by the ported `tests/Feature/Business/QuotationViewTest.php`
+(11 tests, passing unmodified -- the `parties.index` fix wasn't even
+exercised by any assertion, confirming it was a real latent bug in the
+original PR, not something the tests happened to catch): permission
+gating (`commercial:read` to view, `quotations:manage` to write); the
+register and issue form render; a quotation can be created through
+the form; the full DRAFT -> ISSUED -> ACCEPTED -> CONVERTED lifecycle,
+closing the source's own dead end; rejection with a reason; expiring
+an overdue issued quotation; the edit form renders prefilled lines
+with the correct revision count; a two-line edit recalculates totals
+and appends a real revision; an accepted quotation correctly refuses
+to be edited. 399 tests total, 0 regressions, run against real MySQL.
+Also verified live end-to-end in the browser against the real
+`owner@demo-trading.test` demo organisation: registered a real
+customer party, issued a real quotation (`QUO-LIVE-0001`, NAD
+1,150.00 correctly including 15% VAT), sent it, accepted it, and
+converted it -- landing on a genuinely certified fiscal invoice
+(`INV-LIVE-QUOTE-0001`) through the already-existing invoice
+certification pipeline, confirming the full cross-module chain (this
+new slice, Business Parties, and Invoice certification) works
+end-to-end together, not just in isolation.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
@@ -4586,6 +5489,101 @@ preserved rather than silently patched over (the third):
   `lib/domain/*.ts` application code, not the database -- so most of the
   real migration work ahead is porting those domain/validation functions
   into Laravel `Requests`/`Services`, not writing exotic SQL.
+
+## Authority Governance (a genuinely new module, backend-only for now)
+
+Ports `lib/data/authority-governance-repository.ts`'s
+`getAuthorityGovernanceSnapshot`/`createAuthorityOnboardingCase`/
+`decideAuthorityOnboardingCase` -- the backend the source's own NamRA
+Administration portal (`app/portal/namra-admin/page.tsx`) needs. This
+module had never been touched anywhere in this migration before now:
+no prior phase's own MIGRATION_MATRIX entry mentions it, and none of
+its 12 tables (`countries`, `tax_jurisdictions`, `tax_authorities`,
+`tax_authority_units`, `tax_authority_role_definitions`,
+`tax_authority_role_assignments`,
+`tax_authority_federation_connections`,
+`tax_authority_onboarding_cases`, `tax_authority_onboarding_decisions`,
+`tax_authority_governance_events`, `tax_authority_access_reviews`,
+`tax_authority_administrators`) existed anywhere in this schema
+before this slice.
+
+**Provenance, stated plainly:** this port's own code (migrations,
+models, validator, exceptions, service, controller, seeder, tests) was
+not written fresh in this session -- it was extracted verbatim from a
+much larger, independent 100-file/~13,000-line PR (`#3`,
+`claude/next-key-task-7q98el`) that branched off `main` on 2026-09-02,
+*before* this session's entire frontend UI build-out (PRs #2, #4-#9)
+existed. That PR was never merged: a review found it reimplemented
+`AuditCaseViewController`, `RefundViewController`, and
+`BusinessPartyViewController` as shallow read-only stubs that would
+have silently regressed the real, fully-featured versions of those
+same classes already on `main`, plus extensive conflicts across
+`routes/web.php`/`layouts/app.blade.php`/`status-badge.blade.php`/
+`DemoSeeder.php` from having diverged so early. Authority Governance
+was the one genuinely new, zero-overlap, self-contained piece of that
+PR -- no Blade view, no shared-file collision risk, nothing else on
+`main` touches any of its 12 tables -- so it was cherry-picked out on
+its own merits rather than discarded with the rest. The other
+non-overlapping modules in that PR (Quotations, Business Operations,
+the six portal dashboards, an Administration command centre,
+Accounting, a Documents register) remain candidates for the same
+treatment as their own future slices; the overlapping pieces should
+not be revived at all.
+
+**One real bug caught and fixed during this port, before it ever
+shipped:** `AuthorityGovernanceValidationException`'s constructor
+declared `private readonly string $code` -- a fatal PHP error, since
+`\Exception` (its ultimate parent) already declares a non-readonly
+`$code` property, and PHP does not allow a subclass to redeclare an
+inherited property as `readonly`. Caught by `php -l` before this ever
+reached a test run. Renamed to `$errorCode`, matching
+`LicensingValidationException`'s own already-correct, already-working
+name for the identical `{code, message}` exception shape -- the
+sibling class this one should have matched from the start.
+
+Deliberately backend-only, no Blade UI: the source's own NamRA
+Administration portal page is where this data gets a screen, and that
+portal (along with the other five portal dashboards) is exactly the
+kind of Blade UI slice this migration's frontend build-out has been
+shipping incrementally -- a natural future slice, not bundled in here.
+This mirrors how every original numbered phase (8 through 13) shipped
+its JSON API surface first, with Blade UI following later as a
+separate initiative.
+
+`authority-governance:read`/`authority-governance:manage` are the one
+exception to this codebase's own "every permission traces to
+`lib/domain/access.ts`'s static map" rule -- see
+`App\Support\Access\Permissions`'s own doc comment for why (the source
+grants these two through a `role_permission_grants` table row this
+migration's `Permissions::roleHas()` was never wired to read, not
+through the static map at all); reproduced as a direct, targeted
+transcription of that table's effective grant (`PILOT_ADMIN` and
+`NAMRA_SYSTEM_ADMIN` only), not a new permission mechanism.
+
+Verified by the ported `tests/Feature/AuthorityGovernance/AuthorityGovernanceTest.php`
+(11 tests, unchanged from the original PR beyond the exception fix
+above): permission gating; an actor with no administrator-scope row
+sees nothing at all (matching the source's own `AccessDeniedError`);
+the snapshot returns the actor's administered authorities and the
+fixed 9-role catalogue; a `LOCAL_STAGING` onboarding case can be
+created; a `PRODUCTION` one is created pre-blocked (production
+activation has no command anywhere in the source, `productionActivationEnabled`
+is hardcoded `false`, reproduced identically); creating without
+administrator scope is denied; a duplicate open case for the same
+authority/environment is a conflict; creating without step-up
+confirmation is denied (423); the requester cannot decide their own
+case (self-approval denial); a distinct reviewer can approve local
+staging; a decision without a current quarterly access review for
+that authority is denied. All 12 migrations run cleanly against real
+MySQL; 399 tests total, 0 regressions. Also verified live end-to-end
+over real HTTP against the actual dev server: granted
+`admin@vat-msa.test` a real `tax_authority_administrators` row,
+confirmed the snapshot endpoint returns the real NAMRA authority
+joined through its jurisdiction and country plus all 9 seeded roles,
+then created a real `LOCAL_STAGING` onboarding case through the
+step-up-confirmed session and confirmed a real `SUBMITTED` row came
+back -- left in place afterward as harmless local demo data, alongside
+this session's other real cross-slice fixtures.
 
 ## Cloudflare/D1/R2/Vinext dependencies remaining
 

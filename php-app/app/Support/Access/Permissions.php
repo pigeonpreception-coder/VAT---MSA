@@ -16,21 +16,21 @@ namespace App\Support\Access;
  * exactly as the source's UserContext.dynamicPermissions did.
  *
  * `authority-governance:read`/`authority-governance:manage` (PILOT_ADMIN
- * and NAMRA_SYSTEM_ADMIN only) are the one exception to "from
- * access.ts": the source never grants either permission through
- * lib/domain/access.ts's own static ROLE_PERMISSIONS map at all -- it
- * grants them exclusively through a separate, genuinely dynamic
- * `role_permission_grants` database table (db/runtime.ts's own seed:
- * rpg-pa-agr/rpg-pa-agm/rpg-nsa-agr/rpg-nsa-agm), which this migration's
- * `role_permission_grants` table (migrated schema-only in Phase 4) has
- * never had a runtime reader for -- `User::hasAppPermission` only
- * consults this static map and the tenant-scoped `DynamicPermissions`.
- * Every other permission that table seeds already has a direct,
- * line-for-line static equivalent here; these two are the only ones
- * that don't, added for the Authority Governance module (NamRA
- * Administration portal) with the exact two-role grant set the source's
- * own seed data produces -- a targeted transcription of that table's
- * effective result, not a new permission mechanism.
+ * and NAMRA_SYSTEM_ADMIN only) are the one exception to "from access.ts":
+ * the source never grants either permission through lib/domain/access.ts's
+ * own static ROLE_PERMISSIONS map at all -- it grants them exclusively
+ * through a separate, genuinely dynamic `role_permission_grants` database
+ * table (db/runtime.ts's own seed: rpg-pa-agr/rpg-pa-agm/rpg-nsa-agr/
+ * rpg-nsa-agm), which this migration's `role_permission_grants` table
+ * (migrated schema-only in Phase 4) has never had a runtime reader for --
+ * `User::hasAppPermission` only consults this static map and the
+ * tenant-scoped `DynamicPermissions`. Every other permission that table
+ * seeds already has a direct, line-for-line static equivalent here; these
+ * two are the only ones that don't, added for the Authority Governance
+ * module (NamRA Administration portal backend) with the exact two-role
+ * grant set the source's own seed data produces -- a targeted
+ * transcription of that table's effective result, not a new permission
+ * mechanism.
  */
 final class Permissions
 {
