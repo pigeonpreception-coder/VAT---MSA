@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
+use App\Http\Controllers\Administration\AdministrationViewController;
 use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
@@ -236,6 +237,18 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/operations/expenses/{id}/submission', [OperationsViewController::class, 'submit'])->name('operations.submit');
     Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
     Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
+
+    // Administration command centre: getAdministrationSnapshot's own
+    // real Blade UI, alongside the JSON API's own /api/v1/administration
+    // (AdministrationController, the fixed-list read only -- no writes
+    // there). Both write actions here use password.confirm, not the
+    // source's own client-side-only step-up theatre -- see
+    // AdministrationViewController's own doc comment.
+    Route::get('/administration', [AdministrationViewController::class, 'index'])->name('administration.index');
+    Route::post('/administration/employees', [AdministrationViewController::class, 'storeEmployee'])
+        ->middleware('password.confirm')->name('administration.employees.store');
+    Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
+        ->middleware('password.confirm')->name('administration.roles.store');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
