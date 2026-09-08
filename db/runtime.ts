@@ -3394,6 +3394,12 @@ async function initialize(db: D1Database): Promise<void> {
   }
   await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
   await applyLocalCompatibilityColumns(db);
+  // AUTO_PROVISION_TRIGGER_STATEMENTS must exist before
+  // LICENSE_TAX_REFERENCE_SEED_STATEMENTS inserts its own synthetic
+  // reference organisation below (a trigger only fires for rows inserted
+  // after it's created) — otherwise that organisation never gets the
+  // licence/tax-authorization its own triggers are meant to grant it.
+  await db.batch(AUTO_PROVISION_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(LICENSE_TAX_REFERENCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
   if (process.env.NODE_ENV !== "production") {
     const existing = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("pilot-v1").first();
@@ -3431,7 +3437,6 @@ async function initialize(db: D1Database): Promise<void> {
   await db.batch(ISSUE2_IDENTITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE3_COUNTERPARTY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   await db.batch(ISSUE4_AUTHORITY_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
-  await db.batch(AUTO_PROVISION_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
   const foreignKeyViolations = await db.prepare("PRAGMA foreign_key_check").all<Record<string, unknown>>();
   if (foreignKeyViolations.results.length > 0) throw new Error("VAT-MSA local compatibility upgrade left foreign-key violations.");
   await db.prepare("PRAGMA optimize").run();

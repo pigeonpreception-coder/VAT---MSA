@@ -56,7 +56,13 @@ export async function resolveLicensedOrganisation(actor: UserContext, requestedO
     if (!isNationalScope(actor) && row.taxpayer_id !== actor.taxpayerId) throw new AccessDeniedError("The requested organisation is outside your authorised scope.");
     return row;
   }
-  if (!isNationalScope(actor)) throw new AccessDeniedError("An active organisation membership is required.");
+  // National-scope actors (NAMRA/PILOT_ADMIN) aren't the only ones with no
+  // taxpayer organisation of their own — DEVELOPER_PARTNER (an external
+  // SaaS integrator, see lib/domain/access.ts) genuinely has none either,
+  // by design. Any actor with no taxpayerId at all falls back the same way:
+  // there's no specific organisation's licence to check them against, so
+  // resolve to the platform's own baseline instead of denying outright.
+  if (!isNationalScope(actor) && actor.taxpayerId !== null) throw new AccessDeniedError("An active organisation membership is required.");
   const row = await db.prepare("SELECT id,taxpayer_id,legal_name FROM organisations WHERE status='ACTIVE' ORDER BY legal_name LIMIT 1").first<LicensedOrganisationScope>();
   if (!row) throw new AccessDeniedError("No active organisation is available in this environment.");
   return row;
