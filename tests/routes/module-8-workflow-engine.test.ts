@@ -85,12 +85,13 @@ async function seedFixture(): Promise<void> {
         VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${user.userId}`, user.userId, "idp-wf-workspace", user.externalUserId, user.email, "PILOT", "ACTIVE", now, now)),
     db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain)
       VALUES (?,?,?,?,?,?,NULL,?,?)`).bind("plan-wf-test", "WF_TEST_PLAN", "Workflow Test Plan", 1, "ACTIVE", now, now, "COMMERCIAL_SAAS"),
-    db.prepare(`INSERT INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','WORKFLOWS',1,?)`).bind(now),
-    db.prepare(`INSERT INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','USER_SEATS',0,?)`).bind(now),
-    db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-wf-test','plan-wf-test','ADVANCED_WORKFLOW',1,NULL,'{}')`),
-    db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-wf-seats','plan-wf-test','USER_SEATS',1,25,'{}')`),
-    db.prepare(`INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,activated_at,current_period_start,current_period_end,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind("sub-wf-a", ORG_ID, "LOCAL_SYNTHETIC", "synthetic-subscription-wf-a", "ACTIVE", now, "2026-08-01", "2026-10-31", now, now),
+    // ADVANCED_WORKFLOW and USER_SEATS are global reference features (see
+    // LICENSE_TAX_REFERENCE_SEED_STATEMENTS in db/runtime.ts) — seeded
+    // unconditionally, so no local INSERT is needed here.
+    db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-wf-test','plan-wf-test','ADVANCED_WORKFLOW',1,'UNLIMITED',NULL,'{}')`),
+    db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-wf-seats','plan-wf-test','USER_SEATS',1,'FINITE',25,'{}')`),
+    db.prepare(`INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,subscription_domain,payment_mode,activated_at,current_period_start,current_period_end,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind("sub-wf-a", ORG_ID, "LOCAL_SYNTHETIC", "synthetic-subscription-wf-a", "ACTIVE", "COMMERCIAL_SAAS", "DISABLED", now, "2026-08-01", "2026-10-31", now, now),
     db.prepare(`INSERT INTO organisation_licenses (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
       VALUES (?,?,?,?,?,?,?,NULL,NULL,?,?)`).bind("olic-wf-a", ORG_ID, "sub-wf-a", "plan-wf-test", "ACTIVE", 1, now, "NON_DESTRUCTIVE_TAX_RETENTION", now),
     db.prepare(`INSERT INTO license_usage VALUES ('usage-wf-a','olic-wf-a',?,'WORKFLOWS','2026-Q3',0,0,1,?)`).bind(ORG_ID, now),

@@ -56,18 +56,20 @@ async function seedFixture(): Promise<void> {
     // enabled ADMINISTRATION entitlement *and* a current-quarter access review on record (assertEntitledOperation).
     db.prepare(`INSERT INTO license_plans (id,code,name,version,status,effective_from,effective_to,created_at,plan_domain)
       VALUES (?,?,?,?,?,?,NULL,?,?)`).bind("plan-role-test", "ROLE_TEST_PLAN", "Role Test Plan", 1, "ACTIVE", now, now, "COMMERCIAL_SAAS"),
-    db.prepare(`INSERT INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','USER_SEATS',1,?)`).bind(now),
-    db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-role-admin','plan-role-test','ADMINISTRATION',1,NULL,'{}')`),
-    db.prepare(`INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,activated_at,current_period_start,current_period_end,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind("sub-role-a", "org-role", "LOCAL_SYNTHETIC", "synthetic-subscription-role-a", "ACTIVE", now, "2026-08-01", "2026-10-31", now, now),
+    // ADMINISTRATION is a global reference feature (see
+    // LICENSE_TAX_REFERENCE_SEED_STATEMENTS in db/runtime.ts) — seeded
+    // unconditionally, so no local INSERT is needed here.
+    db.prepare(`INSERT INTO license_plan_entitlements VALUES ('ent-role-admin','plan-role-test','ADMINISTRATION',1,'UNLIMITED',NULL,'{}')`),
+    db.prepare(`INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,subscription_domain,payment_mode,activated_at,current_period_start,current_period_end,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind("sub-role-a", "org-role", "LOCAL_SYNTHETIC", "synthetic-subscription-role-a", "ACTIVE", "COMMERCIAL_SAAS", "DISABLED", now, "2026-08-01", "2026-10-31", now, now),
     db.prepare(`INSERT INTO organisation_licenses (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
       VALUES (?,?,?,?,?,?,?,NULL,NULL,?,?)`).bind("olic-role-a", "org-role", "sub-role-a", "plan-role-test", "ACTIVE", 1, now, "NON_DESTRUCTIVE_TAX_RETENTION", now),
     db.prepare(`INSERT INTO access_reviews VALUES (?,?,?,?,?,?,?,?,?,?)`)
       .bind("areview-role-a", "org-role", "Role test access review", "QUARTERLY", "COMPLETED", review.periodStart, review.dueAt, OWNER.userId, now, now),
     // createOrganisationRole also cross-checks every requested permission against the access_permissions
-    // catalogue — real rows, not just domain-layer validation.
-    db.prepare(`INSERT INTO access_permissions VALUES ('invoices:read','INVOICE','READ','Read authorised invoices','RESTRICTED',?)`).bind(now),
-    db.prepare(`INSERT INTO access_permissions VALUES ('documents:read','DOCUMENT','READ','Read authorised document metadata','CONFIDENTIAL',?)`).bind(now),
+    // catalogue — real rows, not just domain-layer validation. invoices:read and documents:read are
+    // global reference permissions (LICENSE_PERMISSION_POLICIES in db/runtime.ts), seeded
+    // unconditionally, so no local INSERT is needed here.
   ]);
 }
 

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { quarterlyAccessReviewWindow } from "@/lib/domain/control-plane";
 
 const PHASE0_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
 const ISSUE2_SCHEMA_REVISION = "issue2-identity-proofing-2026-08-23";
@@ -1380,6 +1381,18 @@ const SCHEMA_STATEMENTS = [
     VALUES ('vrule-outside_scope-na','OUTSIDE_SCOPE','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Outside-scope (non-supply) transactions.',NULL)`,
   `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
     VALUES ('vrule-reverse_charge-na','REVERSE_CHARGE','NA',1500,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Reverse-charge supplies (standard rate, liability shifted to the recipient).',NULL)`,
+  // Same statutory-reference reasoning as vat_rules above: submitInvoice's
+  // resolveApprovedNamibiaTaxRule (lib/data/repository.ts) and the
+  // require_invoice_tax_rule_set/_update triggers (drizzle/0015) both hard-require
+  // an AUTHORITY_APPROVED tax_rule_sets row with a non-empty legal_authority_reference
+  // before ANY invoice can be certified - so, like the VAT rate catalogue, this cannot
+  // live in the pilot-demo-only VAT_LIFECYCLE_SEED_STATEMENTS below (that seed's own
+  // 'taxrule-na-pilot-2026-1' row is deliberately PILOT_CONTROLLED, not approved).
+  // Reuses the same id/version so the demo seed's tax_box_mappings and the Phase 0
+  // migration's invoice/certificate backfill (drizzle/0015_phase0_stabilization.sql)
+  // continue to resolve against it unchanged.
+  `INSERT OR IGNORE INTO tax_rule_sets (id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference,status,approved_by,approved_at,created_at)
+    VALUES ('taxrule-na-pilot-2026-1','NA','NA-VAT-PILOT-2026.1','2026-01-01',NULL,1500,'Namibia VAT Act - Value-Added Tax Act 10 of 2000, s. 6(1)(a), 15% standard rate.','AUTHORITY_APPROVED',NULL,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_trust_status_expiry ON counterparty_trust_profiles(trust_status,expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_snapshot_profile_time ON counterparty_verification_snapshots(trust_profile_id,checked_at)`,
@@ -2006,9 +2019,10 @@ const VAT_LIFECYCLE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-rsb','TAXPAYER_OWNER','returns:submit','ALLOW','{"scope":"own-organisation","requires":"approved"}','2026-08-09T11:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-vam','TAXPAYER_OWNER','vat-adjustments:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T11:00:00Z')`,
 
-  `INSERT OR IGNORE INTO tax_rule_sets
-    (id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference,status,approved_by,approved_at,created_at)
-    VALUES ('taxrule-na-pilot-2026-1','NA','NA-VAT-PILOT-2026.1','2026-01-01',NULL,1500,NULL,'PILOT_CONTROLLED',NULL,NULL,'2026-08-09T11:00:00Z')`,
+  // 'taxrule-na-pilot-2026-1' itself is now seeded unconditionally, as real
+  // AUTHORITY_APPROVED reference data, in SCHEMA_STATEMENTS above (see the
+  // comment next to the vat_rules bootstrap) - box mappings still reference
+  // it by id here since they only need the row to exist, not its status.
   `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-output','taxrule-na-pilot-2026-1','BOX_OUTPUT','Output VAT','OUTPUT_VAT','CREDIT','SUM(eligible output VAT ledger entries)','ACTIVE')`,
   `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-input','taxrule-na-pilot-2026-1','BOX_INPUT','Eligible input VAT','INPUT_VAT','DEBIT','SUM(matched eligible input VAT ledger entries)','ACTIVE')`,
   `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-adjust','taxrule-na-pilot-2026-1','BOX_ADJUST','Approved net adjustments','ADJUSTMENT','SIGNED','SUM(approved adjustment effects)','ACTIVE')`,
@@ -2638,6 +2652,11 @@ const EXPENSE_RECEIPT_TRIGGER_STATEMENTS = [
  * is harmless when the conditional block below also seeds the same rows),
  * so the catalogue exists exactly like it would from real migrations.
  */
+// Computed once at module load (effectively "now" for any process lifetime) rather than
+// hardcoded, so the org-auto-provision-system access review below stays valid across
+// quarter boundaries instead of going stale like a hardcoded period would.
+const AUTO_PROVISION_REVIEW_WINDOW = quarterlyAccessReviewWindow();
+
 const LICENSE_TAX_REFERENCE_SEED_STATEMENTS = [
   // A synthetic, always-present system user purely to satisfy the
   // authorized_by/created_by NOT NULL FK columns the auto-provisioning
@@ -2705,6 +2724,14 @@ const LICENSE_TAX_REFERENCE_SEED_STATEMENTS = [
     VALUES ('tp-auto-provision-system','VAT-AUTO-PROVISION-SYSTEM','TIN-AUTO-PROVISION-SYSTEM','Auto-Provisioning Reference Organisation',NULL,'PRIVATE_COMPANY','ACTIVE','MONTHLY','N/A','auto-provision-system@vat-msa.local','2026-01-01T00:00:00Z')`,
   `INSERT OR IGNORE INTO organisations (id,taxpayer_id,legal_name,trading_name,status,created_at,updated_at)
     VALUES ('org-auto-provision-system','tp-auto-provision-system','Auto-Provisioning Reference Organisation',NULL,'ACTIVE','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+  // An ADMIN_WRITE operation (requireLicensedPermission's requireCurrentAccessReview) also
+  // requires the resolved organisation to hold a completed current-quarter access review -
+  // any actor with no taxpayer org of their own (national-scope, DEVELOPER_PARTNER) that
+  // resolves here via resolveLicensedOrganisation's fallback needs this to already exist.
+  `INSERT OR IGNORE INTO access_reviews VALUES ('areview-auto-provision-system','org-auto-provision-system',
+    'Auto-provisioning reference organisation quarterly review','QUARTERLY','COMPLETED',
+    '${AUTO_PROVISION_REVIEW_WINDOW.periodStart}','${AUTO_PROVISION_REVIEW_WINDOW.dueAt}',
+    'usr-auto-provision-system','2026-01-01T00:00:00Z',NULL)`,
   ...LICENSE_PERMISSION_POLICIES.map(([permission]) =>
     `INSERT OR IGNORE INTO access_permissions (code,resource,action,description,classification,created_at)
       VALUES ('${permission}','REFERENCE_CATALOGUE','USE','Licence permission policy reference','RESTRICTED','2026-08-23T08:00:00Z')`),

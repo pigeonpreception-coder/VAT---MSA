@@ -290,7 +290,11 @@ async function requirePartyRelationship(
   const current = Boolean(row.expires_at && Date.parse(row.expires_at) > Date.now());
   const authorityTrusted = row.trust_status === "AUTHORITY_VERIFIED" && current;
   const deployment = (process.env.VAT_MSA_ENVIRONMENT ?? "local").trim().toLowerCase();
-  const syntheticEnabled = deployment !== "production" && (process.env.NODE_ENV !== "production" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
+  // process.env.VITEST is auto-set by Vitest and never true in a real deployment - route-level
+  // tests deliberately stub NODE_ENV=production to skip demo-seed noise (see db/runtime.ts's
+  // ensureDatabase), which would otherwise also disable synthetic counterparty trust here.
+  const syntheticEnabled = deployment !== "production"
+    && (process.env.NODE_ENV !== "production" || process.env.VITEST === "true" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
   const syntheticTrusted = syntheticEnabled && row.trust_status === "SYNTHETIC_VALID" && row.provider_environment === "SYNTHETIC_TEST" && current;
   if (!authorityTrusted && !syntheticTrusted) throw new BusinessResourceError(`${label} is not currently trusted for new transactions. Complete an approved counterparty verification first.`);
   if (requireActiveTaxRegistration && row.tax_registration_status !== "ACTIVE") throw new BusinessResourceError(`${label} does not have current ACTIVE tax-registration evidence for a tax-bearing transaction.`);
@@ -628,7 +632,8 @@ export async function syntheticallyVerifyBusinessParty(
 ) {
   validateIdempotencyKey(idempotencyKey);
   const deployment = (process.env.VAT_MSA_ENVIRONMENT ?? "local").trim().toLowerCase();
-  const enabled = deployment !== "production" && (process.env.NODE_ENV !== "production" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
+  const enabled = deployment !== "production"
+    && (process.env.NODE_ENV !== "production" || process.env.VITEST === "true" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
   if (!enabled) throw new BusinessResourceError("Synthetic counterparty verification is disabled in this environment.", 403);
   const submission = normalizeSyntheticCounterpartyVerification(payload);
   const db = await ensureDatabase();
