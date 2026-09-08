@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "workflows:manage");
+    await requireLicensedPermission(actor, "workflows:manage", { operationClass: "ADMIN_WRITE" });
     await requireStepUp(request, actor);
     return controlPlaneJson({ workflow: await createWorkflowDraft(actor, await readBoundedJson(request, 65_536), organisationIdFrom(request)) }, context, 201);
   } catch (error) { return controlPlaneProblem(error, context); }

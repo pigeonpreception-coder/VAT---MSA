@@ -95,7 +95,7 @@ export async function handlePartySearch(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "parties:manage");
+    await requireLicensedPermission(user, "parties:manage", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await searchBusinessParties(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -111,7 +111,7 @@ export async function handleSupplierVerificationHistory(request: Request, partyI
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "parties:manage");
+    await requireLicensedPermission(user, "parties:manage", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const history = await getSupplierVerificationHistory(partyId, user, requestedOrganisation(request));
     return Response.json(history, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -126,7 +126,7 @@ export async function handleQuotationSearch(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "commercial:read");
+    await requireLicensedPermission(user, "commercial:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await searchQuotations(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -144,7 +144,7 @@ export async function handleTrialBalance(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "accounting:read");
+    await requireLicensedPermission(user, "accounting:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const asOfRaw = new URL(request.url).searchParams.get("as_of")?.trim();
     if (asOfRaw && !REPORT_DATE_PATTERN.test(asOfRaw)) return problem(422, "VALIDATION_FAILED", "Validation failed", "as_of must be an ISO date (YYYY-MM-DD).", context.correlationId);
     const trialBalance = await getTrialBalance(user, requestedOrganisation(request), asOfRaw);
@@ -161,7 +161,7 @@ export async function handleFinancialStatements(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "accounting:read");
+    await requireLicensedPermission(user, "accounting:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const url = new URL(request.url);
     const today = new Date().toISOString().slice(0, 10);
     const from = url.searchParams.get("from")?.trim() || `${today.slice(0, 7)}-01`;
@@ -182,7 +182,7 @@ export async function handleExpenseReport(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "expenses:read");
+    await requireLicensedPermission(user, "expenses:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const url = new URL(request.url);
     const today = new Date().toISOString().slice(0, 10);
     const from = url.searchParams.get("from")?.trim() || `${today.slice(0, 7)}-01`;
@@ -203,7 +203,7 @@ export async function handleProjectProfitability(request: Request, projectId: st
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "projects:read");
+    await requireLicensedPermission(user, "projects:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const report = await getProjectProfitability(projectId, user, requestedOrganisation(request));
     return Response.json(report, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -218,7 +218,7 @@ export async function handleInventoryAvailability(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "inventory:read");
+    await requireLicensedPermission(user, "inventory:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await getInventoryAvailability(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -233,7 +233,7 @@ export async function handleInventoryValuation(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "inventory:read");
+    await requireLicensedPermission(user, "inventory:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await getInventoryValuation(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
