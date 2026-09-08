@@ -122,6 +122,13 @@
                                 <a class="nav-link {{ request()->routeIs('administration.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration</a>
                             </li>
                         @endcan
+                        {{-- No @can wrapper: dashboard:read (the same
+                             permission portals.index itself is gated on)
+                             is unconditional for every one of this app's
+                             roles, same as the plain Dashboard link above. --}}
+                        <li class="nav-item">
+                            <a class="nav-link {{ request()->routeIs('portals.*', 'portal.*') ? 'text-bg-primary' : 'text-white' }}" href="{{ route('portals.index') }}" @if (request()->routeIs('portals.*', 'portal.*')) aria-current="page" @endif>Portals</a>
+                        </li>
                     </ul>
                     <hr class="text-white-50">
                     <div class="text-white-50 small mb-2">

@@ -56,7 +56,14 @@ use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
+use App\Http\Controllers\Portal\BuyerPortalController;
+use App\Http\Controllers\Portal\DeveloperPortalController;
+use App\Http\Controllers\Portal\NamraAdminPortalController;
+use App\Http\Controllers\Portal\NamraPortalController;
 use App\Http\Controllers\Portal\PortalController;
+use App\Http\Controllers\Portal\PortalViewController;
+use App\Http\Controllers\Portal\SellerPortalController;
+use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Route;
@@ -249,6 +256,21 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         ->middleware('password.confirm')->name('administration.employees.store');
     Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
         ->middleware('password.confirm')->name('administration.roles.store');
+
+    // Portal switchboard (App\Services\Portal\PortalService::
+    // getAvailablePortals, the same read the JSON /api/v1/portals route
+    // already serves) plus the six per-portal dashboards it links to.
+    // Each portal controller re-checks role/capability membership and
+    // its own PORTAL_PERMISSIONS entry independently -- a hidden nav
+    // link never grants access by itself, matching every portal view's
+    // own closing note.
+    Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
+    Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
+    Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
+    Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
+    Route::get('/portal/namra-admin', [NamraAdminPortalController::class, 'index'])->name('portal.namra-admin');
+    Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
+    Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
