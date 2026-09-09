@@ -112,6 +112,7 @@
                                         @if ($canManageExpenses)
                                             <form method="POST" action="{{ route('operations.submit', $expense['id']) }}">
                                                 @csrf
+                    <x-idempotency-key />
                                                 <button type="submit" class="btn btn-sm btn-primary">Submit</button>
                                             </form>
                                         @else
@@ -126,10 +127,12 @@
                                             <div class="d-flex gap-1">
                                                 <form method="POST" action="{{ route('operations.approve', $expense['id']) }}">
                                                     @csrf
+                    <x-idempotency-key />
                                                     <button type="submit" class="btn btn-sm btn-primary">Approve</button>
                                                 </form>
                                                 <form method="POST" action="{{ route('operations.reject', $expense['id']) }}" onsubmit="return operationsDecisionPrompt(this, 'rejection');">
                                                     @csrf
+                    <x-idempotency-key />
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
                                                 </form>
@@ -161,6 +164,7 @@
                 @else
                     <form method="POST" action="{{ route('operations.store') }}">
                         @csrf
+                    <x-idempotency-key />
                         <div class="mb-3">
                             <label for="expense_number" class="form-label">Expense number</label>
                             <input type="text" class="form-control font-monospace" id="expense_number" name="expense_number" required maxlength="40" placeholder="EXP-2026-0001" value="{{ old('expense_number') }}">

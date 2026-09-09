@@ -65,6 +65,7 @@
                     <p class="text-muted small">Officer-only, maker-checker enforced -- you cannot review your own request, and a HIGH/CRITICAL-risk or payment-authorising decision requires a distinct reviewer from the immediately preceding step.</p>
                     <form method="POST" action="{{ route('refunds.transition.store', $claim['id']) }}">
                         @csrf
+                    <x-idempotency-key />
                         <div class="mb-2">
                             <label for="action" class="form-label">Action</label>
                             <select id="action" name="action" class="form-select @error('action') is-invalid @enderror" required>
@@ -94,6 +95,7 @@
                     <p class="text-muted small">Only the original requester may dispute a rejected claim.</p>
                     <form method="POST" action="{{ route('refunds.dispute.store', $claim['id']) }}">
                         @csrf
+                    <x-idempotency-key />
                         <div class="mb-2">
                             <label for="dispute-findings" class="form-label">Reason for dispute</label>
                             <textarea id="dispute-findings" name="findings" class="form-control @error('findings') is-invalid @enderror" minlength="5" maxlength="2000" rows="2" required>{{ old('findings') }}</textarea>

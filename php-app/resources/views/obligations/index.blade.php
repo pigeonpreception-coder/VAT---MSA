@@ -28,6 +28,7 @@
             @endif
             <form method="POST" action="{{ route('obligations.store') }}" class="row g-2">
                 @csrf
+                    <x-idempotency-key />
                 <div class="col-md-2">
                     <label for="vat_number" class="form-label small mb-0">Taxpayer VAT number</label>
                     <input type="text" id="vat_number" name="vat_number" value="{{ old('vat_number') }}" class="form-control form-control-sm @error('vat_number') is-invalid @enderror" required>
@@ -113,6 +114,7 @@
                                 @if ($obligation['status'] === 'PENDING')
                                     <form method="POST" action="{{ route('obligations.satisfaction.store', $obligation['id']) }}" class="d-flex gap-1">
                                         @csrf
+                    <x-idempotency-key />
                                         <input type="text" name="notes" placeholder="Satisfaction notes" minlength="10" maxlength="2000" required class="form-control form-control-sm" style="min-width: 10rem;">
                                         <button type="submit" class="btn btn-outline-success btn-sm text-nowrap">Mark satisfied</button>
                                     </form>

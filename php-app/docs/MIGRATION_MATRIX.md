@@ -4344,6 +4344,95 @@ step-up-confirmed session and confirmed a real `SUBMITTED` row came
 back -- left in place afterward as harmless local demo data, alongside
 this session's other real cross-slice fixtures.
 
+## Duplicate-submission hardening (VAT-MSA Resilience Audit, 2026-09-09)
+
+A black-box red-team pass against `main` (after the six-portal PR merged)
+found one systemic architectural gap, manifesting as two Critical
+findings and a High-severity root cause. Full audit narrative, evidence,
+and every finding's own reproduction steps live in the published report;
+this section documents the fix.
+
+**RT-003 (root cause, High):** every Blade `*ViewController` write action
+-- 33 call sites across 9 controllers (`BusinessPartyViewController`,
+`OperationsViewController`, `QuotationViewController`,
+`AuditCaseViewController`, `DisputeViewController`,
+`ObligationViewController`, `RiskViewController`, `RefundViewController`,
+`VatLifecycleViewController`) -- generated a fresh `(string) Str::uuid()`
+as its idempotency key on every request, silently defeating
+`App\Support\Business\CommandLedger::prior()`'s own replay detection for
+the entire human-facing UI. The JSON API layer was never affected (real
+client-generated keys arrive via the `Idempotency-Key` header there,
+confirmed unrelated and untouched -- see `VatLifecycleController::
+idempotencyKey()`'s own header-reading method, which is why the new
+shared helper below is named `formIdempotencyKey()` instead).
+
+**Fix:** a new `resources/views/components/idempotency-key.blade.php`
+component renders one `Str::uuid()` into a hidden `idempotency_key`
+field, evaluated once per real GET request that renders a form -- a
+double-click or a browser-back-then-resubmit replays the same
+already-rendered HTML, so the same key travels with it; a genuine reload
+renders the component again and gets a new one. Added via
+`@csrf`-adjacent insertion to all 37 real POST/PATCH forms across the 9
+domains (confirmed 1:1 against every `@csrf` occurrence in each affected
+view, not just the 33 controller call sites, since two routes are each
+reachable from more than one screen). A new
+`Controller::formIdempotencyKey(Request $request)` helper reads
+`idempotency_key` from the request, falling back to a fresh UUID only if
+genuinely absent (a hand-crafted request, or a JSON caller hitting a
+Blade route directly) -- deliberately zero protection in that case,
+matching pre-fix behaviour, rather than trusting an attacker-suppliable
+value. All 33 call sites now pass `$this->formIdempotencyKey($request)`
+in place of the inline `Str::uuid()`.
+
+**RT-001 (Critical):** `ExpenseService::create()` had a real DB-level
+unique constraint on `(organisation_id, expense_number)` but -- unlike
+`QuotationService::create()`'s own established pattern -- no
+application-level pre-check ahead of it, and `OperationsViewController`'s
+own catch block never handled the resulting `QueryException`. A plain
+sequential resubmission (no concurrency needed) crashed with an uncaught
+500 showing the raw SQL. Fixed with the same pre-check
+`ExpenseService::createCategory()` already had for its own unique code,
+throwing `RepositoryConflictException` (already caught cleanly by the
+controller) on a real duplicate.
+
+**RT-002 (Critical):** `dispute_number` is auto-generated per insert, so
+disputes had no natural business key for a duplicate check to key off,
+and none was written -- neither a database constraint nor an
+application-level check existed. Every resubmission silently created a
+second, fully valid case with identical content; confirmed live via a
+genuine browser double-click producing two distinct `DSP-2026-*` cases
+from one "File" click. The RT-003 root-cause fix alone closes this: the
+real form's idempotency key is now stable, so `CommandLedger::prior()`
+inside `DisputeService::file()` recognises the replay and returns the
+original dispute.
+
+**Third layer, defense in depth:** `bootstrap/app.php`'s own
+`->withExceptions()` closure (already used for RT-002 of an *earlier*,
+2026-09-02 red-team pass -- see that section's own precedent, which this
+fix follows exactly) now also renders a friendly conflict message for
+any uncaught `QueryException` carrying SQLSTATE 23000 and a MySQL/MariaDB
+"Duplicate entry" message, app-wide. This exists specifically because
+the *other* three domains discovered to already have their own
+duplicate-number pre-check (quotations, employee invitations, refund
+claims) still share a narrow check-then-insert race window under genuine
+concurrent request processing -- unreproduced against this migration's
+single-worker dev server, and not separately fixed per-domain, but now
+covered by this one shared backstop rather than trusted to never
+happen.
+
+Verified: three new regression tests
+(`OperationsViewTest::test_resubmitting_an_expense_number_that_already_exists_shows_a_friendly_error_not_a_500`,
+`OperationsViewTest::test_resubmitting_the_same_rendered_form_via_its_own_idempotency_key_is_a_safe_replay_not_a_duplicate`,
+`DisputeViewTest::test_double_submitting_the_same_rendered_filing_form_creates_only_one_dispute`)
+plus the full existing suite -- 472 tests total, 0 regressions. Also
+re-verified live against a real running instance: the exact RT-001 and
+RT-002 reproduction steps from the original audit were re-run
+byte-for-byte, confirming a friendly "Expense number ... already exists"
+message (not a 500) and a single dispute record shared by both
+submissions (not two). A fresh page reload was also confirmed to render
+a genuinely new idempotency key, so a deliberate second, distinct
+submission is never blocked.
+
 ## Cloudflare/D1/R2/Vinext dependencies remaining
 
 None have been introduced in `php-app/` (it is a clean Laravel project with
