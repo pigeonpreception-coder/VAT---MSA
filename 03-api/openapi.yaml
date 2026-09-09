@@ -52,6 +52,28 @@ tags:
   - name: Reports
   - name: Offline
   - name: Verification
+  - name: Audit
+  - name: Integrations
+  - name: Analytics
+  - name: Navigation
+  - name: Counterparties
+  - name: Notifications
+  - name: Obligations
+  - name: Users
+  - name: VAT rules
+  - name: Audit evidence
+  - name: Developer
+  - name: SaaS providers
+  - name: Security
+  - name: Taxpayers
+  - name: Access grants
+  - name: Portals
+  - name: Risk indicators
+  - name: SaaS applications
+  - name: Workflows
+  - name: Communications
+  - name: Exceptions
+  - name: Payments
 paths:
   /v1/signup-applications:
     post:
@@ -1202,6 +1224,3358 @@ paths:
       responses:
         '200': { description: Workflow version published. }
         '409': { $ref: '#/components/responses/Conflict' }
+  /v1/audit:
+    get:
+      tags: [Audit]
+      operationId: searchAuditTrail
+      summary: Search the append-only audit trail within the caller's authorised scope.
+      description: Filterable, paginated read for Internal Audit; the REST counterpart to the audit workspace.
+      security: [{ oauth2: [audit.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: resource_type
+          in: query
+          schema: { type: string, maxLength: 80 }
+        - name: resource_id
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: action
+          in: query
+          schema: { type: string, maxLength: 80 }
+        - name: actor_id
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Authorised, filtered page of audit trail entries.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/audit/chain-verifications:
+    get:
+      tags: [Audit]
+      operationId: listAuditChainVerifications
+      summary: List past hash-chain verification runs recorded against the audit trail.
+      security: [{ oauth2: [audit.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Recorded chain-verification run history, most recent first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verifications]
+                properties:
+                  verifications: { type: array, items: { type: object, additionalProperties: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Audit]
+      operationId: triggerAuditChainVerification
+      summary: Run an on-demand hash-chain verification of the audit trail and persist its outcome.
+      description: No cron infrastructure exists for this yet, so verification is caller-triggered. A detected break opens a CRITICAL incident.
+      security: [{ oauth2: [audit.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '201':
+          description: Chain-verification run completed and its result persisted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verification]
+                properties:
+                  verification: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/integrations:
+    post:
+      tags: [Integrations]
+      operationId: registerIntegration
+      summary: Register a new platform integration connection pending administrator approval.
+      security: [{ oauth2: [integrations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Integration connection registered.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/integrations/{integration_id}/health:
+    get:
+      tags: [Integrations]
+      operationId: getIntegrationHealth
+      summary: Read connection health for a registered platform integration.
+      description: A lighter, read-only permission than the mutating integration commands, held by every role that already sees the platform integration list.
+      security: [{ oauth2: [integrations.read] }]
+      parameters:
+        - { name: integration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Current integration connection health.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/integrations/{integration_id}/approval:
+    post:
+      tags: [Integrations]
+      operationId: approveIntegration
+      summary: Approve a registered integration connection before it can synchronise data.
+      security: [{ oauth2: [integrations.manage] }]
+      parameters:
+        - { name: integration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Integration connection approved.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/integrations/{integration_id}/suspension:
+    post:
+      tags: [Integrations]
+      operationId: suspendIntegration
+      summary: Suspend an approved integration connection and halt further synchronisation.
+      security: [{ oauth2: [integrations.manage] }]
+      parameters:
+        - { name: integration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Integration connection suspended.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/integrations/{integration_id}/sync:
+    post:
+      tags: [Integrations]
+      operationId: startIntegrationSync
+      summary: Start a synchronisation run for an approved integration connection.
+      security: [{ oauth2: [integrations.manage] }]
+      parameters:
+        - { name: integration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Synchronisation run started.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/licensing/entitlements:
+    get:
+      tags: [Organisations]
+      operationId: getEntitlementsSnapshot
+      summary: Read the organisation's current feature entitlements, independently of the full licence bundle.
+      description: Previously only readable bundled inside GET /v1/licensing/license; now queryable standalone.
+      security: [{ oauth2: [licensing.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Current organisation feature entitlements.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/licensing/usage:
+    get:
+      tags: [Organisations]
+      operationId: getUsageSnapshot
+      summary: Read current licence usage against configured limits for the organisation.
+      description: Previously only readable bundled inside the administration snapshot; now queryable standalone.
+      security: [{ oauth2: [licensing.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Current organisation licence usage against limits.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/licensing/state:
+    post:
+      tags: [Organisations]
+      operationId: changeLicenseState
+      summary: Activate, suspend or renew the organisation's licence using step-up authentication.
+      security: [{ oauth2: [licensing.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, reason]
+              properties:
+                action: { type: string, enum: [ACTIVATE, SUSPEND, RENEW] }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Licence state transitioned.
+          content:
+            application/json:
+              schema: { type: object, required: [license], properties: { license: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/licensing/upgrade:
+    post:
+      tags: [Organisations]
+      operationId: upgradeLicense
+      summary: Change the organisation's licence plan, preserving prior plan history rather than mutating it in place.
+      description: A distinct plan-change operation from Activate/Suspend/Renew — closes the current licence record and opens a new one on the target plan.
+      security: [{ oauth2: [licensing.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [license_plan_code]
+              properties:
+                license_plan_code: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Licence plan upgraded.
+          content:
+            application/json:
+              schema: { type: object, required: [license], properties: { license: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/me/access:
+    get:
+      tags: [Identity]
+      operationId: getMyAccess
+      summary: Read the authenticated identity's own effective permissions, roles and capabilities.
+      security: [{ oauth2: [identity.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Effective access snapshot for the caller.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/organisations/administrators:
+    get:
+      tags: [Organisations]
+      operationId: listOrganisationAdministrators
+      summary: List appointed organisation administrators and their scope.
+      security: [{ oauth2: [administration.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Organisation and its appointed administrators.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Organisations]
+      operationId: appointOrganisationAdministrator
+      summary: Appoint an active employee as an organisation administrator, demoting any existing primary administrator.
+      description: The architecture models exactly one primary Organisation Portal Administrator per organisation; the target must already be an active employee.
+      security: [{ oauth2: [administration.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, administrator_role_code, approval_reference]
+              properties:
+                user_id: { type: string, minLength: 1 }
+                administrator_role_code: { type: string, minLength: 1 }
+                is_primary: { type: boolean }
+                approval_reference: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Administrator appointed.
+          content:
+            application/json:
+              schema: { type: object, required: [administrator], properties: { administrator: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/capabilities:
+    get:
+      tags: [Organisations]
+      operationId: listOrganisationCapabilityGrants
+      summary: List organisation-level capability grants held by members.
+      security: [{ oauth2: [roles.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Organisation and its active member capability grants.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Organisations]
+      operationId: grantOrganisationCapability
+      summary: Grant a member a capability the organisation itself already holds.
+      description: Only ever narrows visibility within what the organisation is already entitled to; never grants something the organisation itself does not hold. Idempotent — reactivates a prior revoked grant rather than duplicating it.
+      security: [{ oauth2: [roles.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, capability]
+              properties:
+                user_id: { type: string, minLength: 1 }
+                capability: { type: string, enum: [BUYER, SELLER] }
+      responses:
+        '201':
+          description: Capability granted (or already-active grant returned unchanged).
+          content:
+            application/json:
+              schema: { type: object, required: [capability], properties: { capability: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/{organisation_id}/branches:
+    get:
+      tags: [Organisations]
+      operationId: listOrganisationBranches
+      summary: List branches registered under an authorised organisation.
+      security: [{ oauth2: [identity.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Organisation branch register.
+          content:
+            application/json:
+              schema: { type: object, required: [branches], properties: { branches: { type: array, items: { type: object, additionalProperties: true } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Organisations]
+      operationId: createOrganisationBranch
+      summary: Register a new branch under an authorised organisation.
+      security: [{ oauth2: [organisations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, address]
+              properties:
+                code: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
+                address: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Branch registered.
+          content:
+            application/json:
+              schema: { type: object, required: [branch], properties: { branch: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/{organisation_id}/branches/{branch_id}:
+    patch:
+      tags: [Organisations]
+      operationId: updateOrganisationBranch
+      summary: Update an existing branch's name, address or active status.
+      description: The head office branch can never be deactivated.
+      security: [{ oauth2: [organisations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationId'
+        - { name: branch_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1 }
+                address: { type: string, minLength: 1 }
+                status: { type: string, enum: [ACTIVE, INACTIVE] }
+      responses:
+        '200':
+          description: Branch updated.
+          content:
+            application/json:
+              schema: { type: object, required: [branch], properties: { branch: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/{organisation_id}/invitations:
+    post:
+      tags: [Organisations]
+      operationId: inviteOrganisationUser
+      summary: Invite a new user to join an authorised organisation.
+      description: The invitee has no user record yet, so they cannot call any permission-gated route themselves; they claim access through the separate invitation-claim flow.
+      security: [{ oauth2: [organisations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Invitation created.
+          content:
+            application/json:
+              schema: { type: object, required: [invitation], properties: { invitation: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/{organisation_id}/memberships:
+    post:
+      tags: [Organisations]
+      operationId: assignOrganisationMembership
+      summary: Assign an existing active user to a membership in an authorised organisation.
+      security: [{ oauth2: [organisations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Membership assigned.
+          content:
+            application/json:
+              schema: { type: object, required: [membership], properties: { membership: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/employees/{employee_id}/activation:
+    post:
+      tags: [Organisations]
+      operationId: activateOrganisationEmployee
+      summary: Activate an invited employee by linking them to an active user identity, consuming a reserved licence seat.
+      security: [{ oauth2: [employees.manage] }]
+      parameters:
+        - { name: employee_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Employee activated, or already-active employee returned unchanged.
+          content:
+            application/json:
+              schema: { type: object, required: [employee], properties: { employee: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/organisations/offboarding:
+    post:
+      tags: [Organisations]
+      operationId: offboardOrganisationUser
+      summary: Immediately revoke a user's organisation membership, role and capability grants.
+      description: The access-only counterpart to employee termination — revokes access without ending the employment record or licence seat. Administrators cannot offboard their own access.
+      security: [{ oauth2: [access-governance.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, reason]
+              properties:
+                user_id: { type: string, minLength: 1 }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Membership, role and capability grants revoked (or a no-op result when nothing was active).
+          content:
+            application/json:
+              schema: { type: object, required: [offboarding], properties: { offboarding: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/quotations/{quotation_id}/sending:
+    post:
+      tags: [Quotations]
+      operationId: sendQuotation
+      summary: Mark an issued quotation as sent to its customer using an idempotent state transition.
+      security: [{ oauth2: [quotations.manage] }]
+      parameters:
+        - name: quotation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Quotation marked as sent. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/analytics/data-products:
+    get:
+      tags: [Analytics]
+      operationId: listAnalyticsDataProducts
+      summary: List active data products with lineage, certified metrics and the latest published snapshot.
+      security:
+        - oauth2: [reports.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Active data products with source lineage and their latest published snapshot. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/analytics/data-products/{data_product_id}/model-runs:
+    post:
+      tags: [Analytics]
+      operationId: runAnalyticsDataProductModel
+      summary: Compute a model run from an already-published, reconciled report run feeding a data product.
+      description: Restricted to an authorised national platform role. Only a report run with status PUBLISHED and a non-suppressed result may feed a model run.
+      security:
+        - oauth2: [reports.run]
+      parameters:
+        - name: data_product_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, report_run_id]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                report_run_id: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201': { description: Model run computed and recorded against the data product. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/analytics/data-products/{data_product_id}/publications:
+    post:
+      tags: [Analytics]
+      operationId: publishAnalyticsDataProduct
+      summary: Promote a completed model run to the data product's current snapshot and raise explainable anomaly candidates.
+      description: Compares every certified metric against the previous snapshot; a change at or beyond the metric's own threshold raises a persisted, queryable AnomalyCandidate. The first-ever publish never raises an anomaly. Restricted to an authorised national platform role.
+      security:
+        - oauth2: [reports.run]
+      parameters:
+        - name: data_product_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, model_run_id]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                model_run_id: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201': { description: Snapshot published as the data product's current state; any raised anomaly candidates are persisted alongside it. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/analytics/metrics:
+    get:
+      tags: [Analytics]
+      operationId: queryAnalyticsMetrics
+      summary: Query only certified metrics, each with its current value from the latest published snapshot.
+      security:
+        - oauth2: [reports.read]
+      parameters:
+        - name: data_product_id
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: code
+          in: query
+          required: false
+          description: Metric code filter, case-insensitive.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Certified metrics with their current value, or NO_DATA when a data product has not yet published. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/analytics/anomalies:
+    get:
+      tags: [Analytics]
+      operationId: listAnalyticsAnomalies
+      summary: List queryable anomaly candidates raised by data-product publication, not just a fire-and-forget outbox event.
+      security:
+        - oauth2: [reports.read]
+      parameters:
+        - name: data_product_id
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Explainable anomaly candidates, most recently detected first. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/identity/assurance:
+    get:
+      tags: [Identity]
+      operationId: getIdentityAssurance
+      summary: Read the caller's own current identity assurance posture, including whether a fresh, server-verified step-up is held.
+      description: Combines the baseline assurance level recorded on each active identity link with the real MFA/step-up state from mfa_totp_credentials and step_up_events. Never trusts a client-asserted assurance header.
+      security:
+        - oauth2: [identity.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Caller's identity links, MFA enrolment and current step-up freshness. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/identity/links:
+    get:
+      tags: [Identity]
+      operationId: listIdentityLinks
+      summary: Resolve identity links for the caller or, with administrative authority, for another user.
+      description: Defaults to the caller's own identity links; requesting a different user_id requires administration:manage authority.
+      security:
+        - oauth2: [identity.read]
+      parameters:
+        - name: user_id
+          in: query
+          required: false
+          description: Defaults to the caller. A different user_id requires administrative authority.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Identity links for the resolved user. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Identity]
+      operationId: linkIdentity
+      summary: Administratively link a provider subject to a user's identity.
+      description: Admin-only. Requires a fresh, server-verified step-up (confirmed via POST /v1/identity/step-up) in addition to administration:manage authority. Refuses an inactive target user, an unconfigured provider, or a subject already linked.
+      security:
+        - oauth2: [administration.manage]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_id, provider_key, subject]
+              properties:
+                user_id: { type: string, minLength: 1, maxLength: 100 }
+                provider_key: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+                subject: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        '201': { description: Identity link created as ADMINISTRATIVE_LINK. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/identity/links/{identity_link_id}/revocation:
+    post:
+      tags: [Identity]
+      operationId: revokeIdentityLink
+      summary: Administratively revoke an identity link (this system's equivalent of revoking a session).
+      description: Admin-only. Requires a fresh, server-verified step-up (confirmed via POST /v1/identity/step-up) in addition to administration:manage authority. Idempotent against an already-revoked link.
+      security:
+        - oauth2: [administration.manage]
+      parameters:
+        - name: identity_link_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Identity link revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/identity/mfa/totp:
+    post:
+      tags: [Identity]
+      operationId: enrollTotpMfa
+      summary: Begin self-service TOTP MFA enrolment and return the one-time-visible secret and otpauth URI.
+      description: Self-service — every actor manages their own MFA credential. The raw base32 secret is returned once, for the caller's authenticator app; it is never returned again after this call. Refused when MFA is already ACTIVE for the account.
+      security:
+        - oauth2: [identity.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '201': { description: TOTP enrolment started; secret and otpauth URI issued once. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/identity/mfa/totp/verification:
+    post:
+      tags: [Identity]
+      operationId: verifyTotpMfaEnrollment
+      summary: Prove the enrolling authenticator app genuinely holds the secret before the credential becomes usable for step-up.
+      security:
+        - oauth2: [identity.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200': { description: MFA credential activated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/identity/step-up:
+    post:
+      tags: [Identity]
+      operationId: confirmIdentityStepUp
+      summary: Confirm a fresh multi-factor step-up using a genuine RFC 6238 TOTP code, gating every step-up-protected command in this API.
+      description: Writes a real, server-verified step_up_events row that lib/security/step-up.ts checks; replaces any client-asserted assurance header. The matched TOTP counter must exceed the credential's last used counter, so a captured code can never confirm step-up twice.
+      security:
+        - oauth2: [identity.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '201': { description: Step-up confirmed; fresh for a bounded window. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/invitations/claim:
+    post:
+      tags: [Identity]
+      operationId: claimInvitation
+      summary: Claim a pending user invitation and link the caller's platform identity to the invited organisation membership.
+      description: Trusts the raw platform-authenticated identity (there is no app_users row yet at this point) and verifies it against the invitation record itself — token, expiry and email match. Never creates access for an email the invitation was not issued to.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201': { description: Invitation claimed and identity link created. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/navigation/actions:
+    get:
+      tags: [Navigation]
+      operationId: getNavigationItemActions
+      summary: Report whether the caller can act on one navigation item right now, and why not if not.
+      security:
+        - oauth2: [workspace.read]
+      parameters:
+        - name: item_key
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Navigation item with allowed flag, permitted actions and any denial reasons. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/navigation/children:
+    get:
+      tags: [Navigation]
+      operationId: getNavigationChildren
+      summary: List the child folders or items of a navigation workspace or folder, filtered to what licence and permission currently allow.
+      security:
+        - oauth2: [workspace.read]
+      parameters:
+        - name: parent_type
+          in: query
+          required: true
+          schema: { type: string, enum: [workspace, folder] }
+        - name: parent_id
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Child folders or items under the resolved parent. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/navigation/preferences:
+    post:
+      tags: [Navigation]
+      operationId: saveNavigationPreference
+      summary: Save one of the caller's own navigation preferences.
+      description: Always writes as the caller's own preference for the resolved organisation; a repeated preference_type overwrites the prior value.
+      security:
+        - oauth2: [workspace.read]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [preference_type, value]
+              properties:
+                preference_type: { type: string, pattern: '^[a-z][a-z0-9_]{1,59}$' }
+                value: {}
+      responses:
+        '200': { description: Preference saved. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/platform/config:
+    get:
+      tags: [Platform]
+      operationId: getPlatformConfig
+      summary: Read active feature flags, platform configuration values and access policies, each with its current value and version.
+      security:
+        - oauth2: [platform.read]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Active feature flags, platform config and access policies. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/platform/change-requests:
+    get:
+      tags: [Platform]
+      operationId: listPlatformChangeRequests
+      summary: List platform change requests, optionally filtered by status.
+      security:
+        - oauth2: [platform.read]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [PENDING, APPLIED, REJECTED] }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Change requests, most recently requested first. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Platform]
+      operationId: requestPlatformChange
+      summary: Propose a governed change to a feature flag, platform config value or access policy for independent maker-checker approval.
+      description: One generic command behind ChangeFeature/ChangePolicy/ChangeConfig — all three are the same shape of governed change. Records only the proposal; nothing is applied until an independent decision approves it.
+      security:
+        - oauth2: [platform.manage]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, target_type, target_id, proposed_value, reason]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                target_type: { type: string, enum: [FEATURE_FLAG, PLATFORM_CONFIG, ACCESS_POLICY] }
+                target_id: { type: string, minLength: 1, maxLength: 100 }
+                proposed_value: { type: object, additionalProperties: true }
+                reason: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '201': { description: Change request recorded as PENDING. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/platform/change-requests/{change_request_id}/decision:
+    post:
+      tags: [Platform]
+      operationId: decidePlatformChangeRequest
+      summary: Approve or reject a pending platform change request, applying it on approval, with maker-checker enforced.
+      description: Only a PENDING change request can be decided, and the decision-maker must differ from the original requester.
+      security:
+        - oauth2: [platform.manage]
+      parameters:
+        - name: change_request_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, decision, notes]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                decision: { type: string, enum: [APPROVE, REJECT] }
+                notes: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Decision recorded; an APPROVE decision applies the proposed value to its target. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/platform/staff:
+    post:
+      tags: [Platform]
+      operationId: provisionPlatformStaff
+      summary: Provision a national-scope platform/NamRA technical staff account.
+      description: Distinct from taxpayer-side employee onboarding — these accounts hold no taxpayer_id and carry a national-scope role from a fixed provisionable role set. Always step-up gated, unconditionally, since provisioning a new national-scope account is always sensitive.
+      security:
+        - oauth2: [platform.manage]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, external_user_id, email, display_name, role]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                external_user_id: { type: string, minLength: 1, maxLength: 100 }
+                email: { type: string, format: email }
+                display_name: { type: string, minLength: 2, maxLength: 120 }
+                role: { type: string, minLength: 2, maxLength: 60, description: Must be one of the fixed provisionable platform staff roles. }
+      responses:
+        '201': { description: Platform staff account provisioned as ACTIVE. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/products:
+    get:
+      tags: [Inventory]
+      operationId: listProducts
+      summary: List products in the authorised organisation.
+      security:
+        - oauth2: [inventory.read]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped product register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Inventory]
+      operationId: createProduct
+      summary: Create a product with server-validated SKU, tax category and pricing.
+      description: A standard-rated product must carry a non-zero tax rate; every other tax category must carry zero. The SKU must be unique within the organisation.
+      security:
+        - oauth2: [inventory.manage]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, sku, name, unit_code, tax_category, tax_rate_bps, sales_price_cents, cost_price_cents]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                sku: { type: string, minLength: 1, maxLength: 40 }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                description: { type: string, minLength: 2, maxLength: 2000 }
+                unit_code: { type: string, minLength: 1, maxLength: 12 }
+                tax_category: { type: string, enum: [STANDARD, ZERO_RATED, EXEMPT, OUT_OF_SCOPE] }
+                tax_rate_bps: { type: integer, minimum: 0, maximum: 10000 }
+                sales_price_cents: { type: integer, minimum: 0 }
+                cost_price_cents: { type: integer, minimum: 0 }
+      responses:
+        '201': { description: Product created. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/warehouses:
+    get:
+      tags: [Inventory]
+      operationId: listWarehouses
+      summary: List warehouses in the authorised organisation.
+      security:
+        - oauth2: [inventory.read]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped warehouse register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Inventory]
+      operationId: createWarehouse
+      summary: Create a warehouse, optionally attached to an owned branch, unsticking what was previously a seed-only table.
+      description: The warehouse code must be unique within the organisation; a supplied branch_id must belong to the same organisation.
+      security:
+        - oauth2: [inventory.manage]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, code, name, address]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                branch_id: { type: string, minLength: 1, maxLength: 100 }
+                code: { type: string, minLength: 1, maxLength: 20 }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                address: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        '201': { description: Warehouse created. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/audit-cases/{audit_case_id}/evidence:
+    get:
+      tags: [Audit cases]
+      operationId: getAuditCaseEvidence
+      summary: Retrieve the preserved evidence citations and custody-event history for an audit case.
+      description: Visible to any national-scope compliance role, and to the case's own taxpayer for transparency.
+      security: [{ oauth2: [compliance.read] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Case evidence register with custody events. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Audit cases]
+      operationId: addAuditCaseEvidence
+      summary: Cite a clean, checked source as preserved evidence on an audit case, or supersede an earlier citation.
+      description: Only a currently preserved citation can be superseded; the same source cannot be cited twice while active.
+      security: [{ oauth2: [cases.manage] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '201': { description: Evidence preserved on the case. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/audit-cases/{audit_case_id}/notes:
+    get:
+      tags: [Audit cases]
+      operationId: getAuditCaseNotes
+      summary: Retrieve the immutable note history recorded on an audit case.
+      security: [{ oauth2: [compliance.read] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Case notes in creation order. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Audit cases]
+      operationId: addAuditCaseNote
+      summary: Append an immutable case note, optionally correcting an earlier note without altering it.
+      security: [{ oauth2: [cases.manage] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '201': { description: Case note recorded. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/audit-cases/{audit_case_id}/timeline:
+    get:
+      tags: [Audit cases]
+      operationId: getAuditCaseTimeline
+      summary: Retrieve the complete chronological transition history for an audit case.
+      security: [{ oauth2: [compliance.read] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Ordered case status transitions. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/audit-cases/{audit_case_id}/findings:
+    post:
+      tags: [Audit cases]
+      operationId: issueAuditCaseFinding
+      summary: Issue a preliminary audit finding while the case is under analysis, taxpayer response or findings review.
+      description: Denies self-approval; a finding cannot be issued by the case's own opening officer without a recorded segregation-of-duties override reason.
+      security: [{ oauth2: [cases.manage] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '201': { description: Preliminary finding issued. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/audit-cases/{audit_case_id}/transition:
+    post:
+      tags: [Audit cases]
+      operationId: transitionAuditCase
+      summary: Move an audit case through its lifecycle — assign, suspend, resume, close or link an appeal — with segregation-of-duties enforcement.
+      description: Closing a case requires at least one recorded finding; the case's own opening officer cannot close it without a recorded override reason.
+      security: [{ oauth2: [cases.manage] }]
+      parameters:
+        - { name: audit_case_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Case transitioned. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/counterparties/classification:
+    get:
+      tags: [Counterparties]
+      operationId: classifyCounterparty
+      summary: Pre-flight check of a counterparty's active VAT registration and buyer/seller capabilities ahead of invoice submission.
+      description: Deliberately a public-posture, cross-tenant lookup rather than scoped to the caller's own taxpayer — it exists to let a submitter verify a trading partner before certifying an invoice.
+      security: [{ oauth2: [invoices.write] }]
+      parameters:
+        - name: vat_number
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 40 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Counterparty trust classification. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/invoices/{invoice_id}/transaction-timeline:
+    get:
+      tags: [Invoices]
+      operationId: getInvoiceTransactionTimeline
+      summary: Get the chronological certification, correction and cancellation narrative for one invoice's lineage.
+      security: [{ oauth2: [invoices.read] }]
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Ordered transaction lineage for the invoice. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/invoices/{invoice_id}/vat-explanation:
+    get:
+      tags: [Invoices]
+      operationId: getInvoiceVatExplanation
+      summary: Get a per-line trace back to the exact approved VAT rule version that produced each tax amount.
+      security: [{ oauth2: [invoices.read] }]
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Line-level VAT calculation explanation. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/invoices/{invoice_id}/cancellation:
+    post:
+      tags: [Invoices]
+      operationId: cancelInvoice
+      summary: Cancel a certified invoice with a protected reason.
+      description: Officer-only (not available to the submitting taxpayer) and step-up authenticated, matching the sensitivity of suspending a taxpayer outright. Restricted licence states never delete historical records.
+      security: [{ oauth2: [invoices.cancel] }]
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10, maxLength: 240 }
+      responses:
+        '200': { description: Invoice cancelled. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/invoices/{invoice_id}/match:
+    post:
+      tags: [Invoices]
+      operationId: matchInvoice
+      summary: Run an independent ledger-consistency verification pass for one invoice.
+      security: [{ oauth2: [reconciliation.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/InvoiceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '201': { description: Reconciliation match recorded. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/notifications:
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      summary: List the caller's own notifications, filterable and paginated.
+      description: Gated on a near-universal personal-workspace scope since notifications belong to every role, not just compliance-facing ones.
+      security: [{ oauth2: [dashboard.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Paginated notification list. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Notifications]
+      operationId: queueNotification
+      summary: Queue a notification directly to a target user or taxpayer.
+      security: [{ oauth2: [notifications.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '201': { description: Notification queued. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/notifications/{notification_id}/cancellation:
+    post:
+      tags: [Notifications]
+      operationId: cancelNotification
+      summary: Cancel one of the caller's own still-unread notifications.
+      security: [{ oauth2: [dashboard.read] }]
+      parameters:
+        - { name: notification_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Notification cancelled. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/notifications/{notification_id}/read:
+    post:
+      tags: [Notifications]
+      operationId: markNotificationRead
+      summary: Mark one of the caller's own notifications as read.
+      security: [{ oauth2: [dashboard.read] }]
+      parameters:
+        - { name: notification_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Notification marked read. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/notifications/preferences:
+    post:
+      tags: [Notifications]
+      operationId: updateNotificationPreference
+      summary: Set the caller's own delivery preference for one notification channel.
+      security: [{ oauth2: [dashboard.read] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Notification preference updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/obligations:
+    post:
+      tags: [Obligations]
+      operationId: createObligation
+      summary: Record a new tax obligation for a taxpayer and period, notifying the taxpayer.
+      security: [{ oauth2: [obligations.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '201': { description: Tax obligation recorded. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/obligations/{obligation_id}/satisfaction:
+    post:
+      tags: [Obligations]
+      operationId: satisfyObligation
+      summary: Mark a tax obligation satisfied.
+      security: [{ oauth2: [obligations.manage] }]
+      parameters:
+        - { name: obligation_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Tax obligation marked satisfied. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/users/{user_id}/reactivation:
+    post:
+      tags: [Users]
+      operationId: reactivateUser
+      summary: Restore a suspended user account to active, reversing a prior suspension.
+      description: Administration-scoped and step-up authenticated, matching the sensitivity of the suspension it reverses.
+      security: [{ oauth2: [administration.manage] }]
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: User reactivated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/users/{user_id}/suspension:
+    post:
+      tags: [Users]
+      operationId: suspendUser
+      summary: Suspend a user account with a protected reason, a standalone reversible lockout.
+      description: Administration-scoped and step-up authenticated. Distinct from terminating an employee's offboarding — this is reversible via reactivation. A user cannot suspend their own account.
+      security: [{ oauth2: [administration.manage] }]
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: User suspended. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/vat-rules:
+    get:
+      tags: [VAT rules]
+      operationId: listVatRules
+      summary: List VAT rules and their approval status.
+      security: [{ oauth2: [vat-rules.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: VAT rule register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [VAT rules]
+      operationId: proposeVatRule
+      summary: Propose a new VAT rule as a draft awaiting independent approval.
+      description: Creates a DRAFT rule only; see the approval sub-resource for activation. Step-up authenticated.
+      security: [{ oauth2: [vat-rules.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '201': { description: Draft VAT rule proposed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/vat-rules/evaluate:
+    get:
+      tags: [VAT rules]
+      operationId: evaluateVatRule
+      summary: Preview the applicable VAT rate for a tax category and date before building an invoice.
+      description: Fails closed with a validation error when no approved rule is bound, rather than returning any default rate.
+      security: [{ oauth2: [vat-rules.read] }]
+      parameters:
+        - name: tax_category
+          in: query
+          required: true
+          schema: { type: string, enum: [STANDARD, ZERO_RATED, EXEMPT, OUT_OF_SCOPE] }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Resolved VAT rule evaluation. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/vat-rules/{vat_rule_id}/approval:
+    post:
+      tags: [VAT rules]
+      operationId: approveVatRule
+      summary: Approve a draft VAT rule and activate it, enforcing that the proposer and approver differ.
+      description: Step-up authenticated; denies self-approval of the proposing officer's own draft.
+      security: [{ oauth2: [vat-rules.manage] }]
+      parameters:
+        - { name: vat_rule_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: VAT rule approved and activated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/accounting/accounts:
+    get:
+      tags: [Accounting]
+      operationId: listAccounts
+      summary: List the chart of accounts in the authorised organisation.
+      security: [{ oauth2: [accounting.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped chart of accounts. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Accounting]
+      operationId: createAccount
+      summary: Create a general ledger account in the chart of accounts.
+      security: [{ oauth2: [accounting.post] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, code, name, account_type, currency]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                code: { type: string, minLength: 1, maxLength: 20 }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                account_type: { type: string, enum: [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE] }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                control_type: { type: string, maxLength: 40 }
+      responses:
+        '201': { description: Account created in the chart of accounts. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/accounting/statements:
+    get:
+      tags: [Accounting]
+      operationId: getFinancialStatements
+      summary: Retrieve the income statement and simplified balance sheet for a date range.
+      security: [{ oauth2: [accounting.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - name: from
+          in: query
+          required: false
+          description: ISO date (YYYY-MM-DD); defaults to the first day of the current calendar month.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          description: ISO date (YYYY-MM-DD); defaults to today.
+          schema: { type: string, format: date }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Income statement and simplified balance sheet for the requested period. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/accounting/trial-balance:
+    get:
+      tags: [Accounting]
+      operationId: getTrialBalance
+      summary: Retrieve the trial balance as of a given date.
+      security: [{ oauth2: [accounting.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - name: as_of
+          in: query
+          required: false
+          description: ISO date (YYYY-MM-DD); defaults to today.
+          schema: { type: string, format: date }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Account balances as of the requested date. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/accounting/journals/{journal_id}/reversal:
+    post:
+      tags: [Accounting]
+      operationId: reverseJournalEntry
+      summary: Post a balancing reversal entry against a previously posted journal, leaving the original entry unchanged.
+      security: [{ oauth2: [accounting.post] }]
+      parameters:
+        - name: journal_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, reason]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                reason: { type: string, minLength: 10, maxLength: 500 }
+      responses:
+        '201': { description: Reversing journal entry posted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/accounting/periods/closure:
+    post:
+      tags: [Accounting]
+      operationId: closeAccountingPeriod
+      summary: Close an accounting period so its ledger entries become immutable.
+      security: [{ oauth2: [accounting.close-period] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, period_code]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                period_code: { type: string, pattern: '^\d{4}-\d{2}$', description: 'YYYY-MM.' }
+      responses:
+        '200': { description: Accounting period closed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/audit-evidence/{audit_evidence_id}/custody-events:
+    post:
+      tags: [Audit evidence]
+      operationId: recordAuditEvidenceCustodyEvent
+      summary: Append an immutable chain-of-custody event (verify, set or release legal hold) to a national audit-case evidence record.
+      security: [{ oauth2: [cases.manage] }]
+      parameters:
+        - name: audit_evidence_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, action]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                action: { type: string, enum: [VERIFY, SET_LEGAL_HOLD, RELEASE_LEGAL_HOLD] }
+                notes: { type: string, minLength: 10, maxLength: 2000, description: Required when setting or releasing a legal hold. }
+      responses:
+        '200': { description: Custody event appended to the evidence record. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/business-parties/{business_party_id}/verification:
+    get:
+      tags: [Verification]
+      operationId: getBusinessPartyVerificationHistory
+      summary: Retrieve a business party's counterparty-trust verification history, most recent first.
+      security: [{ oauth2: [parties.manage] }]
+      parameters:
+        - name: business_party_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Verification snapshots for the business party, most recent first. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Verification]
+      operationId: verifyBusinessPartySupplier
+      summary: Re-check an active supplier's VAT number against the national taxpayer register and record a trust snapshot.
+      security: [{ oauth2: [parties.manage] }]
+      parameters:
+        - name: business_party_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Supplier verification snapshot recorded. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/developer/clients:
+    post:
+      tags: [Developer]
+      operationId: createDeveloperClient
+      summary: Register a new API client with a pending credential awaiting secret-manager provisioning.
+      security: [{ oauth2: [developer.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [name, scopes, rate_limit_profile]
+              properties:
+                name: { type: string, minLength: 3, maxLength: 150 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  items: { type: string, pattern: '^[a-z0-9]+\.[a-z0-9]+$' }
+                rate_limit_profile: { type: string }
+      responses:
+        '201': { description: API client created. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/developer/clients/{client_id}/conformance-runs:
+    post:
+      tags: [Developer]
+      operationId: runDeveloperClientConformance
+      summary: Run the fixed conformance-check harness against an API client's current, real state.
+      security: [{ oauth2: [developer.manage] }]
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '201': { description: Conformance test run recorded with PASS/FAIL/NOT_CONFIGURED checks. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/developer/clients/{client_id}/revocation:
+    post:
+      tags: [Developer]
+      operationId: revokeDeveloperClientCredential
+      summary: Revoke an API client's active credential and disable the client.
+      security: [{ oauth2: [developer.manage] }]
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, reason]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                reason: { type: string, minLength: 10, maxLength: 500 }
+      responses:
+        '200': { description: Credential revoked and the API client disabled. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/developer/clients/{client_id}/rotation:
+    post:
+      tags: [Developer]
+      operationId: rotateDeveloperClientCredential
+      summary: Rotate an API client's credential, retiring the previous one.
+      security: [{ oauth2: [developer.manage] }]
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: New credential issued and the previous one retired. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/saas-providers:
+    post:
+      tags: [SaaS providers]
+      operationId: registerSaasProvider
+      summary: Register a SaaS provider and its first integration application for platform review.
+      security: [{ oauth2: [developer.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [provider_key, legal_name, contact_email, category, application]
+              properties:
+                provider_key: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,49}$' }
+                legal_name: { type: string, minLength: 3, maxLength: 200 }
+                contact_email: { type: string, format: email }
+                category: { type: string }
+                application:
+                  type: object
+                  additionalProperties: true
+                  required: [name, description, requested_capabilities]
+                  properties:
+                    name: { type: string, minLength: 3, maxLength: 150 }
+                    description: { type: string, minLength: 10, maxLength: 2000 }
+                    requested_capabilities: { type: array, minItems: 1, items: { type: string } }
+      responses:
+        '201': { description: SaaS provider and application registered. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/saas-providers/{saas_provider_id}/usage:
+    get:
+      tags: [SaaS providers]
+      operationId: getSaasProviderUsage
+      summary: Read a registered SaaS provider's applications, environment approvals and integration/sync usage.
+      description: Visible only to the registering actor or a national-scope actor.
+      security: [{ oauth2: [developer.read] }]
+      parameters:
+        - name: saas_provider_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: SaaS provider usage snapshot. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/security/incidents:
+    get:
+      tags: [Security]
+      operationId: listSecurityIncidents
+      summary: Read the SOC incident queue, optionally filtered by status or severity.
+      security: [{ oauth2: [security.read] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: severity
+          in: query
+          required: false
+          schema: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: SOC incident queue. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Security]
+      operationId: createSecurityIncident
+      summary: Manually open a security incident, the analyst-initiated counterpart to a detection-rule-opened one.
+      security: [{ oauth2: [security.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, title, severity, details]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                title: { type: string, minLength: 5, maxLength: 200 }
+                severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+                source_event_id: { type: string }
+                subject_user_id: { type: string }
+                details: { type: string, minLength: 5, maxLength: 1000 }
+      responses:
+        '201': { description: Security incident opened. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/security/incidents/{incident_id}:
+    get:
+      tags: [Security]
+      operationId: getSecurityIncident
+      summary: Retrieve full detail for one security incident.
+      security: [{ oauth2: [security.read] }]
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Security incident detail. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/security/incidents/{incident_id}/closure:
+    post:
+      tags: [Security]
+      operationId: closeSecurityIncident
+      summary: Close a security incident from OPEN or CONTAINED with a recorded resolution.
+      security: [{ oauth2: [security.manage] }]
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, resolution_notes]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                resolution_notes: { type: string, minLength: 10, maxLength: 1000 }
+      responses:
+        '200': { description: Security incident closed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/security/incidents/{incident_id}/containment:
+    post:
+      tags: [Security]
+      operationId: containSecurityIncident
+      summary: Record triage containment, transitioning a security incident from OPEN to CONTAINED.
+      security: [{ oauth2: [security.manage] }]
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, notes]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                notes: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Incident contained. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/security/incidents/{incident_id}/revocation:
+    post:
+      tags: [Security]
+      operationId: revokeSecurityIncidentAccess
+      summary: Revoke the incident subject's active identity links as a step-up protected response action.
+      description: Requires a fresh multi-factor step-up confirmation recorded via POST /v1/identity/step-up before this call.
+      security: [{ oauth2: [security.manage] }]
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, notes]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                notes: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Subject user's active identity links revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/taxpayers/{taxpayer_id}/identifiers/{identifier_id}/correction:
+    post:
+      tags: [Taxpayers]
+      operationId: correctTaxpayerIdentifier
+      summary: Supersede a taxpayer's current VAT number or TIN with a corrected value, preserving the prior version.
+      description: Reuses the taxpayer-suspension permission ceiling, since correcting a canonical identifier is at least as consequential as suspending the taxpayer, and requires a fresh step-up confirmation.
+      security: [{ oauth2: [taxpayers.suspend] }]
+      parameters:
+        - name: taxpayer_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: identifier_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [identifier_value, reason]
+              properties:
+                identifier_value: { type: string }
+                reason: { type: string, minLength: 5, maxLength: 240 }
+      responses:
+        '200': { description: Prior identifier superseded and a new active version recorded. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/taxpayers/{taxpayer_id}/identifiers/verification:
+    post:
+      tags: [Taxpayers]
+      operationId: verifyTaxpayerIdentifiers
+      summary: Re-attempt authoritative ITAS verification of a taxpayer's VAT number and TIN.
+      description: Standalone and re-triggerable at any time after registration; never changes the identifier value itself (see .../correction for that). Reports AWAITING_PROVIDER_CONTRACT honestly while ITAS is unconfigured.
+      security: [{ oauth2: [taxpayers.read] }]
+      parameters:
+        - name: taxpayer_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Verification attempt recorded as VERIFIED or AWAITING_PROVIDER_CONTRACT. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/taxpayers/{taxpayer_id}/risk-evaluation:
+    post:
+      tags: [Taxpayers]
+      operationId: evaluateTaxpayerRisk
+      summary: Run the national risk-scoring evaluation for a taxpayer's active organisation.
+      security: [{ oauth2: [risk.review] }]
+      parameters:
+        - name: taxpayer_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+      responses:
+        '200': { description: Risk evaluation recorded for the taxpayer's active organisation. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/taxpayers/{taxpayer_id}/suspension:
+    post:
+      tags: [Taxpayers]
+      operationId: suspendTaxpayer
+      summary: Suspend a taxpayer's VAT status, immediately excluding it from active counterparty resolution.
+      description: Idempotent — re-suspending an already-suspended taxpayer succeeds without a further state change. Requires a fresh step-up confirmation.
+      security: [{ oauth2: [taxpayers.suspend] }]
+      parameters:
+        - name: taxpayer_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 240 }
+      responses:
+        '200': { description: Taxpayer suspended (or already suspended). }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/access-grants/revocation:
+    post:
+      tags: [Access grants]
+      operationId: revokeAccessGrant
+      summary: Independently revoke a single active role or capability grant outside the bulk offboarding/review paths.
+      description: The actor may never revoke their own grant. A grant that is already inactive is returned unchanged rather than re-revoked.
+      security: [{ oauth2: [access-governance.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [grant_type, grant_id, reason]
+              properties:
+                grant_type: { type: string, enum: [ROLE, CAPABILITY] }
+                grant_id: { type: string, minLength: 1, maxLength: 100 }
+                reason: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Access grant revoked, or returned unchanged if it was already inactive. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/documents/{document_id}/download:
+    get:
+      tags: [Documents]
+      operationId: downloadDocument
+      summary: Stream a document's bytes, refusing anything not currently ACTIVE or SUPERSEDED.
+      security: [{ oauth2: [documents.read] }]
+      parameters:
+        - { name: document_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Document bytes with the stored content type and an attachment disposition.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/documents/{document_id}/versions:
+    get:
+      tags: [Documents]
+      operationId: getDocumentVersionHistory
+      summary: Read the immutable supersession chain linking a document to its prior and replacement versions.
+      security: [{ oauth2: [documents.read] }]
+      parameters:
+        - { name: document_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Document version chain. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/documents/{document_id}/retention-hold:
+    post:
+      tags: [Documents]
+      operationId: setDocumentRetentionHold
+      summary: Apply or release a direct legal-hold on a document, independent of any evidence-citation hold.
+      security: [{ oauth2: [documents.manage] }]
+      parameters:
+        - { name: document_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Retention hold applied or released. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/documents/{document_id}/scan-result:
+    post:
+      tags: [Documents]
+      operationId: recordDocumentScanResult
+      summary: Record an external malware scanner's verdict on a quarantined document, the only path that can make it available.
+      description: No scan result is ever inferred by this service; a document without a recorded clean result stays quarantined.
+      security: [{ oauth2: [documents.manage] }]
+      parameters:
+        - { name: document_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Scan verdict recorded and document transitioned. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/documents/{document_id}/supersession:
+    post:
+      tags: [Documents]
+      operationId: supersedeDocument
+      summary: Upload a replacement for an already-clean document and link the two as one immutable version chain.
+      description: The object is unavailable for download until an external malware scanner records a clean result. Only a currently ACTIVE document can be superseded.
+      security: [{ oauth2: [documents.upload] }]
+      parameters:
+        - { name: document_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/DocumentUpload' }
+      responses:
+        '201': { description: Replacement document stored in private quarantine and linked to its predecessor. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/ValidationFailed' }
+        '415': { $ref: '#/components/responses/ValidationFailed' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/inventory/availability:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryAvailability
+      summary: Read on-hand, reserved and available stock per warehouse and product in the authorised organisation.
+      security: [{ oauth2: [inventory.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped stock availability. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/inventory/valuation:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryValuation
+      summary: Read on-hand quantity valued at weighted-average cost, per product and as an organisation-wide grand total.
+      security: [{ oauth2: [inventory.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped weighted-average inventory valuation. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/inventory/transfers:
+    post:
+      tags: [Inventory]
+      operationId: transferStock
+      summary: Move stock between two owned warehouses as one linked pair of movements, without permitting negative on-hand stock.
+      security: [{ oauth2: [inventory.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, from_warehouse_id, to_warehouse_id, product_id, quantity_micros]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                from_warehouse_id: { type: string, minLength: 2, maxLength: 100 }
+                to_warehouse_id: { type: string, minLength: 2, maxLength: 100 }
+                product_id: { type: string, minLength: 2, maxLength: 100 }
+                quantity_micros: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 2, maxLength: 500 }
+      responses:
+        '201': { description: Linked transfer-out and transfer-in movements recorded. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/portals:
+    get:
+      tags: [Portals]
+      operationId: listAvailablePortals
+      summary: List the portals the authenticated identity is currently entitled to enter, the same server-scoped answer that gates every /portal/* page.
+      security: [{ oauth2: [identity.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Self-scoped list of available portals. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/reports/exports/{export_id}:
+    get:
+      tags: [Reports]
+      operationId: getReportExport
+      summary: Read a report export's approval and expiry status.
+      security: [{ oauth2: [reports.read] }]
+      parameters:
+        - { name: export_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Report export status. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/reports/exports/{export_id}/download:
+    get:
+      tags: [Reports]
+      operationId: downloadReportExport
+      summary: Stream an approved, unexpired report export's bytes.
+      security: [{ oauth2: [reports.read] }]
+      parameters:
+        - { name: export_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Report export bytes with the stored content type and an attachment disposition.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/reports/exports/{export_id}/approval:
+    post:
+      tags: [Reports]
+      operationId: approveReportExport
+      summary: Independently approve a pending, sensitive-classification report export using maker-checker control.
+      security: [{ oauth2: [reports.run] }]
+      parameters:
+        - { name: export_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Pending report export approved. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/reports/exports/{export_id}/cancellation:
+    post:
+      tags: [Reports]
+      operationId: cancelReportExport
+      summary: Withdraw a pending report export before it is approved or downloaded.
+      security: [{ oauth2: [reports.run] }]
+      parameters:
+        - { name: export_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Pending report export cancelled. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/reports/runs/{run_id}/exports:
+    post:
+      tags: [Reports]
+      operationId: requestReportExport
+      summary: Generate a downloadable export of a completed report run, auto-approved unless the report's classification is sensitive.
+      security: [{ oauth2: [reports.run] }]
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201': { description: Report export generated as approved, or held pending sensitive-classification approval. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/reports/runs/{run_id}/publication:
+    post:
+      tags: [Reports]
+      operationId: publishReportRun
+      summary: Reconcile a completed report run against a fresh recomputation of its source data before marking it the official published figure.
+      security: [{ oauth2: [reports.run] }]
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Report run reconciled and published. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/risk-indicators:
+    get:
+      tags: [Risk indicators]
+      operationId: listRiskIndicators
+      summary: List restricted, nationally-scoped risk indicators visible only to authorised national risk roles.
+      security: [{ oauth2: [risk.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Restricted risk-indicator register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/risk-indicators/{risk_indicator_id}/assignment:
+    post:
+      tags: [Risk indicators]
+      operationId: assignRiskReview
+      summary: Assign an OPEN risk indicator to an officer for review.
+      security: [{ oauth2: [risk.review] }]
+      parameters:
+        - { name: risk_indicator_id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Risk indicator assigned and transitioned to UNDER_REVIEW. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/risk-indicators/{risk_indicator_id}/decision:
+    post:
+      tags: [Risk indicators]
+      operationId: decideRiskAction
+      summary: Record an independent decision on a risk indicator that is currently UNDER_REVIEW.
+      security: [{ oauth2: [risk.review] }]
+      parameters:
+        - { name: risk_indicator_id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Risk action decision recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/saas-applications/{application_id}/conformance-runs:
+    post:
+      tags: [SaaS applications]
+      operationId: submitSaasConformanceRun
+      summary: Submit a sandbox or production conformance run for a registered SaaS application, gating production on a prior passed sandbox run.
+      security: [{ oauth2: [developer.manage] }]
+      parameters:
+        - { name: application_id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201': { description: Conformance run recorded. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/workflows/delegations:
+    get:
+      tags: [Workflows]
+      operationId: listWorkflowDelegations
+      summary: List workflow approval delegations in the authorised organisation.
+      security: [{ oauth2: [workflows.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Tenant-scoped delegation register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Workflows]
+      operationId: createWorkflowDelegation
+      summary: Delegate a user's workflow approval authority to another active user, optionally scoped to one workflow.
+      security: [{ oauth2: [workflows.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [delegator_user_id, delegate_user_id, scope, effective_from, reason]
+              properties:
+                delegator_user_id: { type: string, minLength: 1, maxLength: 100 }
+                delegate_user_id: { type: string, minLength: 1, maxLength: 100 }
+                workflow_id: { type: string, minLength: 1, maxLength: 100 }
+                scope: { type: string, maxLength: 100 }
+                effective_from: { type: string, format: date-time }
+                effective_to: { type: string, format: date-time }
+                reason: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '201': { description: Delegation created and active. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/workflows/delegations/{delegation_id}/revocation:
+    post:
+      tags: [Workflows]
+      operationId: revokeWorkflowDelegation
+      summary: Revoke an active workflow delegation with a protected reason.
+      security: [{ oauth2: [workflows.manage] }]
+      parameters:
+        - { name: delegation_id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 240 }
+      responses:
+        '200': { description: Delegation revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/workflows/instances:
+    post:
+      tags: [Workflows]
+      operationId: assignWorkflowInstance
+      summary: Start a workflow instance for a domain action, resolving its published version and advancing to the first matching node.
+      security: [{ oauth2: [workflows.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201': { description: Workflow instance created and advanced to its first matching node. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/workflows/versions/{workflow_version_id}/test:
+    post:
+      tags: [Workflows]
+      operationId: testWorkflowVersion
+      summary: Dry-run a workflow version's routing against a sample context without creating a real instance.
+      security: [{ oauth2: [workflows.read] }]
+      parameters:
+        - { name: workflow_version_id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Resolved node path and terminal outcome for the sample context. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/communications:
+    get:
+      tags: [Communications]
+      operationId: listCommunications
+      summary: List correspondence threads (inbox) visible to the caller, each with its latest message preview and count.
+      security: [{ oauth2: [compliance.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Filtered, paginated correspondence inbox with a real total_count. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/communications/{communication_id}:
+    get:
+      tags: [Communications]
+      operationId: getCommunication
+      summary: Retrieve one full correspondence thread with its messages, oldest first.
+      security: [{ oauth2: [compliance.read] }]
+      parameters:
+        - name: communication_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Correspondence thread with its ordered messages. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/communications/{communication_id}/closure:
+    post:
+      tags: [Communications]
+      operationId: closeCommunication
+      summary: Close an open correspondence thread with a recorded reason; officer-only.
+      security: [{ oauth2: [communications.manage] }]
+      parameters:
+        - name: communication_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, reason]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                reason: { type: string, minLength: 10, maxLength: 2000 }
+      responses:
+        '200': { description: Correspondence thread closed. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/communications/{communication_id}/responses:
+    post:
+      tags: [Communications]
+      operationId: respondToCommunication
+      summary: Reply within an open correspondence thread; direction is derived from the actor and never caller-supplied.
+      security: [{ oauth2: [compliance.read] }]
+      parameters:
+        - name: communication_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, channel, content_summary]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                channel: { type: string, enum: [PORTAL, EMAIL, SMS, LETTER] }
+                content_summary: { type: string, minLength: 10, maxLength: 4000 }
+      responses:
+        '201': { description: Reply recorded on the correspondence thread. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/communications/notices:
+    post:
+      tags: [Communications]
+      operationId: sendComplianceNotice
+      summary: Open a new correspondence thread by sending an outbound notice tied to a case reference; officer-only.
+      security: [{ oauth2: [communications.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, related_resource_type, related_resource_id, channel, subject, content_summary, classification]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                related_resource_type: { type: string, description: Case reference type, e.g. AUDIT_CASE, REFUND_CLAIM, VAT_RETURN. }
+                related_resource_id: { type: string, minLength: 1, maxLength: 100 }
+                channel: { type: string, enum: [PORTAL, EMAIL, SMS, LETTER] }
+                subject: { type: string, minLength: 5, maxLength: 200 }
+                content_summary: { type: string, minLength: 10, maxLength: 4000 }
+                classification: { type: string, description: Communication sensitivity classification. }
+      responses:
+        '201': { description: Correspondence thread opened and notice delivered. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/exceptions:
+    get:
+      tags: [Exceptions]
+      operationId: listExceptions
+      summary: List the reconciliation exception work queue, filterable by status, severity, assignment and age.
+      description: Tenant-scoped the same way the pre-existing exception views are; NamRA/national-scope actors see every taxpayer's exceptions, everyone else only their own.
+      security: [{ oauth2: [exceptions.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Filtered, paginated reconciliation exception work queue. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/exceptions/{exception_id}/assignment:
+    post:
+      tags: [Exceptions]
+      operationId: assignException
+      summary: Hand a reconciliation exception to an officer for review.
+      security: [{ oauth2: [reconciliation.manage] }]
+      parameters:
+        - name: exception_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [officer_id]
+              properties:
+                officer_id: { type: string, minLength: 1 }
+      responses:
+        '200': { description: Exception assigned to the named officer. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/exceptions/{exception_id}/resolution:
+    post:
+      tags: [Exceptions]
+      operationId: resolveException
+      summary: Resolve a reconciliation exception with reviewer notes; idempotent on an already-resolved exception.
+      security: [{ oauth2: [reconciliation.manage] }]
+      parameters:
+        - name: exception_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [notes]
+              properties:
+                notes: { type: string, minLength: 10, maxLength: 400 }
+      responses:
+        '200': { description: Exception resolved (or already resolved). }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses/categories:
+    get:
+      tags: [Expenses]
+      operationId: listExpenseCategories
+      summary: List expense categories configured for the authorised organisation, each with its default tax treatment.
+      security: [{ oauth2: [expenses.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+      responses:
+        '200': { description: Organisation-scoped expense category register. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Expenses]
+      operationId: createExpenseCategory
+      summary: Create an expense category with a default tax treatment and receipt requirement.
+      security: [{ oauth2: [expenses.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, code, name, default_tax_category]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                code: { type: string, minLength: 1, maxLength: 20 }
+                name: { type: string, minLength: 2, maxLength: 200 }
+                default_tax_category: { type: string, enum: [STANDARD, ZERO_RATED, EXEMPT, OUT_OF_SCOPE] }
+                requires_receipt: { type: boolean, default: true }
+      responses:
+        '201': { description: Expense category created. }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses/report:
+    get:
+      tags: [Expenses]
+      operationId: getExpenseReport
+      summary: Summarise expenses by status and category within a date range for the authorised organisation.
+      security: [{ oauth2: [expenses.read] }]
+      parameters:
+        - $ref: '#/components/parameters/OrganisationScope'
+        - name: from
+          in: query
+          required: false
+          description: Inclusive ISO start date (defaults to the first of the current month).
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          description: Inclusive ISO end date (defaults to today).
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Expense totals by status and category, plus the matching line items. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses/{expense_id}/approval:
+    post:
+      tags: [Expenses]
+      operationId: approveExpenseSubmission
+      summary: Approve a submitted expense, enforcing that the approver did not create it.
+      security: [{ oauth2: [expenses.manage] }]
+      parameters:
+        - name: expense_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { description: Expense approved. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/expenses/{expense_id}/rejection:
+    post:
+      tags: [Expenses]
+      operationId: rejectExpenseSubmission
+      summary: Reject a submitted expense with a protected reason, enforcing that the rejector did not create it.
+      security: [{ oauth2: [expenses.manage] }]
+      parameters:
+        - name: expense_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, reason]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                reason: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Expense rejected. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/expenses/{expense_id}/submission:
+    post:
+      tags: [Expenses]
+      operationId: submitExpenseForApproval
+      summary: Move a draft expense into the maker-checker approval queue.
+      security: [{ oauth2: [expenses.manage] }]
+      parameters:
+        - name: expense_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { description: Draft expense submitted for approval. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /v1/payments/outstanding:
+    get:
+      tags: [Payments]
+      operationId: listOutstandingRefundPayments
+      summary: List refund claims awaiting payment and the connector's current posture; restricted to national refund roles.
+      security: [{ oauth2: [payments.read] }]
+      responses:
+        '200': { description: Outstanding refund payment queue with a running total and connector status. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/projects/{project_id}/profitability:
+    get:
+      tags: [Projects]
+      operationId: getProjectProfitability
+      summary: Report a project's budget, actual cost and recognised revenue for margin analysis.
+      security: [{ oauth2: [projects.read] }]
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+      responses:
+        '200': { description: Project profitability projection. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/projects/{project_id}/budget-approval:
+    post:
+      tags: [Projects]
+      operationId: approveProjectBudget
+      summary: Approve a project's proposed budget, enforcing that the project's own manager cannot self-approve it.
+      security: [{ oauth2: [projects.manage] }]
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, approved_amount_cents]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                approved_amount_cents: { type: integer, minimum: 0 }
+                notes: { type: string, maxLength: 1000 }
+      responses:
+        '200': { description: Proposed project budget approved. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/projects/{project_id}/costs:
+    post:
+      tags: [Projects]
+      operationId: postProjectCost
+      summary: Post a cost against a project, either citing an already-approved project expense or recording a manual cost.
+      security: [{ oauth2: [projects.manage] }]
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/OrganisationScope'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, cost_type, source_id]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                cost_type: { type: string, enum: [EXPENSE, MANUAL] }
+                source_id: { type: string, minLength: 2, maxLength: 100 }
+                amount_cents: { type: integer, minimum: 1 }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                description: { type: string, minLength: 2, maxLength: 500 }
+                occurred_at: { type: string, format: date }
+      responses:
+        '201': { description: Project cost posted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/refunds/{refund_claim_id}/checks:
+    get:
+      tags: [Refunds]
+      operationId: getRefundClaimChecks
+      summary: Retrieve a refund claim's eligibility checks and calculation snapshot.
+      security: [{ oauth2: [refunds.read] }]
+      parameters:
+        - name: refund_claim_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Refund claim eligibility checks and snapshot hash. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/refunds/{refund_claim_id}/disputes:
+    post:
+      tags: [Refunds]
+      operationId: disputeRefundClaim
+      summary: Dispute a refund claim's outcome; only the original requester may raise it.
+      security: [{ oauth2: [refunds.request] }]
+      parameters:
+        - name: refund_claim_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, action, findings]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                action: { type: string, const: DISPUTE }
+                findings: { type: string, minLength: 5, maxLength: 2000 }
+      responses:
+        '201': { description: Refund claim dispute recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/refunds/{refund_claim_id}/payment:
+    post:
+      tags: [Refunds]
+      operationId: recordRefundPayment
+      summary: Record a payment instruction for a refund claim that has reached PAYMENT_PENDING; restricted to national refund roles.
+      security: [{ oauth2: [payments.record] }]
+      parameters:
+        - name: refund_claim_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, beneficiary_reference, provider]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                beneficiary_reference: { type: string, minLength: 4, maxLength: 100, description: Masked to its last four characters before storage. }
+                provider: { type: string, minLength: 2, maxLength: 60 }
+      responses:
+        '201': { description: Payment instruction recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/refunds/{refund_claim_id}/payment/allocation:
+    post:
+      tags: [Refunds]
+      operationId: allocateRefundPayment
+      summary: Allocate a refund claim's recorded payment instruction against a settlement; restricted to national refund roles.
+      security: [{ oauth2: [payments.record] }]
+      parameters:
+        - name: refund_claim_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, settlement_reference, settled_amount_cents]
+              properties:
+                schema_version: { type: string, const: 1.0.0 }
+                settlement_reference: { type: string, minLength: 4, maxLength: 100 }
+                settled_amount_cents: { type: integer, minimum: 1 }
+      responses:
+        '201': { description: Payment instruction allocated against the settlement. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /v1/registration-applications/{application_id}/decision:
+    post:
+      tags: [Registrations]
+      operationId: decideRegistrationApplication
+      summary: Independently approve or reject a pending registration application, enforcing that the submitter cannot decide their own.
+      security: [{ oauth2: [registrations.approve] }]
+      parameters:
+        - name: application_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: '#/components/parameters/StepUpEvidence'
+        - $ref: '#/components/parameters/StepUpSessionId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [APPROVE, REJECT] }
+                reason: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Registration application decided; an APPROVE provisions the canonical taxpayer and organisation. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 components:
   securitySchemes:
     oauth2:
@@ -1240,6 +4614,46 @@ components:
             documents.upload: Store tenant-scoped evidence in private quarantine.
             reports.run: Execute allow-listed, tenant-scoped inline reports.
             offline.sync: Synchronise enrolled offline devices.
+            audit.read: Read the audit trail and trigger on-demand hash-chain verification.
+            integrations.read: Read platform integration connection health and posture.
+            integrations.manage: Register, approve, suspend and synchronise platform integrations.
+            licensing.manage: Activate, suspend, renew or change the organisation's licence plan.
+            organisations.manage: Manage organisation branches, invitations and memberships.
+            administration.read: Read organisation administrator assignments.
+            administration.manage: Appoint organisation administrators.
+            roles.read: Read organisation-level capability grants.
+            roles.manage: Grant organisation-level capabilities to members.
+            employees.manage: Activate organisation employees.
+            access-governance.manage: Offboard organisation members and revoke their access grants.
+            reports.read: Read certified analytics data products, metrics and anomaly candidates.
+            platform.manage: Propose, decide and apply platform configuration/feature/policy changes and provision platform staff.
+            reconciliation.manage: Run independent ledger-consistency matching for an invoice.
+            invoices.cancel: Cancel a certified invoice under officer-only, step-up authority.
+            notifications.manage: Queue notifications directly to a user or taxpayer.
+            dashboard.read: Read personal dashboard and notification data available to every role.
+            obligations.manage: Record and satisfy compliance obligations.
+            vat-rules.read: Read VAT rules and evaluate the applicable rate for a tax category and date.
+            vat-rules.manage: Propose and approve VAT rules under maker-checker control.
+            accounting.close-period: Close accounting periods so their ledger entries become immutable.
+            parties.manage: Manage business party (customer/supplier) records and counterparty-trust verification.
+            developer.manage: Manage developer platform API clients, credentials and SaaS provider registrations.
+            developer.read: Read developer platform / SaaS provider usage data.
+            security.read: Read the SOC incident queue and incident detail.
+            security.manage: Manage security incidents (create, contain, close, revoke access).
+            taxpayers.read: Read taxpayer identity and identifier data.
+            taxpayers.suspend: Suspend taxpayers and correct canonical taxpayer identifiers.
+            risk.review: Evaluate and review taxpayer risk indicators.
+            documents.read: Read tenant-scoped evidence document metadata, version history and bytes.
+            documents.manage: Manage quarantined/active document lifecycle state (scan results, retention holds).
+            risk.read: Read restricted, nationally-scoped risk indicators.
+            workflows.read: Read workflow delegations and dry-run a workflow version.
+            workflows.manage: Create and revoke workflow delegations and assign workflow instances.
+            communications.manage: Send an outbound compliance notice or close a correspondence thread (national compliance roles only).
+            exceptions.read: Read the reconciliation exception work queue.
+            payments.read: Read the outstanding refund payment queue.
+            payments.record: Record and allocate refund payment instructions.
+            refunds.read: Read refund claim eligibility checks.
+            registrations.approve: Independently decide a registration application.
   parameters:
     StepUpEvidence:
       name: X-VAT-MSA-Step-Up-Evidence
