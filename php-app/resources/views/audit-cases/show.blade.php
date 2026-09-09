@@ -61,6 +61,7 @@
                 <h2 class="h6">Record a decision</h2>
                 <form method="POST" action="{{ route('audit-cases.transition.store', $case->id) }}" id="transition-form">
                     @csrf
+                    <x-idempotency-key />
                     <div class="row g-2">
                         <div class="col-md-3">
                             <label for="action" class="form-label">Action</label>
@@ -164,6 +165,7 @@
                 <h2 class="h6">Issue a finding</h2>
                 <form method="POST" action="{{ route('audit-cases.findings.store', $case->id) }}" class="row g-2">
                     @csrf
+                    <x-idempotency-key />
                     <div class="col-md-2">
                         <label for="finding_code" class="form-label small mb-0">Code</label>
                         <input type="text" id="finding_code" name="finding_code" value="{{ old('finding_code') }}" class="form-control form-control-sm @error('finding_code') is-invalid @enderror" required>
@@ -229,6 +231,7 @@
                             <td colspan="5" class="bg-body-tertiary">
                                 <form method="POST" action="{{ route('audit-evidence.custody-events.store', $e['id']) }}" class="row g-2 align-items-end py-1">
                                     @csrf
+                    <x-idempotency-key />
                                     <div class="col-md-3">
                                         <label class="form-label small mb-0">Custody action</label>
                                         <select name="action" class="form-select form-select-sm">
@@ -276,6 +279,7 @@
                 <h2 class="h6">Cite evidence</h2>
                 <form method="POST" action="{{ route('audit-cases.evidence.store', $case->id) }}" class="row g-2">
                     @csrf
+                    <x-idempotency-key />
                     <div class="col-md-2">
                         <label for="source_resource_type" class="form-label small mb-0">Source type</label>
                         <select id="source_resource_type" name="source_resource_type" class="form-select form-select-sm @error('source_resource_type') is-invalid @enderror" required
@@ -330,6 +334,7 @@
         <div class="card-footer bg-transparent">
             <form method="POST" action="{{ route('audit-cases.notes.store', $case->id) }}">
                 @csrf
+                    <x-idempotency-key />
                 <label for="body" class="visually-hidden">Note</label>
                 <textarea id="body" name="body" class="form-control @error('body') is-invalid @enderror" minlength="5" maxlength="4000" rows="2" placeholder="Add a note..." required>{{ old('body') }}</textarea>
                 @error('body')<div class="invalid-feedback">{{ $message }}</div>@enderror

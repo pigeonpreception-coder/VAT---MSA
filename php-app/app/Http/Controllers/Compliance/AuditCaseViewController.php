@@ -136,7 +136,7 @@ class AuditCaseViewController extends Controller
         ];
 
         try {
-            $case = $this->cases->open($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $case = $this->cases->open($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|AuthorizationException $e) {
@@ -157,7 +157,7 @@ class AuditCaseViewController extends Controller
         ];
 
         try {
-            $this->cases->transition($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->cases->transition($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -179,7 +179,7 @@ class AuditCaseViewController extends Controller
         ];
 
         try {
-            $this->cases->issueFinding($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->cases->issueFinding($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -200,7 +200,7 @@ class AuditCaseViewController extends Controller
         ];
 
         try {
-            $this->cases->addEvidence($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->cases->addEvidence($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -221,7 +221,7 @@ class AuditCaseViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'action' => (string) $request->input('action'), 'notes' => $request->input('notes') ?: null];
 
         try {
-            $this->cases->recordEvidenceCustodyEvent($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->cases->recordEvidenceCustodyEvent($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -238,7 +238,7 @@ class AuditCaseViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'body' => (string) $request->input('body'), 'supersedes_note_id' => $request->input('supersedes_note_id') ?: null];
 
         try {
-            $this->cases->addNote($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->cases->addNote($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|AuthorizationException $e) {

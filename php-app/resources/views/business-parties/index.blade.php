@@ -27,6 +27,7 @@
         @endif
         <form method="POST" action="{{ route('business-parties.store') }}" class="row g-2">
             @csrf
+                    <x-idempotency-key />
             <div class="col-md-3">
                 <label for="display_name" class="form-label small mb-0">Display name</label>
                 <input type="text" id="display_name" name="display_name" value="{{ old('display_name') }}" class="form-control form-control-sm @error('display_name') is-invalid @enderror" required>

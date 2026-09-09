@@ -205,4 +205,42 @@ class DisputeViewTest extends TestCase
         $unmatched = $this->actingAs($owner)->get(route('disputes.index', ['status' => 'DISPUTED']));
         $unmatched->assertSee('No disputes match this view.');
     }
+
+    /**
+     * Red-team finding RT-002 (VAT-MSA Resilience Audit, 2026-09-09):
+     * dispute_number is auto-generated per insert, so there was no natural
+     * business key for a duplicate check to key off, and disputes carried
+     * neither a database constraint nor an application-level check --
+     * every resubmission silently created a second, fully valid case with
+     * identical content. Confirmed live: a genuine browser double-click
+     * produced two distinct DSP-2026-* cases from one "File" click.
+     *
+     * The fix is RT-003's own root-cause fix: the real "File" form now
+     * carries a stable idempotency key via <x-idempotency-key/> (see
+     * resources/views/disputes/index.blade.php), so a replayed submission
+     * of the *same rendered form* is now recognised by
+     * App\Support\Business\CommandLedger::prior() inside
+     * DisputeService::file() and returns the original dispute instead of
+     * creating a second one -- this test drives that exact path, not just
+     * a directly-supplied idempotency key in isolation.
+     */
+    public function test_double_submitting_the_same_rendered_filing_form_creates_only_one_dispute(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-DSP-0008');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $payload = [
+            'disputed_resource_type' => 'OBLIGATION', 'disputed_resource_id' => (string) Str::uuid(),
+            'grounds' => 'Double-click replay test -- identical dispute content submitted twice.',
+            'disputed_amount' => '500',
+            'idempotency_key' => (string) Str::uuid(),
+        ];
+
+        $first = $this->actingAs($owner)->post(route('disputes.store'), $payload);
+        $second = $this->actingAs($owner)->post(route('disputes.store'), $payload);
+
+        $this->assertSame(1, Dispute::where('taxpayer_id', $tp['taxpayer']->id)->count());
+        $dispute = Dispute::where('taxpayer_id', $tp['taxpayer']->id)->firstOrFail();
+        $first->assertRedirect(route('disputes.show', $dispute->id));
+        $second->assertRedirect(route('disputes.show', $dispute->id));
+    }
 }

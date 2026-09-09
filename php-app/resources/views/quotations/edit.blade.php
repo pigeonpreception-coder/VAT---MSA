@@ -58,6 +58,7 @@
         <div class="card-body">
             <form method="POST" action="{{ route('quotations.update', $quotation['id']) }}">
                 @csrf
+                    <x-idempotency-key />
                 @method('PATCH')
 
                 <div class="row">

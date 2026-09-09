@@ -93,7 +93,7 @@ class RefundViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'vat_return_version_id' => $versionId];
 
         try {
-            $claim = $this->refunds->request($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $claim = $this->refunds->request($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceResourceException|RepositoryConflictException $e) {
             return back()->withErrors(['form' => $e->getMessage()]);
         }
@@ -112,7 +112,7 @@ class RefundViewController extends Controller
         ];
 
         try {
-            $this->refunds->transition($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->refunds->transition($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e));
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -129,7 +129,7 @@ class RefundViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'action' => 'DISPUTE', 'findings' => (string) $request->input('findings')];
 
         try {
-            $this->refunds->dispute($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->refunds->dispute($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e));
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
