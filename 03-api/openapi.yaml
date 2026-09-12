@@ -75,6 +75,8 @@ tags:
   - name: Exceptions
   - name: Payments
   - name: Taxpayer systems
+  - name: Fixed assets
+  - name: Logistics
 paths:
   /v1/signup-applications:
     post:
@@ -1549,6 +1551,292 @@ paths:
       responses:
         '200':
           description: Synchronisation state recorded.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/fixed-assets:
+    get:
+      tags: [Fixed assets]
+      operationId: listFixedAssets
+      summary: List an organisation's immovable and movable fixed assets, optionally filtered by asset_class.
+      security: [{ oauth2: [fixed-assets.read] }]
+      parameters:
+        - { name: asset_class, in: query, required: false, schema: { type: string, enum: [IMMOVABLE, MOVABLE] } }
+        - { name: organisation_id, in: query, required: false, schema: { type: string } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Fixed asset list.
+          content:
+            application/json:
+              schema: { type: object, required: [resources], properties: { resources: { type: array, items: { type: object, additionalProperties: true } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Fixed assets]
+      operationId: registerFixedAsset
+      summary: Register an immovable (land/building) or movable (vehicle/equipment/furniture/IT hardware) fixed asset.
+      security: [{ oauth2: [fixed-assets.manage] }]
+      parameters:
+        - { name: organisation_id, in: query, required: false, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Fixed asset registered in ACTIVE status.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/fixed-assets/{fixed_asset_id}:
+    get:
+      tags: [Fixed assets]
+      operationId: getFixedAsset
+      summary: Read a single fixed asset.
+      security: [{ oauth2: [fixed-assets.read] }]
+      parameters:
+        - { name: fixed_asset_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Fixed asset.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/fixed-assets/{fixed_asset_id}/valuation:
+    post:
+      tags: [Fixed assets]
+      operationId: recordFixedAssetValuation
+      summary: Record an updated current value for a fixed asset without changing its lifecycle status.
+      security: [{ oauth2: [fixed-assets.manage] }]
+      parameters:
+        - { name: fixed_asset_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Valuation recorded.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/fixed-assets/{fixed_asset_id}/maintenance:
+    post:
+      tags: [Fixed assets]
+      operationId: flagFixedAssetMaintenance
+      summary: Flag an ACTIVE fixed asset as UNDER_MAINTENANCE.
+      security: [{ oauth2: [fixed-assets.manage] }]
+      parameters:
+        - { name: fixed_asset_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Fixed asset flagged for maintenance.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/fixed-assets/{fixed_asset_id}/restoration:
+    post:
+      tags: [Fixed assets]
+      operationId: restoreFixedAsset
+      summary: Restore a fixed asset from UNDER_MAINTENANCE back to ACTIVE.
+      security: [{ oauth2: [fixed-assets.manage] }]
+      parameters:
+        - { name: fixed_asset_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Fixed asset restored to service.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/fixed-assets/{fixed_asset_id}/disposal:
+    post:
+      tags: [Fixed assets]
+      operationId: disposeFixedAsset
+      summary: Dispose a fixed asset (ACTIVE or UNDER_MAINTENANCE -> DISPOSED) with a recorded reason.
+      security: [{ oauth2: [fixed-assets.manage] }]
+      parameters:
+        - { name: fixed_asset_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Fixed asset disposed.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/logistics-deliveries:
+    get:
+      tags: [Logistics]
+      operationId: listLogisticsDeliveries
+      summary: List an organisation's logistics deliveries.
+      security: [{ oauth2: [logistics.read] }]
+      parameters:
+        - { name: organisation_id, in: query, required: false, schema: { type: string } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Logistics delivery list.
+          content:
+            application/json:
+              schema: { type: object, required: [resources], properties: { resources: { type: array, items: { type: object, additionalProperties: true } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Logistics]
+      operationId: createLogisticsDelivery
+      summary: Create a delivery (PENDING) fulfilling an already-issued tax invoice or POS sale.
+      security: [{ oauth2: [logistics.manage] }]
+      parameters:
+        - { name: organisation_id, in: query, required: false, schema: { type: string } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Logistics delivery created in PENDING status.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/logistics-deliveries/{logistics_delivery_id}:
+    get:
+      tags: [Logistics]
+      operationId: getLogisticsDelivery
+      summary: Read a single logistics delivery.
+      security: [{ oauth2: [logistics.read] }]
+      parameters:
+        - { name: logistics_delivery_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Logistics delivery.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/logistics-deliveries/{logistics_delivery_id}/dispatch:
+    post:
+      tags: [Logistics]
+      operationId: dispatchLogisticsDelivery
+      summary: Dispatch a delivery (PENDING -> IN_TRANSIT).
+      security: [{ oauth2: [logistics.manage] }]
+      parameters:
+        - { name: logistics_delivery_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Delivery dispatched.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/logistics-deliveries/{logistics_delivery_id}/delivery:
+    post:
+      tags: [Logistics]
+      operationId: deliverLogisticsDelivery
+      summary: Mark a delivery as completed (IN_TRANSIT -> DELIVERED).
+      security: [{ oauth2: [logistics.manage] }]
+      parameters:
+        - { name: logistics_delivery_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Delivery marked delivered.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/logistics-deliveries/{logistics_delivery_id}/cancellation:
+    post:
+      tags: [Logistics]
+      operationId: cancelLogisticsDelivery
+      summary: Cancel a delivery (PENDING or IN_TRANSIT -> CANCELLED) with a recorded reason.
+      security: [{ oauth2: [logistics.manage] }]
+      parameters:
+        - { name: logistics_delivery_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Delivery cancelled.
           content:
             application/json:
               schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
@@ -4794,6 +5082,10 @@ components:
             taxpayer-systems.read: Read registered taxpayer ERP/POS/accounting system registrations.
             taxpayer-systems.manage: Register, suspend and record synchronisation state for a taxpayer's own ERP/POS/accounting system.
             taxpayer-systems.approve: Approve a taxpayer's registered system so it may exchange invoice data with NamRA e-VAT MS (national compliance roles only).
+            fixed-assets.read: Read immovable and movable fixed asset records.
+            fixed-assets.manage: Register, revalue, flag for maintenance, restore and dispose immovable and movable fixed asset records.
+            logistics.read: Read logistics delivery records.
+            logistics.manage: Create, dispatch, deliver and cancel logistics delivery records.
   parameters:
     StepUpEvidence:
       name: X-VAT-MSA-Step-Up-Evidence

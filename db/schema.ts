@@ -1331,6 +1331,61 @@ export const taxpayerSystemRegistrations = sqliteTable(
   (table) => [uniqueIndex("ux_taxpayer_system_org_name_vendor").on(table.organisationId, table.systemName, table.systemVendor)],
 );
 
+export const fixedAssets = sqliteTable(
+  "fixed_assets",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    assetClass: text("asset_class").notNull(),
+    assetCode: text("asset_code").notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull(),
+    serialOrRegistrationNumber: text("serial_or_registration_number"),
+    locationOrAddress: text("location_or_address").notNull(),
+    custodianEmployeeId: text("custodian_employee_id").references(() => employees.id),
+    acquisitionDate: text("acquisition_date").notNull(),
+    acquisitionCostCents: integer("acquisition_cost_cents").notNull(),
+    currentValueCents: integer("current_value_cents"),
+    status: text("status").notNull(),
+    disposalReason: text("disposal_reason"),
+    disposedAt: text("disposed_at"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_fixed_assets_org_code").on(table.organisationId, table.assetCode),
+    index("idx_fixed_assets_org_class_status").on(table.organisationId, table.assetClass, table.status),
+  ],
+);
+
+export const logisticsDeliveries = sqliteTable(
+  "logistics_deliveries",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    deliveryNumber: text("delivery_number").notNull(),
+    referenceType: text("reference_type").notNull(),
+    referenceId: text("reference_id"),
+    origin: text("origin").notNull(),
+    destination: text("destination").notNull(),
+    vehicleAssetId: text("vehicle_asset_id").references(() => fixedAssets.id),
+    status: text("status").notNull(),
+    notes: text("notes"),
+    dispatchedAt: text("dispatched_at"),
+    deliveredAt: text("delivered_at"),
+    cancelledAt: text("cancelled_at"),
+    cancellationReason: text("cancellation_reason"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ux_logistics_deliveries_org_number").on(table.organisationId, table.deliveryNumber),
+    index("idx_logistics_deliveries_org_status").on(table.organisationId, table.status),
+  ],
+);
+
 export const apiClients = sqliteTable(
   "api_clients",
   {

@@ -648,6 +648,34 @@ const SCHEMA_STATEMENTS = [
     UNIQUE (organisation_id, system_name, system_vendor)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_taxpayer_system_registrations_org ON taxpayer_system_registrations(organisation_id, registration_status)`,
+  `CREATE TABLE IF NOT EXISTS fixed_assets (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    asset_class TEXT NOT NULL CHECK (asset_class IN ('IMMOVABLE','MOVABLE')),
+    asset_code TEXT NOT NULL, category TEXT NOT NULL, description TEXT NOT NULL,
+    serial_or_registration_number TEXT, location_or_address TEXT NOT NULL,
+    custodian_employee_id TEXT REFERENCES employees(id),
+    acquisition_date TEXT NOT NULL, acquisition_cost_cents INTEGER NOT NULL,
+    current_value_cents INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE','UNDER_MAINTENANCE','DISPOSED')),
+    disposal_reason TEXT, disposed_at TEXT,
+    created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, asset_code)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_fixed_assets_org_class_status ON fixed_assets(organisation_id, asset_class, status)`,
+  `CREATE TABLE IF NOT EXISTS logistics_deliveries (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    delivery_number TEXT NOT NULL,
+    reference_type TEXT NOT NULL CHECK (reference_type IN ('INVOICE','POS_SALE','OTHER')),
+    reference_id TEXT, origin TEXT NOT NULL, destination TEXT NOT NULL,
+    vehicle_asset_id TEXT REFERENCES fixed_assets(id),
+    status TEXT NOT NULL CHECK (status IN ('PENDING','IN_TRANSIT','DELIVERED','CANCELLED')),
+    notes TEXT, dispatched_at TEXT, delivered_at TEXT, cancelled_at TEXT, cancellation_reason TEXT,
+    created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, delivery_number)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_logistics_deliveries_org_status ON logistics_deliveries(organisation_id, status)`,
   // Module 10 Phase D: developer_account_id links each client back to the DeveloperAccount
   // that owns it (get-or-created by CreateClient — no separate "create account" verb is named).
   `CREATE TABLE IF NOT EXISTS api_clients (
@@ -2495,6 +2523,7 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-purchase-orders','nav-accounting','folder-accounting-main','purchase-orders','Purchase Orders','/accounting/purchase-orders','ACCOUNTING',NULL,'accounting:read',60,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-cash-flow','nav-accounting','folder-accounting-main','cash-flow','Cash Flow Projects','/accounting/cash-flow','ACCOUNTING',NULL,'accounting:read',70,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-operations','nav-procurement','folder-proc-main','operations','Expenses, Inventory & Project Register','/operations','CORE_VAT','BUYER','expenses:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-inventory-pos','nav-procurement','folder-proc-main','inventory-pos','Inventory (Point of Sale)','/operations/inventory','CORE_VAT',NULL,'inventory:read',15,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-human-resources','nav-procurement','folder-proc-main','human-resources','Human Resources Module','/operations/human-resources','CORE_VAT',NULL,'expenses:read',20,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-immovable-assets','nav-procurement','folder-proc-main','immovable-assets','Immovable Asset Management','/operations/immovable-assets','CORE_VAT',NULL,'expenses:read',30,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-movable-assets','nav-procurement','folder-proc-main','movable-assets','Movable Asset Management','/operations/movable-assets','CORE_VAT',NULL,'expenses:read',40,'ACTIVE','CONFIDENTIAL')`,
@@ -2600,6 +2629,8 @@ const LICENSE_PERMISSION_POLICIES = [
   ['payments:record','CORE_VAT','BUSINESS_WRITE'], ['security:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['accounting:close-period','ACCOUNTING','BUSINESS_WRITE'],
   ['documents:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['communications:respond','CORE_VAT','COMPLIANCE_WRITE'], ['licensing:manage','ADMINISTRATION','ADMIN_WRITE'],
   ['taxpayer-systems:read','CORE_VAT','READ'], ['taxpayer-systems:manage','CORE_VAT','BUSINESS_WRITE'], ['taxpayer-systems:approve','CORE_VAT','COMPLIANCE_WRITE'],
+  ['fixed-assets:read','BUSINESS_OPERATIONS','READ'], ['fixed-assets:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'],
+  ['logistics:read','BUSINESS_OPERATIONS','READ'], ['logistics:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'],
 ] as const;
 
 const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
@@ -2612,7 +2643,7 @@ const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
     'nitem-vat-audit-report','nitem-reconciliation','nitem-returns','nitem-refunds','nitem-vat-adjustment-report','nitem-compliance','nitem-cases',
     'nitem-local-invoices','nitem-foreign-invoices','nitem-invoices',
     'nitem-accounting','nitem-supplier-ledger','nitem-customer-ledger','nitem-fixed-assets','nitem-budgets','nitem-purchase-orders','nitem-cash-flow',
-    'nitem-operations','nitem-human-resources','nitem-immovable-assets','nitem-movable-assets','nitem-logistics','nitem-erp',
+    'nitem-operations','nitem-inventory-pos','nitem-human-resources','nitem-immovable-assets','nitem-movable-assets','nitem-logistics','nitem-erp',
     'nitem-create-quotation','nitem-issued-quotations','nitem-converted-quotations','nitem-converted-into-invoices',
     'nitem-create-project','nitem-ongoing-projects','nitem-completed-projects',
     'nitem-customers','nitem-suppliers','nitem-service-providers',
