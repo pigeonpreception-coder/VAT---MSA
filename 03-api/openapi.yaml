@@ -74,6 +74,7 @@ tags:
   - name: Communications
   - name: Exceptions
   - name: Payments
+  - name: Taxpayer systems
 paths:
   /v1/signup-applications:
     post:
@@ -1420,6 +1421,142 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/taxpayer-systems:
+    get:
+      tags: [Taxpayer systems]
+      operationId: listTaxpayerSystems
+      summary: List registered taxpayer ERP/POS/accounting systems — the caller's own organisation's systems, or every taxpayer's for a national-scope actor.
+      security: [{ oauth2: [taxpayer-systems.read] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Registered taxpayer system list.
+          content:
+            application/json:
+              schema: { type: object, required: [resources], properties: { resources: { type: array, items: { type: object, additionalProperties: true } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Taxpayer systems]
+      operationId: registerTaxpayerSystem
+      summary: Register a taxpayer's own ERP/POS/accounting/invoicing system pending NamRA approval.
+      description: The submitted VAT registration number (and TIN, if provided) must match the caller's own taxpayer record — this registers a taxpayer's own system, never a claim about another taxpayer's identity.
+      security: [{ oauth2: [taxpayer-systems.manage] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Taxpayer system registration created in DRAFT status.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/taxpayer-systems/{taxpayer_system_registration_id}:
+    get:
+      tags: [Taxpayer systems]
+      operationId: getTaxpayerSystem
+      summary: Read a single registered taxpayer system.
+      security: [{ oauth2: [taxpayer-systems.read] }]
+      parameters:
+        - { name: taxpayer_system_registration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Registered taxpayer system.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/taxpayer-systems/{taxpayer_system_registration_id}/approval:
+    post:
+      tags: [Taxpayer systems]
+      operationId: approveTaxpayerSystem
+      summary: Approve a taxpayer's registered system so it may begin exchanging invoice data with NamRA e-VAT MS.
+      description: Restricted to an authorised national (NamRA) compliance role — the taxpayer's own registration act is not sufficient authority to approve its own system.
+      security: [{ oauth2: [taxpayer-systems.approve] }]
+      parameters:
+        - { name: taxpayer_system_registration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Taxpayer system registration approved.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/taxpayer-systems/{taxpayer_system_registration_id}/suspension:
+    post:
+      tags: [Taxpayer systems]
+      operationId: suspendTaxpayerSystem
+      summary: Suspend a registered taxpayer system (e.g. decommissioning) and halt further synchronisation.
+      security: [{ oauth2: [taxpayer-systems.manage] }]
+      parameters:
+        - { name: taxpayer_system_registration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Taxpayer system registration suspended.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/taxpayer-systems/{taxpayer_system_registration_id}/sync:
+    post:
+      tags: [Taxpayer systems]
+      operationId: recordTaxpayerSystemSync
+      summary: Record a taxpayer system's post-synchronisation connectivity state and timestamp.
+      security: [{ oauth2: [taxpayer-systems.manage] }]
+      parameters:
+        - { name: taxpayer_system_registration_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Synchronisation state recorded.
+          content:
+            application/json:
+              schema: { type: object, required: [resource], properties: { resource: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /v1/licensing/entitlements:
     get:
@@ -4654,6 +4791,9 @@ components:
             payments.record: Record and allocate refund payment instructions.
             refunds.read: Read refund claim eligibility checks.
             registrations.approve: Independently decide a registration application.
+            taxpayer-systems.read: Read registered taxpayer ERP/POS/accounting system registrations.
+            taxpayer-systems.manage: Register, suspend and record synchronisation state for a taxpayer's own ERP/POS/accounting system.
+            taxpayer-systems.approve: Approve a taxpayer's registered system so it may exchange invoice data with NamRA e-VAT MS (national compliance roles only).
   parameters:
     StepUpEvidence:
       name: X-VAT-MSA-Step-Up-Evidence

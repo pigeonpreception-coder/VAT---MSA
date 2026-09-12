@@ -626,6 +626,28 @@ const SCHEMA_STATEMENTS = [
     last_health_check_at TEXT, last_health_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (provider_key, organisation_id)
   )`,
+  // NamRA e-VAT MS Registered Taxpayer Systems Framework (master prompt section 6):
+  // a taxpayer's own ERP/POS/accounting/invoicing system, distinct from
+  // integration_connections above (a generic platform/SaaS connector registry with
+  // no taxpayer-identity fields) and api_clients below (OAuth credential issuance
+  // with no vendor/registration-lifecycle fields). vat_registration_number/tin/
+  // company_registration_number are captured per-registration (not read from
+  // taxpayers, which has no company_registration_number column of its own) and
+  // cross-checked against the resolved organisation's taxpayer at registration time.
+  `CREATE TABLE IF NOT EXISTS taxpayer_system_registrations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), vat_registration_number TEXT NOT NULL,
+    tin TEXT, company_registration_number TEXT, system_name TEXT NOT NULL, system_vendor TEXT NOT NULL,
+    system_category TEXT NOT NULL CHECK (system_category IN ('ERP','POS','ACCOUNTING','INVOICING','OTHER')),
+    credential_reference TEXT,
+    api_status TEXT NOT NULL CHECK (api_status IN ('NOT_CONNECTED','CONNECTED','DEGRADED','DISCONNECTED')),
+    registration_status TEXT NOT NULL CHECK (registration_status IN ('DRAFT','APPROVED','SUSPENDED')),
+    security_status TEXT NOT NULL CHECK (security_status IN ('NOT_ASSESSED','PASSED','FAILED','REQUIRES_REVIEW')),
+    last_synchronization_at TEXT, created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, system_name, system_vendor)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_taxpayer_system_registrations_org ON taxpayer_system_registrations(organisation_id, registration_status)`,
   // Module 10 Phase D: developer_account_id links each client back to the DeveloperAccount
   // that owns it (get-or-created by CreateClient — no separate "create account" verb is named).
   `CREATE TABLE IF NOT EXISTS api_clients (
@@ -2548,6 +2570,7 @@ const LICENSE_PERMISSION_POLICIES = [
   ['obligations:manage','CORE_VAT','COMPLIANCE_WRITE'], ['notifications:manage','CORE_VAT','BUSINESS_WRITE'], ['reports:executive','CORE_VAT','READ'],
   ['payments:record','CORE_VAT','BUSINESS_WRITE'], ['security:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['accounting:close-period','ACCOUNTING','BUSINESS_WRITE'],
   ['documents:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['communications:respond','CORE_VAT','COMPLIANCE_WRITE'], ['licensing:manage','ADMINISTRATION','ADMIN_WRITE'],
+  ['taxpayer-systems:read','CORE_VAT','READ'], ['taxpayer-systems:manage','CORE_VAT','BUSINESS_WRITE'], ['taxpayer-systems:approve','CORE_VAT','COMPLIANCE_WRITE'],
 ] as const;
 
 const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [

@@ -42,7 +42,11 @@ function quotationPayload(quotationNumber: string, overrides: Record<string, unk
     quotation_number: quotationNumber,
     currency: "NAD",
     issue_date: "2026-08-10",
-    valid_until: "2026-09-10",
+    // Comfortably beyond "now" so this fixture doesn't drift into an
+    // "expired" 409 as real time passes (this hardcoded-date staleness
+    // pattern already bit tests/routes/module-3-reconciliation.test.ts once
+    // this session - see its daysAgo() fix).
+    valid_until: "2030-01-01",
     lines: [{
       description: "Consulting services",
       quantity_micros: 1_000_000,

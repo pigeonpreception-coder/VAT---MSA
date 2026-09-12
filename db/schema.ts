@@ -1300,6 +1300,37 @@ export const integrationConnections = sqliteTable(
   (table) => [uniqueIndex("ux_integration_provider_org").on(table.providerKey, table.organisationId)],
 );
 
+/**
+ * NamRA e-VAT MS: the Registered Taxpayer Systems Framework (master prompt
+ * section 6) — a taxpayer's own ERP/POS/accounting/invoicing system,
+ * distinct from integrationConnections (a generic platform/SaaS connector
+ * registry with no taxpayer-identity fields) and from apiClients (OAuth
+ * credential issuance with no vendor/registration-lifecycle fields).
+ */
+export const taxpayerSystemRegistrations = sqliteTable(
+  "taxpayer_system_registrations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    taxpayerId: text("taxpayer_id").notNull().references(() => taxpayers.id),
+    vatRegistrationNumber: text("vat_registration_number").notNull(),
+    tin: text("tin"),
+    companyRegistrationNumber: text("company_registration_number"),
+    systemName: text("system_name").notNull(),
+    systemVendor: text("system_vendor").notNull(),
+    systemCategory: text("system_category").notNull(),
+    credentialReference: text("credential_reference"),
+    apiStatus: text("api_status").notNull(),
+    registrationStatus: text("registration_status").notNull(),
+    securityStatus: text("security_status").notNull(),
+    lastSynchronizationAt: text("last_synchronization_at"),
+    createdBy: text("created_by").notNull().references(() => appUsers.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ux_taxpayer_system_org_name_vendor").on(table.organisationId, table.systemName, table.systemVendor)],
+);
+
 export const apiClients = sqliteTable(
   "api_clients",
   {
