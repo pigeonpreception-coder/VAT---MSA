@@ -9,13 +9,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Ported from db/runtime.ts's `import_records` table -- business-
- * repository.ts's customs-import declaration record. A full-repo grep of
- * the TypeScript source confirms it is only ever read (by
- * `getBusinessPlatformSnapshot` and the source's own `app/operations/
- * page.tsx` fourth panel) and never written by any command -- the same
- * seed/read-only posture already established for `report_definitions`/
- * `data_products`/`feature_flags` elsewhere in this migration. No
- * corresponding service: a plain read-only model is all any caller needs.
+ * repository.ts's customs-import declaration record. Originally read-only
+ * (a full-repo grep of the TypeScript source confirmed no command ever
+ * wrote to it there), until the user's own explicit request to
+ * autonomously pull foreign-invoice declarations from NamRA's E-Tariff
+ * border system -- `App\Services\Business\ForeignInvoiceService` is the
+ * one write path this table now has, gated behind a real external port
+ * (`App\Integrations\Etariff\EtariffPort`) rather than a source-fidelity
+ * concern. `source`/`etariff_reference`/`verification_status`/`pulled_at`
+ * are this feature's own added columns (see that migration's own doc
+ * comment); every other column is still the original ported shape.
  */
 class ImportRecord extends Model
 {
@@ -25,7 +28,7 @@ class ImportRecord extends Model
 
     protected $guarded = [];
 
-    protected $casts = ['declaration_date' => 'date', 'created_at' => 'datetime'];
+    protected $casts = ['declaration_date' => 'date', 'created_at' => 'datetime', 'pulled_at' => 'datetime'];
 
     public function organisation(): BelongsTo
     {

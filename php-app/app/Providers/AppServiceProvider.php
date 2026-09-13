@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Integrations\Etariff\EtariffPort;
+use App\Integrations\Etariff\UnavailableEtariffAdapter;
 use App\Integrations\Itas\ItasIdentityPort;
 use App\Integrations\Itas\UnavailableItasIdentityAdapter;
 use App\Models\User;
@@ -16,6 +18,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(ItasIdentityPort::class, UnavailableItasIdentityAdapter::class);
+        $this->app->bind(EtariffPort::class, UnavailableEtariffAdapter::class);
     }
 
     /**

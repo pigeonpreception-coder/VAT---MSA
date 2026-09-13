@@ -36,6 +36,7 @@
         'DRAFT' => 'text-bg-secondary', 'SUPERSEDED' => 'text-bg-secondary', 'ON_HOLD' => 'text-bg-secondary', 'EXPIRED' => 'text-bg-secondary',
         'CLOSED' => 'text-bg-secondary', 'NOT_CONFIGURED' => 'text-bg-secondary', 'READ' => 'text-bg-secondary', 'REVERSED' => 'text-bg-secondary',
         'INTERNAL' => 'text-bg-secondary', 'TERMINATED' => 'text-bg-secondary', 'DISABLED' => 'text-bg-secondary', 'REVOKED' => 'text-bg-secondary',
+        'VERIFIED_VIA_ETARIFF' => 'text-bg-success', 'UNVERIFIED' => 'text-bg-secondary', 'ETARIFF_PULL_UNAVAILABLE' => 'text-bg-warning',
         'BLOCKED_CONFIGURATION' => 'text-bg-warning', 'BLOCKED_RETURN_NOT_FILED' => 'text-bg-warning',
         'EVIDENCE_REQUESTED' => 'text-bg-warning', 'DISPUTED' => 'text-bg-warning', 'UNREAD' => 'text-bg-warning',
         'TAXPAYER_RESPONSE' => 'text-bg-warning', 'DECISION' => 'text-bg-warning', 'SUSPENDED' => 'text-bg-warning',
