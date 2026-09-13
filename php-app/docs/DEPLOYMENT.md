@@ -310,6 +310,30 @@ SQLite (`:memory:` or otherwise) -- every fidelity check (MariaDB's
 strict-mode TIMESTAMP defaults, the 64-character identifier limit,
 real `ENUM` validation) only surfaces against the real target engine.
 
+## Post-deploy smoke test
+
+```bash
+php scripts/smoke-test.php https://your-domain.example [email] [password]
+```
+
+Drives the real golden path over plain HTTP (session cookies + CSRF,
+exactly like a real user, not a direct DB/shell check): login -> a
+password re-confirmation (step-up) -> upload a document -> run the
+seeded `VAT_POSITION` report -> request its export -> download the
+export and check its contents. Every step that writes a file exercises
+whichever disk `FILESYSTEM_DISK` is actually configured to on that
+environment (local or a real S3/R2 bucket -- see "Switching to a real
+S3/R2-compatible disk" above), so this is the fastest way to confirm
+storage genuinely works post-deploy, not just that config parses.
+
+Defaults to the seeded demo login (`owner@demo-trading.test` /
+`password`) if no email/password are given -- pass real credentials for
+an environment that doesn't carry demo data. Needs no shell access to
+the server itself; run it from anywhere against the public URL right
+after a deploy. Exits 0 only if every step passes, non-zero (with the
+failing step named) otherwise -- safe to wire into a deploy pipeline as
+a final gate.
+
 ## What is not done yet
 
 `docs/MIGRATION_MATRIX.md` is the authoritative, continuously-updated
@@ -321,8 +345,10 @@ complete: no full TOTP step-up parity (Phase 6 note above), three
 platform-config/access-policy values wired to a real downstream consumer
 via `App\Support\Platform\PlatformConfigReader` with every other seeded
 row still illustrative only (Phase 13's "Platform config now feeds three
-real consumers" section), and no real object-storage driver configured
-yet (this document's "Storage" section). (Self-service password reset --
+real consumers" section). A real S3/R2-compatible object-storage disk is
+wired and working (this document's "Switching to a real S3/R2-compatible
+disk" section) -- it's a matter of setting the credentials, not a code
+gap. (Self-service password reset --
 previously listed here as a
 gap -- was closed 2026-09-02 per red team finding RT-005; see
 `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.) None of these block a
