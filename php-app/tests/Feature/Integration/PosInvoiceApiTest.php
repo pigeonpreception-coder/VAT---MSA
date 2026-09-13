@@ -65,7 +65,7 @@ class PosInvoiceApiTest extends TestCase
     /** @return array{client_key: string, client_secret: string, api_client_id: string} */
     private function issueCredential(Organisation $organisation, User $actor): array
     {
-        return app(PosApiClientService::class)->issue($organisation, $actor, 'Front counter till');
+        return app(PosApiClientService::class)->issue($organisation, $actor, 'Front counter till', (string) Str::uuid());
     }
 
     private function invoicePayload(string $supplierVat, ?string $customerVat = null): array
@@ -120,7 +120,7 @@ class PosInvoiceApiTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-POSAPI-0004');
         $credential = $this->issueCredential($org['organisation'], $org['admin']);
-        app(PosApiClientService::class)->revoke($org['organisation'], $credential['api_client_id'], $org['admin'], 'Terminal decommissioned');
+        app(PosApiClientService::class)->revoke($org['organisation'], $credential['api_client_id'], $org['admin'], 'Terminal decommissioned', (string) Str::uuid());
 
         $this->withHeaders(['Authorization' => "Bearer {$credential['client_key']}.{$credential['client_secret']}"])
             ->postJson('/api/pos/v1/invoices', $this->invoicePayload('VAT-POSAPI-0004'))

@@ -38,6 +38,7 @@
         @if ($canPull)
             <form method="POST" action="{{ route('invoice-management.foreign.pull') }}">
                 @csrf
+                <x-idempotency-key/>
                 <button type="submit" class="btn btn-outline-primary">Pull from E-Tariff</button>
             </form>
         @endif

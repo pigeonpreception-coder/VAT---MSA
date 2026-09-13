@@ -152,6 +152,44 @@ class LocalInvoiceViewTest extends TestCase
         $follow->assertSee('Copy this secret now');
     }
 
+    /**
+     * RT-007 (2026-09-13 red-team pass, Critical): reproduced live -- two
+     * rapid POSTs to /invoice-management/local/credentials carrying the
+     * SAME rendered form's idempotency key (an ordinary double-click or
+     * network retry, not a crafted attack) created two distinct ACTIVE
+     * credentials from one user action, and only the second request's
+     * plaintext secret ever reached the session flash the user could see
+     * -- the first credential was left permanently live and unrecoverable.
+     * Fixed by wiring PosApiClientService::issue() into the same
+     * CommandLedger idempotency pattern every other write action in this
+     * codebase already uses (docs/MIGRATION_MATRIX.md's "Duplicate-
+     * submission hardening" section).
+     */
+    public function test_double_submitting_the_same_rendered_issue_credential_form_creates_only_one_credential(): void
+    {
+        $org = $this->makeOrganisation('VAT-LI-0010');
+        $key = (string) Str::uuid();
+
+        $first = $this->actingAs($org['admin'])->post('/invoice-management/local/credentials', ['name' => 'Double Click Till', 'idempotency_key' => $key]);
+        $second = $this->actingAs($org['admin'])->post('/invoice-management/local/credentials', ['name' => 'Double Click Till', 'idempotency_key' => $key]);
+
+        $first->assertRedirect('/invoice-management/local');
+        $second->assertRedirect('/invoice-management/local');
+        $this->assertSame(1, ApiClient::where('organisation_id', $org['organisation']->id)->where('name', 'Double Click Till')->count());
+        // The replay is recognised honestly -- no fabricated second secret.
+        $second->assertSessionMissing('newCredential');
+    }
+
+    public function test_a_genuinely_new_page_load_between_two_issue_requests_is_not_treated_as_a_replay(): void
+    {
+        $org = $this->makeOrganisation('VAT-LI-0011');
+
+        $this->actingAs($org['admin'])->post('/invoice-management/local/credentials', ['name' => 'Till One']);
+        $this->actingAs($org['admin'])->post('/invoice-management/local/credentials', ['name' => 'Till Two']);
+
+        $this->assertSame(2, ApiClient::where('organisation_id', $org['organisation']->id)->count());
+    }
+
     public function test_issuing_a_credential_for_an_organisation_without_seller_capability_is_rejected(): void
     {
         $org = $this->makeOrganisation('VAT-LI-0006', ['BUYER']);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Business;
 
 use App\Exceptions\BusinessValidationException;
+use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Services\Integration\PosApiClientService;
@@ -75,9 +76,16 @@ class LocalInvoiceViewController extends Controller
         $organisation = $this->organisations->resolve($user, $request->query('organisation_id'));
 
         try {
-            $result = $this->posClients->issue($organisation, $user, (string) $request->input('name'));
+            $result = $this->posClients->issue($organisation, $user, (string) $request->input('name'), $this->formIdempotencyKey($request));
         } catch (BusinessValidationException $e) {
             return redirect()->route('invoice-management.local')->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
+        } catch (RepositoryConflictException $e) {
+            return redirect()->route('invoice-management.local')->withErrors(['name' => $e->getMessage()])->withInput();
+        }
+
+        if ($result['replayed']) {
+            return redirect()->route('invoice-management.local')
+                ->with('status', 'This credential was already issued in your last request -- its secret was shown once and cannot be retrieved again. Revoke it and issue a new one if the secret was lost.');
         }
 
         return redirect()->route('invoice-management.local')
@@ -92,9 +100,11 @@ class LocalInvoiceViewController extends Controller
         $organisation = $this->organisations->resolve($user, $request->query('organisation_id'));
 
         try {
-            $this->posClients->revoke($organisation, $id, $user, (string) $request->input('reason'));
+            $this->posClients->revoke($organisation, $id, $user, (string) $request->input('reason'), $this->formIdempotencyKey($request));
         } catch (BusinessValidationException $e) {
             return redirect()->route('invoice-management.local')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
+        } catch (RepositoryConflictException $e) {
+            return redirect()->route('invoice-management.local')->withErrors(['reason' => $e->getMessage()]);
         }
 
         return redirect()->route('invoice-management.local')->with('status', 'POS API credential revoked.');

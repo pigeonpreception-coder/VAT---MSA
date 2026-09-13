@@ -6991,3 +6991,55 @@ labelled "External POS (API)" with status "Certified". The test
 credential and its demo invoice (and all of its ledger/certificate/
 transaction side effects) were removed afterwards to leave the dev
 database clean.
+
+## Red-team pass on Foreign/Local Invoices: duplicate-submission hardening (2026-09-13)
+
+A focused, live-reproduced red-team pass against this same session's own
+two newest features (scoped narrowly given real single-session
+constraints against a much broader 10-phase audit brief -- see the full
+report) found the exact same class of gap the 2026-09-09 resilience audit
+had already closed everywhere else: neither `ForeignInvoiceService::
+pullFromEtariff()` nor `PosApiClientService::issue()`/`::revoke()` had
+been brought into line with the `<x-idempotency-key/>`/`CommandLedger`
+convention established that day, simply because both were built
+afterwards.
+
+**RT-007 (Critical):** a live double-submit reproduction (two concurrent
+POSTs sharing one rendered form's idempotency key) against `POST
+/invoice-management/local/credentials` created two distinct `ACTIVE` POS
+API credentials from one user action -- and since the plaintext secret is
+shown only once, only the second request's secret was ever visible to the
+user, leaving the first credential permanently live, unrevoked, and
+unrecoverable. Fixed by wiring `issue()` into the same `CommandLedger`
+pattern every other write action already uses; a recognised replay
+returns the existing credential's `client_key` with `client_secret` left
+`null` (honestly reporting the secret cannot be recovered) rather than
+minting a second one.
+
+**RT-008 (Medium today, High once E-Tariff is real):** the same
+live-reproduction technique against `POST /invoice-management/
+foreign/pull` produced a 1-to-4 jump in `FOREIGN_INVOICE_PULL_BLOCKED`
+audit rows after three rapid clicks. Harmless today only because the
+integration is fully stubbed; once a real E-Tariff contract exists, an
+accidental double-click would fire the outbound call twice against a live
+government system. Fixed the same way, short-circuiting to a
+`DUPLICATE_REQUEST_SUPPRESSED` result on a recognised replay rather than
+re-invoking the port or re-auditing.
+
+`PosApiClientService::revoke()` was hardened with the same mechanism too,
+for consistency, though it was already naturally idempotent (a second
+revoke of an already-`REVOKED` credential was already a safe no-op) --
+not itself an exploitable gap, recorded as a positive control in the full
+report rather than a finding.
+
+Verified: 4 new regression tests across `tests/Feature/Business/
+LocalInvoiceViewTest.php` and `tests/Feature/Business/
+ForeignInvoiceViewTest.php`, each both proving the fix (a shared key is
+recognised as a replay) and proving it doesn't over-block (two distinct
+page loads still each go through). Full suite: 608 tests, 0 regressions.
+Both fixes were also re-verified live against a running instance with the
+exact original `curl`-based reproduction steps, confirming the database
+state actually changed (one row instead of two; one audit entry instead
+of three), not just that a unit test passed. Full findings, reproduction
+evidence, and standalone engineering prompts for each:
+`docs/RED_TEAM_ASSESSMENT_2026-09-13-INVOICE-MANAGEMENT-POS.md`.

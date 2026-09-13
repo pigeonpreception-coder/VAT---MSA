@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Business;
 
+use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Integrations\Etariff\EtariffPort;
 use App\Models\ImportRecord;
@@ -57,10 +58,17 @@ class ForeignInvoiceViewController extends Controller
         $user = $request->user();
         $organisation = $this->organisations->resolve($user, $request->query('organisation_id'));
 
-        $result = $this->foreignInvoices->pullFromEtariff($organisation, $user);
+        try {
+            $result = $this->foreignInvoices->pullFromEtariff($organisation, $user, $this->formIdempotencyKey($request));
+        } catch (RepositoryConflictException $e) {
+            return redirect()->route('invoice-management.foreign')->withErrors(['pull' => $e->getMessage()]);
+        }
 
         if ($result['status'] === 'BLOCKED_CONFIGURATION') {
             return redirect()->route('invoice-management.foreign')->withErrors(['pull' => $result['message']]);
+        }
+        if ($result['status'] === 'DUPLICATE_REQUEST_SUPPRESSED') {
+            return redirect()->route('invoice-management.foreign')->with('status', $result['message']);
         }
 
         return redirect()->route('invoice-management.foreign')->with('status', "Pulled {$result['pulled']} declaration(s) from E-Tariff.");

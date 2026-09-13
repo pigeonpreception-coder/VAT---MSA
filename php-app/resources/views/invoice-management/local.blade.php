@@ -21,7 +21,7 @@
         </ul>
     </div>
 @endif
-@if ($newCredential)
+@if ($newCredential && $newCredential['client_secret'])
     <div class="alert alert-warning" role="alert">
         <div class="fw-semibold">Copy this secret now -- it will not be shown again.</div>
         <div class="mt-2"><span class="text-muted small">Client key</span><div class="font-monospace">{{ $newCredential['client_key'] }}</div></div>
@@ -39,6 +39,7 @@
     <div class="card-body">
         <form method="POST" action="{{ route('invoice-management.local.credentials.store') }}" class="row g-2 align-items-end mb-3">
             @csrf
+            <x-idempotency-key/>
             <div class="col-md-6">
                 <label for="credential-name" class="form-label">Credential name</label>
                 <input type="text" id="credential-name" name="name" class="form-control" placeholder="e.g. Front counter till" required maxlength="100" value="{{ old('name') }}">
@@ -71,6 +72,7 @@
                                 @if ($client->status === 'ACTIVE')
                                     <form method="POST" action="{{ route('invoice-management.local.credentials.revoke', $client->id) }}" onsubmit="return confirm('Revoke this credential? The POS system using it will stop working immediately.');">
                                         @csrf
+                                        <x-idempotency-key/>
                                         <input type="hidden" name="reason" value="Revoked from Local Invoices">
                                         <button type="submit" class="btn btn-outline-danger btn-sm">Revoke</button>
                                     </form>
