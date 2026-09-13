@@ -174,17 +174,29 @@ config now feeds three real consumers" section.
 in `App\Support\Access\StepUp` and `App\Services\Platform\ReportExportService`.
 
 ### 10. Broader security review of the modules beyond the original red-team scope
-**Status: Buildable now** (curl/fetch-based, doesn't need a UI). The
-red-team assessment this session was explicitly UI-only and scoped to
-the 3 modules that had a UI at the time (Dashboard, Invoices, VAT
-Returns). Every other module now has a UI too (see #2, closed), but
-having a UI is not the same as having been adversarially tested --
-disputes, refunds, audit cases, licensing, access governance (including
-this session's new grant-a-user-an-access-right screen), the workflow
-engine, and the rest of the now-56-view surface have had zero
-adversarial testing beyond their own feature tests. That's untested
-surface, not verified-safe surface -- and it's now a larger surface than
-it was at the original compile, not a smaller one.
+**Status: NARROWED, not closed (2026-09-13).** See
+`docs/RED_TEAM_ASSESSMENT_2026-09-13.md` -- a systemic, cross-cutting
+pass (rate limiting, CSRF, mass assignment, IDOR/tenant scoping,
+self-approval/SoD, `password.confirm` coverage, file-upload validation,
+and the dynamic-permission/custom-role privilege boundary) plus a
+targeted adversarial attempt against this session's own newest,
+highest-privilege feature (the access-rights screen). Found and fixed
+one genuine gap (RT-006: no rate limiting on the password-confirmation
+step-up gate, the endpoint standing directly in front of every
+privileged action in the app) and fully reproduced-then-disproved one
+serious-looking privilege-escalation hypothesis (an ordinary tenant
+admin escalating to `access-rights:manage`/SUPER_ADMIN via a custom
+organisation role -- already blocked by a pre-existing allowlist,
+`Permissions::tenantGrantablePermissions()`), kept as permanent
+regression coverage. This was not an exhaustive per-module adversarial
+pass across all 56 views -- it targeted the failure modes most likely to
+matter (an unthrottled auth control, tenant-to-platform escalation) --
+so further module-by-module testing remains buildable-now, no external
+dependency, if deeper assurance is wanted.
+
+**Evidence**: `docs/RED_TEAM_ASSESSMENT_2026-09-13.md`; `tests/Feature/
+Auth/ConfirmPasswordTest.php`'s 2 new rate-limit tests; `tests/Feature/
+Security/TenantRoleEscalationTest.php`'s 8 tests.
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made

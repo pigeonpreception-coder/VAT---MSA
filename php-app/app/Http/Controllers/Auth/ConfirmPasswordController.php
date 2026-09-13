@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -19,6 +20,17 @@ use Illuminate\View\View;
  * an old session" property via Laravel's own tested mechanism; full TOTP
  * parity (step_up_events, mfa_totp_credentials) is a documented follow-up,
  * not silently dropped -- see docs/MIGRATION_MATRIX.md.
+ *
+ * Rate-limited on the same 5-attempts-then-lock shape as `LoginRequest`
+ * (this session's own broader security review, backlog #10): unlike the
+ * login form, an attacker here already holds a live, authenticated
+ * session (stolen cookie, XSS, a shared/left-unlocked device) but not
+ * necessarily the account's actual password -- without a limiter, this
+ * step-up gate itself was an unthrottled password oracle standing directly
+ * in front of every privileged action in the app (grant an access right,
+ * suspend a taxpayer, decide a registration, assign a membership).
+ * Keyed by user id (the actor is already known, unlike a pre-auth login
+ * attempt) plus IP for defense in depth.
  */
 class ConfirmPasswordController extends Controller
 {
@@ -31,10 +43,20 @@ class ConfirmPasswordController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $throttleKey = $this->throttleKey($request);
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+            throw ValidationException::withMessages(['password' => "Too many attempts. Try again in {$seconds} seconds."]);
+        }
+
         if (! Auth::guard('web')->validate(['email' => $request->user()->email, 'password' => $request->input('password')])) {
+            RateLimiter::hit($throttleKey);
+
             throw ValidationException::withMessages(['password' => 'The provided password does not match our records.']);
         }
 
+        RateLimiter::clear($throttleKey);
         $request->session()->put('auth.password_confirmed_at', time());
 
         // Deliberately not redirect()->intended(): that replays the *blocked*
@@ -51,6 +73,11 @@ class ConfirmPasswordController extends Controller
         // could otherwise turn this into an open redirect straight after a
         // real authentication check.
         return redirect()->to($this->safeRedirectTarget($request, $request->input('redirect_to')));
+    }
+
+    private function throttleKey(Request $request): string
+    {
+        return $request->user()->id.'|'.$request->ip();
     }
 
     private function safeRedirectTarget(Request $request, ?string $candidate): string

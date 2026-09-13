@@ -89,4 +89,40 @@ class ConfirmPasswordTest extends TestCase
         $confirm->assertSessionHasErrors('password');
         $confirm->assertSessionMissing('auth.password_confirmed_at');
     }
+
+    /**
+     * This session's own broader security review (backlog #10) found this
+     * endpoint had no rate limiting at all, unlike `LoginRequest`'s own
+     * 5-attempts throttle -- an attacker already holding a live,
+     * authenticated session (a stolen cookie, XSS, a shared or unlocked
+     * device) but not the account's actual password could brute-force it
+     * here, unthrottled, to pass the step-up gate guarding every privileged
+     * action in the app. Now rate-limited on the same shape as the login
+     * form, keyed by user id (the actor is already known here) plus IP.
+     */
+    public function test_repeated_wrong_passwords_are_rate_limited_same_as_login(): void
+    {
+        $user = $this->user();
+
+        for ($i = 0; $i < 5; $i++) {
+            $this->actingAs($user)->post('/confirm-password', ['password' => 'wrong-password']);
+        }
+
+        $locked = $this->actingAs($user)->post('/confirm-password', ['password' => 'correct-password']);
+
+        $locked->assertSessionHasErrors('password');
+        $locked->assertSessionMissing('auth.password_confirmed_at');
+        self::assertStringContainsString('Too many attempts', session('errors')->first('password'));
+    }
+
+    public function test_a_correct_password_clears_the_rate_limiter(): void
+    {
+        $user = $this->user();
+
+        $this->actingAs($user)->post('/confirm-password', ['password' => 'wrong-password']);
+        $this->actingAs($user)->post('/confirm-password', ['password' => 'wrong-password']);
+        $confirm = $this->actingAs($user)->post('/confirm-password', ['password' => 'correct-password']);
+
+        $confirm->assertSessionHas('auth.password_confirmed_at');
+    }
 }
