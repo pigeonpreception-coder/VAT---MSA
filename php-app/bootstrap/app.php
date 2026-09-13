@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -51,5 +52,48 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return response()->view('errors.403', ['message' => $e->getMessage()], 403);
+        });
+
+        // Red-team finding RT-001 (VAT-MSA Resilience Audit, 2026-09-09):
+        // ExpenseService::create() had a real DB-level unique constraint
+        // on (organisation_id, expense_number) but no application-level
+        // pre-check ahead of it and no catch for the resulting
+        // QueryException -- so a plain sequential resubmission (no
+        // concurrency needed) crashed with an uncaught 500 showing the raw
+        // SQL. ExpenseService now has its own pre-check (matching
+        // QuotationService's own established pattern), and the systemic
+        // root cause -- every Blade *ViewController generating a fresh
+        // idempotency key per request instead of a stable one, defeating
+        // CommandLedger::prior() -- is fixed too (see
+        // Controller::formIdempotencyKey() and <x-idempotency-key/>). This
+        // handler is the deliberate third layer: the same narrow
+        // check-then-insert race the audit flagged as a residual,
+        // unreproduced risk for every *other* domain with its own
+        // pre-check (quotations, employees, refund claims) still exists
+        // in principle under genuine concurrent request processing this
+        // single-worker dev server cannot produce -- so rather than trust
+        // that no other write path ever hits its own version of this same
+        // failure mode, any uncaught duplicate-key violation anywhere in
+        // the app now renders as a real, if generic, conflict message
+        // instead of a raw SQL error page.
+        //
+        // SQLSTATE 23000 covers more than a unique-key violation (e.g. a
+        // foreign-key violation too), so this only claims "conflict" for
+        // the specific MySQL/MariaDB duplicate-entry error code (1062) --
+        // any other integrity violation still surfaces as a genuine
+        // uncaught exception rather than being mislabeled.
+        $exceptions->render(function (QueryException $e, Request $request) {
+            if ($e->getCode() !== '23000' || ! str_contains($e->getMessage(), 'Duplicate entry')) {
+                return null;
+            }
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'code' => 'CONFLICT',
+                    'message' => 'This action conflicts with an existing record. Refresh and try again.',
+                ], 409);
+            }
+
+            return back()->withErrors(['form' => 'This action conflicts with an existing record -- it may already have been submitted.'])->withInput();
         });
     })->create();

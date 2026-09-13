@@ -28,6 +28,7 @@
             @endif
             <form method="POST" action="{{ route('risk-indicators.evaluation.store') }}" class="row g-2">
                 @csrf
+                    <x-idempotency-key />
                 <div class="col-md-4">
                     <label for="vat_number" class="visually-hidden">VAT number</label>
                     <input type="text" id="vat_number" name="vat_number" value="{{ old('vat_number') }}" class="form-control" placeholder="VAT number, e.g. VAT-DEMO-0001" required>

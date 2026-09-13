@@ -79,6 +79,7 @@
                 @if ($canSell)
                     <form method="POST" action="{{ route('operations.inventory.checkout') }}" id="pos-form">
                         @csrf
+                        <x-idempotency-key />
                         <div class="mb-3">
                             <label for="warehouse_id" class="form-label">Warehouse</label>
                             <select class="form-select" id="warehouse_id" name="warehouse_id" required>

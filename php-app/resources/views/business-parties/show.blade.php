@@ -73,6 +73,7 @@
                     @php $canVerify = $party['vat_number'] && in_array('SUPPLIER', $party['relationships'], true); @endphp
                     <form method="POST" action="{{ route('business-parties.verification.store', $party['id']) }}" class="d-inline">
                         @csrf
+                    <x-idempotency-key />
                         <button type="submit" class="btn btn-primary btn-sm" @disabled(! $canVerify)>Verify against national taxpayer register</button>
                         @unless ($canVerify)
                             <span class="text-muted small ms-2">
@@ -108,6 +109,7 @@
                         <p class="text-muted small">Deactivating preserves all history but stops this party from being used in new transactions.</p>
                         <form method="POST" action="{{ route('business-parties.deactivation.store', $party['id']) }}">
                             @csrf
+                    <x-idempotency-key />
                             <div class="mb-2">
                                 <label for="reason" class="form-label small mb-0">Reason</label>
                                 <textarea id="reason" name="reason" minlength="5" maxlength="500" rows="2" required class="form-control form-control-sm @error('reason') is-invalid @enderror">{{ old('reason') }}</textarea>

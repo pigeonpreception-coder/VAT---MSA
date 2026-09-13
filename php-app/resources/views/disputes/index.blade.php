@@ -28,6 +28,7 @@
             @endif
             <form method="POST" action="{{ route('disputes.store') }}" class="row g-2">
                 @csrf
+                    <x-idempotency-key />
                 @if ($isNational)
                     <div class="col-md-2">
                         <label for="vat_number" class="form-label small mb-0">Taxpayer VAT number</label>

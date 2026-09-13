@@ -101,7 +101,7 @@ class BusinessPartyViewController extends Controller
         ];
 
         try {
-            $party = $this->parties->create($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), $request->input('organisation_id'));
+            $party = $this->parties->create($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), $request->input('organisation_id'));
         } catch (BusinessValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (RepositoryConflictException $e) {
@@ -116,7 +116,7 @@ class BusinessPartyViewController extends Controller
         $this->authorize('permission', 'parties:manage');
 
         try {
-            $this->verification->verify($id, $request->user(), (string) Str::uuid(), (string) Str::uuid(), $request->query('organisation_id'));
+            $this->verification->verify($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), $request->query('organisation_id'));
         } catch (BusinessResourceException $e) {
             // Redirects explicitly to the show page rather than back(): the
             // verify button only ever lives there, and back() depends on
@@ -136,7 +136,7 @@ class BusinessPartyViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'reason' => (string) $request->input('reason')];
 
         try {
-            $this->parties->deactivate($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), $request->query('organisation_id'));
+            $this->parties->deactivate($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), $request->query('organisation_id'));
         } catch (BusinessValidationException $e) {
             return redirect()->route('business-parties.show', $id)->withErrors($this->fieldErrors($e))->withInput();
         } catch (BusinessResourceException|RepositoryConflictException $e) {

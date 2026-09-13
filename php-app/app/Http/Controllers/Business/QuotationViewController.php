@@ -79,7 +79,7 @@ class QuotationViewController extends Controller
         $this->authorize('permission', 'quotations:manage');
 
         try {
-            $this->quotations->create($this->createPayload($request), $request->user(), (string) Str::uuid(), (string) Str::uuid(), null);
+            $this->quotations->create($this->createPayload($request), $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null);
         } catch (BusinessValidationException $e) {
             return redirect()->route('quotations.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
         } catch (BusinessResourceException|RepositoryConflictException $e) {
@@ -112,7 +112,7 @@ class QuotationViewController extends Controller
         $this->authorize('permission', 'quotations:manage');
 
         try {
-            $this->quotations->update($id, $this->editPayload($request), $request->user(), (string) Str::uuid(), (string) Str::uuid(), null);
+            $this->quotations->update($id, $this->editPayload($request), $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null);
         } catch (BusinessValidationException $e) {
             return redirect()->route('quotations.edit', $id)->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
         } catch (BusinessResourceException|RepositoryConflictException $e) {
@@ -126,14 +126,14 @@ class QuotationViewController extends Controller
     {
         $this->authorize('permission', 'quotations:manage');
 
-        return $this->runTransition(fn () => $this->quotations->send($id, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Quotation sent to the customer.');
+        return $this->runTransition(fn () => $this->quotations->send($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Quotation sent to the customer.');
     }
 
     public function accept(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'quotations:manage');
 
-        return $this->runTransition(fn () => $this->quotations->accept($id, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Quotation accepted.');
+        return $this->runTransition(fn () => $this->quotations->accept($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Quotation accepted.');
     }
 
     public function reject(Request $request, string $id): RedirectResponse
@@ -141,14 +141,14 @@ class QuotationViewController extends Controller
         $this->authorize('permission', 'quotations:manage');
         $payload = ['schema_version' => '1.0.0', 'reason' => (string) $request->input('reason')];
 
-        return $this->runTransition(fn () => $this->quotations->reject($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Quotation rejected.');
+        return $this->runTransition(fn () => $this->quotations->reject($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Quotation rejected.');
     }
 
     public function expire(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'quotations:manage');
 
-        return $this->runTransition(fn () => $this->quotations->expire($id, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Quotation expired.');
+        return $this->runTransition(fn () => $this->quotations->expire($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Quotation expired.');
     }
 
     public function convert(Request $request, string $id): RedirectResponse

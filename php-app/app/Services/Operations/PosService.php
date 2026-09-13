@@ -49,7 +49,7 @@ class PosService
      * @param list<array{product_id: string, quantity: int}> $cart
      * @return array{invoice: array<string, mixed>, failures: list<string>}
      */
-    public function checkout(array $cart, string $warehouseId, ?string $customerVatNumber, User $actor, ?string $requestedOrganisationId): array
+    public function checkout(array $cart, string $warehouseId, ?string $customerVatNumber, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
         $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
         $warehouse = Warehouse::where('id', $warehouseId)->where('organisation_id', $organisation->id)->first();
@@ -124,7 +124,7 @@ class PosService
         ];
 
         $correlationId = (string) Str::uuid();
-        $invoice = $this->invoices->submit($invoicePayload, $actor, (string) Str::uuid(), ['correlation_id' => $correlationId]);
+        $invoice = $this->invoices->submit($invoicePayload, $actor, $idempotencyKey, ['correlation_id' => $correlationId]);
 
         $failures = [];
         foreach ($products as $index => $entry) {

@@ -84,7 +84,7 @@ class RiskViewController extends Controller
         }
 
         try {
-            $this->risk->evaluate($taxpayer->id, ['schema_version' => '1.0.0'], $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->risk->evaluate($taxpayer->id, ['schema_version' => '1.0.0'], $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceResourceException $e) {
             return back()->withErrors(['vat_number' => $e->getMessage()])->withInput();
         }
@@ -100,7 +100,7 @@ class RiskViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'officer_id' => (string) $request->input('officer_id')];
 
         try {
-            $this->risk->assignReview($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->risk->assignReview($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e));
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -123,7 +123,7 @@ class RiskViewController extends Controller
         ];
 
         try {
-            $this->risk->approveAction($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->risk->approveAction($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {

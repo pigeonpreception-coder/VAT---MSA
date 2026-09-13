@@ -142,8 +142,7 @@ class OperationsViewController extends Controller
         ];
 
         try {
-            $this->expenses->create($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null);
-        } catch (BusinessValidationException $e) {
+            $this->expenses->create($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null);        } catch (BusinessValidationException $e) {
             return redirect()->route('operations.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
         } catch (BusinessResourceException|RepositoryConflictException $e) {
             return redirect()->route('operations.index')->withErrors(['expense' => $e->getMessage()])->withInput();
@@ -156,23 +155,20 @@ class OperationsViewController extends Controller
     {
         $this->authorize('permission', 'expenses:manage');
 
-        return $this->runTransition(fn () => $this->expenses->submit($id, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Expense submitted for independent review.');
-    }
+        return $this->runTransition(fn () => $this->expenses->submit($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Expense submitted for independent review.');    }
 
     public function approve(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'expenses:manage');
 
-        return $this->runTransition(fn () => $this->expenses->approve($id, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Expense approved.');
-    }
+        return $this->runTransition(fn () => $this->expenses->approve($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Expense approved.');    }
 
     public function reject(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'expenses:manage');
         $payload = ['schema_version' => '1.0.0', 'reason' => (string) $request->input('reason')];
 
-        return $this->runTransition(fn () => $this->expenses->reject($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null), 'Expense rejected.');
-    }
+        return $this->runTransition(fn () => $this->expenses->reject($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Expense rejected.');    }
 
     private function runTransition(\Closure $action, string $successMessage): RedirectResponse
     {

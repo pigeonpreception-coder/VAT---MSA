@@ -52,7 +52,7 @@ class LogisticsViewController extends Controller
         ];
 
         try {
-            $this->logistics->create($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null);
+            $this->logistics->create($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null);
         } catch (OperationsValidationException $e) {
             return redirect()->route('operations.logistics')->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
         } catch (BusinessResourceException|RepositoryConflictException $e) {
@@ -66,14 +66,14 @@ class LogisticsViewController extends Controller
     {
         $this->authorize('permission', 'logistics:manage');
 
-        return $this->runTransition(fn () => $this->logistics->dispatch($id, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Delivery dispatched.');
+        return $this->runTransition(fn () => $this->logistics->dispatch($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Delivery dispatched.');
     }
 
     public function deliver(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'logistics:manage');
 
-        return $this->runTransition(fn () => $this->logistics->deliver($id, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Delivery marked as delivered.');
+        return $this->runTransition(fn () => $this->logistics->deliver($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Delivery marked as delivered.');
     }
 
     public function cancel(Request $request, string $id): RedirectResponse
@@ -81,7 +81,7 @@ class LogisticsViewController extends Controller
         $this->authorize('permission', 'logistics:manage');
         $payload = ['schema_version' => '1.0.0', 'reason' => (string) $request->input('reason')];
 
-        return $this->runTransition(fn () => $this->logistics->cancel($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Delivery cancelled.');
+        return $this->runTransition(fn () => $this->logistics->cancel($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Delivery cancelled.');
     }
 
     private function runTransition(\Closure $action, string $successMessage): RedirectResponse

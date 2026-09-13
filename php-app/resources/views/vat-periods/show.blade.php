@@ -71,6 +71,7 @@
                     @if ($canGenerateNow)
                         <form method="POST" action="{{ route('vat-periods.return.store', $period['id']) }}">
                             @csrf
+                    <x-idempotency-key />
                             <button type="submit" class="btn btn-primary btn-sm">Generate return</button>
                         </form>
                     @elseif ($period['status'] !== 'OPEN')
@@ -88,6 +89,7 @@
             <p class="text-muted mb-0">A new draft return can be generated on top of the current one (e.g. after approved adjustments).</p>
             <form method="POST" action="{{ route('vat-periods.return.store', $period['id']) }}">
                 @csrf
+                    <x-idempotency-key />
                 <button type="submit" class="btn btn-outline-primary btn-sm">Generate new draft return</button>
             </form>
         </div>
@@ -150,6 +152,7 @@
                     @else
                         <form method="POST" action="{{ route('approval-tasks.decision.store', $task->id) }}" class="row g-2 align-items-end">
                             @csrf
+                    <x-idempotency-key />
                             <div class="col-md-8">
                                 <label for="comment-{{ $task->id }}" class="form-label">Comment</label>
                                 <input type="text" id="comment-{{ $task->id }}" name="comment" value="{{ old('comment') }}" class="form-control @error('comment') is-invalid @enderror" minlength="5" maxlength="1000" required>
@@ -171,6 +174,7 @@
             <h2 class="h6">Submit a new adjustment</h2>
             <form method="POST" action="{{ route('vat-periods.adjustments.store', $period['id']) }}" class="row g-2">
                 @csrf
+                    <x-idempotency-key />
                 <div class="col-md-3">
                     <label for="adjustment_type" class="form-label">Type</label>
                     <select id="adjustment_type" name="adjustment_type" class="form-select @error('adjustment_type') is-invalid @enderror" required>

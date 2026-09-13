@@ -102,6 +102,7 @@
                                         @if ($canManageQuotations)
                                             <form method="POST" action="{{ route('quotations.send', $item['id']) }}">
                                                 @csrf
+                    <x-idempotency-key />
                                                 <button type="submit" class="btn btn-sm btn-primary">Send</button>
                                             </form>
                                         @else
@@ -113,17 +114,20 @@
                                         @elseif ($overdue)
                                             <form method="POST" action="{{ route('quotations.expire', $item['id']) }}">
                                                 @csrf
+                    <x-idempotency-key />
                                                 <button type="submit" class="btn btn-sm btn-outline-secondary">Expire</button>
                                             </form>
                                         @else
                                             <div class="d-flex flex-wrap gap-1">
                                                 <form method="POST" action="{{ route('quotations.accept', $item['id']) }}">
                                                     @csrf
+                    <x-idempotency-key />
                                                     <button type="submit" class="btn btn-sm btn-outline-primary">Accept</button>
                                                 </form>
                                                 <a href="{{ route('quotations.edit', $item['id']) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
                                                 <form method="POST" action="{{ route('quotations.reject', $item['id']) }}" onsubmit="return quotationRejectPrompt(this);">
                                                     @csrf
+                    <x-idempotency-key />
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
                                                 </form>
@@ -133,6 +137,7 @@
                                         @if ($canConvertQuotations)
                                             <form method="POST" action="{{ route('quotations.convert', $item['id']) }}" class="d-flex gap-1">
                                                 @csrf
+                    <x-idempotency-key />
                                                 <input type="text" class="form-control form-control-sm font-monospace" name="invoice_number" aria-label="Invoice number" required minlength="2" maxlength="100" placeholder="INV-2026-0001">
                                                 <input type="date" class="form-control form-control-sm" name="issue_date" aria-label="Invoice issue date" required min="{{ $item['issue_date'] }}" value="{{ $todayIso }}">
                                                 <button type="submit" class="btn btn-sm btn-primary text-nowrap">Convert</button>
@@ -166,6 +171,7 @@
                 @else
                     <form method="POST" action="{{ route('quotations.store') }}">
                         @csrf
+                    <x-idempotency-key />
                         <div class="mb-3">
                             <label for="quotation_number" class="form-label">Quotation number</label>
                             <input type="text" class="form-control font-monospace" id="quotation_number" name="quotation_number" required maxlength="40" placeholder="QUO-2026-0002" value="{{ old('quotation_number') }}">

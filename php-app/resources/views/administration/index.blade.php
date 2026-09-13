@@ -11,6 +11,12 @@
     // See docs/MIGRATION_MATRIX.md's Administration section.
     $openCapacityExceptions = collect($snapshot['capacityExceptions'] ?? [])->where('status', 'OPEN');
     $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    // Not re-derived here as a local closure (main's own merge history had
+    // one, `$capacityMode`, as a workaround) -- App\Support\Licensing\
+    // LicenseResolver::getEntitlements already computes a real
+    // `capacity_mode` field (NOT_APPLICABLE/UNLIMITED/FINITE) on every
+    // entitlement row, so this view reads that directly, matching the
+    // rest of this migration's own single-source-of-truth convention.
 @endphp
 
 @section('content')
@@ -29,7 +35,7 @@
         <div class="card h-100"><div class="card-body">
             <div class="text-muted small text-uppercase">Licence</div>
             <div class="fs-4 fw-semibold">{{ $snapshot['license']['plan_name'] }}</div>
-            <div class="small text-success">Price-free configurable placeholder &middot; {{ $snapshot['license']['state'] }}</div>
+            <div class="small text-success">Price-free configurable placeholder &middot; <x-status-badge :value="$snapshot['license']['state']" type="license" /></div>
         </div></div>
     </div>
     <div class="col">
@@ -253,7 +259,7 @@
             <div class="fw-semibold">Licence entitlements and usage</div>
             <div class="text-muted small">No prices configured &middot; expiry is non-destructive</div>
         </div>
-        <x-status-badge :value="$snapshot['license']['state']" type="status" />
+        <x-status-badge :value="$snapshot['license']['state']" type="license" />
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">

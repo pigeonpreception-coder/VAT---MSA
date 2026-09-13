@@ -106,7 +106,7 @@ class VatLifecycleViewController extends Controller
         ];
 
         try {
-            $this->vatLifecycle->createAdjustment($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->vatLifecycle->createAdjustment($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (VatLifecycleValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (RepositoryConflictException|VatLifecycleResourceException $e) {
@@ -121,7 +121,7 @@ class VatLifecycleViewController extends Controller
         $this->authorize('permission', 'returns:generate');
 
         try {
-            $version = $this->vatLifecycle->generateReturn($id, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $version = $this->vatLifecycle->generateReturn($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (RepositoryConflictException|VatLifecycleResourceException $e) {
             return redirect()->route('vat-periods.show', $id)->withErrors(['form' => $e->getMessage()]);
         }
@@ -134,7 +134,7 @@ class VatLifecycleViewController extends Controller
         $this->authorize('permission', 'returns:generate');
 
         try {
-            $this->vatLifecycle->requestReturnApproval($id, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->vatLifecycle->requestReturnApproval($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (RepositoryConflictException|VatLifecycleResourceException $e) {
             return back()->withErrors(['form' => $e->getMessage()]);
         }
@@ -147,7 +147,7 @@ class VatLifecycleViewController extends Controller
         $this->authorize('permission', 'returns:submit');
 
         try {
-            $this->vatLifecycle->submitReturn($id, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->vatLifecycle->submitReturn($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (RepositoryConflictException|VatLifecycleResourceException $e) {
             return back()->withErrors(['form' => $e->getMessage()]);
         }
@@ -163,7 +163,7 @@ class VatLifecycleViewController extends Controller
         $decisionInput = ['decision' => $request->input('decision'), 'comment' => $request->input('comment')];
 
         try {
-            $this->vatLifecycle->decideApproval($id, $decisionInput, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->vatLifecycle->decideApproval($id, $decisionInput, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (VatLifecycleValidationException $e) {
             return back()->withErrors($this->fieldErrors($e));
         } catch (RepositoryConflictException|VatLifecycleResourceException|AuthorizationException $e) {

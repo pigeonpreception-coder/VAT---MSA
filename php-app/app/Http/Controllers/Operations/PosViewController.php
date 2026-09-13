@@ -65,7 +65,7 @@ class PosViewController extends Controller
         }
 
         try {
-            $result = $this->pos->checkout($cart, (string) $request->input('warehouse_id'), $request->input('customer_vat_number') ?: null, $request->user(), null);
+            $result = $this->pos->checkout($cart, (string) $request->input('warehouse_id'), $request->input('customer_vat_number') ?: null, $request->user(), null, $this->formIdempotencyKey($request));
         } catch (BusinessValidationException|InvoiceValidationException $e) {
             return redirect()->route('operations.inventory')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (BusinessResourceException|RepositoryConflictException $e) {

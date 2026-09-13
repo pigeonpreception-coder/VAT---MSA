@@ -4630,7 +4630,420 @@ certification pipeline, confirming the full cross-module chain (this
 new slice, Business Parties, and Invoice certification) works
 end-to-end together, not just in isolation.
 
-### Sidebar restructuring (the fourteenth UI slice, master prompt §16-21 taxonomy)
+### Accounting dashboard (the fourteenth UI slice, the eighth fresh smaller PR)
+
+Ports the source's own `app/accounting/page.tsx` -- a read-only
+general ledger dashboard -- over `App\Models\ChartOfAccount` and
+`App\Models\JournalEntry`, both already present on `main` with zero
+model changes needed. Like Quotations, this one is extracted from PR
+#3 rather than written fresh (see the "Authority Governance" section
+above for that PR's full provenance and why it was never merged as a
+unit), but unlike every other extraction so far it needed **no
+adaptation at all**: no stale route names, no signature drift against
+`main`, nothing. `App\Http\Controllers\Business\AccountingController`
+(the existing JSON API, reachable at `/api/v1/accounting/**`) already
+fully supports posting journals, creating accounts, reversals, period
+close, trial balance and financial statements, so this slice is a UI
+gap only, not a backend one -- and the source's own scope for this
+specific screen is genuinely read-only (its own closing note, quoted
+verbatim in the view: "Interactive journal authoring and approval
+queues will be expanded with the VAT close workflow"), so this port
+stays read-only too rather than inventing forms the source doesn't
+have.
+
+New: `App\Http\Controllers\Business\AccountingViewController` (a
+single `index` action, gated on `accounting:read`, resolving the
+active organisation via the same `OrganisationResolver` every other
+slice already uses). Two new `<x-status-badge>` entries added to the
+shared map (`POSTED` success, `REVERSED` secondary) -- the real status
+literals `App\Services\Business\AccountingService` actually writes
+(confirmed by grepping the service directly rather than guessing from
+the view), alongside `ACTIVE` which the shared map already covered.
+No collision risk with any per-context map, since neither value
+appears in `indicator`/`taxpayer`/`license`.
+
+Verified by the ported `tests/Feature/Business/AccountingViewTest.php`
+(4 tests, passing unmodified): the page requires authentication; a
+role without `accounting:read` (`SELLER_VIEWER`) is forbidden; the
+ledger and chart of accounts render real seeded rows with the correct
+`postedCount`; an empty ledger renders its zero-state rows rather than
+erroring. 414 tests total, 0 regressions, run against real MySQL.
+Also verified live in the browser against the real
+`owner@demo-trading.test` demo organisation: posted a real balanced
+journal and created a real chart-of-accounts entry through the
+already-existing JSON API (`POST /api/v1/accounting/accounts` and
+`/api/v1/accounting/journals`, both idempotency-key-gated), then
+confirmed the dashboard's stat cards, journal register and chart of
+accounts all reflect that real data with the correct badge colours
+(`Posted` green, `Active` green) -- not just a zero-state render.
+
+### Documents register (the fourteenth UI slice, the eighth fresh smaller PR)
+
+Ports the source's own `app/documents/page.tsx` +
+`DocumentUploadForm.tsx` -- the evidence register and the real,
+governed upload-to-quarantine form -- over
+`App\Services\Document\DocumentService::upload`, the same method
+`App\Http\Controllers\Document\DocumentController::store` already
+serves at `POST /api/v1/documents`, including its real MIME allow-list,
+size bound, magic-byte content-sniffing and SHA-256 checksum -- none
+of that is re-implemented here. Extracted from PR #3 (see the
+"Authority Governance" section above for that PR's full provenance),
+and unlike every prior extraction so far, this one needed **no
+adaptation at all** -- `DocumentService::upload`'s signature and
+`App\Models\DocumentMetadata` were both untouched since PR #3
+branched.
+
+The source's own page has no UI at all for scan-decision, supersede,
+retention-hold or download (confirmed by reading the source's own
+`app/documents/page.tsx` in full -- its own subtitle even says
+"Downloads are unavailable while malware scanning is not configured",
+reproduced verbatim in the ported view), so none of those are built
+here either -- not a gap, a faithful match of the source's own scope
+for this specific screen. All four remain reachable at their existing
+JSON routes for whichever future admin/national-scope screen needs
+them.
+
+New: `App\Http\Controllers\Document\DocumentViewController`
+(index/store, gated on `documents:read`/`documents:upload`
+respectively -- both permissions already wired to the same roles the
+existing JSON `DocumentController` uses). Six new `<x-status-badge>`
+entries added to the shared map, all the real literals
+`DocumentService`/`DocumentValidator` actually write (confirmed by
+grep, not guessed): `QUARANTINED` warning, `PENDING_EXTERNAL_SCANNER`
+info, `CLEAN` success, `INFECTED` danger (the scan lifecycle), plus
+`TAX_CONFIDENTIAL` warning, `CONFIDENTIAL` info, `RESTRICTED` danger
+and `INTERNAL` secondary (the classification levels, using increasing
+severity rather than a workflow-state meaning -- the first time this
+map has mixed sensitivity levels alongside state, but no collision
+risk since none of those four strings were used by anything else in
+the map). `ACTIVE`, `REJECTED` and `SUPERSEDED` were already present
+from earlier slices and needed no change.
+
+Verified by the ported `tests/Feature/Document/DocumentViewTest.php`
+(7 tests, passing unmodified): the page requires authentication; a
+role without `documents:read` (`SELLER_VIEWER`) is forbidden; the
+register and upload form render a real seeded document; a valid PDF
+can be uploaded to quarantine through the real multipart form; a role
+without `documents:upload` (`TAXPAYER_VIEWER`) is forbidden from
+uploading even though it can view; a file whose content doesn't match
+its declared MIME type is rejected by the real magic-byte check; the
+upload form is prefilled from an `owner_domain`/`owner_resource_id`
+query string (the deep-link an Expenses screen would use). 417 tests
+total, 0 regressions, run against real MySQL. Also verified live in
+the browser against the real `owner@demo-trading.test` demo
+organisation: uploaded a real minimal PDF through the actual multipart
+form (`fetch()` with a real `FormData`/`Blob`, not a stub), landed in
+`QUARANTINED` with `scan_status=PENDING_EXTERNAL_SCANNER` exactly as
+the service produces it, and confirmed the register renders it with
+the correct badge colours (`Tax Confidential` amber, `Pending External
+Scanner` blue, `Quarantined` amber) and the `Documents`/`Quarantined`
+stat cards both increment from the same real row.
+
+### Business operations (the fourteenth UI slice, the eighth fresh smaller PR)
+
+Ports the source's own `app/operations/page.tsx` +
+`ExpenseDecisionActions.tsx` + `ExpenseReceiptActions.tsx` -- the
+expense register (with receipt evidence and independent maker-checker
+decisions), inventory balances and project control, plus a read-only
+fourth panel for customs import declarations. Extracted from PR #3
+(see the "Authority Governance" section above for that PR's full
+provenance). Reuses `App\Services\Business\ExpenseService` for every
+write and direct `InventoryBalance`/`Project(+Budget/Cost)` reads,
+mirroring `InventoryController`/`ProjectController`'s own existing
+inline-query precedent -- no second query/command path anywhere in
+this controller.
+
+**One genuine gap found and closed while extracting this slice:** the
+migration for `import_records` already existed on `main` (an earlier
+phase), but no `App\Models\ImportRecord` Eloquent model had ever been
+built for it -- a plain read-only model, ported verbatim from PR #3,
+closes that gap. A full-repo grep of the TypeScript source (reproduced
+in the model's own doc comment) confirms `import_records` is only ever
+read, never written by any command, so a plain read-only model is all
+any caller needs -- not a backend gap, matching the same posture
+already established for `report_definitions`/`data_products`/
+`feature_flags` elsewhere in this migration.
+
+**One real cross-slice dependency found and guarded:** the expense
+register's "Upload receipt" link points at `documents.index` --
+Documents ships as its own independently-mergeable PR (see the
+"Documents register" section above) and may not have landed on `main`
+yet when this PR merges. Wrapped in the same `Route::has()` guard
+`ComplianceOverviewViewController`'s own view already established for
+exactly this situation: the link renders once Documents lands, and
+degrades to plain text with no broken route until then. Verified live
+in the browser (this PR's own branch predates Documents on `main`):
+the link is correctly absent and "Receipt optional"/"Receipt required"
+render as plain text with no 500.
+
+One deliberate, documented deviation from the source, closing a
+confirmed dead end the same way the Quotations slice's "Send" action
+did: the source's own operations page has no create-expense form and
+no `DRAFT -> SUBMITTED` action anywhere (confirmed by a full-repo grep
+of the TypeScript source for "submission"/"submitExpense", reproduced
+in the controller's own doc comment), even though
+`ExpenseService::create`/`submit` are fully built. Without either, no
+expense created through this application could ever reach the
+maker-checker decision this same page's own UI is built around. This
+port adds both, the same way Quotations added "Send".
+
+New: `App\Http\Controllers\Business\OperationsViewController`
+(index/store/submit/approve/reject, gated on
+`expenses:read`/`expenses:manage`, both already wired to the correct
+roles). Two new `<x-status-badge>` entries added to the shared map --
+`SUBMITTED` info and `EVIDENCE_REQUIRED` warning, the real literals
+`ExpenseService`/`ImportRecord` rows actually carry -- alongside
+`DRAFT`/`APPROVED`/`REJECTED`/`ACTIVE`, all already present from
+earlier slices.
+
+Verified by the ported `tests/Feature/Business/OperationsViewTest.php`
+(9 tests, passing unmodified): the page requires authentication; a
+role without `expenses:read` (`SELLER_VIEWER`) is forbidden; all four
+panels render real seeded rows; import records are correctly scoped
+to the organisation; an expense can be recorded through the real
+form; a role without `expenses:manage` (`TAXPAYER_VIEWER`) cannot
+record one; a draft expense can be submitted then approved by an
+independent reviewer; the creator cannot approve their own submitted
+expense (a real `403`, `Illuminate\Auth\Access\AuthorizationException`
+propagating unmodified from `ExpenseService::approve`, not caught by
+this controller); a submitted expense can be rejected with a reason.
+419 tests total, 0 regressions, run against real MySQL. Also verified
+live in the browser against the real `owner@demo-trading.test` demo
+organisation: created a real expense category and a real expense
+through the actual form, submitted it, and confirmed the owner's own
+attempt to approve their own expense returns a real `403` -- the exact
+maker-checker rule the source's own UI is built around, enforced
+end-to-end, not just asserted by a test.
+
+### Administration command centre (extracted from PR #3, alongside Accounting/Documents/Operations)
+
+Ports the source's own `app/administration/page.tsx` +
+`AdministrationActions.tsx` -- licence entitlements/usage, employees and
+employment structure, organisation roles, versioned workflows, access
+governance, and this page's only two interactive actions: inviting an
+employee and creating a least-privilege organisation role. Extracted
+from PR #3 (`claude/next-key-task-7q98el`, see the "Authority
+Governance" section above for that PR's full provenance), branched in
+parallel alongside the Accounting, Documents and Operations
+extractions -- exact PR ordinal numbers among those four will settle
+once they're merged in whatever order actually happens; this section
+doesn't claim one.
+
+Reuses `App\Services\Administration\AdministrationSnapshotService::
+getAdministrationSnapshot` directly for the entire read (the same
+fixed-list aggregate every one of Phase 12's own five sub-domain
+slices already bundles into, confirmed unchanged since PR #3 branched
+-- signatures matched verbatim) and `App\Services\OrganisationAdmin\
+OrganisationAdminService::inviteEmployee`/`createOrganisationRole` for
+the two writes, the exact methods `OrganisationAdminController`
+already serves at `/api/v1/organisations/{employees,roles}`. Finally
+gives `AdministrationSnapshotService` its first UI anywhere in this
+migration -- it was explicitly passed over for the Licensing slice
+(PR #9) for exactly this reason, documented there at the time.
+
+One deliberate substitution carried over unchanged from PR #3, not
+introduced here: the source's own `AdministrationActions.tsx` gates
+both actions behind a client-side checkbox and a custom header the
+server trusts blindly -- theatre, not a real check. Both write routes
+here use the `password.confirm` middleware instead, the same
+server-enforced step-up every other sensitive command in this
+migration already uses.
+
+**Two real, adapted bugs, both caught by reading `LicenseResolver::
+getEntitlements` directly rather than trusting the ported view:**
+
+1. The view referenced `$entitlement['capacity_mode']` (and
+   `$seat['capacity_mode']`) throughout -- a field `getEntitlements`
+   has never returned (confirmed by reading it in full: `feature_key`,
+   `name`, `description`, `metric_key`, `enabled`, `limit_value`,
+   `used_value`, `reserved_value`, nothing else). This would have been
+   a PHP undefined-array-key warning on every single row. Fixed by
+   reusing the exact `limit_value === null` convention the Licensing
+   slice (PR #9, `resources/views/licensing/index.blade.php`) already
+   established for the identical "is this entitlement unlimited"
+   question, via a small `$capacityMode` closure local to this view,
+   rather than inventing a second convention or growing the shared
+   service's public contract for one caller.
+2. Both `<x-status-badge>` calls for the licence state used
+   `type="status"` (the default map) instead of `type="license"` --
+   the same "a licence being suspended is more severe than the default
+   map's own SUSPENDED" distinction `<x-status-badge>`'s own doc
+   comment already documents and the Licensing slice already
+   established. Fixed to `type="license"` in both places (the stat
+   card and the entitlements table header).
+
+New `<x-status-badge>` entries added to the shared map (real literals
+confirmed by grep against `OrganisationAdminService` and
+`WorkflowService`, not guessed from the view): `INVITED` (info, an
+employee record before their first login), `TERMINATED` (secondary,
+matching the CANCELLED/RETIRED "no longer active" grouping),
+`PUBLISHED` (success, a workflow version that's live), `COMPLETED`
+(success, an access review that finished), `DISABLED` (secondary, an
+entitlement toggled off). No collision risk with any existing entry or
+per-context map.
+
+Verified by the ported `tests/Feature/Administration/
+AdministrationViewTest.php` (8 tests, passing unmodified): the page
+requires authentication; a role without `administration:read`
+(`TAXPAYER_STAFF`) is forbidden; the full snapshot renders (licence,
+seats, employees, roles, workflows, access reviews, entitlements); an
+employee can be invited once step-up is confirmed; inviting without
+step-up redirects to `password.confirm`; a role without
+`employees:manage` (`TAXPAYER_ACCOUNTANT`) is forbidden from inviting;
+an organisation role can be created with step-up confirmed; creating a
+role with a protected permission (`security:manage`) fails validation
+without touching the database. 418 tests total, 0 regressions, run
+against real MySQL.
+
+Also verified live end-to-end against the real
+`owner@demo-trading.test` demo organisation (via `curl` with an
+explicit cookie jar, after an initial browser-tool `fetch()`-based
+attempt produced a false-positive "logs out on confirm" result traced
+to the tool's own `redirect: 'manual'` handling, not the app --
+cross-checked and ruled out before touching any code): confirmed the
+`capacity_mode` fix renders correctly against real entitlement rows
+(`Unlimited`/`Fixed` per feature, matching each one's real
+`limit_value`) with no PHP warnings in the response body; confirmed
+the licence badge renders `Active` in the correct green; opened a real
+quarterly access review (a genuine precondition `EntitlementGate::
+assert` enforces for administrative writes, not a bug -- the ported
+test file's own `openReview()` helper does the same thing), then
+invited a real employee (`EMP-LIVE-01`, rendering with the new
+`Invited` info badge) and created a real organisation role (`Branch
+VAT Reviewer`, scoped to `invoices:read, returns:read`) through the
+real step-up-gated forms.
+
+### The six portal dashboards + switchboard (extracted from PR #3, closing out the frontend build-out's own PR #3 salvage effort)
+
+Ports the source's own `app/portals/page.tsx` ("Portal switchboard")
+plus its six per-portal dashboards (`app/portal/{buyer,seller,namra,
+namra-admin,super-admin,developer}/page.tsx`) -- the last, largest and
+most interconnected candidate from PR #3 (`claude/next-key-task-7q98el`,
+see the "Authority Governance" section above for that PR's full
+provenance). Built as one PR rather than six: every dashboard shares
+the same gate precedent (`PortalService::getAvailablePortals()` role/
+capability membership, reused not re-derived) and the switchboard
+itself is the natural landing page linking to all six, so splitting
+them would have meant six PRs each briefly leaving the switchboard's
+own links half-broken depending on merge order.
+
+`App\Domain\Portal\PortalDefinitions` (already on `main`, Phase 12)
+already declared exactly six portals -- `buyer`, `seller`, `namra`,
+`namra-admin`, `super-admin`, `developer` -- so this slice's own scope
+was never in question. Four of the six dashboards need zero new
+backend query at all, only composition of already-existing snapshot
+services: NamRA (`IdentityFoundationSnapshotService`,
+`ComplianceSnapshotService`, `VatLifecycleService`), NamRA
+Administration (`AuthorityGovernanceService::getSnapshot`, the exact
+JSON read already covered by `tests/Feature/AuthorityGovernance/
+AuthorityGovernanceTest.php` -- this is that module's own first UI
+surface, closing the "backend-only for now" note in its own section
+above), Super Administration and Developer (both
+`PlatformSnapshotService`, whose `getTechnicalSnapshot`/
+`developerPortalSnapshot` methods already existed on `main` but had no
+Blade UI consumer before this). Buyer and Seller each needed one new,
+small snapshot service (`BuyerPortalSnapshotService`,
+`SellerPortalSnapshotService`) composing existing reads
+(`VatLifecycleService`, `DashboardSnapshotService`,
+`PlatformSnapshotService::documentCustodySummary`) plus one own-domain
+query each (expenses; quotation count/value) -- not a second copy of
+any other slice's own already-built query. Every method signature this
+slice depends on (nine across five existing services) was confirmed
+unchanged since PR #3 branched -- no adaptation needed there, unlike
+every prior extraction this build-out has done.
+
+**One genuine, additive gap-close applied to the existing
+`App\Services\Portal\PortalService`, not introduced fresh:** the
+source's own `lib/portals.ts` checks *both* role/capability membership
+*and* a `PORTAL_PERMISSIONS` map (`requireLicensedPermission`) before
+listing a portal; this port's `PortalService::getAvailablePortals()`
+had only ever reproduced the first half. Two of the six portal
+controllers make the gap concrete: `SuperAdminPortalController` gates
+on `platform:read` specifically (not the `dashboard:read` every other
+sibling controller uses, since `dashboard:read` is unconditional for
+every role and would make the check redundant with role/capability
+membership alone), and `SECURITY_ANALYST` is on `PortalDefinitions`'
+own `super-admin` role list but does not hold `platform:read` --
+`PortalService::getAvailablePortals()` alone would have kept showing
+that role a card that then always 403s. Same pattern for
+`DeveloperPortalController` (`developer:read`, `SELLER_ADMIN` the role
+that's listed but under-permissioned). Folding the same
+`PORTAL_PERMISSIONS` filter into `PortalService` itself (not just each
+portal controller) is what makes the switchboard stop showing those
+dead cards too. Every permission the map references
+(`dashboard:read`, `authority-governance:read`, `platform:read`,
+`developer:read`) already existed on `main` before this PR touched
+anything -- `authority-governance:read` specifically from the
+Authority Governance extraction (this build-out's own earlier PR),
+confirmed by grep before relying on it.
+
+New `<x-status-badge>` entries added to the shared map, every one
+confirmed against a real column enum or a real seeded/service-written
+literal (not guessed from the view, per this build-out's own
+established discipline): `SUBMITTED` (info, an expense awaiting
+approval -- `ExpenseService`), `PRODUCTION_APPROVED`/`REVOKED`/
+`CONTRACT_PENDING`/`CONFIGURATION_PENDING`/`CONFORMANCE_PENDING`/
+`LOCAL_STAGING_READY` (the real `tax_authority_federation_connections.
+status` DB enum), `COMPLETED`/`OVERDUE` (the real
+`tax_authority_access_reviews.status` DB enum, alongside the already-
+mapped `OPEN`), `CONFIGURED`/`REQUIRES_ITAS_CONFIRMATION`/
+`REQUIRES_SECURITY_DECISION` (the real `identity_providers.
+configuration_status` values `IdentityProviderSeeder` actually writes
+-- confirmed live: NamRA Administration's own identity-provider table
+renders exactly these three, correctly coloured, against the real
+seeded rows). Two fields were deliberately left unmapped rather than
+guessed: `service_components.{configuration_status,operational_status}`
+and `api_clients.status` -- neither table has a single command or
+seeder anywhere in this migration that writes to it yet (confirmed by
+grep), so there is no real literal to confirm against; both fall back
+to the shared map's existing neutral `text-bg-light` default, and both
+portal views' own `@empty` blocks render correctly in the meantime
+(verified live, not assumed).
+
+Verified by all seven ported test files (`BuyerPortalTest`,
+`SellerPortalTest`, `NamraPortalTest`, `NamraAdminPortalTest`,
+`SuperAdminPortalTest`, `DeveloperPortalTest`, `PortalViewTest` -- 31
+tests, passing unmodified): authentication is required on every
+portal; a role absent from a portal's own role list is forbidden; a
+role present on the list but missing that portal's specific
+`PORTAL_PERMISSIONS` entry is forbidden too (the exact gap this PR
+closes, covered for both `super-admin`/`SECURITY_ANALYST` and
+`developer`/`SELLER_ADMIN`); a taxpayer owner without the Buyer/Seller
+capability is denied that specific portal; an administrator with no
+governed Tax Authority scope is denied NamRA Administration
+specifically (`AuthorityGovernanceService::getSnapshot`'s own
+fail-closed `AuthorizationException`, not a bug); each dashboard
+renders its real snapshot data, correctly scoped to the actor's own
+organisation; an unlinked `DEVELOPER_PARTNER` sees the empty
+application registry rather than erroring; the switchboard shows
+exactly the portals a given role/capability combination is entitled
+to, from the empty state through to a `PILOT_ADMIN` seeing all six.
+441 tests total, 0 regressions, run against real MySQL.
+
+Also verified live end-to-end against the real dev database: logged in
+as `admin@vat-msa.test` (`PILOT_ADMIN`, already holding a real
+`tax_authority_administrators` row from the Authority Governance
+slice's own live verification) via `curl` with an explicit cookie jar
+-- the switchboard listed all six "Open X" buttons, and all six portal
+routes returned real `200` rendered pages with no PHP warnings in the
+response body. Confirmed real data throughout, not just a zero state:
+the Buyer portal's expense register showed a genuine `Submitted`
+badge; the Seller portal showed a certified invoice and five matched
+reconciliation rows; the NamRA portal showed a `High`-risk audit case;
+the NamRA Administration portal's identity-provider table showed all
+three real seeded providers with the correct `Active`/`Pending` status
+and `Configured`/`Requires Itas Confirmation`/`Requires Security
+Decision` configuration badges; the empty-state tables (authority
+units, federation, protected assignments, access reviews, service
+components, applications) all rendered their own correct "No X on
+record" copy rather than erroring on genuinely empty tables. Also
+confirmed visually in the browser as `owner@demo-trading.test`
+(`TAXPAYER_OWNER`): the switchboard correctly showed only the three
+portals that role/capability combination is entitled to (Buyer,
+Seller, Developer -- not NamRA/NamRA Administration/Super
+Administration), and the Buyer portal itself rendered with the same
+real `Submitted`-badged expense.
+### Sidebar restructuring (the fifteenth UI slice, master prompt §16-21 taxonomy)
 
 Not a port of an existing source screen -- this one starts from the
 NamRA e-VAT MS master prompt's own §16-21 sidebar architecture, which
@@ -4726,7 +5139,7 @@ suite: 518 tests, 0 regressions, run against real MySQL after a cold
 environment rebuild (`composer install`, starting MySQL, `npm run
 build` for the Vite manifest `layouts.app` needs to render at all).
 
-### The five Operations modules (the fifteenth UI slice)
+### The five Operations modules (the sixteenth UI slice)
 
 Replaces the sidebar restructuring's five Operations placeholders --
 Human Resources, Immovable Asset Management, Movable Asset Management,
@@ -5826,6 +6239,95 @@ then created a real `LOCAL_STAGING` onboarding case through the
 step-up-confirmed session and confirmed a real `SUBMITTED` row came
 back -- left in place afterward as harmless local demo data, alongside
 this session's other real cross-slice fixtures.
+
+## Duplicate-submission hardening (VAT-MSA Resilience Audit, 2026-09-09)
+
+A black-box red-team pass against `main` (after the six-portal PR merged)
+found one systemic architectural gap, manifesting as two Critical
+findings and a High-severity root cause. Full audit narrative, evidence,
+and every finding's own reproduction steps live in the published report;
+this section documents the fix.
+
+**RT-003 (root cause, High):** every Blade `*ViewController` write action
+-- 33 call sites across 9 controllers (`BusinessPartyViewController`,
+`OperationsViewController`, `QuotationViewController`,
+`AuditCaseViewController`, `DisputeViewController`,
+`ObligationViewController`, `RiskViewController`, `RefundViewController`,
+`VatLifecycleViewController`) -- generated a fresh `(string) Str::uuid()`
+as its idempotency key on every request, silently defeating
+`App\Support\Business\CommandLedger::prior()`'s own replay detection for
+the entire human-facing UI. The JSON API layer was never affected (real
+client-generated keys arrive via the `Idempotency-Key` header there,
+confirmed unrelated and untouched -- see `VatLifecycleController::
+idempotencyKey()`'s own header-reading method, which is why the new
+shared helper below is named `formIdempotencyKey()` instead).
+
+**Fix:** a new `resources/views/components/idempotency-key.blade.php`
+component renders one `Str::uuid()` into a hidden `idempotency_key`
+field, evaluated once per real GET request that renders a form -- a
+double-click or a browser-back-then-resubmit replays the same
+already-rendered HTML, so the same key travels with it; a genuine reload
+renders the component again and gets a new one. Added via
+`@csrf`-adjacent insertion to all 37 real POST/PATCH forms across the 9
+domains (confirmed 1:1 against every `@csrf` occurrence in each affected
+view, not just the 33 controller call sites, since two routes are each
+reachable from more than one screen). A new
+`Controller::formIdempotencyKey(Request $request)` helper reads
+`idempotency_key` from the request, falling back to a fresh UUID only if
+genuinely absent (a hand-crafted request, or a JSON caller hitting a
+Blade route directly) -- deliberately zero protection in that case,
+matching pre-fix behaviour, rather than trusting an attacker-suppliable
+value. All 33 call sites now pass `$this->formIdempotencyKey($request)`
+in place of the inline `Str::uuid()`.
+
+**RT-001 (Critical):** `ExpenseService::create()` had a real DB-level
+unique constraint on `(organisation_id, expense_number)` but -- unlike
+`QuotationService::create()`'s own established pattern -- no
+application-level pre-check ahead of it, and `OperationsViewController`'s
+own catch block never handled the resulting `QueryException`. A plain
+sequential resubmission (no concurrency needed) crashed with an uncaught
+500 showing the raw SQL. Fixed with the same pre-check
+`ExpenseService::createCategory()` already had for its own unique code,
+throwing `RepositoryConflictException` (already caught cleanly by the
+controller) on a real duplicate.
+
+**RT-002 (Critical):** `dispute_number` is auto-generated per insert, so
+disputes had no natural business key for a duplicate check to key off,
+and none was written -- neither a database constraint nor an
+application-level check existed. Every resubmission silently created a
+second, fully valid case with identical content; confirmed live via a
+genuine browser double-click producing two distinct `DSP-2026-*` cases
+from one "File" click. The RT-003 root-cause fix alone closes this: the
+real form's idempotency key is now stable, so `CommandLedger::prior()`
+inside `DisputeService::file()` recognises the replay and returns the
+original dispute.
+
+**Third layer, defense in depth:** `bootstrap/app.php`'s own
+`->withExceptions()` closure (already used for RT-002 of an *earlier*,
+2026-09-02 red-team pass -- see that section's own precedent, which this
+fix follows exactly) now also renders a friendly conflict message for
+any uncaught `QueryException` carrying SQLSTATE 23000 and a MySQL/MariaDB
+"Duplicate entry" message, app-wide. This exists specifically because
+the *other* three domains discovered to already have their own
+duplicate-number pre-check (quotations, employee invitations, refund
+claims) still share a narrow check-then-insert race window under genuine
+concurrent request processing -- unreproduced against this migration's
+single-worker dev server, and not separately fixed per-domain, but now
+covered by this one shared backstop rather than trusted to never
+happen.
+
+Verified: three new regression tests
+(`OperationsViewTest::test_resubmitting_an_expense_number_that_already_exists_shows_a_friendly_error_not_a_500`,
+`OperationsViewTest::test_resubmitting_the_same_rendered_form_via_its_own_idempotency_key_is_a_safe_replay_not_a_duplicate`,
+`DisputeViewTest::test_double_submitting_the_same_rendered_filing_form_creates_only_one_dispute`)
+plus the full existing suite -- 472 tests total, 0 regressions. Also
+re-verified live against a real running instance: the exact RT-001 and
+RT-002 reproduction steps from the original audit were re-run
+byte-for-byte, confirming a friendly "Expense number ... already exists"
+message (not a 500) and a single dispute record shared by both
+submissions (not two). A fresh page reload was also confirmed to render
+a genuinely new idempotency key, so a deliberate second, distinct
+submission is never blocked.
 
 ## Cloudflare/D1/R2/Vinext dependencies remaining
 

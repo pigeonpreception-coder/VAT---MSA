@@ -244,4 +244,62 @@ class OperationsViewTest extends TestCase
         $response->assertSessionHas('status', 'Expense rejected.');
         $this->assertDatabaseHas('expenses', ['id' => $expenseId, 'status' => 'REJECTED']);
     }
+
+    /**
+     * Red-team finding RT-001 (VAT-MSA Resilience Audit, 2026-09-09):
+     * expense_number carries a real DB-level unique constraint but had no
+     * application-level pre-check ahead of it -- a plain sequential
+     * resubmission (no concurrency needed) crashed with an uncaught 500
+     * showing the raw SQLSTATE[23000] error, confirmed live against a
+     * running dev instance. Two independent layers now cover this: the
+     * new pre-check in ExpenseService::create() (this test), and
+     * bootstrap/app.php's own QueryException handler as a last-resort
+     * backstop for any duplicate-key violation this or any other pre-check
+     * misses.
+     */
+    public function test_resubmitting_an_expense_number_that_already_exists_shows_a_friendly_error_not_a_500(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0007');
+        $category = $this->makeCategory($org['organisation']);
+        $payload = [
+            'expense_number' => 'EXP-DUP-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'description' => 'First submission', 'net_cents' => 10000, 'tax_cents' => 1500,
+        ];
+        $this->actingAs($org['owner'])->post('/operations/expenses', $payload)
+            ->assertSessionHas('status', 'Expense recorded.');
+
+        $response = $this->actingAs($org['owner'])->post('/operations/expenses', array_merge($payload, ['description' => 'Second, distinct submission attempt']));
+
+        $response->assertStatus(302)->assertSessionHasErrors('expense');
+        $this->assertSame(1, Expense::where('expense_number', 'EXP-DUP-0001')->count());
+    }
+
+    /**
+     * Red-team finding RT-003 (VAT-MSA Resilience Audit, 2026-09-09): the
+     * Blade UI layer generated a fresh idempotency key on every request,
+     * silently defeating App\Support\Business\CommandLedger::prior()'s own
+     * replay detection for every one of 11 controllers, this one included.
+     * A double-click (or a browser-back-then-resubmit) on the real "record
+     * expense" form now carries the same key both times -- the second
+     * request should be recognised as a replay of the first, returning the
+     * same expense rather than either creating a second row or falling
+     * through to the RT-001 duplicate-number error path.
+     */
+    public function test_resubmitting_the_same_rendered_form_via_its_own_idempotency_key_is_a_safe_replay_not_a_duplicate(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0008');
+        $category = $this->makeCategory($org['organisation']);
+        $payload = [
+            'expense_number' => 'EXP-REPLAY-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'description' => 'Double-click replay test', 'net_cents' => 10000, 'tax_cents' => 1500,
+            'idempotency_key' => (string) Str::uuid(),
+        ];
+
+        $this->actingAs($org['owner'])->post('/operations/expenses', $payload)
+            ->assertSessionHas('status', 'Expense recorded.');
+        $this->actingAs($org['owner'])->post('/operations/expenses', $payload)
+            ->assertSessionHas('status', 'Expense recorded.');
+
+        $this->assertSame(1, Expense::where('expense_number', 'EXP-REPLAY-0001')->count());
+    }
 }

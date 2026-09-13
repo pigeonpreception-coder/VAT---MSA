@@ -99,7 +99,12 @@
                                         <div class="text-muted small">{{ $expense['receipt']['scan_status'] }} / {{ $expense['receipt']['status'] }}</div>
                                     @else
                                         <div class="{{ $expense['requires_receipt'] ? 'text-warning' : 'text-muted' }} small">{{ $expense['requires_receipt'] ? 'Receipt required' : 'Receipt optional' }}</div>
-                                        <a href="{{ route('documents.index', ['owner_domain' => 'EXPENSE', 'owner_resource_id' => $expense['id']]) }}" class="small">Upload receipt</a>
+                                        {{-- Route::has() guard: the Documents module ships as its own
+                                             independently-mergeable PR (see docs/MIGRATION_MATRIX.md) and
+                                             may not have landed on main yet at this PR's own merge time. --}}
+                                        @if (Route::has('documents.index'))
+                                            <a href="{{ route('documents.index', ['owner_domain' => 'EXPENSE', 'owner_resource_id' => $expense['id']]) }}" class="small">Upload receipt</a>
+                                        @endif
                                     @endif
                                 </td>
                                 <td>
@@ -107,6 +112,7 @@
                                         @if ($canManageExpenses)
                                             <form method="POST" action="{{ route('operations.submit', $expense['id']) }}">
                                                 @csrf
+                                                <x-idempotency-key />
                                                 <button type="submit" class="btn btn-sm btn-primary">Submit</button>
                                             </form>
                                         @else
@@ -121,10 +127,12 @@
                                             <div class="d-flex gap-1">
                                                 <form method="POST" action="{{ route('operations.approve', $expense['id']) }}">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <button type="submit" class="btn btn-sm btn-primary">Approve</button>
                                                 </form>
                                                 <form method="POST" action="{{ route('operations.reject', $expense['id']) }}" onsubmit="return operationsDecisionPrompt(this, 'rejection');">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
                                                 </form>
@@ -156,6 +164,7 @@
                 @else
                     <form method="POST" action="{{ route('operations.store') }}">
                         @csrf
+                        <x-idempotency-key />
                         <div class="mb-3">
                             <label for="expense_number" class="form-label">Expense number</label>
                             <input type="text" class="form-control font-monospace" id="expense_number" name="expense_number" required maxlength="40" placeholder="EXP-2026-0001" value="{{ old('expense_number') }}">

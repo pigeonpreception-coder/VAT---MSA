@@ -62,10 +62,12 @@
                                             <div class="d-flex flex-wrap gap-1">
                                                 <form method="POST" action="{{ route('operations.logistics.dispatch', $delivery['id']) }}">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <button type="submit" class="btn btn-sm btn-primary">Dispatch</button>
                                                 </form>
                                                 <form method="POST" action="{{ route('operations.logistics.cancellation', $delivery['id']) }}" onsubmit="return logisticsReasonPrompt(this);">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
                                                 </form>
@@ -74,10 +76,12 @@
                                             <div class="d-flex flex-wrap gap-1">
                                                 <form method="POST" action="{{ route('operations.logistics.delivery', $delivery['id']) }}">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <button type="submit" class="btn btn-sm btn-primary">Mark delivered</button>
                                                 </form>
                                                 <form method="POST" action="{{ route('operations.logistics.cancellation', $delivery['id']) }}" onsubmit="return logisticsReasonPrompt(this);">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
                                                 </form>
@@ -107,6 +111,7 @@
                 <div class="card-body">
                     <form method="POST" action="{{ route('operations.logistics.store') }}">
                         @csrf
+                        <x-idempotency-key />
                         <div class="mb-3">
                             <label for="delivery_number" class="form-label">Delivery number</label>
                             <input type="text" class="form-control font-monospace" id="delivery_number" name="delivery_number" required maxlength="40" value="{{ old('delivery_number') }}">

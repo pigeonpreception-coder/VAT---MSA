@@ -106,7 +106,7 @@ class DisputeViewController extends Controller
         ];
 
         try {
-            $dispute = $this->disputes->file($payload, $actor, (string) Str::uuid(), (string) Str::uuid());
+            $dispute = $this->disputes->file($payload, $actor, $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException $e) {

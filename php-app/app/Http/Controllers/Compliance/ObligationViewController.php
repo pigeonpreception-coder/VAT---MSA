@@ -82,7 +82,7 @@ class ObligationViewController extends Controller
         ];
 
         try {
-            $this->obligations->create($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->obligations->create($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -99,7 +99,7 @@ class ObligationViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'notes' => (string) $request->input('notes')];
 
         try {
-            $this->obligations->markSatisfied($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->obligations->markSatisfied($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (ComplianceValidationException $e) {
             return back()->withErrors($this->fieldErrors($e))->withInput();
         } catch (ComplianceResourceException|AuthorizationException $e) {

@@ -65,11 +65,13 @@
                                             <div class="d-flex flex-wrap gap-1">
                                                 <form method="POST" action="{{ route('operations.fixed-assets.maintenance', $asset['id']) }}">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="return_to" value="{{ $routeName }}">
                                                     <button type="submit" class="btn btn-sm btn-outline-secondary">Flag maintenance</button>
                                                 </form>
                                                 <form method="POST" action="{{ route('operations.fixed-assets.disposal', $asset['id']) }}" onsubmit="return fixedAssetReasonPrompt(this, 'disposal');">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="return_to" value="{{ $routeName }}">
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Dispose</button>
@@ -79,11 +81,13 @@
                                             <div class="d-flex flex-wrap gap-1">
                                                 <form method="POST" action="{{ route('operations.fixed-assets.restoration', $asset['id']) }}">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="return_to" value="{{ $routeName }}">
                                                     <button type="submit" class="btn btn-sm btn-primary">Restore</button>
                                                 </form>
                                                 <form method="POST" action="{{ route('operations.fixed-assets.disposal', $asset['id']) }}" onsubmit="return fixedAssetReasonPrompt(this, 'disposal');">
                                                     @csrf
+                                                    <x-idempotency-key />
                                                     <input type="hidden" name="return_to" value="{{ $routeName }}">
                                                     <input type="hidden" name="reason" value="">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">Dispose</button>
@@ -114,6 +118,7 @@
                 <div class="card-body">
                     <form method="POST" action="{{ route('operations.fixed-assets.store') }}">
                         @csrf
+                        <x-idempotency-key />
                         <input type="hidden" name="asset_class" value="{{ $assetClass }}">
                         <input type="hidden" name="return_to" value="{{ $routeName }}">
                         <div class="mb-3">

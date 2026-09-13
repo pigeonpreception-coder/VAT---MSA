@@ -79,6 +79,7 @@
                         <p class="text-muted small">Sends this draft to a maker-checker reviewer. Once approved, the VAT period locks.</p>
                         <form method="POST" action="{{ route('vat-returns.approval-request.store', $version['id']) }}">
                             @csrf
+                    <x-idempotency-key />
                             <button type="submit" class="btn btn-primary btn-sm">Request approval</button>
                         </form>
                     </div>
@@ -96,6 +97,7 @@
                         <p class="text-muted small">Submits the approved return to the tax authority's submission provider.</p>
                         <form method="POST" action="{{ route('vat-returns.submission.store', $version['id']) }}">
                             @csrf
+                    <x-idempotency-key />
                             <button type="submit" class="btn btn-primary btn-sm">Submit to ITAS</button>
                         </form>
                     </div>
@@ -113,6 +115,7 @@
                         @if ($canDecideThis)
                             <form method="POST" action="{{ route('approval-tasks.decision.store', $pendingApproval['id']) }}">
                                 @csrf
+                    <x-idempotency-key />
                                 <div class="mb-2">
                                     <label for="comment" class="form-label">Comment</label>
                                     <textarea id="comment" name="comment" class="form-control @error('comment') is-invalid @enderror" minlength="5" maxlength="1000" rows="2" required>{{ old('comment') }}</textarea>
@@ -139,6 +142,7 @@
                         <p class="text-muted small">This return shows a negative net position -- a refund of {{ $money(abs($version['net_payable_cents'])) }} may be claimed against it.</p>
                         <form method="POST" action="{{ route('vat-returns.refund-request.store', $version['id']) }}">
                             @csrf
+                    <x-idempotency-key />
                             <button type="submit" class="btn btn-primary btn-sm">Request refund</button>
                         </form>
                     </div>

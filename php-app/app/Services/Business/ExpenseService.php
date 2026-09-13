@@ -76,6 +76,23 @@ class ExpenseService
         // project_id: no ownership check yet -- projects (Phase 10's own later
         // sub-slice) has no table to check against, matching the expenses
         // migration's own documented gap.
+        // Same pre-check createCategory() above already has for its own
+        // unique code -- expense_number carries a real DB-level unique
+        // constraint (organisation_id, expense_number) but had no
+        // application-level check ahead of it, so a resubmission with an
+        // unchanged idempotency key (the JSON API's own real client-
+        // generated one; the UI layer's own key is stable per rendered
+        // form since <x-idempotency-key/>, so CommandLedger::prior() above
+        // already catches an ordinary double-click before reaching here)
+        // still fell straight through to an uncaught QueryException on the
+        // duplicate-key INSERT. A red-team pass caught this as a live,
+        // deterministic 500 on a plain sequential resubmission -- see
+        // docs/MIGRATION_MATRIX.md's "Duplicate-submission hardening"
+        // section.
+        $duplicateNumber = Expense::where('organisation_id', $organisation->id)->where('expense_number', $expense['expense_number'])->first();
+        if ($duplicateNumber) {
+            throw new RepositoryConflictException("Expense number {$expense['expense_number']} already exists as {$duplicateNumber->id}.");
+        }
 
         $id = (string) Str::uuid();
         $now = now();

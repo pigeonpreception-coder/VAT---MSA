@@ -57,6 +57,7 @@
                 <p class="text-muted small">Moves this indicator to Under Review under a named officer's own accountability.</p>
                 <form method="POST" action="{{ route('risk-indicators.assignment.store', $indicator->id) }}" class="row g-2">
                     @csrf
+                    <x-idempotency-key />
                     <div class="col-md-6">
                         <label for="officer_id" class="form-label">Officer</label>
                         <select id="officer_id" name="officer_id" class="form-select @error('officer_id') is-invalid @enderror" required>
@@ -82,6 +83,7 @@
                 <p class="text-muted small">Dismiss the signal, or escalate it into a governed audit case -- the case's risk tier and opening reason are taken from this indicator's own severity and your rationale, never entered independently.</p>
                 <form method="POST" action="{{ route('risk-indicators.decision.store', $indicator->id) }}" id="decision-form">
                     @csrf
+                    <x-idempotency-key />
                     <div class="mb-2">
                         <label for="decision" class="form-label">Decision</label>
                         <select id="decision" name="decision" class="form-select @error('decision') is-invalid @enderror" required onchange="document.getElementById('case-fields').hidden = this.value !== 'ESCALATE_TO_CASE'">

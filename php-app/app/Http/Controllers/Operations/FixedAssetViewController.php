@@ -72,7 +72,7 @@ class FixedAssetViewController extends Controller
         ];
 
         try {
-            $this->assets->register($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid(), null);
+            $this->assets->register($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null);
         } catch (OperationsValidationException $e) {
             return redirect()->route($returnTo)->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
         } catch (BusinessResourceException|RepositoryConflictException $e) {
@@ -87,21 +87,21 @@ class FixedAssetViewController extends Controller
         $this->authorize('permission', 'fixed-assets:manage');
         $payload = ['schema_version' => '1.0.0', 'current_value_cents' => (int) $request->input('current_value_cents', 0)];
 
-        return $this->runTransition($request, fn () => $this->assets->recordValuation($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Valuation recorded.');
+        return $this->runTransition($request, fn () => $this->assets->recordValuation($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Valuation recorded.');
     }
 
     public function maintenance(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'fixed-assets:manage');
 
-        return $this->runTransition($request, fn () => $this->assets->flagMaintenance($id, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Asset flagged for maintenance.');
+        return $this->runTransition($request, fn () => $this->assets->flagMaintenance($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Asset flagged for maintenance.');
     }
 
     public function restoration(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'fixed-assets:manage');
 
-        return $this->runTransition($request, fn () => $this->assets->restore($id, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Asset restored to active service.');
+        return $this->runTransition($request, fn () => $this->assets->restore($id, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Asset restored to active service.');
     }
 
     public function disposal(Request $request, string $id): RedirectResponse
@@ -109,7 +109,7 @@ class FixedAssetViewController extends Controller
         $this->authorize('permission', 'fixed-assets:manage');
         $payload = ['schema_version' => '1.0.0', 'reason' => (string) $request->input('reason')];
 
-        return $this->runTransition($request, fn () => $this->assets->dispose($id, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid()), 'Asset disposed.');
+        return $this->runTransition($request, fn () => $this->assets->dispose($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Asset disposed.');
     }
 
     private function runTransition(Request $request, \Closure $action, string $successMessage): RedirectResponse
