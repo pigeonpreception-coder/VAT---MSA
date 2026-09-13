@@ -4630,6 +4630,102 @@ certification pipeline, confirming the full cross-module chain (this
 new slice, Business Parties, and Invoice certification) works
 end-to-end together, not just in isolation.
 
+### Sidebar restructuring (the fourteenth UI slice, master prompt §16-21 taxonomy)
+
+Not a port of an existing source screen -- this one starts from the
+NamRA e-VAT MS master prompt's own §16-21 sidebar architecture, which
+defines 9 named top-level navigation groups (Dashboard, VAT Management,
+Invoice Management, Accounting & Finance, Operations, Quotation,
+Project Management, Registered, New Registration) with specific
+subfolders under each, several of them reserved for a later build
+rather than backed by a real screen yet. The TypeScript source
+(`app/`, root of this repository) was restructured to this taxonomy
+first, in this same session; this slice is that restructuring ported
+onto `layouts.app`'s sidebar, the one Blade partial every module in
+this build-out shares, rather than a new controller or service.
+
+`layouts/app.blade.php`'s sidebar `<ul>` was rewritten around a
+`$groups` map (group key -> `routeIs()` glob patterns) and an
+`$activeGroup` lookup that auto-expands whichever group contains the
+current route, replacing the old flat link list with 9 new
+Bootstrap-collapse `<li class="sidebar-group">` blocks (a
+`data-bs-toggle="collapse"` trigger button over a `.sidebar-subnav`
+list of `@can('permission', ...)`-gated items) plus the 5 groups this
+build-out had already shipped (Documents & Records, Reporting &
+Analytics, Administration, Licensing & Subscription, Platform),
+preserved unchanged and resorted after the 9 new ones.
+
+Every subfolder that already has a real screen from an earlier slice
+in this same build-out links straight to it rather than getting a
+placeholder -- VAT Returns/Refunds/Risk Indicators/Disputes/
+Obligations/Compliance Overview (VAT Management), General Ledger
+(Accounting & Finance), the existing Operations register (Operations),
+Business Parties filtered by relationship (Registered, New
+Registration -- `business-parties.index?relationship=CUSTOMER|SUPPLIER`,
+a filter `BusinessPartyViewController::index()` already applied via
+`$request->only([..., 'relationship', ...])` before this slice ever
+touched it, so no controller change was needed here, unlike the
+TypeScript port which had to add that filter itself), and Quotations
+(Quotation -- both "Create" and "Issued" route to `quotations.index`).
+
+New: `resources/views/components/planned-module.blade.php` (a shared
+`@props(['eyebrow','title','description','scopeNote'])` component
+rendering a "Reserved for a future release" card with a DRAFT
+`<x-status-badge>` and an info box reading "This module is not built
+yet.") and `resources/views/planned/show.blade.php` (the thin
+`layouts.app` wrapper around it). `routes/web.php` defines a
+`$plannedRoute` closure (path/name/permission/eyebrow/title/
+description/scopeNote) called once per subfolder with no real screen
+yet -- 23 routes total: VAT Audit Report/Adjustment Report; Local/
+Foreign invoices; Supplier/Customer Ledger, Fixed Assets, Budgets,
+Purchase Orders, Cash Flow (Accounting & Finance); Human Resources,
+Immovable/Movable Assets, Logistics, ERP (Operations -- the five real
+modules built for these in the TypeScript source in this same session
+were deliberately **not** ported here; this slice is the navigation
+and placeholder restructuring only, matching what was actually asked
+for); Converted/Converted Invoices (Quotation); New/Ongoing/Completed
+(Project Management); Service Providers (Registered); Credit Note/
+Debit Note (New Registration).
+
+**One real modelling bug caught by a test, not eyeballing:** the
+Invoice Reconciliation placeholder was first gated on `risk:read` --
+copied from the adjacent Risk Indicators item without checking who
+actually holds it. `risk:read` is NamRA/national-scope only
+(`Permissions::ROLE_PERMISSIONS` has no `TAXPAYER_*` role holding it),
+so a `TAXPAYER_OWNER` fixture got a 403 in a throwaway smoke test
+against every placeholder route. Fixed by re-gating on `compliance:read`
+in both `routes/web.php` and `layouts/app.blade.php` -- every taxpayer
+role already holds it, and it matches how the TypeScript source's own,
+real reconciliation feature is gated (`exceptions:read`, a taxpayer-
+facing permission), which `risk:read` never was.
+
+`resources/css/app.css` gained three small rules for the new collapse
+chrome (`.sidebar-group-trigger`, a rotating `.sidebar-group-caret`,
+and indentation for `.sidebar-subnav`) after the pre-existing
+`.sidebar-nav .nav-link[aria-current="page"]` rule.
+
+Deliberately left untouched, and recorded here rather than silently
+skipped: `App\Services\Navigation\NavigationService` and its
+`NavigationSeeder` are a separate, DB-driven navigation tree that
+mirrors the *old*, un-restructured 12-workspace taxonomy -- but nothing
+in the rendered UI reads from it; only the JSON navigation API and its
+own `tests/Feature/Navigation/NavigationTest.php` do. Re-seeding it to
+the new 9-group taxonomy is a real follow-on item if that JSON API
+ever needs to agree with the sidebar a person actually sees, but nothing
+in this slice's own scope (a Blade sidebar) depends on it.
+
+Verified by a temporary `tests/Feature/Navigation/
+SidebarRestructuringSmokeTest.php` (39 assertions: all 12 group
+headings render, all 23 placeholder routes return 200 under a
+permission-holding actor, and both `business-parties.index`
+relationship filters return 200) -- written to catch exactly the kind
+of gating mistake described above, then deleted before commit per its
+own doc comment, since (like every other slice's throwaway checks) it
+duplicated coverage rather than adding a lasting regression test. Full
+suite: 518 tests, 0 regressions, run against real MySQL after a cold
+environment rebuild (`composer install`, starting MySQL, `npm run
+build` for the Vite manifest `layouts.app` needs to render at all).
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
