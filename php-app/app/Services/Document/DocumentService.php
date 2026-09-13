@@ -12,6 +12,7 @@ use App\Support\Access\TenantScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -30,11 +31,12 @@ use Illuminate\Support\Str;
  *
  * `env.DOCUMENTS` (a Cloudflare R2 bucket binding in the source) has no
  * Laravel equivalent in this migration by design (no Cloudflare
- * dependency of any kind) -- substituted with Laravel's own `local`
- * filesystem disk, storing under the identical `quarantine/{organisation_id}/
- * {document_id}/{file_name}` object-key shape the source uses, so the
- * eventual real object-storage adapter (S3/R2-compatible, whenever a
- * later phase needs one) is a disk-driver swap, not a key-shape rewrite.
+ * dependency of any kind) -- substituted with whichever disk `$this->
+ * disk()` resolves to (`FILESYSTEM_DISK`, `local` by default), storing
+ * under the identical `quarantine/{organisation_id}/{document_id}/
+ * {file_name}` object-key shape the source uses, so a real S3/
+ * R2-compatible object-storage disk (see docs/DEPLOYMENT.md's "Storage"
+ * section) is a config change, not a key-shape rewrite.
  *
  * The magic-byte content-sniffing check (`matchesDeclaredType`) is a
  * genuine, named security control in the source (SECURITY_GAP_ASSESSMENT.md
@@ -61,6 +63,17 @@ class DocumentService
     private const CLASSIFICATIONS = ['INTERNAL', 'CONFIDENTIAL', 'TAX_CONFIDENTIAL', 'RESTRICTED'];
 
     public function __construct(private readonly OrganisationResolver $organisations) {}
+
+    /**
+     * The disk `env.DOCUMENTS` (the source's R2 bucket binding) maps onto --
+     * `FILESYSTEM_DISK` governs it, so switching to a real S3/R2-compatible
+     * disk (see config/filesystems.php and docs/DEPLOYMENT.md's "Storage"
+     * section) is a config change only, no code change.
+     */
+    private function disk(): Filesystem
+    {
+        return Storage::disk(config('filesystems.default'));
+    }
 
     /**
      * Owner_domain/owner_resource_id/classification are validated inline
@@ -95,7 +108,7 @@ class DocumentService
         $objectKey = "quarantine/{$scope->id}/{$id}/{$fileName}";
         $now = now();
 
-        Storage::disk('local')->put($objectKey, $bytes);
+        $this->disk()->put($objectKey, $bytes);
         try {
             DB::transaction(function () use ($id, $scope, $ownerDomain, $ownerResourceId, $objectKey, $fileName, $file, $checksum, $classification, $actor, $now, $correlationId) {
                 DocumentMetadata::create([
@@ -109,7 +122,7 @@ class DocumentService
                 AuditService::append($actor, 'DOCUMENT_QUARANTINED', 'DOCUMENT', $id, ['organisationId' => $scope->id, 'ownerDomain' => $ownerDomain, 'ownerResourceId' => $ownerResourceId, 'checksum' => $checksum, 'correlationId' => $correlationId], $now);
             });
         } catch (\Throwable $e) {
-            Storage::disk('local')->delete($objectKey);
+            $this->disk()->delete($objectKey);
             throw $e;
         }
 
@@ -196,7 +209,7 @@ class DocumentService
         $objectKey = "quarantine/{$scope->id}/{$id}/{$fileName}";
         $now = now();
 
-        Storage::disk('local')->put($objectKey, $bytes);
+        $this->disk()->put($objectKey, $bytes);
         try {
             DB::transaction(function () use ($id, $scope, $original, $documentId, $objectKey, $fileName, $file, $checksum, $actor, $now, $correlationId) {
                 DocumentMetadata::create([
@@ -211,7 +224,7 @@ class DocumentService
                 AuditService::append($actor, 'DOCUMENT_SUPERSEDED', 'DOCUMENT', $id, ['organisationId' => $scope->id, 'supersedesDocumentId' => $documentId, 'checksum' => $checksum, 'correlationId' => $correlationId], $now);
             });
         } catch (\Throwable $e) {
-            Storage::disk('local')->delete($objectKey);
+            $this->disk()->delete($objectKey);
             throw $e;
         }
 
@@ -345,10 +358,10 @@ class DocumentService
         if (! in_array($document->status, ['ACTIVE', 'SUPERSEDED'], true)) {
             throw new RepositoryConflictException('The document is not available for download in its current state.');
         }
-        if (! Storage::disk('local')->exists($document->object_key)) {
+        if (! $this->disk()->exists($document->object_key)) {
             throw new PlatformResourceException('The document object could not be located in storage.', 404);
         }
-        $bytes = Storage::disk('local')->get($document->object_key);
+        $bytes = $this->disk()->get($document->object_key);
 
         $now = now();
         AuditService::append($actor, 'DOCUMENT_DOWNLOADED', 'DOCUMENT', $documentId, ['organisationId' => $document->organisation_id, 'correlationId' => $correlationId], $now);

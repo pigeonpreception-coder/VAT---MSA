@@ -469,4 +469,33 @@ class DocumentTest extends TestCase
 
         $this->actingAs($owner)->get("/api/v1/documents/{$infectedId}/download")->assertStatus(409);
     }
+
+    /**
+     * Regression test for the FILESYSTEM_DISK-driven storage swap
+     * (App\Services\Document\DocumentService::disk()): proves a document
+     * upload actually lands on whichever disk `filesystems.default`
+     * resolves to -- not a disk named 'local' hardcoded in the service --
+     * so pointing FILESYSTEM_DISK at a real S3/R2-compatible disk in
+     * production genuinely redirects document storage there.
+     */
+    public function test_document_storage_follows_the_configured_filesystem_disk(): void
+    {
+        config(['filesystems.default' => 'r2_test']);
+        Storage::fake('r2_test');
+
+        $tp = $this->makeTaxpayer('VAT-DOC-0017');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $bytes = $this->minimalPdfBytes();
+
+        $response = $this->actingAs($owner)->post('/api/v1/documents', [
+            'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0017', 'classification' => 'INTERNAL',
+            'file' => $this->fakeUpload($bytes, 'application/pdf'),
+        ]);
+        $response->assertStatus(201);
+
+        $documentId = $response->json('document.id');
+        $objectKey = "quarantine/{$tp['organisation']->id}/{$documentId}/evidence.pdf";
+        Storage::disk('r2_test')->assertExists($objectKey);
+        Storage::disk('local')->assertMissing($objectKey);
+    }
 }
