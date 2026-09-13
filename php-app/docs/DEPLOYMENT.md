@@ -55,6 +55,17 @@ exists anywhere in `php-app/`). The substitutions:
   ran without it), but its absence is a severe, measured throughput
   problem under any real concurrency, not a minor tuning knob.
 
+## VPS setup (web server, PHP-FPM, TLS)
+
+`deploy/` holds concrete, version-controlled config for this: an nginx
+vhost, a dedicated PHP-FPM pool, OPcache/upload-size ini overrides, and
+`provision.sh`/`deploy.sh` scripts that wire them together on a fresh
+Ubuntu VPS -- currently written for `vat.safi-nuru.com` specifically. See
+`deploy/README.md` for the full walkthrough. The steps below (composer/npm/
+migrate/seed) are what `provision.sh` prints as its own final manual
+instructions; they're documented here too since they apply to any host,
+not just one provisioned by that script.
+
 ## First-time setup
 
 ```bash
@@ -313,7 +324,7 @@ real `ENUM` validation) only surfaces against the real target engine.
 ## Post-deploy smoke test
 
 ```bash
-php scripts/smoke-test.php https://your-domain.example [email] [password]
+php scripts/smoke-test.php https://your-domain.example [email]
 ```
 
 Drives the real golden path over plain HTTP (session cookies + CSRF,
@@ -327,9 +338,13 @@ S3/R2-compatible disk" above), so this is the fastest way to confirm
 storage genuinely works post-deploy, not just that config parses.
 
 Defaults to the seeded demo login (`owner@demo-trading.test` /
-`password`) if no email/password are given -- pass real credentials for
-an environment that doesn't carry demo data. Needs no shell access to
-the server itself; run it from anywhere against the public URL right
+`password`) if no email is given. For any other email, set
+`SMOKE_TEST_PASSWORD` in the environment rather than passing it as a CLI
+argument -- e.g. `SMOKE_TEST_PASSWORD=... php scripts/smoke-test.php
+https://your-domain.example ops@real-domain.tld` -- so a real password
+never ends up visible in `ps`/`/proc` output or shell/CI history. Needs
+no shell access to the server itself; run it from anywhere against the
+public URL right
 after a deploy. Exits 0 only if every step passes, non-zero (with the
 failing step named) otherwise -- safe to wire into a deploy pipeline as
 a final gate.

@@ -14,11 +14,17 @@
  * right after a deploy, before calling a rollout done.
  *
  * Usage:
- *   php scripts/smoke-test.php https://your-domain.example [email] [password]
+ *   php scripts/smoke-test.php https://your-domain.example [email]
+ *   SMOKE_TEST_PASSWORD=... php scripts/smoke-test.php https://your-domain.example you@real-domain.tld
  *
  * Defaults to the seeded demo login (owner@demo-trading.test / password)
- * if email/password are omitted -- override for a real environment that
- * doesn't carry demo data.
+ * if email is omitted entirely. For any other email, the password MUST
+ * come from the SMOKE_TEST_PASSWORD environment variable, never a CLI
+ * argument -- command-line arguments are visible to any other process on
+ * the same host via /proc/<pid>/cmdline (or `ps aux` while this runs) and
+ * commonly end up in shell history or CI job logs, which would leak a
+ * real account's password for anyone who followed the old convenience of
+ * passing it positionally.
  *
  * Exit code 0 if every step passes, 1 otherwise.
  */
@@ -27,11 +33,20 @@ ini_set('display_errors', '1');
 
 $baseUrl = rtrim($argv[1] ?? '', '/');
 $email = $argv[2] ?? 'owner@demo-trading.test';
-$password = $argv[3] ?? 'password';
 
 if ($baseUrl === '') {
-    fwrite(STDERR, "Usage: php scripts/smoke-test.php https://your-domain.example [email] [password]\n");
+    fwrite(STDERR, "Usage: php scripts/smoke-test.php https://your-domain.example [email]\n");
+    fwrite(STDERR, "Set SMOKE_TEST_PASSWORD in the environment unless using the demo login.\n");
     exit(1);
+}
+
+$password = getenv('SMOKE_TEST_PASSWORD');
+if ($password === false) {
+    if ($email !== 'owner@demo-trading.test') {
+        fwrite(STDERR, "SMOKE_TEST_PASSWORD is not set -- required for any email other than the demo login.\n");
+        exit(1);
+    }
+    $password = 'password';
 }
 
 $cookieJar = tempnam(sys_get_temp_dir(), 'vatmsa-smoke-');
