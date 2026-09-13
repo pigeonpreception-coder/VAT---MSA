@@ -27,6 +27,7 @@ use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ForeignInvoiceViewController;
+use App\Http\Controllers\Business\LocalInvoiceViewController;
 use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
@@ -270,6 +271,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // placeholder. See ForeignInvoiceViewController's own doc comment.
     Route::get('/invoice-management/foreign', [ForeignInvoiceViewController::class, 'index'])->name('invoice-management.foreign');
     Route::post('/invoice-management/foreign/pull', [ForeignInvoiceViewController::class, 'pull'])->name('invoice-management.foreign.pull');
+    // Local Invoices -- replaces the former `invoice-management.local`
+    // planned-module placeholder. See LocalInvoiceViewController's own doc
+    // comment.
+    Route::get('/invoice-management/local', [LocalInvoiceViewController::class, 'index'])->name('invoice-management.local');
+    Route::post('/invoice-management/local/credentials', [LocalInvoiceViewController::class, 'storeCredential'])->name('invoice-management.local.credentials.store');
+    Route::post('/invoice-management/local/credentials/{id}/revocation', [LocalInvoiceViewController::class, 'revokeCredential'])->name('invoice-management.local.credentials.revoke');
 
     // The five Operations modules (NamRA e-VAT MS master prompt section
     // 16E): Human Resources, Immovable/Movable Asset Management, the
@@ -433,9 +440,8 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     $plannedRoute('/vat-management/adjustment-report', 'vat-management.adjustment-report', 'compliance:read', 'VAT Management', 'VAT Adjustment Report',
         'A summary of credit and debit note adjustments against filed VAT periods.',
         'This report format is not yet approved. The underlying VAT-period and adjustment data already exists in the platform.');
-    $plannedRoute('/invoice-management/local', 'invoice-management.local', 'invoices:read', 'Invoice Management', 'Local Invoices',
-        'Issued invoices, received invoices, credit notes and debit notes classified as domestic (Namibia).',
-        'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
+    // Local Invoices is no longer a planned-module placeholder -- see the
+    // real routes registered alongside /operations above.
     // Foreign Invoices is no longer a planned-module placeholder -- see
     // the real routes registered alongside /operations above.
     $plannedRoute('/accounting/supplier-ledger', 'accounting.supplier-ledger', 'accounting:read', 'Accounting & Finance', 'Supplier Ledger',
