@@ -8,6 +8,7 @@ use App\Models\ImportRecord;
 use App\Models\Organisation;
 use App\Models\User;
 use App\Services\Audit\AuditService;
+use App\Support\Business\CommandLedger;
 use Illuminate\Support\Str;
 
 /**
@@ -33,16 +34,36 @@ use Illuminate\Support\Str;
  * real feature. When a real E-Tariff contract exists, wiring this same
  * call into a scheduled command is a small, additive change -- not a
  * redesign.
+ *
+ * RT-008 (2026-09-13 red-team pass): this action, like `PosApiClientService
+ * ::issue()`/`::revoke()`, was originally built without this codebase's own
+ * established idempotency-key pattern (`docs/MIGRATION_MATRIX.md`'s
+ * "Duplicate-submission hardening" section) -- a live reproduction fired
+ * three rapid, same-rendered-form "Pull from E-Tariff" submissions and
+ * observed three separate `FOREIGN_INVOICE_PULL_BLOCKED` audit rows for one
+ * user action. Harmless *today* only because the integration is fully
+ * stubbed (every call is rejected identically); once a real E-Tariff
+ * contract exists, an accidental double-click would fire the outbound call
+ * twice against a live government system. Now takes the same stable
+ * per-form-render key every other write action does and uses
+ * `CommandLedger` to recognise an exact replay -- never re-invoking the
+ * port or re-auditing for a key already seen, while a genuine second click
+ * after a fresh page reload (a new key) still runs normally.
  */
 class ForeignInvoiceService
 {
     public function __construct(private readonly EtariffPort $etariff) {}
 
     /** @return array{status: string, pulled: int, message: ?string} */
-    public function pullFromEtariff(Organisation $organisation, User $actor): array
+    public function pullFromEtariff(Organisation $organisation, User $actor, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $taxpayer = $organisation->taxpayer;
         $now = now();
+        $requestHash = CommandLedger::requestHash(['organisation_id' => $organisation->id]);
+        if (CommandLedger::prior($actor->id, 'FOREIGN_INVOICE_PULL', $idempotencyKey, $requestHash) !== null) {
+            return ['status' => 'DUPLICATE_REQUEST_SUPPRESSED', 'pulled' => 0, 'message' => 'This pull request was already processed. Reload the page to try again.'];
+        }
 
         try {
             $declarations = $this->etariff->pullDeclarations([
@@ -54,6 +75,7 @@ class ForeignInvoiceService
             AuditService::append($actor, 'FOREIGN_INVOICE_PULL_BLOCKED', 'IMPORT_RECORD', $organisation->id, [
                 'organisationId' => $organisation->id, 'reason' => $e->getMessage(),
             ], $now);
+            CommandLedger::record($actor->id, 'FOREIGN_INVOICE_PULL', $idempotencyKey, $requestHash, 'IMPORT_RECORD', $organisation->id, $now);
 
             return ['status' => 'BLOCKED_CONFIGURATION', 'pulled' => 0, 'message' => $e->getMessage()];
         }
@@ -91,6 +113,7 @@ class ForeignInvoiceService
         AuditService::append($actor, 'FOREIGN_INVOICE_PULLED', 'IMPORT_RECORD', $organisation->id, [
             'organisationId' => $organisation->id, 'count' => count($declarations),
         ], $now);
+        CommandLedger::record($actor->id, 'FOREIGN_INVOICE_PULL', $idempotencyKey, $requestHash, 'IMPORT_RECORD', $organisation->id, $now);
 
         return ['status' => 'PULLED', 'pulled' => count($declarations), 'message' => null];
     }

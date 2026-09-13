@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\AuditEvent;
 use App\Models\ImportRecord;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
@@ -130,6 +131,37 @@ class ForeignInvoiceViewTest extends TestCase
         $response->assertDontSee('Pull from E-Tariff');
 
         $this->actingAs($org['viewer'])->post('/invoice-management/foreign/pull')->assertForbidden();
+    }
+
+    /**
+     * RT-008 (2026-09-13 red-team pass): reproduced live -- three rapid
+     * POSTs to /invoice-management/foreign/pull carrying the same
+     * rendered form's idempotency key each wrote a distinct
+     * FOREIGN_INVOICE_PULL_BLOCKED audit row. Harmless today only because
+     * the integration is fully stubbed; once E-Tariff is real, a double-
+     * click would fire the outbound call twice against a live government
+     * system. Fixed with the same CommandLedger pattern as RT-007.
+     */
+    public function test_double_submitting_the_same_rendered_pull_form_writes_only_one_audit_entry(): void
+    {
+        $org = $this->makeOrganisation('VAT-FI-0009');
+        $key = (string) Str::uuid();
+
+        $this->actingAs($org['owner'])->post('/invoice-management/foreign/pull', ['idempotency_key' => $key]);
+        $this->actingAs($org['owner'])->post('/invoice-management/foreign/pull', ['idempotency_key' => $key]);
+        $this->actingAs($org['owner'])->post('/invoice-management/foreign/pull', ['idempotency_key' => $key]);
+
+        $this->assertSame(1, AuditEvent::where('action', 'FOREIGN_INVOICE_PULL_BLOCKED')->where('resource_id', $org['organisation']->id)->count());
+    }
+
+    public function test_a_fresh_pull_request_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $org = $this->makeOrganisation('VAT-FI-0010');
+
+        $this->actingAs($org['owner'])->post('/invoice-management/foreign/pull');
+        $this->actingAs($org['owner'])->post('/invoice-management/foreign/pull');
+
+        $this->assertSame(2, AuditEvent::where('action', 'FOREIGN_INVOICE_PULL_BLOCKED')->where('resource_id', $org['organisation']->id)->count());
     }
 
     public function test_pulling_from_an_unconfigured_etariff_shows_a_friendly_error_and_creates_no_records(): void
