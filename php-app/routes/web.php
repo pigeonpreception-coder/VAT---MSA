@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Access\AccessRightsViewController;
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
 use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
@@ -348,6 +349,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/platform/change-requests', [PlatformConfigViewController::class, 'requestChange'])->name('platform.change-requests.store');
     Route::post('/platform/change-requests/{id}/decide', [PlatformConfigViewController::class, 'decideChange'])->name('platform.change-requests.decide');
     Route::post('/platform/staff', [PlatformConfigViewController::class, 'provisionStaff'])->name('platform.staff.store')
+        ->middleware('password.confirm');
+
+    // Super Admin "grant a user an access right" screen (user's own
+    // explicit request) -- see App\Services\Access\UserRoleScopeGrantService's
+    // own doc comment. Both writes wear password.confirm: granting
+    // directly overwrites the target user's users.role column, at least
+    // as privileged as platform.staff.store's own provisioning step-up.
+    Route::get('/access-rights', [AccessRightsViewController::class, 'index'])->name('access-rights.index');
+    Route::post('/access-rights', [AccessRightsViewController::class, 'store'])->name('access-rights.store')
+        ->middleware('password.confirm');
+    Route::post('/access-rights/{grant}/revoke', [AccessRightsViewController::class, 'revoke'])->name('access-rights.revoke')
         ->middleware('password.confirm');
 
     // Frontend UI build-out: the workflow engine's own authoring console,

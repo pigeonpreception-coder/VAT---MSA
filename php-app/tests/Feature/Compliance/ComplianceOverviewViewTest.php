@@ -50,11 +50,11 @@ class ComplianceOverviewViewTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Auditor', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'NAMRA_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
-    /** communications:manage/notifications:manage live here, not on NAMRA_AUDITOR -- matches ComplianceSnapshotTest's own fixture choice. */
+    /** communications:manage/notifications:manage live here, not on NAMRA_VAT_AUDITOR -- matches ComplianceSnapshotTest's own fixture choice. */
     private function namraComplianceOfficer(string $email = 'officer@overview.test'): User
     {
         return User::create([

@@ -278,7 +278,7 @@ class PlatformChangeTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function staffBody(string $externalUserId, string $email, string $role = 'NAMRA_AUDITOR'): array
+    private function staffBody(string $externalUserId, string $email, string $role = 'NAMRA_VAT_AUDITOR'): array
     {
         return ['schema_version' => '1.0.0', 'external_user_id' => $externalUserId, 'email' => $email, 'display_name' => 'New Platform Staff', 'role' => $role];
     }
@@ -330,7 +330,7 @@ class PlatformChangeTest extends TestCase
             ->postJson('/api/v1/platform/staff', $body, ['Idempotency-Key' => 'test-idem-pc-staff-success-0001']);
         $first->assertStatus(201);
         $staffId = $first->json('staff.id');
-        $this->assertSame('NAMRA_AUDITOR', $first->json('staff.role'));
+        $this->assertSame('NAMRA_VAT_AUDITOR', $first->json('staff.role'));
         $this->assertSame('ACTIVE', $first->json('staff.status'));
 
         $created = DB::table('users')->where('id', $staffId)->first();

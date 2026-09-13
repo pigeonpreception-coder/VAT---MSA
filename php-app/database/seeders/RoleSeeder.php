@@ -34,8 +34,14 @@ class RoleSeeder extends Seeder
             // Seller/NamRA/NamRA Administration, no Super Administration or
             // Developer) -- a deliberate deviation from the otherwise-
             // verbatim db/runtime.ts source row, not an inherited value.
-            // Every row below this one is still verbatim from db/runtime.ts
-            // SECURITY_SEED_STATEMENTS / CONTROL_PLANE_SEED_STATEMENTS.
+            // NAMRA_VAT_SENIOR_AUDITOR (formerly NAMRA_REFUND_OFFICER),
+            // NAMRA_VAT_SUPERVISOR (formerly NAMRA_SUPERVISOR) and
+            // NAMRA_VAT_AUDITOR (formerly NAMRA_AUDITOR) below are three
+            // more such deliberate renames, at the same user's later
+            // explicit requests -- their own permission sets are unchanged
+            // from the source, only each role code (and this row's own
+            // name) moved. Every other row is still verbatim from
+            // db/runtime.ts SECURITY_SEED_STATEMENTS / CONTROL_PLANE_SEED_STATEMENTS.
             ['NAMRA_SYSTEM_SUPPORT', 'NamRA System Support', 'NAMRA', 'HIGH'],
             ['TAXPAYER_OWNER', 'Taxpayer Owner', 'TAXPAYER', 'HIGH'],
             ['TAXPAYER_ADMIN', 'Taxpayer Administrator', 'TAXPAYER', 'HIGH'],
@@ -43,11 +49,11 @@ class RoleSeeder extends Seeder
             ['TAXPAYER_STAFF', 'Taxpayer Staff', 'TAXPAYER', 'MEDIUM'],
             ['TAXPAYER_VIEWER', 'Taxpayer Viewer', 'TAXPAYER', 'LOW'],
             ['NAMRA_COMPLIANCE_OFFICER', 'NamRA Compliance Officer', 'NAMRA', 'HIGH'],
-            ['NAMRA_AUDITOR', 'NamRA Auditor', 'NAMRA', 'HIGH'],
+            ['NAMRA_VAT_AUDITOR', 'NamRA VAT Auditor', 'NAMRA', 'HIGH'],
             ['INTERNAL_AUDITOR', 'Internal Auditor', 'ASSURANCE', 'HIGH'],
             ['SECURITY_ANALYST', 'Security Analyst', 'SECURITY', 'HIGH'],
-            ['NAMRA_REFUND_OFFICER', 'NamRA Refund Officer', 'NAMRA', 'HIGH'],
-            ['NAMRA_SUPERVISOR', 'NamRA Supervisor', 'NAMRA', 'CRITICAL'],
+            ['NAMRA_VAT_SENIOR_AUDITOR', 'NamRA VAT Senior Auditor', 'NAMRA', 'HIGH'],
+            ['NAMRA_VAT_SUPERVISOR', 'NamRA VAT Supervisor', 'NAMRA', 'CRITICAL'],
             ['NAMRA_SYSTEM_ADMIN', 'NamRA System Administrator', 'NAMRA_ADMIN', 'CRITICAL'],
             ['SUPER_ADMIN', 'Super Administrator', 'PLATFORM', 'CRITICAL'],
             ['INFRASTRUCTURE_ADMIN', 'Infrastructure Administrator', 'PLATFORM', 'CRITICAL'],

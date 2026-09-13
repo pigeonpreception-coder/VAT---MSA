@@ -61,7 +61,7 @@ class ReportViewTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Supervisor', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'NAMRA_SUPERVISOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_SUPERVISOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
