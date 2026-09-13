@@ -6842,3 +6842,152 @@ pull leaving an existing `ImportRecord` completely unchanged. Full suite
 "Pull from E-Tariff" shows the friendly "awaiting a confirmed technical
 contract..." banner rather than a stack trace, with the database
 confirmed unchanged (still exactly one row) afterwards.
+
+## Local Invoices: real-time private-POS API + built-in POS visibility (2026-09-13)
+
+User's own explicit request: local (domestic) invoices issued or received
+through a taxpayer's own private Point-of-Sale system must be linked up
+"through their API shared" in real time, cross-authenticating a
+supplier/seller's own sale against the buyer/purchaser's own side the
+same instant it happens, feeding NamRA's real-time VAT audit and refund
+reporting; the same must hold for invoices processed through VAT-MSA's
+own built-in POS module, but without needing any API at all. Given a
+choice between mirroring the ITAS/E-Tariff "honestly unavailable" stub
+pattern or building a real, working integration, the user chose the
+latter -- unlike ITAS/E-Tariff (real external government systems this
+application has no access to), a private POS pushing into VAT-MSA's own
+API is an integration entirely within this application's own control to
+build for real.
+
+Replaces the former `invoice-management.local` planned-module
+placeholder, whose scope-note framed the local/foreign split as blocked
+on a missing counterparty-country field. That framing predates the
+Foreign Invoices feature (previous section): foreign invoices are now
+their own customs-declaration-backed register (`App\Models\ImportRecord`)
+entirely separate from this domestic `App\Models\Invoice` pipeline, so no
+country field was ever needed here -- every `Invoice` row already is a
+local one by construction, and credit/debit notes are already the same
+`Invoice` rows (`document_type` `CREDIT_NOTE`/`DEBIT_NOTE`), needing no
+separate handling.
+
+**What was already true and needed no new work**: `App\Services\
+Operations\PosService::checkout()` (VAT-MSA's own built-in POS, "Operations
+> Inventory Module") already calls `App\Services\Invoice\
+InvoiceService::submit()` directly and synchronously -- an invoice
+processed through it is already certified, matched against the named
+buyer's VAT number, and posted to both parties' ledgers in the same
+request, with no API involved. Likewise, `VatLifecycleService::
+generateReturn()` and the refund-claim pipeline already read this same
+ledger data live. The "real-time NamRA autonomous match" and "real-time
+VAT audit/refund reporting" the request describes were therefore already
+correct, existing behaviour; this feature's job was to (a) build a real
+API for a *private* POS to reach the same pipeline, and (b) surface both
+paths together on a real Local Invoices screen, neither of which existed.
+
+**The one stateless, credential-authenticated API surface in this
+application**: every other "JSON API" (the `api/v1/**` group inside
+`routes/web.php`) is deliberately Blade/session-driven (that group's own
+doc comment), which a real external POS terminal with no browser session
+cannot use. `bootstrap/app.php` now also registers `routes/api.php` via
+Laravel's `api:` routing key (auto-prefixed `/api`, wrapped in the
+stock stateless `api` middleware group -- `throttle:api` +
+`SubstituteBindings`, no session, no CSRF; confirmed via the framework's
+own `ApplicationBuilder`/`Middleware` source, and that no Sanctum package
+is installed to add anything statefully to it). The new route:
+`POST /api/pos/v1/invoices`, guarded by the new `App\Http\Middleware\
+AuthenticatePosApiClient`.
+
+**Credential model, built for real rather than stubbed**: the Developer
+Portal's `api_clients`/`developer_accounts`/`credential_refs` tables
+(Module 10) were schema-only with no Eloquent models and no command
+writing to them -- `PlatformSnapshotService::developerPortalSnapshot()`
+only ever read them via raw `DB::table()` for display. New models
+`App\Models\{ApiClient,DeveloperAccount,CredentialRef}` and the first
+real write path, `App\Services\Integration\PosApiClientService`:
+- `issue()`: requires the organisation to hold an active SELLER
+  capability (only a seller issues invoices; a buyer's own side of a sale
+  is populated automatically the instant the seller's push names their
+  VAT number -- `InvoiceService::submit()`'s existing MATCHED-status
+  handling, unchanged). Get-or-creates a `developer_accounts` row for
+  (organisation, acting user), generates a `client_key` and a plaintext
+  `client_secret` (`Str::random`), stores only `Hash::make($secret)` in
+  `api_clients.credential_reference` -- there is no external
+  secrets-manager in this environment for that column to reference
+  instead, so this is the pragmatic, honest choice for a
+  verifiable-but-not-recoverable credential -- and writes a matching
+  `credential_refs` row. The plaintext secret is returned once, at
+  issuance, and never stored or re-displayed again.
+- `revoke()`: tenant-scoped to the issuing organisation, flips
+  `api_clients.status` to `REVOKED` and closes out the active
+  `credential_refs` row with who/when/why.
+- Both actions are audited (`POS_API_CLIENT_ISSUED`/`_REVOKED`).
+
+**Authentication** (`AuthenticatePosApiClient`): expects `Authorization:
+Bearer <client_key>.<client_secret>`. Looks up `api_clients` by
+`client_key`, requires `status=ACTIVE` and (if set) `expires_at` in the
+future, verifies the secret with `Hash::check`, and requires the
+`invoices:submit` scope. On success it resolves the credential's
+developer-account owner as the acting `User` and sets it via
+`Auth::setUser()` for this request's lifecycle only (no session is ever
+started) -- so `App\Http\Controllers\Integration\PosInvoiceController`
+and `InvoiceService::submit()`'s own `TenantScope` check work exactly as
+they already do for the session-authenticated JSON mirror, with no
+special-casing.
+
+**Ingestion** (`PosInvoiceController::store()`): the same request/
+response contract as the existing `POST /api/v1/invoices`
+(`InvoiceController::store()`) -- same underlying command
+(`InvoiceService::submit()`), same certificate/verification response
+shape -- so a private POS integrating against this endpoint gets the
+identical guarantee an in-app submission already gets: real VAT-rule
+validation, real certification, a real MATCHED/CERTIFIED/EXCEPTION
+outcome, never a fabricated acknowledgement. `source.system_id` is always
+overwritten server-side to `EXTERNAL-POS:<client_key>` rather than trusted
+from the request body, so a private POS cannot claim to be a different
+system (including VAT-MSA's own POS, or another taxpayer's integration)
+by lying in its own payload.
+
+**Local Invoices page** (`App\Http\Controllers\Business\
+LocalInvoiceViewController`, `resources/views/invoice-management/
+local.blade.php`, gated on the existing `invoices:read`): shows the
+organisation's own domestic invoices in two panels ("Issued" where the
+organisation is the supplier, "Received" where it is the customer), each
+row labelled with a source ("VAT-MSA POS", "External POS (API)", or
+"Manual / other system", derived from `source_system`) and its existing
+MATCHED/CERTIFIED/EXCEPTION status. Taxpayers holding the existing
+`integrations:manage` permission (already granted to `TAXPAYER_OWNER`/
+`TAXPAYER_ADMIN`, not `TAXPAYER_ACCOUNTANT`/`STAFF`/`VIEWER` or either
+`BUYER_*` role -- a materially better fit than `developer:read`/`manage`,
+which is explicitly scoped to the separate, national Developer Portal and
+which `TAXPAYER_OWNER` deliberately does not hold) also see a credential
+management card: issue a new POS credential (name only), see existing
+ones with their status, and revoke one. No new permissions were added --
+both `invoices:read` and `integrations:manage` already existed for
+exactly this shape of gate. Route name kept identical to the old
+placeholder's (`invoice-management.local`), so the existing sidebar nav
+link needed no change.
+
+New `tests/Feature/Integration/PosInvoiceApiTest.php` (6 tests) covers the
+credential boundary: no header, unknown key, wrong secret and a revoked
+credential are all rejected (401) with no invoice created; a valid
+credential certifies an invoice tagged `EXTERNAL-POS:<client_key>`; a
+valid credential naming a real customer VAT number produces a MATCHED
+invoice with both parties' ledger entries and shows up in the buyer's own
+Local Invoices register. New `tests/Feature/Business/
+LocalInvoiceViewTest.php` (8 tests) covers: auth required, `invoices:read`
+gate, issued/received rendering with source labels, the credentials card
+hidden without `integrations:manage`, credential issuance (secret shown
+once) and its seller-capability precondition, and revocation (including
+that one organisation cannot revoke another's credential). Full suite
+(604 tests) re-run clean.
+
+Verified live end to end against a running dev server: logged in as
+`owner@demo-trading.test`, issued a real POS credential through the
+browser, then used that exact credential from a plain `curl` request (no
+session, no browser) against `POST /api/pos/v1/invoices` -- received a
+real 201 response with a genuine certificate/signature -- and confirmed
+the resulting invoice appeared on the Local Invoices page correctly
+labelled "External POS (API)" with status "Certified". The test
+credential and its demo invoice (and all of its ledger/certificate/
+transaction side effects) were removed afterwards to leave the dev
+database clean.
