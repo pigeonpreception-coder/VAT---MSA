@@ -539,14 +539,13 @@ class DemoSeeder extends Seeder
         // reaches its real org-scoped query path instead of short-
         // circuiting on the "no organisation linked yet" placeholder.
         //
-        // SECURITY_ANALYST is deliberately included even though it cannot
-        // actually reach /portal/super-admin: it is on that portal's
-        // PortalDefinitions role list but Permissions::ROLE_PERMISSIONS
-        // grants it no platform:read, so PortalService::getAvailablePortals
-        // (and SuperAdminPortalController's own re-check) correctly 403 it.
-        // That is the real, intentional access-control outcome for this
-        // role -- this login exists to demonstrate that gap live, not to
-        // paper over it.
+        // SECURITY_ANALYST originally could not reach /portal/super-admin
+        // (on that portal's role list but denied platform:read -- a real,
+        // intentional gap this login demonstrated live). The user's own
+        // later explicit request closed that gap for real: SECURITY_ANALYST
+        // now holds platform:read/authority-governance:read/developer:read
+        // /manage and reaches every portal except none.
+        $nationalDemoUsers = [];
         foreach ([
             ['email' => 'namra-compliance@vat-msa.test', 'name' => 'NamRA Compliance Officer', 'role' => 'NAMRA_COMPLIANCE_OFFICER'],
             ['email' => 'namra-auditor@vat-msa.test', 'name' => 'NamRA Auditor', 'role' => 'NAMRA_AUDITOR'],
@@ -554,7 +553,7 @@ class DemoSeeder extends Seeder
             ['email' => 'namra-supervisor@vat-msa.test', 'name' => 'NamRA Supervisor', 'role' => 'NAMRA_SUPERVISOR'],
             ['email' => 'security-analyst@vat-msa.test', 'name' => 'Security Analyst', 'role' => 'SECURITY_ANALYST'],
         ] as $nationalDemo) {
-            User::updateOrCreate(
+            $nationalDemoUsers[$nationalDemo['email']] = User::updateOrCreate(
                 ['email' => $nationalDemo['email']],
                 [
                     'name' => $nationalDemo['name'], 'password' => Hash::make('password'), 'role' => $nationalDemo['role'],
@@ -569,6 +568,17 @@ class DemoSeeder extends Seeder
                 'taxpayer_id' => $taxpayer->id, 'status' => 'ACTIVE', 'email_verified_at' => now(),
             ],
         );
+        // SECURITY_ANALYST now reaches NamRA Administration too (user's own
+        // explicit request) -- same "governed scope" row every other login
+        // reaching that portal already needed above, otherwise this login
+        // would show a switchboard card that then always 403s.
+        DB::table('tax_authority_administrators')->updateOrInsert(
+            ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $nationalDemoUsers['security-analyst@vat-msa.test']->id],
+            [
+                'id' => (string) Str::uuid(), 'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                'appointed_by' => 'SYNTHETIC_ARCHITECTURE_BASELINE', 'approval_reference' => 'LOCAL-STAGING-ADR-030',
+            ],
+        );
 
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
@@ -580,7 +590,7 @@ class DemoSeeder extends Seeder
         $this->command?->info("NamRA auditor login: namra-auditor@vat-msa.test / password (NAMRA_AUDITOR)");
         $this->command?->info("NamRA refund officer login: namra-refund@vat-msa.test / password (NAMRA_REFUND_OFFICER)");
         $this->command?->info("NamRA supervisor login: namra-supervisor@vat-msa.test / password (NAMRA_SUPERVISOR)");
-        $this->command?->info("Security analyst login: security-analyst@vat-msa.test / password (SECURITY_ANALYST -- cannot reach /portal/super-admin, by design)");
+        $this->command?->info("Security analyst login: security-analyst@vat-msa.test / password (SECURITY_ANALYST, global scope)");
         $this->command?->info("Developer partner login: developer-partner@vat-msa.test / password (DEVELOPER_PARTNER)");
     }
 }

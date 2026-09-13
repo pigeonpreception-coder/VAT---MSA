@@ -76,20 +76,21 @@ class SuperAdminPortalTest extends TestCase
     }
 
     /**
-     * SECURITY_ANALYST is on PortalDefinitions' own super-admin role list
-     * (role/capability check alone would pass) but does not hold
-     * platform:read -- the exact fidelity gap the controller's own doc
-     * comment documents. Confirms the gate is genuinely platform:read,
-     * not the dashboard:read every sibling portal happens to use.
+     * SECURITY_ANALYST originally sat on PortalDefinitions' own
+     * super-admin role list without holding platform:read (the exact
+     * fidelity gap this test used to document -- role/capability alone
+     * would pass, but the permission gate still denied it). The user's
+     * own later explicit request closed that gap for real: SECURITY_ANALYST
+     * now holds platform:read and reaches this portal.
      */
-    public function test_a_role_on_the_list_but_missing_platform_read_is_denied(): void
+    public function test_security_analyst_reaches_the_super_admin_portal(): void
     {
         $analyst = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Security Analyst', 'email' => 'analyst@superadminportal.test',
             'password' => bcrypt('password'), 'role' => 'SECURITY_ANALYST', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
-        $this->actingAs($analyst)->get('/portal/super-admin')->assertForbidden();
+        $this->actingAs($analyst)->get('/portal/super-admin')->assertOk();
     }
 
     /**

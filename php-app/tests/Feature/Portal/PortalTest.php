@@ -80,12 +80,14 @@ class PortalTest extends TestCase
         sort($keys);
 
         // NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN, then NAMRA_STAFF, both
-        // renamed at the user's own explicit request) is on Buyer/Seller's
-        // own role list plus NamRA and NamRA Administration's own -- not
-        // Super Administration or Developer. PortalService::capabilitySet
-        // grants it BUYER/SELLER unconditionally, same as the other three
-        // national/global-scope roles.
-        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller'], $keys);
+        // renamed at the user's own explicit request) reaches Buyer,
+        // Seller, NamRA, NamRA Administration and now Developer too --
+        // still not Super Administration, and its scope stays National
+        // (Permissions::NATIONAL_SCOPE_ROLES is unchanged for it) even
+        // with the Developer grant, unlike the Global-scope roles.
+        // PortalService::capabilitySet grants it BUYER/SELLER
+        // unconditionally, same as the other national/global-scope roles.
+        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller'], $keys);
     }
 
     public function test_super_admin_sees_every_portal(): void
@@ -120,7 +122,7 @@ class PortalTest extends TestCase
         $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller'], $keys);
     }
 
-    public function test_infrastructure_admin_sees_every_portal_except_developer(): void
+    public function test_infrastructure_admin_sees_every_portal(): void
     {
         $admin = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Infrastructure Admin', 'email' => 'infra-admin-0005@test.test', 'password' => bcrypt('password'),
@@ -132,7 +134,26 @@ class PortalTest extends TestCase
         $keys = collect($response->json('portals'))->pluck('key')->all();
         sort($keys);
 
-        // User's own explicit request: every portal except Developer.
-        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
+        // User's own explicit request: INFRASTRUCTURE_ADMIN now reaches
+        // every one of the six portals (Developer was added in a later
+        // request, reversing an earlier "except Developer" restriction).
+        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
+    }
+
+    public function test_security_analyst_sees_every_portal(): void
+    {
+        $analyst = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Security Analyst', 'email' => 'security-analyst-0006@test.test', 'password' => bcrypt('password'),
+            'role' => 'SECURITY_ANALYST', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->actingAs($analyst)->getJson('/api/v1/portals');
+        $response->assertStatus(200);
+        $keys = collect($response->json('portals'))->pluck('key')->all();
+        sort($keys);
+
+        // User's own explicit request: SECURITY_ANALYST now reaches every
+        // one of the six portals and is global scope.
+        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
     }
 }

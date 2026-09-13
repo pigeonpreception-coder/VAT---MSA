@@ -128,7 +128,7 @@ class PortalViewTest extends TestCase
         $response->assertSee(route('dashboard'), false);
     }
 
-    public function test_namra_system_support_sees_buyer_seller_namra_and_namra_admin(): void
+    public function test_namra_system_support_sees_buyer_seller_namra_namra_admin_and_developer(): void
     {
         $admin = $this->namraSystemSupport();
 
@@ -137,7 +137,9 @@ class PortalViewTest extends TestCase
         $response->assertOk();
         $keys = collect($response->viewData('portals'))->pluck('key')->all();
         sort($keys);
-        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller'], $keys);
+        // Developer added at a later, distinct request -- this role's own
+        // scope stays National even with it (unlike the Global-scope roles).
+        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller'], $keys);
     }
 
     public function test_super_admin_sees_every_portal(): void

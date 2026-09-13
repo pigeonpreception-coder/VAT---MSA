@@ -38,20 +38,22 @@ final class Permissions
     public const ROLE_PERMISSIONS = [
         // NamRA System Support (formerly PILOT_ADMIN, then NAMRA_STAFF, both
         // renamed at the user's own explicit request): retains every other
-        // national operations permission it always had, and regained
-        // authority-governance:read (needed for /portal/namra-admin, whose
-        // own permission gate checks it directly, not just role-list
-        // membership) now that it's back on that portal's role list. Still
-        // no developer:read/manage -- this role must not reach the
-        // Developer portal (nor its raw JSON mirror,
-        // PlatformSnapshotController::developerPortal, which checks that
-        // permission directly). platform:read is kept -- it also gates the
-        // separate Platform Config feature (PlatformConfigController/
-        // ViewController), not just the Super Administration portal;
-        // PortalDefinitions' own 'super-admin' role list (not this
-        // permission) is what actually blocks this role from that specific
-        // portal, via SuperAdminPortalController's own getAvailablePortals()
-        // re-check.
+        // national operations permission it always had, and now holds
+        // authority-governance:read (needed for /portal/namra-admin) and
+        // developer:read/manage (needed for /portal/developer and its raw
+        // JSON mirror, PlatformSnapshotController::developerPortal) --
+        // both permissions those portals' own gates check directly, not
+        // just role-list membership. This role's scope stays National
+        // (Permissions::NATIONAL_SCOPE_ROLES is unchanged for it) even
+        // with the Developer grant, unlike SUPER_ADMIN/INFRASTRUCTURE_
+        // ADMIN/SECURITY_ANALYST, which are all Global scope -- the
+        // user's own explicit distinction. platform:read is kept -- it
+        // also gates the separate Platform Config feature
+        // (PlatformConfigController/ViewController), not just the Super
+        // Administration portal; PortalDefinitions' own 'super-admin'
+        // role list (not this permission) is what actually blocks this
+        // role from that specific portal, via SuperAdminPortalController's
+        // own getAvailablePortals() re-check.
         'NAMRA_SYSTEM_SUPPORT' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'taxpayers:suspend', 'registrations:read', 'registrations:submit',
             'registrations:approve', 'organisations:manage', 'invoices:read', 'invoices:submit', 'invoices:cancel', 'exceptions:read',
@@ -64,7 +66,7 @@ final class Permissions
             'parties:manage', 'quotations:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read',
             'expenses:manage', 'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read',
             'imports:manage', 'documents:read', 'documents:upload', 'documents:manage',
-            'authority-governance:read',
+            'authority-governance:read', 'developer:read', 'developer:manage',
             'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
         ],
         // TAXPAYER_OWNER: no longer includes developer:read/manage -- this
@@ -167,21 +169,33 @@ final class Permissions
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'integrations:manage', 'security:read',
             'security:manage', 'developer:read', 'developer:manage', 'authority-governance:read',
         ],
-        // INFRASTRUCTURE_ADMIN: made global/national scope (see
-        // NATIONAL_SCOPE_ROLES below) at the user's own explicit request,
-        // with access to Buyer, Seller, NamRA, NamRA Administration and
-        // Super Administration (not Developer) -- authority-governance:read
-        // added so it can reach /portal/namra-admin, whose own permission
-        // gate checks that directly (not just PortalDefinitions' role
-        // list). dashboard:read (already held) covers Buyer/Seller/NamRA;
-        // platform:read (already held) covers Super Administration.
+        // INFRASTRUCTURE_ADMIN: global scope (see NATIONAL_SCOPE_ROLES
+        // below) at the user's own explicit request, now reaching all six
+        // portals -- authority-governance:read (NamRA Administration) and
+        // developer:read/manage (Developer, plus its raw JSON mirror,
+        // PlatformSnapshotController::developerPortal) added; dashboard:read
+        // (already held) covers Buyer/Seller/NamRA, platform:read (already
+        // held) covers Super Administration.
         'INFRASTRUCTURE_ADMIN' => [
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'security:read', 'security:manage',
-            'authority-governance:read',
+            'authority-governance:read', 'developer:read', 'developer:manage',
         ],
         'DEVELOPER_PARTNER' => ['dashboard:read', 'developer:read', 'developer:manage', 'integrations:read'],
         'INTERNAL_AUDITOR' => ['dashboard:read', 'audit:read'],
-        'SECURITY_ANALYST' => ['dashboard:read', 'security:read', 'audit:read', 'security:manage'],
+        // SECURITY_ANALYST: global scope (added to NATIONAL_SCOPE_ROLES
+        // below) at the user's own explicit request, now reaching all six
+        // portals -- previously it was listed on the Super Administration
+        // portal's own role list without ever holding platform:read (the
+        // exact "listed but denied" gap this file's own history flagged
+        // as intentional); the user's own explicit request closes that
+        // gap for real. dashboard:read (already held) covers Buyer/Seller/
+        // NamRA; platform:read added for Super Administration; authority-
+        // governance:read for NamRA Administration; developer:read/manage
+        // for Developer and its raw JSON mirror.
+        'SECURITY_ANALYST' => [
+            'dashboard:read', 'security:read', 'audit:read', 'security:manage',
+            'platform:read', 'authority-governance:read', 'developer:read', 'developer:manage',
+        ],
     ];
 
     private const WORKSPACE_READ = ['workspace:read', 'search:read', 'licensing:read'];

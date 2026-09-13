@@ -6525,3 +6525,56 @@ green): logged in as every demo login above (including the now-
 switchboard cards and every 200/403 match this model exactly -- with
 zero mismatches between what the switchboard shows and what actually
 loads.
+
+## Post-launch access-model change (2026-09-13, part 3): NAMRA_SYSTEM_SUPPORT/SECURITY_ANALYST/INFRASTRUCTURE_ADMIN all gained Developer
+
+Three more explicit, direct requests, following immediately after part 2
+above:
+
+- **`NAMRA_SYSTEM_SUPPORT` gained the Developer portal** (added to its
+  own `PortalDefinitions` role list, plus `developer:read`/
+  `developer:manage`) -- explicitly *while remaining National scope*
+  (`Permissions::NATIONAL_SCOPE_ROLES` is unchanged for this role), unlike
+  the three Global-scope roles below. It now reaches Buyer, Seller,
+  NamRA, NamRA Administration and Developer -- still not Super
+  Administration.
+- **`SECURITY_ANALYST` gained Buyer, Seller, NamRA, NamRA Administration
+  and Developer** (added to each one's own role list; already had a
+  role-list spot on Super Administration, but -- as this document's own
+  part-1/part-2 entries and `SuperAdminPortalController`'s own doc
+  comment recorded -- never actually held `platform:read`, the exact
+  "listed but denied" fidelity gap the original source's own
+  `PORTAL_PERMISSIONS` map produced and this migration deliberately
+  preserved until now). It now holds `platform:read`, `authority-
+  governance:read`, `developer:read`/`developer:manage` -- reaching all
+  six portals for the first time. Its scope was already Global
+  (`Permissions::NATIONAL_SCOPE_ROLES` already listed it from the
+  original source port, unchanged by this request).
+- **`INFRASTRUCTURE_ADMIN` gained the Developer portal** (added to its
+  own role list, plus `developer:read`/`developer:manage`), reversing
+  part 2's explicit "except Developer" restriction for this role -- it
+  now reaches all six portals, remaining Global scope
+  (`Permissions::NATIONAL_SCOPE_ROLES`, unchanged from part 2).
+- `PortalService::capabilitySet`'s own unconditional BUYER/SELLER grant
+  now covers all five national/global-scope roles across parts 1-3:
+  `NAMRA_SYSTEM_ADMIN`, `INFRASTRUCTURE_ADMIN`, `SUPER_ADMIN`,
+  `NAMRA_SYSTEM_SUPPORT` and `SECURITY_ANALYST`.
+- The demo `security-analyst@vat-msa.test` login needed the same
+  `tax_authority_administrators` fix part 2 applied to
+  `infra-admin@vat-msa.test`/`platform-admin@vat-msa.test`, for the same
+  reason: NamRA Administration access via role list + permission alone
+  isn't enough, `NamraAdminPortalController`'s own governed-scope check
+  still needs one.
+- Two tests that used to demonstrate the deliberate "on the role list,
+  denied by the permission gate" pattern for `SECURITY_ANALYST`
+  (`SuperAdminPortalTest`) no longer apply -- rewritten to confirm the
+  now-real access instead of deleted outright, so the historical pattern
+  they documented stays visible in the diff.
+
+Verified live (not just via the updated test suite -- all 560 tests
+green): logged in as every demo login above (including the
+now-all-access `security-analyst@vat-msa.test` and
+`infra-admin@vat-msa.test`, and the Developer-plus-National
+`admin@vat-msa.test`) in a real browser, hit `/portals` and every
+`/portal/*` route directly, and confirmed the switchboard cards and
+every 200/403 match this model exactly -- zero mismatches.
