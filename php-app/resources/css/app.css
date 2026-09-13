@@ -163,8 +163,15 @@ body {
         width: var(--bs-offcanvas-width);
     }
 
+    /* .container-fluid (main's own class) is width:100% of the viewport --
+       margin-left alone pushes main right without shrinking it, so it
+       always overflowed the right edge by exactly the sidebar's width on
+       every single page (confirmed: document.scrollWidth was 260px past
+       clientWidth site-wide, not a per-page content issue). width: calc()
+       shrinks main to the space actually left beside the fixed sidebar. */
     body.has-sidebar main {
         margin-left: var(--bs-offcanvas-width, 260px);
+        width: calc(100% - var(--bs-offcanvas-width, 260px));
     }
 }
 
