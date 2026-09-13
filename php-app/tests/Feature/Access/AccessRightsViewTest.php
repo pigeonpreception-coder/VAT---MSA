@@ -116,6 +116,45 @@ class AccessRightsViewTest extends TestCase
         ]);
     }
 
+    /**
+     * RT-009 (2026-09-13 red-team pass, High): reproduced live -- two
+     * concurrent identical grant requests (a real double-click) against
+     * the running dev server created two distinct ACTIVE
+     * user_role_scope_grants rows for one admin action, corrupting this
+     * feature's own most sensitive audit trail. Fixed by wiring
+     * UserRoleScopeGrantService::grant() into the same CommandLedger
+     * idempotency pattern every other write action in this codebase
+     * uses.
+     */
+    public function test_double_submitting_the_same_rendered_grant_form_creates_only_one_grant(): void
+    {
+        $admin = $this->superAdmin();
+        $target = $this->taxpayerViewer();
+        $key = (string) Str::uuid();
+        $payload = ['user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL', 'idempotency_key' => $key];
+
+        $first = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post('/access-rights', $payload);
+        $second = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post('/access-rights', $payload);
+
+        $first->assertRedirect('/access-rights');
+        $second->assertRedirect('/access-rights');
+        $this->assertSame(1, DB::table('user_role_scope_grants')->where('user_id', $target->id)->where('role_code', 'TAXPAYER_ADMIN')->count());
+    }
+
+    public function test_a_genuinely_new_grant_request_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $admin = $this->superAdmin();
+        $targetA = $this->taxpayerViewer('viewer-a@accessrights.test');
+        $targetB = $this->taxpayerViewer('viewer-b@accessrights.test');
+
+        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+            ->post('/access-rights', ['user_id' => $targetA->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL']);
+        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+            ->post('/access-rights', ['user_id' => $targetB->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL']);
+
+        $this->assertSame(2, DB::table('user_role_scope_grants')->where('role_code', 'TAXPAYER_ADMIN')->count());
+    }
+
     public function test_a_local_office_grant_requires_a_scope_label(): void
     {
         $admin = $this->superAdmin();

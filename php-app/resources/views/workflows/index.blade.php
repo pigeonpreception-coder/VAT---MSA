@@ -158,6 +158,7 @@
         <div class="card-body">
             <form method="POST" action="{{ route('workflows.assign') }}">
                 @csrf
+                <x-idempotency-key/>
                 <div class="row">
                     <div class="col-md-3 mb-3">
                         <label for="assign_domain_action" class="form-label">Domain action</label>

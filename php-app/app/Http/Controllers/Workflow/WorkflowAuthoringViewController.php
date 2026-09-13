@@ -133,7 +133,7 @@ class WorkflowAuthoringViewController extends Controller
         ];
 
         try {
-            $this->workflows->assignWorkflow($payload, $request->user(), $request->query('organisation_id'));
+            $this->workflows->assignWorkflow($payload, $request->user(), $request->query('organisation_id'), $this->formIdempotencyKey($request));
         } catch (LicensingValidationException|RepositoryConflictException|AuthorizationException $e) {
             return redirect()->route('workflows.index')->withErrors(['assign' => $e->getMessage()])->withInput();
         }

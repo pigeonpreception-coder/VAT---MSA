@@ -224,12 +224,12 @@ class WorkflowTest extends TestCase
 
         // Below the threshold: completes immediately, no assignment.
         $small = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'expense', 'resource_type' => 'EXPENSE', 'resource_id' => 'exp-0001', 'context' => ['amount_cents' => 500]]);
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'expense', 'resource_type' => 'EXPENSE', 'resource_id' => 'exp-0001', 'context' => ['amount_cents' => 500]], ['Idempotency-Key' => (string) Str::uuid()]);
         $small->assertStatus(201)->assertJsonPath('instance.status', 'COMPLETED')->assertJsonPath('instance.assignmentId', null);
 
         // Above the threshold: an approval task is created and assigned to the role.
         $large = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'expense', 'resource_type' => 'EXPENSE', 'resource_id' => 'exp-0002', 'context' => ['amount_cents' => 50000]]);
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'expense', 'resource_type' => 'EXPENSE', 'resource_id' => 'exp-0002', 'context' => ['amount_cents' => 50000]], ['Idempotency-Key' => (string) Str::uuid()]);
         $large->assertStatus(201)->assertJsonPath('instance.status', 'IN_PROGRESS');
         $assignmentId = $large->json('instance.assignmentId');
         $this->assertNotNull($assignmentId);
@@ -248,7 +248,7 @@ class WorkflowTest extends TestCase
 
         // No active workflow at all for a domain action is a clean error, not a crash.
         $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-1'])
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-1'], ['Idempotency-Key' => (string) Str::uuid()])
             ->assertStatus(422)->assertJsonPath('code', 'WORKFLOW_NOT_CONFIGURED');
     }
 
@@ -272,7 +272,7 @@ class WorkflowTest extends TestCase
         $versionId = $created->json('workflow.versionId');
         $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
         $instance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-100']);
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-100'], ['Idempotency-Key' => (string) Str::uuid()]);
         $assignmentId = $instance->json('instance.assignmentId');
 
         $rejected = $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
@@ -313,7 +313,7 @@ class WorkflowTest extends TestCase
         $versionId = $created->json('workflow.versionId');
         $this->actingAs($publisher)->withSession(['auth.password_confirmed_at' => time()])->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
         $instance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'role_change', 'resource_type' => 'ROLE_CHANGE', 'resource_id' => 'rc-1']);
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'role_change', 'resource_type' => 'ROLE_CHANGE', 'resource_id' => 'rc-1'], ['Idempotency-Key' => (string) Str::uuid()]);
         $assignmentId = $instance->json('instance.assignmentId');
 
         $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
@@ -407,7 +407,7 @@ class WorkflowTest extends TestCase
         // A different user publishes -- the creator can't be its own approver.
         $this->actingAs($delegate)->withSession(['auth.password_confirmed_at' => time()])->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
         $instance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-1']);
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-1'], ['Idempotency-Key' => (string) Str::uuid()]);
         $instance->assertStatus(201);
         $this->assertDatabaseHas('workflow_assignments', ['id' => $instance->json('instance.assignmentId'), 'assigned_user_id' => $delegate->id]);
 
@@ -418,7 +418,7 @@ class WorkflowTest extends TestCase
         // A second delegation assigned after the revocation goes to the
         // real target, not the now-revoked delegate.
         $secondInstance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-2']);
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-2'], ['Idempotency-Key' => (string) Str::uuid()]);
         $this->assertDatabaseHas('workflow_assignments', ['id' => $secondInstance->json('instance.assignmentId'), 'assigned_user_id' => $target->id]);
 
         // Already revoked -- revoking it again is a conflict.

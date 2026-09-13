@@ -46,10 +46,12 @@ class AccessRightsViewController extends Controller
         ];
 
         try {
-            $this->grants->grant($payload, $request->user());
+            $this->grants->grant($payload, $request->user(), $this->formIdempotencyKey($request));
         } catch (AccessRightsValidationException $e) {
             return redirect()->route('access-rights.index')
                 ->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
+        } catch (RepositoryConflictException $e) {
+            return redirect()->route('access-rights.index')->withErrors(['user_id' => $e->getMessage()])->withInput();
         }
 
         return redirect()->route('access-rights.index')->with('status', 'Access right granted.');

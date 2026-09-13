@@ -238,6 +238,46 @@ class WorkflowAuthoringViewTest extends TestCase
         $page->assertSee('Test result:');
     }
 
+    /**
+     * RT-010 (2026-09-13 red-team pass, Critical): reproduced live --
+     * two concurrent, identical "Assign" requests against a running dev
+     * server created two separate workflow_instances (and, for an
+     * approval-requiring workflow, two independent PENDING approval
+     * gates) for the very same business resource from one user action.
+     * Fixed by wiring WorkflowService::assignWorkflow() into the same
+     * CommandLedger idempotency pattern every other write action uses.
+     */
+    public function test_double_submitting_the_same_rendered_assign_form_creates_only_one_instance(): void
+    {
+        $ctx = $this->createdDraft('VAT-WFV-0009B');
+        $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+            ->post("/workflows/versions/{$ctx['versionId']}/publish");
+        $key = (string) Str::uuid();
+        $payload = ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-double-0001', 'context' => '{}', 'idempotency_key' => $key];
+
+        $first = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/workflows/instances', $payload);
+        $second = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/workflows/instances', $payload);
+
+        $first->assertRedirect('/workflows');
+        $second->assertRedirect('/workflows');
+        $this->assertSame(1, DB::table('workflow_instances')->where('resource_id', 'exp-double-0001')->count());
+    }
+
+    public function test_a_genuinely_new_assign_request_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $ctx = $this->createdDraft('VAT-WFV-0009C');
+        $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+            ->post("/workflows/versions/{$ctx['versionId']}/publish");
+
+        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->post('/workflows/instances', ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-fresh-0001', 'context' => '{}']);
+        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            ->post('/workflows/instances', ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-fresh-0002', 'context' => '{}']);
+
+        $this->assertSame(1, DB::table('workflow_instances')->where('resource_id', 'exp-fresh-0001')->count());
+        $this->assertSame(1, DB::table('workflow_instances')->where('resource_id', 'exp-fresh-0002')->count());
+    }
+
     public function test_assigning_and_deciding_a_workflow_instance_end_to_end(): void
     {
         $ctx = $this->createdDraft('VAT-WFV-0009');

@@ -7,6 +7,7 @@ use App\Exceptions\RepositoryConflictException;
 use App\Models\AccessRole;
 use App\Models\User;
 use App\Models\UserRoleScopeGrant;
+use App\Support\Business\CommandLedger;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -38,6 +39,21 @@ use Illuminate\Support\Facades\DB;
  * granted a NamRA-facing role at LOCAL_OFFICE scope gets that role's full,
  * ordinary permission set exactly as if granted at NATIONAL/GLOBAL scope
  * -- the office/region label is recorded, not yet a live data filter.
+ *
+ * RT-009 (2026-09-13 red-team pass, High): `grant()` originally had no
+ * idempotency protection at all -- a live reproduction fired two
+ * concurrent identical grant requests against the real `/access-rights`
+ * screen (post step-up) and confirmed two distinct `ACTIVE`
+ * `user_role_scope_grants` rows were created for one admin action. Both
+ * rows target the same user/role, so `users.role` itself ends up correct
+ * either way, but the grants audit trail -- this feature's own most
+ * sensitive record, per this class's own doc comment -- is corrupted: an
+ * admin who later revokes "the" grant sees exactly one row flip to
+ * REVOKED while a second, forgotten ACTIVE grant for the same role
+ * silently remains, making "does this user still hold an active grant"
+ * unreliable to answer from this table alone. Fixed with this codebase's
+ * own established `CommandLedger` idempotency pattern (`docs/
+ * MIGRATION_MATRIX.md`'s "Duplicate-submission hardening" section).
  */
 class UserRoleScopeGrantService
 {
@@ -48,8 +64,9 @@ class UserRoleScopeGrantService
     private const LABELLED_SCOPES = ['LOCAL_OFFICE', 'REGIONAL'];
 
     /** @param array{user_id?: mixed, role_code?: mixed, scope_level?: mixed, scope_label?: mixed} $payload */
-    public function grant(array $payload, User $grantedBy): UserRoleScopeGrant
+    public function grant(array $payload, User $grantedBy, string $idempotencyKey): UserRoleScopeGrant
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $errors = [];
 
         $userId = (string) ($payload['user_id'] ?? '');
@@ -94,7 +111,15 @@ class UserRoleScopeGrantService
             throw new AccessRightsValidationException($errors);
         }
 
-        return DB::transaction(function () use ($targetUser, $role, $scopeLevel, $scopeLabel, $grantedBy) {
+        $requestHash = CommandLedger::requestHash([
+            'user_id' => $targetUser->id, 'role_code' => $role->code, 'scope_level' => $scopeLevel, 'scope_label' => $scopeLabel,
+        ]);
+        $prior = CommandLedger::prior($grantedBy->id, 'GRANT_ACCESS_RIGHT', $idempotencyKey, $requestHash);
+        if ($prior !== null) {
+            return UserRoleScopeGrant::findOrFail($prior);
+        }
+
+        return DB::transaction(function () use ($targetUser, $role, $scopeLevel, $scopeLabel, $grantedBy, $idempotencyKey, $requestHash) {
             $grant = UserRoleScopeGrant::create([
                 'user_id' => $targetUser->id,
                 'role_code' => $role->code,
@@ -106,6 +131,7 @@ class UserRoleScopeGrantService
             ]);
 
             $targetUser->update(['role' => $role->code]);
+            CommandLedger::record($grantedBy->id, 'GRANT_ACCESS_RIGHT', $idempotencyKey, $requestHash, 'USER_ROLE_SCOPE_GRANT', $grant->id, now());
 
             return $grant;
         });
