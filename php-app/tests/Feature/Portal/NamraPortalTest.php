@@ -56,7 +56,7 @@ class NamraPortalTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Auditor', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'NAMRA_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -111,7 +111,7 @@ class NamraPortalTest extends TestCase
             'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
             'domain' => 'VAT_RETURN', 'resource_type' => 'VAT_RETURN_VERSION', 'resource_id' => $versionId,
             'requested_action' => 'APPROVE_RETURN', 'risk_tier' => 'MEDIUM', 'status' => 'PENDING',
-            'requested_by' => $auditor->id, 'assigned_role' => 'NAMRA_SUPERVISOR', 'requested_at' => now(),
+            'requested_by' => $auditor->id, 'assigned_role' => 'NAMRA_VAT_SUPERVISOR', 'requested_at' => now(),
         ]);
 
         $response = $this->actingAs($auditor)->get('/portal/namra');

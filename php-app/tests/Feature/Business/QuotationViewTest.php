@@ -88,7 +88,7 @@ class QuotationViewTest extends TestCase
         $seller = $this->makeOrganisation('VAT-DENY-0001');
         $noAccess = User::create([
             'id' => (string) Str::uuid(), 'name' => 'No Access', 'email' => 'noaccess@quoteview.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($noAccess)->get('/quotations')->assertForbidden();

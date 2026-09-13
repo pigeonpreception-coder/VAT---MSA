@@ -124,7 +124,7 @@ class SellerPortalTest extends TestCase
     {
         $auditor = User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Auditor', 'email' => 'auditor@sellerportal.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($auditor)->get('/portal/seller')->assertForbidden();

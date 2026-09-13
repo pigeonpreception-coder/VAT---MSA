@@ -89,7 +89,7 @@ class PosViewTest extends TestCase
         $org = $this->makeOrganisation('VAT-POS-0001');
         $viewer = User::create([
             'id' => (string) Str::uuid(), 'name' => 'HR Only', 'email' => 'hr-only@posview.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_REFUND_OFFICER', 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_SENIOR_AUDITOR', 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($viewer)->get('/operations/inventory')->assertForbidden();

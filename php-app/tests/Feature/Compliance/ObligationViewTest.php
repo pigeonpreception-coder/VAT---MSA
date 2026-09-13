@@ -54,7 +54,7 @@ class ObligationViewTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Auditor', 'email' => 'auditor-'.Str::random(8).'@namra.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -63,7 +63,7 @@ class ObligationViewTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Refund Officer', 'email' => 'refund-officer-'.Str::random(8).'@namra.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_REFUND_OFFICER', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_SENIOR_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 

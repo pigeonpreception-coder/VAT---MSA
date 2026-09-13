@@ -253,6 +253,9 @@
                     @can('permission', 'platform:read')
                         <li class="nav-item"><a class="nav-link" href="{{ route('platform.index') }}" @if (request()->routeIs('platform.*')) aria-current="page" @endif>Platform</a></li>
                     @endcan
+                    @can('permission', 'access-rights:read')
+                        <li class="nav-item"><a class="nav-link" href="{{ route('access-rights.index') }}" @if (request()->routeIs('access-rights.*')) aria-current="page" @endif>Access Rights</a></li>
+                    @endcan
                 </ul>
                 <div class="sidebar-user">
                     <div class="small text-white-50">Signed in as</div>

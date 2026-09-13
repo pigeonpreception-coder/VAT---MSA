@@ -527,8 +527,8 @@ class DemoSeeder extends Seeder
 
         // Portal-access coverage demo logins. A live check of every
         // PortalDefinitions::all() portal against every login seeded above
-        // found /portal/namra (NAMRA_COMPLIANCE_OFFICER/NAMRA_AUDITOR/
-        // NAMRA_REFUND_OFFICER/NAMRA_SUPERVISOR -- distinct from
+        // found /portal/namra (NAMRA_COMPLIANCE_OFFICER/NAMRA_VAT_AUDITOR/
+        // NAMRA_VAT_SENIOR_AUDITOR/NAMRA_VAT_SUPERVISOR -- distinct from
         // NAMRA_SYSTEM_ADMIN, which is not on that portal's own role list
         // and so cannot reach it) had no seeded login at all, and neither
         // did SECURITY_ANALYST or DEVELOPER_PARTNER. One login per role,
@@ -548,9 +548,9 @@ class DemoSeeder extends Seeder
         $nationalDemoUsers = [];
         foreach ([
             ['email' => 'namra-compliance@vat-msa.test', 'name' => 'NamRA Compliance Officer', 'role' => 'NAMRA_COMPLIANCE_OFFICER'],
-            ['email' => 'namra-auditor@vat-msa.test', 'name' => 'NamRA Auditor', 'role' => 'NAMRA_AUDITOR'],
-            ['email' => 'namra-refund@vat-msa.test', 'name' => 'NamRA Refund Officer', 'role' => 'NAMRA_REFUND_OFFICER'],
-            ['email' => 'namra-supervisor@vat-msa.test', 'name' => 'NamRA Supervisor', 'role' => 'NAMRA_SUPERVISOR'],
+            ['email' => 'namra-auditor@vat-msa.test', 'name' => 'NamRA VAT Auditor', 'role' => 'NAMRA_VAT_AUDITOR'],
+            ['email' => 'namra-refund@vat-msa.test', 'name' => 'NamRA VAT Senior Auditor', 'role' => 'NAMRA_VAT_SENIOR_AUDITOR'],
+            ['email' => 'namra-supervisor@vat-msa.test', 'name' => 'NamRA VAT Supervisor', 'role' => 'NAMRA_VAT_SUPERVISOR'],
             ['email' => 'security-analyst@vat-msa.test', 'name' => 'Security Analyst', 'role' => 'SECURITY_ANALYST'],
         ] as $nationalDemo) {
             $nationalDemoUsers[$nationalDemo['email']] = User::updateOrCreate(
@@ -587,9 +587,9 @@ class DemoSeeder extends Seeder
         $this->command?->info("Platform admin login: platform-admin@vat-msa.test / password (SUPER_ADMIN)");
         $this->command?->info("Infrastructure admin login: infra-admin@vat-msa.test / password (INFRASTRUCTURE_ADMIN)");
         $this->command?->info("NamRA compliance officer login: namra-compliance@vat-msa.test / password (NAMRA_COMPLIANCE_OFFICER)");
-        $this->command?->info("NamRA auditor login: namra-auditor@vat-msa.test / password (NAMRA_AUDITOR)");
-        $this->command?->info("NamRA refund officer login: namra-refund@vat-msa.test / password (NAMRA_REFUND_OFFICER)");
-        $this->command?->info("NamRA supervisor login: namra-supervisor@vat-msa.test / password (NAMRA_SUPERVISOR)");
+        $this->command?->info("NamRA auditor login: namra-auditor@vat-msa.test / password (NAMRA_VAT_AUDITOR)");
+        $this->command?->info("NamRA refund officer login: namra-refund@vat-msa.test / password (NAMRA_VAT_SENIOR_AUDITOR)");
+        $this->command?->info("NamRA supervisor login: namra-supervisor@vat-msa.test / password (NAMRA_VAT_SUPERVISOR)");
         $this->command?->info("Security analyst login: security-analyst@vat-msa.test / password (SECURITY_ANALYST, global scope)");
         $this->command?->info("Developer partner login: developer-partner@vat-msa.test / password (DEVELOPER_PARTNER)");
     }

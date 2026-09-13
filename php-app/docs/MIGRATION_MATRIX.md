@@ -6578,3 +6578,112 @@ now-all-access `security-analyst@vat-msa.test` and
 `admin@vat-msa.test`) in a real browser, hit `/portals` and every
 `/portal/*` route directly, and confirmed the switchboard cards and
 every 200/403 match this model exactly -- zero mismatches.
+
+## Two more role renames (2026-09-13): NAMRA_REFUND_OFFICER/NAMRA_SUPERVISOR/NAMRA_AUDITOR
+
+Three more explicit, direct user requests, each a pure rename with no
+permission-set change -- same enum-swap/`access_roles`-rename/defensive-FK-
+update mechanics as the `PILOT_ADMIN`→`NAMRA_STAFF`→`NAMRA_SYSTEM_SUPPORT`
+renames earlier in this document, each its own new migration (never an
+edit to an already-applied one, since `users.role` is a real MySQL enum
+and an already-migrated database has existing rows storing the literal
+old string):
+
+- **`NAMRA_REFUND_OFFICER` renamed to `NAMRA_VAT_SENIOR_AUDITOR`** --
+  `2026_09_13_000006_rename_namra_refund_officer_and_supervisor_roles.php`.
+- **`NAMRA_SUPERVISOR` renamed to `NAMRA_VAT_SUPERVISOR`** -- same
+  migration as above.
+- **`NAMRA_AUDITOR` renamed to `NAMRA_VAT_AUDITOR`** --
+  `2026_09_13_000007_rename_namra_auditor_role_to_namra_vat_auditor.php`.
+
+Each role's own `Permissions::ROLE_PERMISSIONS` grant set, `NATIONAL_SCOPE_ROLES`
+membership and `PortalDefinitions` role-list spots are unchanged --
+only the role code, and each row's own `access_roles.name`, moved. Blind-
+renamed across every non-historical seeder/test/domain file (never the
+historical migrations that document a real point-in-time enum state, and
+never this document's own earlier entries). `RoleSeeder.php`'s own doc
+comment and `DemoSeeder.php`'s demo-login display names were updated by
+hand where the rename script couldn't reach a human-readable string.
+
+Verified: full test suite green (573 tests) after both migrations ran
+cleanly against the already-seeded dev database.
+
+## Super Admin / NamRA System Admin "grant a user an access right" (2026-09-13)
+
+User's own explicit request: "To able able to give user access rights in
+proper manner, just build UI supper admin to give the user access right
+to other users. Remember to add the user access rights at Local Office,
+Regional/Provincial, National and Global levels of user access right
+permissions." Two design questions were put to the user before building
+(what the screen assigns, and what Local Office/Regional actually are as
+data) -- both later corrected by a follow-up explicit instruction, see
+below.
+
+- **New table `user_role_scope_grants`** (model `UserRoleScopeGrant`),
+  genuinely distinct from the pre-existing `user_role_assignments` table
+  (Phase 8's tenant-scoped custom-role system: one organisation's own
+  `organisation_roles`, assigned within that one organisation). This one
+  instead records an assignment of one of the app's static roles
+  (`App\Models\AccessRole`, backed by `Permissions::ROLE_PERMISSIONS`) to
+  a user, at one of four scope levels -- Local Office / Regional-
+  Provincial / National / Global.
+- **`scope_level`** is one of `LOCAL_OFFICE`/`REGIONAL`/`NATIONAL`/`GLOBAL`.
+  **`scope_label`** is a plain free-text name (e.g. "Windhoek" or "Khomas
+  Region"), required for Local Office/Regional grants and null for
+  National/Global ones -- this is a deliberate correction of this
+  feature's first revision, which instead required picking a real
+  `tax_authority_units` office/region row (a parent-child hierarchy under
+  `tax-authority-na-namra`); the user explicitly corrected this to a
+  plain label with no hierarchy, so the migration and service were
+  reworked before this feature was ever committed, and the once-added
+  `TaxAuthorityUnit` model plus the `DemoSeeder.php` REGION/OFFICE seed
+  rows built for the abandoned design were removed again.
+- **Granting a row immediately sets the target user's own `users.role`
+  column** to the granted role -- that column is this app's one real,
+  everywhere-enforced source of what a user can do, so a grant takes real
+  effect immediately, not just a record. `scope_level`/`scope_label` are
+  the grant's own governance context (who authorised what, at what
+  office/region, for audit) -- there is no separate office/region-scoped
+  permission *enforcement* mechanism anywhere else in this codebase
+  beyond the existing national-vs-tenant split
+  (`TenantScope::isNational`), and this feature does not invent one; a
+  user granted a role at LOCAL_OFFICE scope gets that role's full,
+  ordinary permission set exactly as at NATIONAL/GLOBAL scope.
+- **Self-grant is blocked** (`UserRoleScopeGrantService::grant()`),
+  matching this codebase's own consistent self-approval/SoD convention
+  elsewhere (VAT rules, workflows, refund claims, authority governance
+  onboarding decisions).
+- **Revoke only flags the grant row `REVOKED`** (audit trail) -- it
+  deliberately does not revert `users.role`, since there is no "previous
+  role" stack to revert to.
+- **Delegation model, per the user's own explicit follow-up correction**:
+  `access-rights:read`/`access-rights:manage` are granted to both
+  `SUPER_ADMIN` and `NAMRA_SYSTEM_ADMIN` -- SUPER_ADMIN delegates access-
+  rights allocation to NAMRA_SYSTEM_ADMIN, who then allocates roles/
+  access rights to the rest of NamRA's own system users through the same
+  screen. The gate is a flat permission check like every other role in
+  this codebase, not a target-role-restricted delegation -- both roles
+  reach the identical screen and can grant any active role to any user.
+- New Blade UI at `/access-rights` (`AccessRightsViewController`,
+  `resources/views/access-rights/index.blade.php`): a grants register
+  (user, role, scope, office/region label, granted-by, granted-at,
+  status, revoke action) plus a gated grant form, following this
+  codebase's own established card/table/form Bootstrap conventions
+  (`platform/index.blade.php` as the direct template). Route-level
+  `password.confirm` step-up gates both the grant and revoke POSTs, same
+  as every other privileged action in this app.
+- Nav link added, gated `@can('permission', 'access-rights:read')`.
+
+Verified live (not just via the new feature test file, 13 tests, and the
+full suite -- 573 tests green): logged in as `platform-admin@vat-msa.test`
+(SUPER_ADMIN) and `namra-admin@vat-msa.test` (NAMRA_SYSTEM_ADMIN) in a
+real browser, confirmed both reach `/access-rights` with the grant form
+visible and `developer-partner@vat-msa.test` gets a 403; granted a GLOBAL
+role (target user's role changed, grant row recorded with a null
+`scope_label`), granted a LOCAL_OFFICE role with a free-text label
+("Windhoek", shown correctly in the grants table), confirmed a
+LOCAL_OFFICE/REGIONAL grant with a blank label is rejected with a
+friendly validation error, confirmed a self-grant attempt is refused with
+a friendly error, and revoked an active grant (flagged `REVOKED` without
+reverting the target user's role). All demo data touched during this
+verification was cleaned up afterwards.

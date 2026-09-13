@@ -118,6 +118,14 @@ class PermissionSeeder extends Seeder
             ['accounting:close-period', 'ACCOUNTING', 'CLOSE_PERIOD', 'Close an accounting period and block further postings', 'CONFIDENTIAL'],
             ['documents:manage', 'DOCUMENT', 'MANAGE', 'Record scan verdicts and manage retention holds on documents', 'CONFIDENTIAL'],
             ['exceptions:read', 'RECONCILIATION_EXCEPTION', 'READ', 'Read authorised VAT reconciliation exceptions', 'RESTRICTED'],
+
+            // Genuinely new module (Super Admin "grant a user an access
+            // right" screen, user's own explicit request) -- not from the
+            // TS source at all, same as authority-governance:read/manage's
+            // own precedent (Permissions::ROLE_PERMISSIONS' own doc
+            // comment).
+            ['access-rights:read', 'USER_ROLE_SCOPE_GRANT', 'READ', 'Read user role/scope access grants and the office/region hierarchy', 'SECURITY'],
+            ['access-rights:manage', 'USER_ROLE_SCOPE_GRANT', 'MANAGE', 'Grant or revoke a user\'s role at a Local Office/Regional/National/Global scope', 'SECURITY'],
         ];
 
         foreach ($permissions as [$code, $resource, $action, $description, $classification]) {

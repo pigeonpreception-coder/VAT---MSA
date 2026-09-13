@@ -137,26 +137,36 @@ final class Permissions
             'refunds:read', 'risk:read', 'risk:review', 'communications:manage', 'notifications:manage', 'integrations:read',
             'reports:read', 'reports:run', 'platform:read', 'payments:read', 'vat-rules:read',
         ],
-        'NAMRA_AUDITOR' => [
+        'NAMRA_VAT_AUDITOR' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'invoices:read', 'exceptions:read',
             'returns:read', 'audit:read', 'reconciliation:manage', 'compliance:read', 'cases:manage', 'disputes:manage',
             'obligations:manage', 'refunds:read', 'risk:read', 'risk:review', 'vat-rules:read', 'reports:read', 'reports:run',
         ],
-        'NAMRA_REFUND_OFFICER' => [
+        'NAMRA_VAT_SENIOR_AUDITOR' => [
             'dashboard:read', 'taxpayers:read', 'returns:read', 'compliance:read', 'refunds:read', 'refunds:review', 'risk:read',
             'communications:manage', 'notifications:manage', 'payments:read', 'payments:record',
         ],
-        'NAMRA_SUPERVISOR' => [
+        'NAMRA_VAT_SUPERVISOR' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'invoices:read', 'exceptions:read',
             'returns:read', 'reconciliation:manage', 'compliance:read', 'cases:manage', 'cases:override-sod', 'disputes:manage',
             'obligations:manage', 'refunds:read', 'refunds:review', 'risk:read', 'risk:review', 'communications:manage',
             'integrations:read', 'integrations:manage', 'reports:read', 'reports:run', 'reports:executive', 'platform:read',
             'payments:read', 'payments:record', 'audit:read', 'vat-rules:read',
         ],
+        // access-rights:read/manage added at the user's own explicit
+        // request: SUPER_ADMIN delegates access-rights allocation to
+        // NAMRA_SYSTEM_ADMIN, who then allocates roles/access rights to
+        // the rest of NamRA's own system users through the same screen --
+        // see App\Services\Access\UserRoleScopeGrantService's own doc
+        // comment. The gate is a flat permission check like every other
+        // role here, not a target-role-restricted delegation: this role
+        // reaches the same "grant a user an access right" screen SUPER_ADMIN
+        // does, same as SUPER_ADMIN's own grant below.
         'NAMRA_SYSTEM_ADMIN' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'taxpayers:suspend', 'registrations:read', 'registrations:approve',
             'organisations:manage', 'administration:read', 'administration:manage', 'vat-rules:read', 'vat-rules:manage',
             'invoices:cancel', 'documents:manage', 'authority-governance:read', 'authority-governance:manage',
+            'access-rights:read', 'access-rights:manage',
         ],
         // SUPER_ADMIN: global/national scope (see NATIONAL_SCOPE_ROLES
         // below), with access to all six portals (user's own explicit
@@ -165,9 +175,13 @@ final class Permissions
         // gate checks it directly, not just role-list membership);
         // dashboard:read (already held) covers Buyer/Seller/NamRA,
         // platform:read (already held) covers Super Administration.
+        // access-rights:read/manage (user's own explicit request) gate the
+        // new "grant a user an access right" screen -- see
+        // App\Services\Access\UserRoleScopeGrantService's own doc comment.
         'SUPER_ADMIN' => [
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'integrations:manage', 'security:read',
             'security:manage', 'developer:read', 'developer:manage', 'authority-governance:read',
+            'access-rights:read', 'access-rights:manage',
         ],
         // INFRASTRUCTURE_ADMIN: global scope (see NATIONAL_SCOPE_ROLES
         // below) at the user's own explicit request, now reaching all six
@@ -224,15 +238,15 @@ final class Permissions
 
     /** @var list<string> */
     public const NATIONAL_SCOPE_ROLES = [
-        'NAMRA_SYSTEM_SUPPORT', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
-        'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST', 'SUPER_ADMIN',
+        'NAMRA_SYSTEM_SUPPORT', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_VAT_AUDITOR', 'NAMRA_VAT_SENIOR_AUDITOR',
+        'NAMRA_VAT_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST', 'SUPER_ADMIN',
         'INFRASTRUCTURE_ADMIN',
     ];
 
     /** Roles that never represent a tenant/organisation -- national tax-administration roles plus platform-technical roles. */
     private const NATIONAL_OR_PLATFORM_ONLY_ROLES = [
-        'NAMRA_SYSTEM_SUPPORT', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
-        'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST',
+        'NAMRA_SYSTEM_SUPPORT', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_VAT_AUDITOR', 'NAMRA_VAT_SENIOR_AUDITOR',
+        'NAMRA_VAT_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST',
         'SUPER_ADMIN', 'INFRASTRUCTURE_ADMIN',
     ];
 
