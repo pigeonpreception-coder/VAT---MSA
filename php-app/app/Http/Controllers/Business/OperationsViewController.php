@@ -36,15 +36,15 @@ use Illuminate\View\View;
  * second query/command path anywhere in this controller.
  *
  * The source's fourth panel, "Import VAT evidence" (customs
- * declarations), is now rendered read-only via App\Models\ImportRecord --
+ * declarations), is rendered read-only here via App\Models\ImportRecord --
  * a plain direct read (`ImportRecord::where('organisation_id', ...)`, the
- * same inline-query precedent as InventoryBalance/Project above), never a
- * write: a full-repo grep of the TypeScript source confirms `import_records`
- * is only ever read (by this same page and by `getBusinessPlatformSnapshot`)
- * and no command anywhere creates or updates a row. Building a "record an
- * import declaration" command would be inventing backend capability the
- * source itself never implements, not porting one -- see
- * docs/MIGRATION_MATRIX.md's own note.
+ * same inline-query precedent as InventoryBalance/Project above). This
+ * page itself still only reads that table; the one write path it now has
+ * is `App\Services\Business\ForeignInvoiceService`'s E-Tariff pull,
+ * reached from the Foreign Invoices screen (user's own later explicit
+ * request), not from here -- see that service's own doc comment for why
+ * this table's original read-only-by-source-fidelity boundary was
+ * deliberately reversed rather than silently contradicted.
  *
  * One remaining confirmed, documented scope boundary against the source:
  *  - Receipt handling stays read-only: the source's own

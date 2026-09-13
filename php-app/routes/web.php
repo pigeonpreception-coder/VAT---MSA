@@ -26,6 +26,7 @@ use App\Http\Controllers\Business\BusinessPartyController;
 use App\Http\Controllers\Business\BusinessPartyViewController;
 use App\Http\Controllers\Business\ExpenseController;
 use App\Http\Controllers\Business\InventoryController;
+use App\Http\Controllers\Business\ForeignInvoiceViewController;
 use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
@@ -263,6 +264,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
     Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
 
+    // User's own explicit request: Foreign Invoices, autonomously
+    // cross-authenticated against NamRA's E-Tariff border system --
+    // replaces the former `invoice-management.foreign` planned-module
+    // placeholder. See ForeignInvoiceViewController's own doc comment.
+    Route::get('/invoice-management/foreign', [ForeignInvoiceViewController::class, 'index'])->name('invoice-management.foreign');
+    Route::post('/invoice-management/foreign/pull', [ForeignInvoiceViewController::class, 'pull'])->name('invoice-management.foreign.pull');
+
     // The five Operations modules (NamRA e-VAT MS master prompt section
     // 16E): Human Resources, Immovable/Movable Asset Management, the
     // Inventory Module (point of sale) and Logistics, plus a read-only ERP
@@ -428,9 +436,8 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     $plannedRoute('/invoice-management/local', 'invoice-management.local', 'invoices:read', 'Invoice Management', 'Local Invoices',
         'Issued invoices, received invoices, credit notes and debit notes classified as domestic (Namibia).',
         'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
-    $plannedRoute('/invoice-management/foreign', 'invoice-management.foreign', 'invoices:read', 'Invoice Management', 'Foreign Invoices',
-        'Issued invoices, received invoices, credit notes and debit notes classified as foreign (non-Namibia).',
-        'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
+    // Foreign Invoices is no longer a planned-module placeholder -- see
+    // the real routes registered alongside /operations above.
     $plannedRoute('/accounting/supplier-ledger', 'accounting.supplier-ledger', 'accounting:read', 'Accounting & Finance', 'Supplier Ledger',
         'Per-supplier posted balances derived from the general ledger.',
         'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');

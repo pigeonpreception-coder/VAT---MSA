@@ -6741,3 +6741,104 @@ box) and that the true last item (`Access Rights`) becomes fully visible
 after scrolling to the bottom, screenshotted before and after. Full test
 suite (583 tests) re-run clean after the CSS-only change (no PHP/test
 files touched).
+
+## Foreign Invoices: E-Tariff-linked customs declaration pull (2026-09-13)
+
+User's own explicit request: `/invoice-management/foreign` must be linked
+to NamRA's E-Tariff border/customs system, so a foreign invoice's own
+customs value and import VAT are autonomously pulled from and
+cross-authenticated against the independent duty-paid record captured at
+the border -- not left resting on the taxpayer's own submission alone.
+This replaces the former `invoice-management.foreign` planned-module
+placeholder in `routes/web.php`, which had explicitly deferred any real
+foreign-invoice concept for lack of a counterparty-country field
+anywhere in the schema (see that placeholder's own former scope-note).
+
+Two genuinely ambiguous design questions were put to the user directly
+rather than guessed at, and both were answered before any code was
+written:
+
+- **What backs "foreign invoice"?** No local/foreign invoice
+  classification exists anywhere in this codebase (no country field on
+  any invoice table). The closest real concept already ported is
+  `App\Models\ImportRecord` -- customs-import declarations
+  (`declaration_number`, `customs_office`, `supplier_name`,
+  `country_of_origin`, `currency`, `customs_value_cents`,
+  `import_vat_cents`, `declaration_date`), previously read-only and
+  rendered on the Operations page's own "Import VAT evidence" panel. The
+  user chose to build the Foreign Invoices register on this existing
+  record rather than invent a new schema.
+- **How is the "autonomous pull" implemented with no real E-Tariff API
+  credentials?** The user chose to mirror this codebase's own established
+  pattern for exactly this situation --
+  `App\Integrations\Itas\ItasIdentityPort` /
+  `UnavailableItasIdentityAdapter` / `ItasIntegrationUnavailableException`,
+  already consumed by `VatLifecycleService::submitReturn()` with a
+  fail-closed `BLOCKED_CONFIGURATION` outcome. A new, parallel
+  `App\Integrations\Etariff\EtariffPort` interface was added with the
+  same shape: a real contract for a future integration, backed today only
+  by `UnavailableEtariffAdapter`, the sole bound implementation, which
+  honestly reports itself unconfigured and throws
+  `EtariffIntegrationUnavailableException` on every pull attempt -- never
+  fabricated declarations.
+
+**A deliberate, explained reversal of a previously-documented boundary**:
+`ImportRecord` and `OperationsViewController` both carried doc comments
+stating the table was read-only by design, matching the TypeScript
+source (which never wrote to it either). The user's own new request is
+precisely a write command over this table, so both doc comments were
+updated in place to explain the reversal openly, rather than silently
+contradicting the earlier documented decision.
+
+**What was built**:
+- Migration `2026_09_13_000008_add_etariff_fields_to_import_records_table`
+  adds `source` (`MANUAL` / `ETARIFF_PULL`, default `MANUAL`),
+  `etariff_reference`, `verification_status` (`UNVERIFIED` /
+  `VERIFIED_VIA_ETARIFF` / `ETARIFF_PULL_UNAVAILABLE`, default
+  `UNVERIFIED`), and `pulled_at` to `import_records`.
+- `App\Integrations\Etariff\{EtariffPort,EtariffIntegrationUnavailableException,UnavailableEtariffAdapter}`,
+  bound in `AppServiceProvider` alongside the existing ITAS binding.
+- `App\Services\Business\ForeignInvoiceService::pullFromEtariff()` --
+  calls the port, catches the unavailable exception into a
+  `BLOCKED_CONFIGURATION` result with an audit-trail entry
+  (`FOREIGN_INVOICE_PULL_BLOCKED`), and on a real future success would
+  upsert each returned declaration by fetching the existing row first
+  (`ImportRecord::where(...)->first()` then `->update()`, never
+  `updateOrCreate()` with `id` in the values array -- avoiding this
+  codebase's own previously-caught "always-fresh-id" upsert bug that
+  reassigns a new id to an existing row on every re-run) before logging
+  `FOREIGN_INVOICE_PULLED`.
+- `App\Http\Controllers\Business\ForeignInvoiceViewController` (`index`
+  gated on `imports:read`, `pull` gated on `imports:manage` -- both
+  permission codes already existed for this purpose, no new ones added)
+  and `resources/views/invoice-management/foreign.blade.php`: an E-Tariff
+  integration status card (configured/not-configured, with a "Pull from
+  E-Tariff" button hidden without `imports:manage`) plus the foreign
+  invoice register table.
+- Routes `GET`/`POST /invoice-management/foreign` (`pull` sub-route),
+  replacing the old placeholder call in `routes/web.php`. The route name
+  was kept identical to the placeholder's own (`invoice-management.
+  foreign`), so the existing sidebar nav link needed no change.
+- `status-badge.blade.php`'s `$statusMap` extended with
+  `VERIFIED_VIA_ETARIFF` (success), `UNVERIFIED` (secondary), and
+  `ETARIFF_PULL_UNAVAILABLE` (warning) -- checked against every existing
+  key first to confirm no collision.
+- No step-up (`password.confirm`) gate on the pull action, consistent
+  with the existing ITAS-consuming VAT-submission routes (this
+  codebase's own convention reserves step-up for destructive/
+  privilege-granting actions, not "trigger an external system call"
+  ones).
+
+New `tests/Feature/Business/ForeignInvoiceViewTest.php` (7 tests) covers:
+auth required, `imports:read` gate on the page, `imports:manage` gate on
+the pull action (button hidden and the route itself forbidden without
+it), organisation-scoped rendering of the register, a blocked pull
+showing a friendly session error and creating zero rows, and a blocked
+pull leaving an existing `ImportRecord` completely unchanged. Full suite
+(590 tests) re-run clean. Verified live via a real browser session
+(`owner@demo-trading.test`): the existing demo declaration
+(`NAMCUS-2026-0001`) renders correctly with its default `MANUAL`/
+`Unverified` values, the status card reads "Not Configured", and clicking
+"Pull from E-Tariff" shows the friendly "awaiting a confirmed technical
+contract..." banner rather than a stack trace, with the database
+confirmed unchanged (still exactly one row) afterwards.
