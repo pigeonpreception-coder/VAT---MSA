@@ -289,22 +289,28 @@ class DemoSeeder extends Seeder
                 ],
             );
         }
-        $hqUnit = (string) Str::uuid();
-        $identityUnit = (string) Str::uuid();
+        // Fetch-existing-id-first (this file's own established pattern, see
+        // e.g. $dataProductId below) rather than always generating a fresh
+        // Str::uuid() and putting it straight in updateOrInsert's own value
+        // array: that always-fresh-id version re-assigned a brand new id to
+        // this row on every re-seed of an already-existing one, breaking
+        // tax_authority_role_assignments' own FK to it (caught live via a
+        // 1451 constraint violation reseeding this exact row).
+        $hqUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'HQ')->value('id') ?: (string) Str::uuid();
+        $identityUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'IDENTITY_SECURITY')->value('id') ?: (string) Str::uuid();
+        $domesticTaxUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'DOMESTIC_TAX')->value('id') ?: (string) Str::uuid();
         DB::table('tax_authority_units')->updateOrInsert(
             ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'HQ'],
             ['id' => $hqUnit, 'parent_unit_id' => null, 'name' => 'Head Office', 'unit_type' => 'HEAD_OFFICE', 'status' => 'ACTIVE', 'created_at' => now()],
         );
-        $hqUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'HQ')->value('id');
         DB::table('tax_authority_units')->updateOrInsert(
             ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'DOMESTIC_TAX'],
-            ['id' => (string) Str::uuid(), 'parent_unit_id' => $hqUnit, 'name' => 'Domestic Taxes Directorate', 'unit_type' => 'DIRECTORATE', 'status' => 'ACTIVE', 'created_at' => now()],
+            ['id' => $domesticTaxUnit, 'parent_unit_id' => $hqUnit, 'name' => 'Domestic Taxes Directorate', 'unit_type' => 'DIRECTORATE', 'status' => 'ACTIVE', 'created_at' => now()],
         );
         DB::table('tax_authority_units')->updateOrInsert(
             ['tax_authority_id' => 'tax-authority-na-namra', 'code' => 'IDENTITY_SECURITY'],
             ['id' => $identityUnit, 'parent_unit_id' => $hqUnit, 'name' => 'Identity and Access Governance', 'unit_type' => 'DIVISION', 'status' => 'ACTIVE', 'created_at' => now()],
         );
-        $identityUnit = DB::table('tax_authority_units')->where('tax_authority_id', 'tax-authority-na-namra')->where('code', 'IDENTITY_SECURITY')->value('id');
 
         DB::table('tax_authority_role_assignments')->updateOrInsert(
             ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $namraAdmin->id, 'role_code' => 'AUTHORITY_ONBOARDING_MAKER', 'authority_unit_id' => $hqUnit],
@@ -336,7 +342,12 @@ class DemoSeeder extends Seeder
             );
         }
 
-        $onboardingCaseId = (string) Str::uuid();
+        // Same fetch-existing-id-first fix as the tax_authority_units block
+        // above, for the same reason (this row's own id is referenced by
+        // tax_authority_governance_events' own FK just below).
+        $onboardingCaseId = DB::table('tax_authority_onboarding_cases')
+            ->where('tax_authority_id', 'tax-authority-na-namra')->where('target_environment', 'LOCAL_STAGING')->where('status', 'SUBMITTED')
+            ->value('id') ?: (string) Str::uuid();
         DB::table('tax_authority_onboarding_cases')->updateOrInsert(
             ['tax_authority_id' => 'tax-authority-na-namra', 'target_environment' => 'LOCAL_STAGING', 'status' => 'SUBMITTED'],
             [
@@ -346,9 +357,6 @@ class DemoSeeder extends Seeder
                 'submitted_at' => now(), 'approved_at' => null, 'activated_at' => null, 'created_at' => now(), 'updated_at' => now(),
             ],
         );
-        $onboardingCaseId = DB::table('tax_authority_onboarding_cases')
-            ->where('tax_authority_id', 'tax-authority-na-namra')->where('target_environment', 'LOCAL_STAGING')->where('status', 'SUBMITTED')
-            ->value('id');
         DB::table('tax_authority_governance_events')->updateOrInsert(
             ['onboarding_case_id' => $onboardingCaseId, 'event_type' => 'TaxAuthorityOnboardingRequested'],
             [
@@ -498,11 +506,62 @@ class DemoSeeder extends Seeder
             ],
         );
 
+        // Portal-access coverage demo logins. A live check of every
+        // PortalDefinitions::all() portal against every login seeded above
+        // found /portal/namra (NAMRA_COMPLIANCE_OFFICER/NAMRA_AUDITOR/
+        // NAMRA_REFUND_OFFICER/NAMRA_SUPERVISOR -- distinct from
+        // NAMRA_SYSTEM_ADMIN, which is not on that portal's own role list
+        // and so cannot reach it) had no seeded login at all, and neither
+        // did SECURITY_ANALYST or DEVELOPER_PARTNER. One login per role,
+        // all national-scope (taxpayer_id null) except DEVELOPER_PARTNER,
+        // which OrganisationResolver::resolve treats as tenant-scoped
+        // (Permissions::NATIONAL_SCOPE_ROLES omits it) -- linked to the
+        // demo taxpayer so PlatformSnapshotService::developerPortalSnapshot
+        // reaches its real org-scoped query path instead of short-
+        // circuiting on the "no organisation linked yet" placeholder.
+        //
+        // SECURITY_ANALYST is deliberately included even though it cannot
+        // actually reach /portal/super-admin: it is on that portal's
+        // PortalDefinitions role list but Permissions::ROLE_PERMISSIONS
+        // grants it no platform:read, so PortalService::getAvailablePortals
+        // (and SuperAdminPortalController's own re-check) correctly 403 it.
+        // That is the real, intentional access-control outcome for this
+        // role -- this login exists to demonstrate that gap live, not to
+        // paper over it.
+        foreach ([
+            ['email' => 'namra-compliance@vat-msa.test', 'name' => 'NamRA Compliance Officer', 'role' => 'NAMRA_COMPLIANCE_OFFICER'],
+            ['email' => 'namra-auditor@vat-msa.test', 'name' => 'NamRA Auditor', 'role' => 'NAMRA_AUDITOR'],
+            ['email' => 'namra-refund@vat-msa.test', 'name' => 'NamRA Refund Officer', 'role' => 'NAMRA_REFUND_OFFICER'],
+            ['email' => 'namra-supervisor@vat-msa.test', 'name' => 'NamRA Supervisor', 'role' => 'NAMRA_SUPERVISOR'],
+            ['email' => 'security-analyst@vat-msa.test', 'name' => 'Security Analyst', 'role' => 'SECURITY_ANALYST'],
+        ] as $nationalDemo) {
+            User::updateOrCreate(
+                ['email' => $nationalDemo['email']],
+                [
+                    'name' => $nationalDemo['name'], 'password' => Hash::make('password'), 'role' => $nationalDemo['role'],
+                    'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+                ],
+            );
+        }
+        User::updateOrCreate(
+            ['email' => 'developer-partner@vat-msa.test'],
+            [
+                'name' => 'Demo Developer Partner', 'password' => Hash::make('password'), 'role' => 'DEVELOPER_PARTNER',
+                'taxpayer_id' => $taxpayer->id, 'status' => 'ACTIVE', 'email_verified_at' => now(),
+            ],
+        );
+
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
         $this->command?->info("Admin login: admin@vat-msa.test / password (PILOT_ADMIN, national scope)");
         $this->command?->info("NamRA admin login: namra-admin@vat-msa.test / password (NAMRA_SYSTEM_ADMIN)");
         $this->command?->info("Platform admin login: platform-admin@vat-msa.test / password (SUPER_ADMIN)");
         $this->command?->info("Infrastructure admin login: infra-admin@vat-msa.test / password (INFRASTRUCTURE_ADMIN)");
+        $this->command?->info("NamRA compliance officer login: namra-compliance@vat-msa.test / password (NAMRA_COMPLIANCE_OFFICER)");
+        $this->command?->info("NamRA auditor login: namra-auditor@vat-msa.test / password (NAMRA_AUDITOR)");
+        $this->command?->info("NamRA refund officer login: namra-refund@vat-msa.test / password (NAMRA_REFUND_OFFICER)");
+        $this->command?->info("NamRA supervisor login: namra-supervisor@vat-msa.test / password (NAMRA_SUPERVISOR)");
+        $this->command?->info("Security analyst login: security-analyst@vat-msa.test / password (SECURITY_ANALYST -- cannot reach /portal/super-admin, by design)");
+        $this->command?->info("Developer partner login: developer-partner@vat-msa.test / password (DEVELOPER_PARTNER)");
     }
 }
