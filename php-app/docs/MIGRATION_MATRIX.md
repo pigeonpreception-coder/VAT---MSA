@@ -6687,3 +6687,57 @@ friendly validation error, confirmed a self-grant attempt is refused with
 a friendly error, and revoked an active grant (flagged `REVOKED` without
 reverting the target user's role). All demo data touched during this
 verification was cleaned up afterwards.
+
+## Sidebar: vertical scroll + folder/subfolder font hierarchy (2026-09-13)
+
+User's own explicit report: certain folders on the sidebar were
+unreachable because the sidebar menu didn't scroll vertically, and the
+folder/subfolder labels were hard to visually tell apart.
+
+- **Root cause of the scroll gap**: Bootstrap's own `.offcanvas-lg`
+  breakpoint rule (`@media (min-width: 992px)`) never declares `display:
+  flex` on `.offcanvas-lg` at all -- that's only set under its own
+  `@media (max-width: 991.98px)`, the "closed drawer" state -- and
+  separately resets `.offcanvas-body` to `flex-grow: 0; overflow-y:
+  visible`. So at desktop widths `.sidebar` was a plain block box that
+  grew to its own full content height (brand header + every expanded
+  group + the signed-in-as footer), silently overflowing past its fixed
+  bottom edge with nothing to scroll it back into view -- confirmed live:
+  with several groups expanded, the lowest items rendered below the
+  viewport with no way to reach them.
+- **First attempt, reverted**: tried to keep the brand header and footer
+  permanently pinned by making only the inner `.sidebar-nav` list scroll
+  (a nested flex-column chain needing `flex-grow`/`min-height: 0` at each
+  level to actually constrain the next). This fought Bootstrap's own
+  Collapse plugin -- expanding a group measures `scrollHeight` on the
+  collapsing element at the moment of the click, and nesting it inside an
+  already height-constrained, `overflow-y: hidden` ancestor made that
+  measurement come back wrong: a group's caret flipped to "expanded" but
+  its own subitems never actually rendered, confirmed live via direct DOM
+  inspection (`scrollHeight: 0`, zero children measured on the collapse
+  target immediately after toggling it).
+- **Actual fix**: `.sidebar.offcanvas-lg { overflow-y: auto; }` at the
+  `>=992px` breakpoint -- the whole sidebar box scrolls as one unit
+  instead, with no nested flex constraints for Collapse's own measurement
+  to collide with. Trade-off: the brand header and footer now scroll
+  along with the rest of the list instead of staying permanently pinned,
+  judged a reasonable cost for something that reliably works over a
+  fragile pinned-footer version that didn't.
+- **Font hierarchy**: `.sidebar-nav > .nav-item > .nav-link` (a group's
+  own trigger button, or a flat top-level link with no subfolders of its
+  own -- Licensing, Platform, Access Rights) now gets `font-size: 1.05rem;
+  font-weight: 600`, while `.sidebar-subnav .nav-link` (the nested items
+  inside a group) is `font-size: 0.85rem; font-weight: 400` -- widened
+  from the previous, barely-noticeable 1rem/0.92rem gap with no weight
+  distinction at all. The `>` child-combinator selector is what keeps this
+  from also matching `.sidebar-subnav`'s own nested links, which sit three
+  levels down from `.sidebar-nav`, not directly under it.
+
+Verified live: at a deliberately short viewport with every top-level
+group expanded via real clicks (not synthetic class toggling, which
+doesn't exercise Bootstrap's own Collapse measurement the same way),
+confirmed real overflow (`sidebar.scrollHeight` 795px against a 500px
+box) and that the true last item (`Access Rights`) becomes fully visible
+after scrolling to the bottom, screenshotted before and after. Full test
+suite (583 tests) re-run clean after the CSS-only change (no PHP/test
+files touched).

@@ -89,13 +89,25 @@ body {
 .sidebar-nav {
     padding: 0.75rem;
     gap: 0.15rem;
-    overflow-y: auto;
 }
 
 .sidebar-nav .nav-link {
     color: rgba(255, 255, 255, 0.75);
     border-radius: 0.5rem;
     padding: 0.55rem 0.9rem;
+}
+
+/* Top-level folder items -- both a group's own trigger button
+   (.sidebar-group-trigger) and a flat top-level link with no subfolders
+   of its own (Licensing, Platform, Access Rights) -- get a visibly
+   larger, bolder label than the subfolder items nested inside a group,
+   so the two tiers of the sidebar are easy to tell apart at a glance
+   (user's own explicit request). The child combinator keeps this from
+   also matching .sidebar-subnav's own nested .nav-link items, which sit
+   three levels down from .sidebar-nav, not directly under it. */
+.sidebar-nav > .nav-item > .nav-link {
+    font-size: 1.05rem;
+    font-weight: 600;
 }
 
 .sidebar-nav .nav-link:hover {
@@ -140,7 +152,8 @@ body {
 }
 
 .sidebar-subnav .nav-link {
-    font-size: 0.92rem;
+    font-size: 0.85rem;
+    font-weight: 400;
     padding: 0.4rem 0.9rem;
 }
 
@@ -154,6 +167,36 @@ body {
 }
 
 @media (min-width: 992px) {
+    /* Bootstrap's own >=992px .offcanvas-lg rule (bootstrap.min.css) resets
+       .offcanvas-body to `flex-grow: 0; overflow-y: visible` and never
+       gives `.offcanvas-lg` itself `display: flex` at this breakpoint at
+       all (that's only declared under its own `@media (max-width:
+       991.98px)`, the "closed drawer" state) -- so at desktop widths this
+       whole sidebar is just a plain block box that grows to its own full
+       content height (brand + every expanded group + the signed-in-as
+       footer), silently overflowing past the fixed bottom edge below with
+       nothing to scroll it back into view. Confirmed live: with several
+       groups expanded, the lowest folders render below the viewport with
+       no way to reach them (user's own reported bug).
+
+       An earlier version of this fix tried to keep the brand header and
+       footer permanently pinned by making only the inner `.sidebar-nav`
+       list scroll (a nested flex-column chain: `.sidebar` -> `.offcanvas-
+       body` -> `.sidebar-nav`, each needing `flex-grow`/`min-height: 0` to
+       actually constrain the next). That fought Bootstrap's own Collapse
+       plugin: expanding a group measures `scrollHeight` on the collapsing
+       element at the moment of the click, and nesting it inside an
+       already height-constrained, `overflow-y: hidden` ancestor made that
+       measurement come back wrong -- confirmed live: a group's caret
+       flipped to "expanded" but its own subitems never actually appeared.
+
+       This simpler version instead lets the whole sidebar box itself
+       scroll as one unit -- no nested flex constraints for Collapse's own
+       measurement to collide with, at the cost of the brand/footer
+       scrolling along with the rest instead of staying permanently
+       pinned. `.sidebar.offcanvas-lg`'s two-class selector out-specifies
+       Bootstrap's own single-class `.offcanvas-lg`/`.offcanvas-body`
+       rules from the same media query, so no !important is needed. */
     .sidebar.offcanvas-lg {
         position: fixed;
         top: 0;
@@ -161,6 +204,7 @@ body {
         bottom: 0;
         z-index: 1030;
         width: var(--bs-offcanvas-width);
+        overflow-y: auto;
     }
 
     /* .container-fluid (main's own class) is width:100% of the viewport --
