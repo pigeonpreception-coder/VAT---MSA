@@ -49,6 +49,7 @@ final class Permissions
             'expenses:manage', 'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read',
             'imports:manage', 'documents:read', 'documents:upload', 'documents:manage',
             'authority-governance:read', 'authority-governance:manage',
+            'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
         ],
         'TAXPAYER_OWNER' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'registrations:submit', 'organisations:manage',
@@ -58,7 +59,7 @@ final class Permissions
             'developer:manage', 'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'commercial:read', 'parties:manage',
             'quotations:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read', 'expenses:manage',
             'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read', 'imports:manage',
-            'documents:read', 'documents:upload',
+            'documents:read', 'documents:upload', 'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
         ],
         'TAXPAYER_ADMIN' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'organisations:manage', 'invoices:read',
@@ -68,21 +69,25 @@ final class Permissions
             'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'commercial:read', 'parties:manage', 'quotations:manage',
             'accounting:read', 'expenses:read', 'expenses:manage', 'inventory:read', 'inventory:manage', 'projects:read',
             'projects:manage', 'imports:read', 'imports:manage', 'documents:read', 'documents:upload',
+            'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
         ],
         'TAXPAYER_ACCOUNTANT' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'invoices:read', 'invoices:submit', 'exceptions:read',
             'returns:read', 'returns:generate', 'returns:submit', 'vat-adjustments:manage', 'communications:respond',
             'commercial:read', 'parties:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read',
             'expenses:manage', 'projects:read', 'imports:read', 'imports:manage', 'documents:read', 'documents:upload',
+            'fixed-assets:read',
         ],
         'TAXPAYER_STAFF' => [
             'dashboard:read', 'identity:read', 'invoices:read', 'invoices:submit', 'exceptions:read', 'commercial:read',
             'parties:manage', 'quotations:manage', 'expenses:read', 'expenses:manage', 'inventory:read', 'inventory:manage',
-            'projects:read', 'documents:read', 'documents:upload',
+            'projects:read', 'documents:read', 'documents:upload', 'fixed-assets:read', 'fixed-assets:manage',
+            'logistics:read', 'logistics:manage',
         ],
         'TAXPAYER_VIEWER' => [
             'dashboard:read', 'identity:read', 'invoices:read', 'returns:read', 'commercial:read', 'accounting:read',
             'expenses:read', 'inventory:read', 'projects:read', 'imports:read', 'documents:read',
+            'fixed-assets:read', 'logistics:read',
         ],
         'SELLER_ADMIN' => [
             'dashboard:read', 'identity:read', 'invoices:read', 'invoices:submit', 'exceptions:read', 'returns:read',

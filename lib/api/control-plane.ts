@@ -1,5 +1,6 @@
 import { AccessDeniedError } from "@/lib/auth";
 import { RepositoryConflictError } from "@/lib/data/repository";
+import { AuthorityGovernanceValidationError } from "@/lib/domain/authority-governance";
 import { ControlPlaneValidationError } from "@/lib/domain/control-plane";
 import { recordAuthorizationDenial, recordRateLimitBreach, RequestGuardError, type RequestContext } from "@/lib/security/request";
 

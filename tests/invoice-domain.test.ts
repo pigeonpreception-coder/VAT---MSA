@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateAndValidateInvoice, decimalToScaled, InvoiceValidationError, normalizeInvoiceCancellation, scoreInvoice, stableStringify } from "@/lib/domain/invoice";
+import { calculateAndValidateInvoice, decimalToScaled, InvoiceValidationError, normalizeInvoiceCancellation, scoreInvoice, stableStringify, type AppliedTaxRule } from "@/lib/domain/invoice";
 import type { InvoiceSubmission } from "@/lib/domain/types";
 
 function invoice(overrides: Partial<InvoiceSubmission> = {}): InvoiceSubmission {

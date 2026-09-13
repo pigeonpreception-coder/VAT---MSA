@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { quarterlyAccessReviewWindow } from "@/lib/domain/control-plane";
 import { generateTotpCode } from "@/lib/domain/mfa";
 import { env } from "@/tests/fakes/cloudflare-workers";
 import { __setRequestHeaders } from "@/tests/fakes/next-headers";
@@ -40,6 +41,7 @@ function jsonRequest(url: string, body: unknown): Request {
 async function seedFixture(): Promise<void> {
   const db = env.DB;
   const now = "2026-08-01T00:00:00.000Z";
+  const review = quarterlyAccessReviewWindow();
   await db.batch([
     db.prepare(`INSERT INTO taxpayers (id,vat_number,tin,legal_name,trading_name,taxpayer_type,vat_status,return_frequency,address,email,created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind("tp-mfa", "VAT-MFA-001", "TIN-MFA-001", "MFA Test Co (Pty) Ltd", null, "PRIVATE_COMPANY", "ACTIVE", "MONTHLY", "1 MFA Street", "finance@mfa-test.test", now),
@@ -54,6 +56,16 @@ async function seedFixture(): Promise<void> {
     ...[OWNER, COLLEAGUE].map((user) =>
       db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
         VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${user.userId}`, user.userId, "idp-mfa-workspace", user.externalUserId, user.email, "PILOT", "ACTIVE", now, now)),
+    // LinkIdentity is an ADMIN_WRITE control-plane operation: it requires the organisation to
+    // hold an enabled ADMINISTRATION entitlement (plan-pilot-professional-v1, a global reference
+    // plan seeded unconditionally - see LICENSE_TAX_REFERENCE_SEED_STATEMENTS in db/runtime.ts)
+    // *and* a current-quarter access review on record (assertEntitledOperation).
+    db.prepare(`INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,subscription_domain,payment_mode,activated_at,current_period_start,current_period_end,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind("sub-org-mfa", "org-mfa", "LOCAL_SYNTHETIC", "synthetic-subscription-org-mfa", "ACTIVE", "COMMERCIAL_SAAS", "DISABLED", now, "2026-08-01", "2026-10-31", now, now),
+    db.prepare(`INSERT INTO organisation_licenses (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
+      VALUES (?,?,?,?,?,?,?,NULL,NULL,?,?)`).bind("olic-org-mfa", "org-mfa", "sub-org-mfa", "plan-pilot-professional-v1", "ACTIVE", 1, now, "NON_DESTRUCTIVE_TAX_RETENTION", now),
+    db.prepare(`INSERT INTO access_reviews VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .bind("areview-org-mfa", "org-mfa", "MFA test access review", "QUARTERLY", "COMPLETED", review.periodStart, review.dueAt, OWNER.userId, now, now),
   ]);
 }
 

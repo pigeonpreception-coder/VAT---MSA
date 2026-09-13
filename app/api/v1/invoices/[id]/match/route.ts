@@ -1,5 +1,6 @@
 import { reconciliationJson, reconciliationProblem } from "@/lib/api/reconciliation";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { runMatch } from "@/lib/data/reconciliation-repository";
 import { enforceReconciliationRateLimits, requestContext } from "@/lib/security/request";
 
@@ -8,7 +9,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "reconciliation:manage");
+    await requireLicensedPermission(actor, "reconciliation:manage", { operationClass: "COMPLIANCE_WRITE" });
     await enforceReconciliationRateLimits("RUN_MATCH", actor);
     const { id } = await params;
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";

@@ -1,9 +1,9 @@
 <?php
 
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
+use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
 use App\Http\Controllers\Administration\AdministrationViewController;
-use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
@@ -50,12 +50,19 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Licensing\LicensingViewController;
 use App\Http\Controllers\Navigation\NavigationController;
+use App\Http\Controllers\Operations\ErpViewController;
+use App\Http\Controllers\Operations\FixedAssetViewController;
+use App\Http\Controllers\Operations\HumanResourcesViewController;
+use App\Http\Controllers\Operations\LogisticsViewController;
+use App\Http\Controllers\Operations\PosViewController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
+use App\Http\Controllers\Platform\PlatformConfigViewController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
 use App\Http\Controllers\Platform\ReportController;
+use App\Http\Controllers\Platform\ReportViewController;
 use App\Http\Controllers\Portal\BuyerPortalController;
 use App\Http\Controllers\Portal\DeveloperPortalController;
 use App\Http\Controllers\Portal\NamraAdminPortalController;
@@ -65,7 +72,9 @@ use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
+use App\Http\Controllers\Workflow\WorkflowAuthoringViewController;
 use App\Http\Controllers\Workflow\WorkflowController;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -234,43 +243,236 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
     Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
 
+    // Ported from the source's own app/accounting/page.tsx -- read-only,
+    // matching the source exactly (its own closing note says interactive
+    // journal authoring is a future scope, not a gap this port silently
+    // introduced). See AccountingViewController's own doc comment.
     Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
 
-    Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
-    Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
-
+    // Ported from the source's own app/operations/page.tsx -- expenses,
+    // inventory and projects. See OperationsViewController's own doc
+    // comment for its two confirmed scope boundaries (no import-VAT-
+    // evidence panel, receipt linking stays read-only) and its one
+    // deliberate deviation (a create-expense form + a "Submit" action,
+    // closing a confirmed dead end the same way quotations' own "Send"
+    // action did).
     Route::get('/operations', [OperationsViewController::class, 'index'])->name('operations.index');
     Route::post('/operations/expenses', [OperationsViewController::class, 'store'])->name('operations.store');
     Route::post('/operations/expenses/{id}/submission', [OperationsViewController::class, 'submit'])->name('operations.submit');
     Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
     Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
 
-    // Administration command centre: getAdministrationSnapshot's own
-    // real Blade UI, alongside the JSON API's own /api/v1/administration
-    // (AdministrationController, the fixed-list read only -- no writes
-    // there). Both write actions here use password.confirm, not the
-    // source's own client-side-only step-up theatre -- see
-    // AdministrationViewController's own doc comment.
+    // The five Operations modules (NamRA e-VAT MS master prompt section
+    // 16E): Human Resources, Immovable/Movable Asset Management, the
+    // Inventory Module (point of sale) and Logistics, plus a read-only ERP
+    // cross-module overview. Route names match the placeholders the
+    // sidebar restructuring already wired up, so layouts/app.blade.php
+    // needed no changes for these five links.
+    Route::get('/operations/human-resources', [HumanResourcesViewController::class, 'index'])->name('operations.human-resources');
+    Route::post('/operations/human-resources/employees', [HumanResourcesViewController::class, 'storeEmployee'])
+        ->name('operations.human-resources.employees.store')->middleware('password.confirm');
+    Route::post('/operations/human-resources/employees/{id}/termination', [HumanResourcesViewController::class, 'terminateEmployee'])
+        ->name('operations.human-resources.employees.termination')->middleware('password.confirm');
+
+    Route::get('/operations/immovable-assets', [FixedAssetViewController::class, 'indexImmovable'])->name('operations.immovable-assets');
+    Route::get('/operations/movable-assets', [FixedAssetViewController::class, 'indexMovable'])->name('operations.movable-assets');
+    Route::post('/operations/fixed-assets', [FixedAssetViewController::class, 'store'])->name('operations.fixed-assets.store');
+    Route::post('/operations/fixed-assets/{id}/valuation', [FixedAssetViewController::class, 'valuation'])->name('operations.fixed-assets.valuation');
+    Route::post('/operations/fixed-assets/{id}/maintenance', [FixedAssetViewController::class, 'maintenance'])->name('operations.fixed-assets.maintenance');
+    Route::post('/operations/fixed-assets/{id}/restoration', [FixedAssetViewController::class, 'restoration'])->name('operations.fixed-assets.restoration');
+    Route::post('/operations/fixed-assets/{id}/disposal', [FixedAssetViewController::class, 'disposal'])->name('operations.fixed-assets.disposal');
+
+    Route::get('/operations/logistics', [LogisticsViewController::class, 'index'])->name('operations.logistics');
+    Route::post('/operations/logistics', [LogisticsViewController::class, 'store'])->name('operations.logistics.store');
+    Route::post('/operations/logistics/{id}/dispatch', [LogisticsViewController::class, 'dispatch'])->name('operations.logistics.dispatch');
+    Route::post('/operations/logistics/{id}/delivery', [LogisticsViewController::class, 'deliver'])->name('operations.logistics.delivery');
+    Route::post('/operations/logistics/{id}/cancellation', [LogisticsViewController::class, 'cancel'])->name('operations.logistics.cancellation');
+
+    Route::get('/operations/inventory', [PosViewController::class, 'index'])->name('operations.inventory');
+    Route::post('/operations/inventory/checkout', [PosViewController::class, 'checkout'])->name('operations.inventory.checkout');
+
+    Route::get('/operations/erp', [ErpViewController::class, 'index'])->name('operations.erp');
+
+    // Ported from the source's own app/administration/page.tsx +
+    // AdministrationActions.tsx -- the Administration command centre
+    // (licensing/entitlements, employees, roles, workflows, access
+    // governance). See AdministrationViewController's own doc comment for
+    // its one deliberate substitution: password.confirm step-up in place
+    // of the source's own client-side checkbox theatre.
     Route::get('/administration', [AdministrationViewController::class, 'index'])->name('administration.index');
     Route::post('/administration/employees', [AdministrationViewController::class, 'storeEmployee'])
-        ->middleware('password.confirm')->name('administration.employees.store');
+        ->name('administration.employees.store')->middleware('password.confirm');
     Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
-        ->middleware('password.confirm')->name('administration.roles.store');
+        ->name('administration.roles.store')->middleware('password.confirm');
 
-    // Portal switchboard (App\Services\Portal\PortalService::
-    // getAvailablePortals, the same read the JSON /api/v1/portals route
-    // already serves) plus the six per-portal dashboards it links to.
-    // Each portal controller re-checks role/capability membership and
-    // its own PORTAL_PERMISSIONS entry independently -- a hidden nav
-    // link never grants access by itself, matching every portal view's
-    // own closing note.
+    // Ported from the source's own app/documents/page.tsx +
+    // DocumentUploadForm.tsx -- see DocumentViewController's own doc
+    // comment for why supersede/scan-decision/retention-hold/download
+    // have no UI here either (the source's own page has none of them).
+    // No step-up gate, matching the source's own /api/v1/documents
+    // upload route (no password.confirm there either).
+    Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
+    Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
+
+    // Frontend UI build-out: the Reports & Analytics console, reusing
+    // ReportExportService/DataProductService directly (see
+    // App\Http\Controllers\Platform\ReportViewController's own doc
+    // comment). Deliberately distinct path segments from the JSON API
+    // routes under api/v1/reports and api/v1/analytics below (run vs
+    // runs, file vs download, run-model/publish vs model-runs/
+    // publications) so the two route sets never collide on the same
+    // method+path even though they share a path prefix. requestExport/
+    // approveExport carry no password.confirm middleware -- their
+    // step-up is data-conditional, handled inline by the controller.
+    Route::get('/reports', [ReportViewController::class, 'index'])->name('reports.index');
+    Route::post('/reports/{code}/run', [ReportViewController::class, 'run'])->name('reports.run');
+    Route::post('/reports/runs/{id}/publish', [ReportViewController::class, 'publish'])->name('reports.publish');
+    Route::post('/reports/runs/{id}/export', [ReportViewController::class, 'requestExport'])->name('reports.export.request');
+    Route::post('/reports/exports/{id}/approve', [ReportViewController::class, 'approveExport'])->name('reports.export.approve');
+    Route::post('/reports/exports/{id}/cancel', [ReportViewController::class, 'cancelExport'])->name('reports.export.cancel');
+    Route::get('/reports/exports/{id}/file', [ReportViewController::class, 'downloadExport'])->name('reports.export.download');
+    Route::post('/analytics/data-products/{id}/run-model', [ReportViewController::class, 'runModel'])->name('reports.analytics.run-model');
+    Route::post('/analytics/data-products/{id}/publish', [ReportViewController::class, 'publishDataProduct'])->name('reports.analytics.publish');
+
+    // Frontend UI build-out: the Platform config console, reusing
+    // PlatformChangeService directly (see App\Http\Controllers\Platform\
+    // PlatformConfigViewController's own doc comment). Distinct path
+    // segments from the JSON API routes under api/v1/platform below
+    // (change-requests/{id}/decide vs .../decision, staff vs
+    // api/v1/platform/staff) so the two route sets never collide.
+    // provisionStaff wears password.confirm (unconditional step-up,
+    // matching the JSON route's own posture) -- unlike the reports
+    // console's data-conditional requestExport/approveExport, this one
+    // is a plain route-level gate.
+    Route::get('/platform', [PlatformConfigViewController::class, 'index'])->name('platform.index');
+    Route::post('/platform/change-requests', [PlatformConfigViewController::class, 'requestChange'])->name('platform.change-requests.store');
+    Route::post('/platform/change-requests/{id}/decide', [PlatformConfigViewController::class, 'decideChange'])->name('platform.change-requests.decide');
+    Route::post('/platform/staff', [PlatformConfigViewController::class, 'provisionStaff'])->name('platform.staff.store')
+        ->middleware('password.confirm');
+
+    // Frontend UI build-out: the workflow engine's own authoring console,
+    // reusing WorkflowService directly (see App\Http\Controllers\Workflow\
+    // WorkflowAuthoringViewController's own doc comment). Its read-only
+    // register was already part of Administration's own page before this
+    // slice existed -- this adds the write side. Distinct path segments
+    // from the JSON API under api/v1/workflows[-tasks] below (decide vs
+    // decision, revoke vs revocation) so the two route sets never
+    // collide even without the prefix difference alone to rely on. Every
+    // write here wears password.confirm, matching the JSON route's own
+    // unconditional step-up posture exactly -- test is the one exception
+    // in both (a dry-run has no side effects).
+    Route::get('/workflows', [WorkflowAuthoringViewController::class, 'index'])->name('workflows.index');
+    Route::post('/workflows', [WorkflowAuthoringViewController::class, 'store'])->name('workflows.store')
+        ->middleware('password.confirm');
+    Route::post('/workflows/versions/{id}/publish', [WorkflowAuthoringViewController::class, 'publish'])->name('workflows.publish')
+        ->middleware('password.confirm');
+    Route::post('/workflows/versions/{id}/test', [WorkflowAuthoringViewController::class, 'test'])->name('workflows.test');
+    Route::post('/workflows/instances', [WorkflowAuthoringViewController::class, 'assign'])->name('workflows.assign')
+        ->middleware('password.confirm');
+    Route::post('/workflow-tasks/{id}/decide', [WorkflowAuthoringViewController::class, 'decide'])->name('workflows.decide')
+        ->middleware('password.confirm');
+    Route::post('/workflows/delegations', [WorkflowAuthoringViewController::class, 'storeDelegation'])->name('workflows.delegations.store')
+        ->middleware('password.confirm');
+    Route::post('/workflows/delegations/{id}/revoke', [WorkflowAuthoringViewController::class, 'revokeDelegation'])->name('workflows.delegations.revoke')
+        ->middleware('password.confirm');
+
+    // Ported from the source's own app/portals/page.tsx -- see
+    // PortalViewController's own doc comment.
     Route::get('/portals', [PortalViewController::class, 'index'])->name('portals.index');
+
+    // All six per-portal dashboards the switchboard above links to --
+    // see each controller's own doc comment. URLs kept 1:1 with the
+    // source's own app/portal/{buyer,seller,namra,namra-admin,
+    // super-admin,developer}/page.tsx paths and with
+    // PortalDefinitions::all()'s own hrefs.
     Route::get('/portal/buyer', [BuyerPortalController::class, 'index'])->name('portal.buyer');
     Route::get('/portal/seller', [SellerPortalController::class, 'index'])->name('portal.seller');
     Route::get('/portal/namra', [NamraPortalController::class, 'index'])->name('portal.namra');
     Route::get('/portal/namra-admin', [NamraAdminPortalController::class, 'index'])->name('portal.namra-admin');
     Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
     Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
+
+    // Sidebar restructuring (master prompt sections 16-21): reserved
+    // navigation/architecture placeholders for subfolders the new 9-group
+    // sidebar names but that have no backing feature yet -- mirrors the
+    // source's own app/vat-management, app/invoice-management etc.
+    // PlannedModule pages 1:1 (route path, permission and copy match).
+    $plannedRoute = function (string $path, string $name, string $permission, string $eyebrow, string $title, string $description, string $scopeNote) {
+        Route::get($path, function () use ($permission, $eyebrow, $title, $description, $scopeNote) {
+            Gate::authorize('permission', $permission);
+            return view('planned.show', compact('eyebrow', 'title', 'description', 'scopeNote'));
+        })->name($name);
+    };
+
+    $plannedRoute('/vat-management/audit-report', 'vat-management.audit-report', 'compliance:read', 'VAT Management', 'VAT Audit Report',
+        'A real-time invoice and VAT summary drawn from certified invoices and reconciliation evidence.',
+        'This report format is not yet approved. Today, the closest equivalent data lives in Audit Cases and Compliance Overview.');
+    $plannedRoute('/vat-management/reconciliation', 'vat-management.reconciliation', 'compliance:read', 'VAT Management', 'Invoice Reconciliation',
+        'Matching of issued invoices, received invoices and unlocated issued invoices.',
+        'Not yet built. Risk Indicators is the closest existing equivalent today.');
+    $plannedRoute('/vat-management/adjustment-report', 'vat-management.adjustment-report', 'compliance:read', 'VAT Management', 'VAT Adjustment Report',
+        'A summary of credit and debit note adjustments against filed VAT periods.',
+        'This report format is not yet approved. The underlying VAT-period and adjustment data already exists in the platform.');
+    $plannedRoute('/invoice-management/local', 'invoice-management.local', 'invoices:read', 'Invoice Management', 'Local Invoices',
+        'Issued invoices, received invoices, credit notes and debit notes classified as domestic (Namibia).',
+        'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
+    $plannedRoute('/invoice-management/foreign', 'invoice-management.foreign', 'invoices:read', 'Invoice Management', 'Foreign Invoices',
+        'Issued invoices, received invoices, credit notes and debit notes classified as foreign (non-Namibia).',
+        'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
+    $plannedRoute('/accounting/supplier-ledger', 'accounting.supplier-ledger', 'accounting:read', 'Accounting & Finance', 'Supplier Ledger',
+        'Per-supplier posted balances derived from the general ledger.',
+        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    $plannedRoute('/accounting/customer-ledger', 'accounting.customer-ledger', 'accounting:read', 'Accounting & Finance', 'Customer Ledger',
+        'Per-customer posted balances derived from the general ledger.',
+        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    // Superseded by the real Immovable/Movable Asset Management modules
+    // below (accounting:read is still the gate, matching the placeholder
+    // this replaces): a fixed-asset domain model now exists, so this is a
+    // thin real page linking to the two, rather than a planned-module
+    // placeholder claiming no such model exists.
+    Route::get('/accounting/fixed-assets', function () {
+        Gate::authorize('permission', 'accounting:read');
+
+        return view('accounting.fixed-assets');
+    })->name('accounting.fixed-assets');
+    $plannedRoute('/accounting/budgets', 'accounting.budgets', 'accounting:read', 'Accounting & Finance', 'Budgets',
+        'Budget planning and budget-versus-actual tracking.',
+        'Not yet built. No budget domain model exists in the platform today.');
+    $plannedRoute('/accounting/purchase-orders', 'accounting.purchase-orders', 'accounting:read', 'Accounting & Finance', 'Purchase Orders',
+        'Purchase order issuance, approval and conversion to supplier invoices.',
+        'Not yet built. No purchase-order domain model exists in the platform today.');
+    $plannedRoute('/accounting/cash-flow', 'accounting.cash-flow', 'accounting:read', 'Accounting & Finance', 'Cash Flow Projects',
+        'Project-level cash flow forecasting and monitoring.',
+        'Not yet built. Project Management does not yet have a dedicated project domain model to derive cash flow from.');
+    // The five Operations modules (Human Resources, Immovable/Movable
+    // Asset Management, Logistics, ERP) are now real routes -- see the
+    // '/operations/human-resources' etc. block above, defined alongside
+    // the rest of the Operations routes rather than here among the
+    // remaining placeholders.
+    $plannedRoute('/quotation/converted', 'quotation.converted', 'commercial:read', 'Quotation', 'Converted Quotations',
+        'Quotations that have progressed to a purchase order or invoice.',
+        'Not yet built as a dedicated view. Quotation status and conversion actions already exist on the quotation register.');
+    $plannedRoute('/quotation/converted-invoices', 'quotation.converted-invoices', 'commercial:read', 'Quotation', 'Converted Quotations into Invoices',
+        'The invoice, credit notes, debit notes and related quotation for each converted quotation, in one list.',
+        'Not yet built as a dedicated cross-reference view. The invoice and quotation records this would join already exist independently.');
+    $plannedRoute('/project-management/new', 'project-management.new', 'projects:read', 'Project Management', 'Create New Project',
+        'Capture project name, customer, description, location, dates, budget, expected revenue, category, VAT treatment and owner.',
+        'Not yet built. No dedicated project domain model exists in the platform today.');
+    $plannedRoute('/project-management/ongoing', 'project-management.ongoing', 'projects:read', 'Project Management', 'Ongoing Project Reports',
+        'Real-time/periodic progress reporting for active projects.',
+        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
+    $plannedRoute('/project-management/completed', 'project-management.completed', 'projects:read', 'Project Management', 'Completed Projects',
+        'Summary lists and reports for finished projects.',
+        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
+    $plannedRoute('/registered/service-providers', 'registered.service-providers', 'parties:manage', 'Registered', 'Service Providers',
+        'A categorised register of service providers, distinct from customers and suppliers.',
+        'Not yet built. Business-party records do not yet carry a service-provider relationship or category; Customers and Suppliers are available today under Registered.');
+    $plannedRoute('/new-registration/credit-note', 'new-registration.credit-note', 'invoices:read', 'New Registration', 'New Credit Note',
+        'A controlled form to issue a credit note against an original tax invoice.',
+        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the credit, and the lines to reverse -- with amounts recorded as a reduction. Awaiting approval before the UI is built.');
+    $plannedRoute('/new-registration/debit-note', 'new-registration.debit-note', 'invoices:read', 'New Registration', 'New Debit Note',
+        'A controlled form to issue a debit note against an original tax invoice.',
+        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the debit, and the additional lines/amounts. Awaiting approval before the UI is built.');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
@@ -555,9 +757,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // Kept 1:1 with the source's own
         // app/api/v1/tax-authority-onboarding-cases/** shape; both write
         // commands are step-up gated, matching the source's own
-        // requireStepUp. Backend-only for now, the same JSON-API-first
-        // pattern every other phase in this migration used before its own
-        // Blade UI slice followed later -- see docs/MIGRATION_MATRIX.md.
+        // requireStepUp.
         Route::get('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'show']);
         Route::post('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'store'])
             ->middleware('password.confirm');

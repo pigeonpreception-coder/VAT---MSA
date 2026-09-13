@@ -580,6 +580,83 @@ class ReportExportTest extends TestCase
         $this->actingAs($owner)->getJson("/api/v1/reports/exports/{$exportId}/download")->assertStatus(410);
     }
 
+    /**
+     * Proves App\Support\Platform\PlatformConfigReader actually wires the
+     * seeded `reports.export_size_limit_bytes` platform_config row into
+     * ReportExportService::requestExport -- the same CSV content that
+     * exports fine at the default 200KB limit is refused once an ACTIVE
+     * row seeds a limit smaller than the generated file.
+     */
+    public function test_a_seeded_export_size_limit_is_enforced_over_the_hardcoded_default(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-RPT-0030');
+        $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
+        $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'sizelimit@reporttest.test');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+
+        DB::table('platform_config')->insert([
+            'id' => (string) Str::uuid(), 'key' => 'reports.export_size_limit_bytes', 'category' => 'REPORTS',
+            'value' => '1', 'description' => 'Test override.', 'status' => 'ACTIVE', 'updated_at' => now(),
+        ]);
+
+        $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-sizelimit-0001'])
+            ->assertStatus(413);
+    }
+
+    /**
+     * Proves the seeded `reports.min_cell_suppression_threshold` row is
+     * actually read live -- raising it above the 14 invoices that, under
+     * the hardcoded default of 10, were NOT suppressed in
+     * test_national_vat_aggregate_suppresses_the_result_under_the_minimum_cell_threshold
+     * above now suppresses that same count.
+     */
+    public function test_a_seeded_minimum_cell_suppression_threshold_is_enforced_over_the_hardcoded_default(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-RPT-0031');
+        $this->seedDefinition('NATIONAL_VAT_AGGREGATE', 'OPEN_DATA', 'INTERNAL');
+        for ($i = 0; $i < 14; $i++) {
+            $this->makeInvoice($tp['taxpayer']->id, 10_000, 1_000);
+        }
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'thresholdoverride@reporttest.test');
+
+        DB::table('platform_config')->insert([
+            'id' => (string) Str::uuid(), 'key' => 'reports.min_cell_suppression_threshold', 'category' => 'REPORTS',
+            'value' => '20', 'description' => 'Test override.', 'status' => 'ACTIVE', 'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', []);
+        $response->assertStatus(201);
+        $this->assertSame(['invoices' => 0, 'total_cents' => 0, 'suppressed' => true], $response->json('report_run.result_summary'));
+    }
+
+    /**
+     * Proves the seeded `STEP_UP_WINDOW` access_policies row's
+     * `window_seconds` is actually read live by App\Support\Access\StepUp
+     * -- a confirmation that is fresh under the hardcoded default
+     * (10800s/3 hours) is stale once an ACTIVE row shrinks the window to
+     * a few seconds in the past.
+     */
+    public function test_a_seeded_step_up_window_is_enforced_over_the_hardcoded_default(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-RPT-0032');
+        $this->seedDefinition('COMPLIANCE_CASELOAD', 'NAMRA_OPERATIONS', 'TAX_CONFIDENTIAL');
+        $officer = $this->namraComplianceOfficer('stepupwindow@reporttest.test');
+        $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $officer->id);
+        $runId = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+
+        DB::table('access_policies')->insert([
+            'id' => (string) Str::uuid(), 'code' => 'STEP_UP_WINDOW', 'name' => 'Test step-up window',
+            'policy_type' => 'AUTHENTICATION', 'description' => 'Test override.',
+            'parameters' => json_encode(['window_seconds' => 60]), 'status' => 'ACTIVE', 'updated_at' => now(),
+        ]);
+
+        // Confirmed 5 minutes ago -- fresh under the hardcoded 3-hour default, stale under the seeded 60s window.
+        $this->actingAs($officer)->withSession(['auth.password_confirmed_at' => time() - 300])
+            ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-stepupwindow-0001'])
+            ->assertStatus(403);
+    }
+
     public function test_downloading_an_approved_export_returns_the_exact_bytes(): void
     {
         $tp = $this->makeTaxpayer('VAT-RPT-0029');

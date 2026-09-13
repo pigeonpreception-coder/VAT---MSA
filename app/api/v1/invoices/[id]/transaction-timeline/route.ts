@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getTransactionTimeline } from "@/lib/data/repository";
 
 /** Module 2 Phase D GetTransactionTimeline: certification, every correction and any cancellation for one invoice's lineage, as a chronological narrative of VATTransaction events. */
@@ -6,7 +7,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const correlationId = crypto.randomUUID();
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "invoices:read");
+    await requireLicensedPermission(user, "invoices:read", { operationClass: "READ" });
     const { id } = await params;
     const timeline = await getTransactionTimeline(id, user);
     if (!timeline) return Response.json({ type: "https://vat-msa.local/problems/not-found", title: "Not found", status: 404, correlation_id: correlationId }, { status: 404 });

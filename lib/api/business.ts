@@ -14,6 +14,7 @@ import {
   createProject,
   createQuotation,
   createWarehouse,
+  decideExpense,
   getBusinessPlatformSnapshot,
   getExpenseReport,
   getFinancialStatements,
@@ -35,6 +36,7 @@ import {
   searchQuotations,
   sendQuotation,
   submitExpense,
+  syntheticallyVerifyBusinessParty,
   transferStock,
   updateBusinessParty,
   updateQuotation,
@@ -48,7 +50,7 @@ import { InvoiceValidationError } from "@/lib/domain/invoice";
 import { emitStructuredSecurityLog, enforceRateLimits, readBoundedJson, recordSecurityEvent, requestContext, RequestGuardError } from "@/lib/security/request";
 
 export type BusinessSection = "parties" | "quotations" | "journals" | "expenses" | "balances" | "projects" | "accounts" | "categories" | "products" | "warehouses";
-export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "SEND_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER" | "CREATE_PRODUCT" | "CREATE_WAREHOUSE" | "TRANSFER_STOCK";
+export type BusinessCommand = "CREATE_BUSINESS_PARTY" | "UPDATE_BUSINESS_PARTY" | "DEACTIVATE_BUSINESS_PARTY" | "SYNTHETIC_VERIFY_BUSINESS_PARTY" | "CREATE_QUOTATION" | "UPDATE_QUOTATION" | "SEND_QUOTATION" | "ACCEPT_QUOTATION" | "REJECT_QUOTATION" | "EXPIRE_QUOTATION" | "CONVERT_QUOTATION" | "POST_JOURNAL" | "CREATE_EXPENSE" | "LINK_EXPENSE_RECEIPT" | "DECIDE_EXPENSE" | "RECORD_STOCK_MOVEMENT" | "CREATE_PROJECT" | "CREATE_ACCOUNT" | "REVERSE_JOURNAL_ENTRY" | "CLOSE_ACCOUNTING_PERIOD" | "CREATE_EXPENSE_CATEGORY" | "SUBMIT_EXPENSE" | "APPROVE_EXPENSE" | "REJECT_EXPENSE" | "APPROVE_PROJECT_BUDGET" | "POST_PROJECT_COST" | "VERIFY_SUPPLIER" | "CREATE_PRODUCT" | "CREATE_WAREHOUSE" | "TRANSFER_STOCK";
 
 function problem(status: number, code: string, title: string, detail: string, correlationId: string, errors?: unknown, retryAfter?: number | null) {
   return Response.json({
@@ -95,7 +97,7 @@ export async function handlePartySearch(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "parties:manage");
+    await requireLicensedPermission(user, "parties:manage", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await searchBusinessParties(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -111,7 +113,7 @@ export async function handleSupplierVerificationHistory(request: Request, partyI
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "parties:manage");
+    await requireLicensedPermission(user, "parties:manage", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const history = await getSupplierVerificationHistory(partyId, user, requestedOrganisation(request));
     return Response.json(history, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -126,7 +128,7 @@ export async function handleQuotationSearch(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "commercial:read");
+    await requireLicensedPermission(user, "commercial:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await searchQuotations(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -144,7 +146,7 @@ export async function handleTrialBalance(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "accounting:read");
+    await requireLicensedPermission(user, "accounting:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const asOfRaw = new URL(request.url).searchParams.get("as_of")?.trim();
     if (asOfRaw && !REPORT_DATE_PATTERN.test(asOfRaw)) return problem(422, "VALIDATION_FAILED", "Validation failed", "as_of must be an ISO date (YYYY-MM-DD).", context.correlationId);
     const trialBalance = await getTrialBalance(user, requestedOrganisation(request), asOfRaw);
@@ -161,7 +163,7 @@ export async function handleFinancialStatements(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "accounting:read");
+    await requireLicensedPermission(user, "accounting:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const url = new URL(request.url);
     const today = new Date().toISOString().slice(0, 10);
     const from = url.searchParams.get("from")?.trim() || `${today.slice(0, 7)}-01`;
@@ -182,7 +184,7 @@ export async function handleExpenseReport(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "expenses:read");
+    await requireLicensedPermission(user, "expenses:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const url = new URL(request.url);
     const today = new Date().toISOString().slice(0, 10);
     const from = url.searchParams.get("from")?.trim() || `${today.slice(0, 7)}-01`;
@@ -203,7 +205,7 @@ export async function handleProjectProfitability(request: Request, projectId: st
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "projects:read");
+    await requireLicensedPermission(user, "projects:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const report = await getProjectProfitability(projectId, user, requestedOrganisation(request));
     return Response.json(report, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -218,7 +220,7 @@ export async function handleInventoryAvailability(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "inventory:read");
+    await requireLicensedPermission(user, "inventory:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await getInventoryAvailability(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -233,7 +235,7 @@ export async function handleInventoryValuation(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "inventory:read");
+    await requireLicensedPermission(user, "inventory:read", { operationClass: "READ", requestedOrganisationId: requestedOrganisation(request) });
     const result = await getInventoryValuation(user, requestedOrganisation(request), new URL(request.url).searchParams);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
@@ -336,7 +338,7 @@ export async function handleBusinessPost(request: Request, permission: string, c
     }
     if (!resource) throw new RepositoryConflictError("The idempotent resource is no longer available.");
     emitStructuredSecurityLog({ level: "INFO", event: command, correlationId: context.correlationId, actorId, outcome: "SUCCESS", durationMs: Date.now() - startedAt });
-    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "UPDATE_QUOTATION", "SEND_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "APPROVE_PROJECT_BUDGET", "VERIFY_SUPPLIER"].includes(command) ? 200 : 201;
+    const status = ["ACCEPT_QUOTATION", "UPDATE_BUSINESS_PARTY", "DEACTIVATE_BUSINESS_PARTY", "SYNTHETIC_VERIFY_BUSINESS_PARTY", "UPDATE_QUOTATION", "SEND_QUOTATION", "REJECT_QUOTATION", "EXPIRE_QUOTATION", "CLOSE_ACCOUNTING_PERIOD", "SUBMIT_EXPENSE", "APPROVE_EXPENSE", "REJECT_EXPENSE", "DECIDE_EXPENSE", "LINK_EXPENSE_RECEIPT", "APPROVE_PROJECT_BUDGET", "VERIFY_SUPPLIER"].includes(command) ? 200 : 201;
     return Response.json({ resource }, { status, headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
     emitStructuredSecurityLog({ level: error instanceof AccessDeniedError || error instanceof RequestGuardError ? "WARN" : "ERROR", event: command, correlationId: context.correlationId, actorId, outcome: error instanceof Error ? error.name : "FAILED", durationMs: Date.now() - startedAt });

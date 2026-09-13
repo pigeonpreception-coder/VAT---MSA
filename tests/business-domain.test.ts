@@ -8,6 +8,8 @@ import {
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateExpenseCategory,
+  normalizeAndValidateExpenseDecision,
+  normalizeAndValidateExpenseReceiptLink,
   normalizeAndValidateExpenseRejection,
   normalizeAndValidateJournal,
   normalizeAndValidateJournalReversal,

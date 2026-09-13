@@ -11,6 +11,7 @@ use App\Services\Audit\AuditService;
 use App\Support\Access\TenantScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
+use App\Support\Platform\PlatformConfigReader;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -48,11 +49,13 @@ class ReportExportService
 
     private const SENSITIVE_CLASSIFICATIONS = ['TAX_CONFIDENTIAL', 'RESTRICTED'];
 
-    private const EXPORT_SIZE_LIMIT_BYTES = 200 * 1_024;
+    /** Fallback only -- read live via PlatformConfigReader::int('reports.export_size_limit_bytes', ...) below when an ACTIVE platform_config row exists. */
+    private const EXPORT_SIZE_LIMIT_BYTES_DEFAULT = 200 * 1_024;
 
     private const EXPORT_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
 
-    private const MIN_CELL_SUPPRESSION_THRESHOLD = 10;
+    /** Fallback only -- read live via PlatformConfigReader::int('reports.min_cell_suppression_threshold', ...) below when an ACTIVE platform_config row exists. */
+    private const MIN_CELL_SUPPRESSION_THRESHOLD_DEFAULT = 10;
 
     private const CURRENCY_BASIS = 'NAD';
 
@@ -228,7 +231,8 @@ class ReportExportService
         $now = now();
         $watermark = "issued_to:{$actor->id} at:{$now->toISOString()} correlation:{$correlationId}";
         $bytes = $this->buildExportContent($run, $watermark);
-        if (strlen($bytes) > self::EXPORT_SIZE_LIMIT_BYTES) {
+        $exportSizeLimitBytes = PlatformConfigReader::int('reports.export_size_limit_bytes', self::EXPORT_SIZE_LIMIT_BYTES_DEFAULT);
+        if (strlen($bytes) > $exportSizeLimitBytes) {
             throw new PlatformResourceException('The generated export exceeds the maximum allowed size.', 413);
         }
         $fileName = DocumentValidator::safeFileName("{$run->code}-{$run->id}.csv");
@@ -544,7 +548,8 @@ class ReportExportService
         if ($code === 'NATIONAL_VAT_AGGREGATE') {
             $row = DB::table('invoices')->selectRaw('COUNT(*) as invoices, COALESCE(SUM(total_cents),0) as total_cents')->first();
             $invoiceCount = (int) ($row->invoices ?? 0);
-            $suppressed = $invoiceCount < self::MIN_CELL_SUPPRESSION_THRESHOLD;
+            $minCellSuppressionThreshold = PlatformConfigReader::int('reports.min_cell_suppression_threshold', self::MIN_CELL_SUPPRESSION_THRESHOLD_DEFAULT);
+            $suppressed = $invoiceCount < $minCellSuppressionThreshold;
 
             return $suppressed
                 ? ['invoices' => 0, 'total_cents' => 0, 'suppressed' => true]

@@ -286,6 +286,11 @@ export async function submitRegistrationApplication(
     status: "PENDING_VERIFICATION",
     verification_source: "ITAS",
     verification_status: verificationStatus,
+    proofing_case_id: null,
+    proofing_status: null,
+    proofing_confidence_bps: null,
+    proofing_reason_code: null,
+    mismatch_status: null,
     submitted_by: actor.userId,
     submitted_at: now,
   };

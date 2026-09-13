@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { explainInvoiceVat } from "@/lib/data/repository";
 
 /** Module 2 Phase A ExplainCalculation: per-line trace back to the exact approved VATRule version that produced its tax amount. */
@@ -6,7 +7,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const correlationId = crypto.randomUUID();
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "invoices:read");
+    await requireLicensedPermission(user, "invoices:read", { operationClass: "READ" });
     const { id } = await params;
     const explanation = await explainInvoiceVat(id, user);
     if (!explanation) return Response.json({ type: "https://vat-msa.local/problems/not-found", title: "Not found", status: 404, correlation_id: correlationId }, { status: 404 });

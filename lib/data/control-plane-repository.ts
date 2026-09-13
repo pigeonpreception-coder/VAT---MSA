@@ -258,7 +258,7 @@ function navigationRowAllowed(actor: UserContext, row: NavigationGate, context: 
   return true;
 }
 
-export async function getEffectiveNavigation(actor: UserContext, requestedOrganisationId?: string | null): Promise<{ organisation: OrganisationScope; workspaces: NavigationWorkspace[] }> {
+export async function getEffectiveNavigation(actor: UserContext, requestedOrganisationId?: string | null): Promise<{ organisation: OrganisationScope; license: { state: LicenseState; plan_name: string; current_period_end: string }; workspaces: NavigationWorkspace[] }> {
   const db = await ensureDatabase();
   const organisation = await resolveOrganisation(actor, requestedOrganisationId);
   const license = await getLicense(db, organisation.id);

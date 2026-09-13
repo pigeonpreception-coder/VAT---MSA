@@ -34,7 +34,7 @@ function relationships(value: string | null) {
   return new Set((value ?? "").split(",").filter(Boolean));
 }
 
-export function PartyManager({ organisationId, parties, syntheticVerificationEnabled }: { organisationId: string; parties: PartyRow[]; syntheticVerificationEnabled: boolean }) {
+export function PartyManager({ organisationId, parties, syntheticVerificationEnabled, initialCreateRelationship }: { organisationId: string; parties: PartyRow[]; syntheticVerificationEnabled: boolean; initialCreateRelationship?: "CUSTOMER" | "SUPPLIER" | null }) {
   const [editing, setEditing] = useState<PartyRow | null>(null);
   const [state, setState] = useState<ActionState>({ kind: "idle", message: "" });
 
@@ -122,7 +122,7 @@ export function PartyManager({ organisationId, parties, syntheticVerificationEna
     }
   }
 
-  const selectedRelationships = relationships(editing?.relationships ?? null);
+  const selectedRelationships = editing ? relationships(editing.relationships) : new Set(initialCreateRelationship ? [initialCreateRelationship] : []);
 
   return <div className="grid-2">
     <section className="panel">

@@ -24,7 +24,10 @@ describe("central licence enforcement migration", () => {
     expect(centralIndex).toBeGreaterThan(0);
     for (const migration of migrations.slice(0, centralIndex)) applyMigration(db, migration);
     db.exec("PRAGMA foreign_keys=ON");
-    const authSource = readFileSync(join(process.cwd(), "lib", "auth.ts"), "utf8");
+    // Permission-code literals live in lib/domain/access.ts (lib/auth.ts is
+    // just a re-export barrel since that file split out — see its own
+    // top-of-file comment) — scan the real source, not the barrel.
+    const authSource = readFileSync(join(process.cwd(), "lib", "domain", "access.ts"), "utf8");
     const grantedPermissions = new Set([...authSource.matchAll(/"([a-z][a-z0-9-]*:[a-z][a-z0-9-]*)"/g)].map((match) => match[1]));
     for (const permission of grantedPermissions) {
       db.prepare("INSERT OR IGNORE INTO access_permissions VALUES (?,?,?,?,?,?)")
@@ -87,11 +90,37 @@ describe("licence enforcement coverage", () => {
       join("app", "api", "health", "ready", "route.ts"),
       join("app", "api", "v1", "signup-applications", "route.ts"),
       join("app", "api", "v1", "verify", "[token]", "route.ts"),
+      // Genuinely pre-auth: the caller has no app_users row yet, so
+      // getCurrentUser() (and anything gated behind it) would throw before
+      // ever reaching here — see the route's own file comment.
+      join("app", "api", "v1", "invitations", "claim", "route.ts"),
+      // Authenticated but deliberately permission-free by design: this is
+      // the introspection endpoint a user calls to ask "what can I do" —
+      // gating it behind a specific permission would be circular.
+      join("app", "api", "v1", "me", "access", "route.ts"),
     ]);
-    const sharedGuards = /requireLicensedPermission|handleBusiness(Get|Post)|handleCompliance(List|Command)|handleVat(LifecycleList|ReturnDetail|Command)|handle(PlatformList|OfflineBatch|ReportRun|DocumentUpload)/;
+    // Most routes delegate to a shared dispatcher in lib/api/* rather than
+    // calling requireLicensedPermission directly — hardcoding each
+    // dispatcher's name here has repeatedly gone stale as new modules
+    // added their own (handlePaymentCommand, handleIncident*,
+    // handleDocumentScanResult, ...). Resolve each route's own local "@/..."
+    // imports one level deep and check those too, so this stays accurate as
+    // new dispatchers are added without needing another name added here.
+    const guard = /requireLicensedPermission/;
+    const isGuarded = (source: string): boolean => {
+      if (guard.test(source)) return true;
+      const importedModules = [...source.matchAll(/from ["']@\/([^"']+)["']/g)].map((match) => match[1]);
+      return importedModules.some((mod) => {
+        try {
+          return guard.test(readFileSync(join(process.cwd(), `${mod}.ts`), "utf8"));
+        } catch {
+          return false;
+        }
+      });
+    };
     const uncoveredRoutes = routes.filter((path) => {
       const local = relative(process.cwd(), path);
-      return !publicRoutes.has(local) && !sharedGuards.test(readFileSync(path, "utf8"));
+      return !publicRoutes.has(local) && !isGuarded(readFileSync(path, "utf8"));
     }).map((path) => relative(process.cwd(), path));
     expect(uncoveredRoutes).toEqual([]);
   });

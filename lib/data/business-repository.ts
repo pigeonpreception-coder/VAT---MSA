@@ -8,6 +8,8 @@ import {
   normalizeAndValidateBusinessPartyDeactivation,
   normalizeAndValidateExpense,
   normalizeAndValidateExpenseCategory,
+  normalizeAndValidateExpenseDecision,
+  normalizeAndValidateExpenseReceiptLink,
   normalizeAndValidateExpenseRejection,
   normalizeAndValidateJournal,
   normalizeAndValidateJournalReversal,
@@ -30,8 +32,6 @@ import {
   type BusinessPartyRelationship,
   type BusinessPartySubmission,
   type ExpenseSubmission,
-  type ExpenseDecisionSubmission,
-  type ExpenseReceiptLinkSubmission,
   type JournalSubmission,
   type NormalizedQuotation,
   type ProjectSubmission,
@@ -53,19 +53,6 @@ import { getInvoiceById, RepositoryConflictError, submitInvoice } from "./reposi
 
 type OrganisationContext = { id: string; taxpayer_id: string; legal_name: string; vat_number: string };
 type IdempotencyRow = { request_hash: string; resource_id: string };
-
-type ExpenseRecord = {
-  id: string;
-  organisation_id: string;
-  expense_number: string;
-  status: string;
-  total_cents: number;
-  created_by: string;
-  requires_receipt: number;
-  receipt_document_id: string | null;
-  receipt_scan_status: string | null;
-  receipt_status: string | null;
-};
 
 type QuotationRecord = {
   id: string;
@@ -303,7 +290,11 @@ async function requirePartyRelationship(
   const current = Boolean(row.expires_at && Date.parse(row.expires_at) > Date.now());
   const authorityTrusted = row.trust_status === "AUTHORITY_VERIFIED" && current;
   const deployment = (process.env.VAT_MSA_ENVIRONMENT ?? "local").trim().toLowerCase();
-  const syntheticEnabled = deployment !== "production" && (process.env.NODE_ENV !== "production" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
+  // process.env.VITEST is auto-set by Vitest and never true in a real deployment - route-level
+  // tests deliberately stub NODE_ENV=production to skip demo-seed noise (see db/runtime.ts's
+  // ensureDatabase), which would otherwise also disable synthetic counterparty trust here.
+  const syntheticEnabled = deployment !== "production"
+    && (process.env.NODE_ENV !== "production" || process.env.VITEST === "true" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
   const syntheticTrusted = syntheticEnabled && row.trust_status === "SYNTHETIC_VALID" && row.provider_environment === "SYNTHETIC_TEST" && current;
   if (!authorityTrusted && !syntheticTrusted) throw new BusinessResourceError(`${label} is not currently trusted for new transactions. Complete an approved counterparty verification first.`);
   if (requireActiveTaxRegistration && row.tax_registration_status !== "ACTIVE") throw new BusinessResourceError(`${label} does not have current ACTIVE tax-registration evidence for a tax-bearing transaction.`);
@@ -641,7 +632,8 @@ export async function syntheticallyVerifyBusinessParty(
 ) {
   validateIdempotencyKey(idempotencyKey);
   const deployment = (process.env.VAT_MSA_ENVIRONMENT ?? "local").trim().toLowerCase();
-  const enabled = deployment !== "production" && (process.env.NODE_ENV !== "production" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
+  const enabled = deployment !== "production"
+    && (process.env.NODE_ENV !== "production" || process.env.VITEST === "true" || (deployment === "staging" && process.env.VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST === "true"));
   if (!enabled) throw new BusinessResourceError("Synthetic counterparty verification is disabled in this environment.", 403);
   const submission = normalizeSyntheticCounterpartyVerification(payload);
   const db = await ensureDatabase();
@@ -1525,6 +1517,110 @@ export async function rejectExpense(expenseId: string, payload: unknown, actor: 
     db.prepare("UPDATE expenses SET status='REJECTED', approved_by=?, approved_at=?, rejection_reason=? WHERE id=?").bind(actor.userId, now, input.reason, expenseId),
     commandRecord(db, actor.userId, "REJECT_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
     outboxRecord(db, "EXPENSE", expenseId, "ExpenseRejected", organisation.id, { expense_id: expenseId, organisation_id: organisation.id, reason: input.reason, correlation_id: correlationId }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+type ExpenseDecisionRow = {
+  id: string;
+  organisation_id: string;
+  status: string;
+  created_by: string;
+  requires_receipt: number;
+  receipt_document_id: string | null;
+  receipt_scan_status: string | null;
+  receipt_status: string | null;
+};
+
+async function loadExpenseForDecision(db: D1Database, expenseId: string, organisationId: string): Promise<ExpenseDecisionRow> {
+  const expense = await db.prepare(`SELECT e.id,e.organisation_id,e.status,e.created_by,c.requires_receipt,e.receipt_document_id,
+    d.scan_status AS receipt_scan_status,d.status AS receipt_status
+    FROM expenses e JOIN expense_categories c ON c.id=e.category_id
+    LEFT JOIN document_metadata d ON d.id=e.receipt_document_id
+    WHERE e.id=? AND e.organisation_id=?`).bind(expenseId, organisationId).first<ExpenseDecisionRow>();
+  if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
+  return expense;
+}
+
+/**
+ * Module 5 Phase E DecideExpense. A newer, consolidated maker-checker
+ * decision that replaces the old two-step SUBMIT->APPROVE/REJECT flow with
+ * a single receipt-gated decision straight from DRAFT (see
+ * evaluateExpenseDecision in lib/domain/business.ts for the exact gate, and
+ * drizzle/0010_curvy_zaran.sql's expense_decisions triggers for the
+ * authoritative DB-level enforcement this mirrors). SUBMIT_EXPENSE/
+ * APPROVE_EXPENSE/REJECT_EXPENSE above are unchanged for callers still on
+ * that flow; DECIDE_EXPENSE is the new one.
+ */
+export async function decideExpense(expenseId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const decision = normalizeAndValidateExpenseDecision(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, decision }));
+  const prior = await priorCommand(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const expense = await loadExpenseForDecision(db, expenseId, organisation.id);
+  assertNotSelfReview(actor, expense.created_by, "deciding");
+  const evaluation = evaluateExpenseDecision({
+    status: expense.status,
+    createdBy: expense.created_by,
+    actorId: actor.userId,
+    decision: decision.decision,
+    receiptRequired: Boolean(expense.requires_receipt),
+    receiptDocumentId: expense.receipt_document_id,
+    receiptScanStatus: expense.receipt_scan_status,
+    receiptStatus: expense.receipt_status,
+  });
+  if (!evaluation.allowed) throw new RepositoryConflictError(evaluation.reason);
+  const now = new Date().toISOString();
+  const action = decision.decision === "APPROVE" ? "EXPENSE_APPROVED" : "EXPENSE_REJECTED";
+  const audit = await auditEnvelope(db, actor, action, "EXPENSE", expenseId, { organisationId: organisation.id, decision: decision.decision, reason: decision.reason, correlationId }, now);
+  await db.batch([
+    db.prepare("INSERT INTO expense_decisions (id,expense_id,organisation_id,decision,reason,decided_by,decided_at) VALUES (?,?,?,?,?,?,?)")
+      .bind(crypto.randomUUID(), expenseId, organisation.id, decision.decision, decision.reason, actor.userId, now),
+    commandRecord(db, actor.userId, "DECIDE_EXPENSE", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, decision.decision === "APPROVE" ? "ExpenseApproved" : "ExpenseRejected", organisation.id, {
+      expense_id: expenseId, organisation_id: organisation.id, reason: decision.reason, correlation_id: correlationId,
+    }, now),
+    auditRecord(db, actor, audit, now),
+  ]);
+  return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();
+}
+
+/**
+ * Module 5 Phase E LinkExpenseReceipt. One immutable receipt per draft
+ * expense (drizzle/0011_melted_weapon_omega.sql's unique index and
+ * immutability triggers are the authoritative enforcement); this mirrors
+ * the same clean/available gate here so a bad link is rejected with a
+ * normal application error instead of falling through to a raw SQL abort.
+ */
+export async function linkExpenseReceipt(expenseId: string, payload: unknown, actor: UserContext, idempotencyKey: string, correlationId: string, requestedOrganisationId?: string | null) {
+  validateIdempotencyKey(idempotencyKey);
+  const link = normalizeAndValidateExpenseReceiptLink(payload);
+  const db = await ensureDatabase();
+  const organisation = await resolveOrganisation(actor, requestedOrganisationId);
+  const requestHash = await sha256Hex(stableStringify({ organisation_id: organisation.id, expense_id: expenseId, link }));
+  const prior = await priorCommand(db, actor.userId, "LINK_EXPENSE_RECEIPT", idempotencyKey, requestHash);
+  if (prior) return db.prepare("SELECT * FROM expenses WHERE id=? AND organisation_id=?").bind(prior, organisation.id).first<Record<string, unknown>>();
+  const expense = await db.prepare("SELECT id,status,receipt_document_id FROM expenses WHERE id=? AND organisation_id=?")
+    .bind(expenseId, organisation.id).first<{ id: string; status: string; receipt_document_id: string | null }>();
+  if (!expense) throw new BusinessResourceError("Expense was not found in the authorised organisation.", 404);
+  if (expense.status !== "DRAFT" || expense.receipt_document_id) throw new RepositoryConflictError("A receipt can only be linked once, while the expense is still in draft.");
+  const document = await db.prepare("SELECT id,scan_status,status FROM document_metadata WHERE id=? AND organisation_id=? AND owner_domain='EXPENSE' AND owner_resource_id=?")
+    .bind(link.receipt_document_id, organisation.id, expenseId).first<{ id: string; scan_status: string; status: string }>();
+  if (!document) throw new BusinessResourceError("Receipt document was not found for this expense.", 404);
+  if (document.scan_status !== "CLEAN" || document.status !== "AVAILABLE") throw new RepositoryConflictError("Only a clean, available receipt document may be linked.");
+  const now = new Date().toISOString();
+  const audit = await auditEnvelope(db, actor, "EXPENSE_RECEIPT_LINKED", "EXPENSE", expenseId, { organisationId: organisation.id, documentId: link.receipt_document_id, correlationId }, now);
+  await db.batch([
+    db.prepare("INSERT INTO expense_receipt_links (id,expense_id,organisation_id,document_id,linked_by,linked_at) VALUES (?,?,?,?,?,?)")
+      .bind(crypto.randomUUID(), expenseId, organisation.id, link.receipt_document_id, actor.userId, now),
+    commandRecord(db, actor.userId, "LINK_EXPENSE_RECEIPT", idempotencyKey, requestHash, "EXPENSE", expenseId, now),
+    outboxRecord(db, "EXPENSE", expenseId, "ExpenseReceiptLinked", organisation.id, {
+      expense_id: expenseId, organisation_id: organisation.id, document_id: link.receipt_document_id, correlation_id: correlationId,
+    }, now),
     auditRecord(db, actor, audit, now),
   ]);
   return db.prepare("SELECT * FROM expenses WHERE id=?").bind(expenseId).first<Record<string, unknown>>();

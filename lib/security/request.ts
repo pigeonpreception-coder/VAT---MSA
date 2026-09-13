@@ -158,6 +158,22 @@ export async function enforceVerifyTokenRateLimits(context: RequestContext): Pro
   ]);
 }
 
+/** POST /api/v1/signup-applications is another pre-auth, unauthenticated surface (Sec 18) — same source/device keying as enforceInvitationClaimRateLimits, since there is no actor yet at signup. */
+export async function enforceSelfServeSignupSourceRateLimits(context: RequestContext): Promise<void> {
+  await enforceRateLimits([
+    { key: `self-serve-signup:source:${context.sourceToken}`, limit: 10, windowSeconds: 300 },
+    { key: `self-serve-signup:device:${context.deviceId}`, limit: 15, windowSeconds: 300 },
+    { key: "self-serve-signup:global", limit: 500, windowSeconds: 300 },
+  ]);
+}
+
+/** A second, email-keyed limit alongside enforceSelfServeSignupSourceRateLimits — bounds repeated signup attempts against one contact email regardless of which source/device they arrive from. */
+export async function enforceSelfServeSignupEmailRateLimit(email: string): Promise<void> {
+  await enforceRateLimits([
+    { key: `self-serve-signup:email:${email.trim().toLowerCase()}`, limit: 5, windowSeconds: 3_600 },
+  ]);
+}
+
 export async function enforceRateLimits(buckets: RateBucket[], nowMs = Date.now()): Promise<void> {
   const { ensureDatabase } = await import("@/db/runtime");
   const db = await ensureDatabase();

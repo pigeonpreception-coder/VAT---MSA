@@ -204,23 +204,27 @@ describe("Module 3 reconciliation matching engine (Phase A)", () => {
       ]);
       const [invoiceRecent, invoiceMid, invoiceOld] = await Promise.all(submissions.map((response) => response.json()));
 
+      // Age filters (below) compute age from Date.now(), so these must be relative to
+      // real "now" rather than fixed calendar dates - a hardcoded date drifts out of its
+      // intended age bracket as real time passes.
+      const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
       await db.batch([
         // 1 day old, CRITICAL, unassigned.
         db.prepare("INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)").bind(
-          "wq-exc-recent", invoiceRecent.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "CRITICAL", "OPEN", "Recent critical exception.", "2026-08-24T00:00:00.000Z",
+          "wq-exc-recent", invoiceRecent.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "CRITICAL", "OPEN", "Recent critical exception.", daysAgo(1),
         ),
         // 10 days old, MEDIUM, assigned to NAMRA_OFFICER.
         db.prepare("INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,?,NULL,NULL)").bind(
-          "wq-exc-mid", invoiceMid.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "MEDIUM", "ASSIGNED", "Mid-aged assigned exception.", "2026-08-15T00:00:00.000Z", NAMRA_OFFICER.userId,
+          "wq-exc-mid", invoiceMid.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "MEDIUM", "ASSIGNED", "Mid-aged assigned exception.", daysAgo(10), NAMRA_OFFICER.userId,
         ),
         // 40 days old, LOW, unassigned.
         db.prepare("INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)").bind(
-          "wq-exc-old", invoiceOld.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "LOW", "OPEN", "Old unassigned exception.", "2026-07-16T00:00:00.000Z",
+          "wq-exc-old", invoiceOld.invoice_id, "tp-rec-seller", "LEDGER_MISMATCH", "LOW", "OPEN", "Old unassigned exception.", daysAgo(40),
         ),
         // Belongs to a different taxpayer entirely.
-        db.prepare(`INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+        db.prepare(`INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
           "inv-wq-other", "INV-WQ-OTHER", "TAX_INVOICE", "TEST-ERP", "wq-doc-other", "tp-wq-other", "Other Co (Pty) Ltd", "VAT-WQ-OTHER-001",
-          null, "Walk-in customer", null, "2026-08-25", "NAD", 10_000, 1_500, 11_500, "CERTIFIED", "LOW",
+          null, "Walk-in customer", null, "2026-08-25", "taxrule-na-pilot-2026-1", "NAD", 10_000, 1_500, 11_500, "CERTIFIED", "LOW",
           "hash", "txn-wq-other", "cert-wq-other", "vfy_wq_other", now, now,
         ),
         db.prepare("INSERT INTO reconciliation_exceptions VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)").bind(

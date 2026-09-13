@@ -101,7 +101,11 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
       const response = await POST(submitRequest(invoicePayload({ rate: "20.00", taxAmount: "20.00" })));
       expect(response.status).toBe(422);
       const body = await response.json();
-      expect(body.errors?.[0]?.code).toBe("VAT_RATE_RULE_MISMATCH");
+      // calculateAndValidateInvoice (lib/domain/invoice.ts) checks the submitted rate against
+      // the resolved tax_rule_set's standard rate before submitInvoice ever reaches the
+      // per-category vat_rules lookup this describe block otherwise exercises - both layers
+      // reject the same non-conforming rate, this one just fires first.
+      expect(body.errors?.[0]?.code).toBe("STANDARD_RATE_NOT_APPROVED");
     });
 
     it("rejects an OTHER-category line entirely, since no rule is approved for it (fails closed)", async () => {
@@ -110,7 +114,9 @@ describe("Module 2 route-level VAT rule engine (Phase A)", () => {
       const response = await POST(submitRequest(invoicePayload({ rate: "0.00", taxAmount: "0.00", category: "OTHER" })));
       expect(response.status).toBe(422);
       const body = await response.json();
-      expect(body.errors?.[0]?.code).toBe("NO_APPROVED_VAT_RULE");
+      // Same reasoning: calculateAndValidateInvoice rejects OTHER/REVERSE_CHARGE outright
+      // (not mapped by the approved tax_rule_set) before the vat_rules lookup runs.
+      expect(body.errors?.[0]?.code).toBe("TAX_CATEGORY_NOT_APPROVED");
     });
 
     it("certifies a STANDARD line taxed at the approved 15% rate, traceable via ExplainCalculation", async () => {

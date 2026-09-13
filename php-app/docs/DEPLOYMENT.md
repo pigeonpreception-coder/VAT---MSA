@@ -285,11 +285,13 @@ record. As of this document: every application-code phase (3 through
 13) is COMPLETE for its own actual scope -- every export from the
 original source's `lib/data/**` and `lib/api/**` now has a ported PHP
 counterpart. Known, documented gaps that are not silently pretended
-complete: no full TOTP step-up parity (Phase 6 note above), platform-config
-values not yet wired to any real downstream consumer (Phase 13's
-"Platform config & change-management" section), and no real
-object-storage driver configured yet (this document's "Storage"
-section). (Self-service password reset -- previously listed here as a
+complete: no full TOTP step-up parity (Phase 6 note above), three
+platform-config/access-policy values wired to a real downstream consumer
+via `App\Support\Platform\PlatformConfigReader` with every other seeded
+row still illustrative only (Phase 13's "Platform config now feeds three
+real consumers" section), and no real object-storage driver configured
+yet (this document's "Storage" section). (Self-service password reset --
+previously listed here as a
 gap -- was closed 2026-09-02 per red team finding RT-005; see
 `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.) None of these block a
 pilot/demo deployment; all are called out here so a real production

@@ -1,5 +1,6 @@
 import { identityJson, identityProblem } from "@/lib/api/identity";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { classifyTransaction } from "@/lib/data/identity-repository";
 import { requestContext } from "@/lib/security/request";
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "invoices:submit");
+    await requireLicensedPermission(actor, "invoices:submit", { operationClass: "BUSINESS_WRITE" });
     const vatNumber = new URL(request.url).searchParams.get("vat_number");
     const classification = await classifyTransaction(vatNumber);
     return identityJson({ classification }, context);

@@ -42,7 +42,11 @@ function quotationPayload(quotationNumber: string, overrides: Record<string, unk
     quotation_number: quotationNumber,
     currency: "NAD",
     issue_date: "2026-08-10",
-    valid_until: "2026-09-10",
+    // Comfortably beyond "now" so this fixture doesn't drift into an
+    // "expired" 409 as real time passes (this hardcoded-date staleness
+    // pattern already bit tests/routes/module-3-reconciliation.test.ts once
+    // this session - see its daysAgo() fix).
+    valid_until: "2030-01-01",
     lines: [{
       description: "Consulting services",
       quantity_micros: 1_000_000,
@@ -77,6 +81,17 @@ async function seedFixture(): Promise<void> {
         VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${user.userId}`, user.userId, "idp-quote-workspace", user.externalUserId, user.email, "PILOT", "ACTIVE", now, now)),
     db.prepare(`INSERT INTO business_parties (id,organisation_id,display_name,legal_name,vat_number,tin,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,'LOCAL',NULL,'ACTIVE',?,?)`).bind("party-quote-customer", "org-quote-taxpayer", "Quote Customer Co", null, null, null, null, null, null, now, now),
+    // Quotations require a SYNTHETIC_VALID/AUTHORITY_VERIFIED counterparty trust profile
+    // for the customer party before a quotation (or an ACTIVE party_relationship) can
+    // reference it (drizzle/0018_counterparty_trust.sql's insert/update guard triggers).
+    db.prepare(`INSERT INTO counterparty_trust_profiles
+      (id,business_party_id,provider,provider_environment,trust_status,tax_registration_status,vat_verification_status,
+       tin_verification_status,company_verification_status,confidence_bps,evidence_hash,source_reference,requested_by,
+       reviewed_by,checked_at,expires_at,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind("trust-quote-customer", "party-quote-customer", "ITAS_BIPA", "SYNTHETIC_TEST", "SYNTHETIC_VALID", "ACTIVE",
+        "NOT_PROVIDED", "NOT_PROVIDED", "NOT_PROVIDED", 10000, "synthetic-evidence-hash-quote-customer-0000000000",
+        null, OWNER.userId, null, now, "2030-01-01T00:00:00.000Z", now, now),
     db.prepare(`INSERT INTO party_relationships (id,organisation_id,party_id,relationship,status,effective_from,effective_to,created_at)
       VALUES (?,?,?,?,'ACTIVE',?,NULL,?)`).bind("prel-quote-customer", "org-quote-taxpayer", "party-quote-customer", "CUSTOMER", now, now),
   ]);

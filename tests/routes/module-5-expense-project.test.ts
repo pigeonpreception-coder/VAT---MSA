@@ -46,6 +46,21 @@ async function seedFixture(): Promise<void> {
     ...[PREPARER, APPROVER].map((user) =>
       db.prepare(`INSERT INTO identity_links (id,user_id,provider_id,subject,email_at_link,assurance_level,status,linked_at,last_authenticated_at)
         VALUES (?,?,?,?,?,?,?,?,?)`).bind(`ilink-${user.userId}`, user.userId, "idp-exp-workspace", user.externalUserId, user.email, "PILOT", "ACTIVE", now, now)),
+    // A tax-bearing expense requires a trusted supplier (lib/domain/business.ts's
+    // TAXED_EXPENSE_SUPPLIER_REQUIRED), which in turn requires a SYNTHETIC_VALID/
+    // AUTHORITY_VERIFIED counterparty trust profile (drizzle/0018_counterparty_trust.sql).
+    db.prepare(`INSERT INTO business_parties (id,organisation_id,display_name,legal_name,vat_number,tin,email,phone,address,source_system,source_party_id,status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'LOCAL',NULL,'ACTIVE',?,?)`).bind("party-exp-supplier", "org-exp-taxpayer", "Expense Supplier Co", null, null, null, null, null, null, now, now),
+    db.prepare(`INSERT INTO counterparty_trust_profiles
+      (id,business_party_id,provider,provider_environment,trust_status,tax_registration_status,vat_verification_status,
+       tin_verification_status,company_verification_status,confidence_bps,evidence_hash,source_reference,requested_by,
+       reviewed_by,checked_at,expires_at,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind("trust-exp-supplier", "party-exp-supplier", "ITAS_BIPA", "SYNTHETIC_TEST", "SYNTHETIC_VALID", "ACTIVE",
+        "NOT_PROVIDED", "NOT_PROVIDED", "NOT_PROVIDED", 10000, "synthetic-evidence-hash-exp-supplier-00000000",
+        null, PREPARER.userId, null, now, "2030-01-01T00:00:00.000Z", now, now),
+    db.prepare(`INSERT INTO party_relationships (id,organisation_id,party_id,relationship,status,effective_from,effective_to,created_at)
+      VALUES (?,?,?,?,'ACTIVE',?,NULL,?)`).bind("prel-exp-supplier", "org-exp-taxpayer", "party-exp-supplier", "SUPPLIER", now, now),
   ]);
 }
 
@@ -121,7 +136,9 @@ describe("Module 5 expense and project workflow (Phase E)", () => {
     await ensureDatabase();
     await seedFixture();
 
-    const category = await createCategoryRoute({ code: "TRAVEL", name: "Travel" }, PREPARER);
+    // requires_receipt defaults to true; this suite exercises the maker-checker approval
+    // workflow itself, not receipt evidence, so opt out explicitly.
+    const category = await createCategoryRoute({ code: "TRAVEL", name: "Travel", requires_receipt: false }, PREPARER);
     categoryId = (await category.json()).resource.id;
   });
 
@@ -136,7 +153,7 @@ describe("Module 5 expense and project workflow (Phase E)", () => {
 
   it("walks an expense from DRAFT through SUBMITTED to APPROVED, denying self-approval along the way", async () => {
     const created = await createExpenseRoute({
-      category_id: categoryId, expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-10",
+      category_id: categoryId, supplier_party_id: "party-exp-supplier", expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-10",
       description: "Client site visit travel", net_cents: 1_000, tax_cents: 150, total_cents: 1_150,
     }, PREPARER);
     expect(created.status).toBe(201);
@@ -158,7 +175,7 @@ describe("Module 5 expense and project workflow (Phase E)", () => {
 
   it("rejects a submitted expense with a reason, denying self-rejection", async () => {
     const created = await createExpenseRoute({
-      category_id: categoryId, expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-11",
+      category_id: categoryId, supplier_party_id: "party-exp-supplier", expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-11",
       description: "Disputed taxi claim", net_cents: 500, tax_cents: 75, total_cents: 575,
     }, PREPARER);
     const expenseId = (await created.json()).resource.id as string;
@@ -176,7 +193,7 @@ describe("Module 5 expense and project workflow (Phase E)", () => {
 
   it("rejects submitting an already-submitted expense and approving a still-draft expense", async () => {
     const created = await createExpenseRoute({
-      category_id: categoryId, expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-12",
+      category_id: categoryId, supplier_party_id: "party-exp-supplier", expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-12",
       description: "State-machine guard test", net_cents: 200, tax_cents: 30, total_cents: 230,
     }, PREPARER);
     const expenseId = (await created.json()).resource.id as string;
@@ -229,7 +246,7 @@ describe("Module 5 expense and project workflow (Phase E)", () => {
     const projectId = (await project.json()).resource.id as string;
 
     const expense = await createExpenseRoute({
-      category_id: categoryId, project_id: projectId, expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-15",
+      category_id: categoryId, supplier_party_id: "party-exp-supplier", project_id: projectId, expense_number: `EXP-${crypto.randomUUID().slice(0, 8)}`, expense_date: "2026-07-15",
       description: "Materials for the rollout", net_cents: 8_000, tax_cents: 1_200, total_cents: 9_200,
     }, PREPARER);
     const expenseId = (await expense.json()).resource.id as string;

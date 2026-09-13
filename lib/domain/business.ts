@@ -587,6 +587,69 @@ export function normalizeAndValidateExpenseRejection(payload: unknown): ExpenseR
   return { schema_version: "1.0.0", reason };
 }
 
+/**
+ * DecideExpense normalizer. emergency_override was a legacy escape hatch
+ * for bypassing the receipt-gated maker-checker decision below; it is
+ * deliberately rejected here rather than silently ignored, so a stale
+ * client can't believe it bypassed the gate when it didn't.
+ */
+export function normalizeAndValidateExpenseDecision(payload: unknown): ExpenseDecisionSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const decision = textValue(input.decision).toUpperCase();
+  if (decision !== "APPROVE" && decision !== "REJECT") messages.push({ code: "DECISION_INVALID", path: "/decision", message: "decision must be APPROVE or REJECT." });
+  const reason = textField(input.reason, "/reason", "Decision reason", 5, 500, messages);
+  if (input.emergency_override !== undefined) messages.push({ code: "EMERGENCY_OVERRIDE_UNSUPPORTED", path: "/emergency_override", message: "Emergency override of the expense decision gate is not supported." });
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", decision: decision as ExpenseDecisionSubmission["decision"], reason };
+}
+
+export function normalizeAndValidateExpenseReceiptLink(payload: unknown): ExpenseReceiptLinkSubmission {
+  const input = record(payload);
+  const messages: BusinessValidationMessage[] = [];
+  schemaVersion(input, messages);
+  const receiptDocumentId = idField(input.receipt_document_id, "/receipt_document_id", "Receipt document", messages) ?? "";
+  if (messages.length) throw new BusinessValidationError(messages);
+  return { schema_version: "1.0.0", receipt_document_id: receiptDocumentId };
+}
+
+/**
+ * DecideExpense evaluation. Maker-checker separation applies to both
+ * APPROVE and REJECT (the actor may never decide their own expense), but
+ * the clean-receipt gate below only blocks APPROVE — rejecting a
+ * draft never requires evidence to already be in place. Mirrors the DB
+ * triggers in drizzle/0010_curvy_zaran.sql, which enforce the same rules
+ * as the authoritative last line of defence.
+ */
+export function evaluateExpenseDecision(input: {
+  status: string;
+  createdBy: string;
+  actorId: string;
+  decision: "APPROVE" | "REJECT";
+  receiptRequired: boolean;
+  receiptDocumentId: string | null;
+  receiptScanStatus: string | null;
+  receiptStatus: string | null;
+}): ExpenseDecisionEvaluation {
+  const targetStatus = input.decision === "APPROVE" ? "APPROVED" : "REJECTED";
+  if (input.status !== "DRAFT") {
+    return { allowed: false, targetStatus, reason: `Only a draft expense can be decided; current status is ${input.status}.` };
+  }
+  if (input.actorId === input.createdBy) {
+    return { allowed: false, targetStatus, reason: "Maker-checker separation prevents deciding an expense you created yourself." };
+  }
+  if (input.decision === "APPROVE" && input.receiptRequired
+    && (!input.receiptDocumentId || input.receiptScanStatus !== "CLEAN" || input.receiptStatus !== "AVAILABLE")) {
+    return { allowed: false, targetStatus, reason: "Approval requires a linked receipt that has cleared scanning and is available." };
+  }
+  return {
+    allowed: true,
+    targetStatus,
+    reason: input.decision === "APPROVE" ? "The expense evidence and totals were independently reviewed and approved." : "The expense was independently reviewed and rejected.",
+  };
+}
+
 export type ProjectBudgetApprovalSubmission = { schema_version: "1.0.0"; approved_amount_cents: number; notes?: string };
 
 /** Module 5 Phase E ApproveBudget. approved_amount_cents is deliberately independent of the originally proposed amount — an approver may approve less (or more, e.g. a pre-approved overrun) than what was proposed. */

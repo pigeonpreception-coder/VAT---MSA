@@ -1,5 +1,6 @@
 import { vatRuleJson, vatRuleProblem } from "@/lib/api/vat-rules";
-import { getCurrentUser, requirePermission } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { evaluateVatRule } from "@/lib/data/vat-rule-repository";
 import { requestContext } from "@/lib/security/request";
 
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "vat-rules:read");
+    await requireLicensedPermission(actor, "vat-rules:read", { operationClass: "READ" });
     const url = new URL(request.url);
     const evaluation = await evaluateVatRule(url.searchParams.get("tax_category"), url.searchParams.get("date"));
     return vatRuleJson({ evaluation }, context);

@@ -11,13 +11,12 @@
     // See docs/MIGRATION_MATRIX.md's Administration section.
     $openCapacityExceptions = collect($snapshot['capacityExceptions'] ?? [])->where('status', 'OPEN');
     $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
-    // App\Support\Licensing\LicenseResolver::getEntitlements has no
-    // capacity_mode field at all (confirmed by reading it directly) --
-    // the same limit_value===null-means-unlimited convention the
-    // Licensing slice (PR #9, resources/views/licensing/index.blade.php)
-    // already established is used here instead of the source's own
-    // computed field, rather than inventing a second convention.
-    $capacityMode = fn (?int $limit) => $limit === null ? 'UNLIMITED' : 'FIXED';
+    // Not re-derived here as a local closure (main's own merge history had
+    // one, `$capacityMode`, as a workaround) -- App\Support\Licensing\
+    // LicenseResolver::getEntitlements already computes a real
+    // `capacity_mode` field (NOT_APPLICABLE/UNLIMITED/FINITE) on every
+    // entitlement row, so this view reads that directly, matching the
+    // rest of this migration's own single-source-of-truth convention.
 @endphp
 
 @section('content')
@@ -42,8 +41,8 @@
     <div class="col">
         <div class="card h-100"><div class="card-body">
             <div class="text-muted small text-uppercase">User seats</div>
-            <div class="fs-2 fw-semibold">{{ number_format($seat['used_value'] ?? $activeEmployees) }} / {{ $seat && $seat['limit_value'] === null ? 'Unlimited' : ($seat['limit_value'] ?? '—') }}</div>
-            <div class="small text-muted">{{ $seat ? $capacityMode($seat['limit_value']) : 'NOT CONFIGURED' }} &middot; invitations reserve capacity</div>
+            <div class="fs-2 fw-semibold">{{ number_format($seat['used_value'] ?? $activeEmployees) }} / {{ ($seat['capacity_mode'] ?? null) === 'UNLIMITED' ? 'Unlimited' : ($seat['limit_value'] ?? '—') }}</div>
+            <div class="small text-muted">{{ $seat['capacity_mode'] ?? 'NOT CONFIGURED' }} &middot; invitations reserve capacity</div>
         </div></div>
     </div>
     <div class="col">
@@ -284,8 +283,8 @@
                         </td>
                         <td class="font-monospace">{{ $entitlement['metric_key'] ?? 'Unmetered' }}</td>
                         <td>{{ number_format($entitlement['used_value'] + $entitlement['reserved_value']) }}</td>
-                        <td><x-status-badge :value="$capacityMode($entitlement['limit_value'])" type="status" /></td>
-                        <td>{{ $entitlement['limit_value'] === null ? 'Unlimited' : $entitlement['limit_value'] }}</td>
+                        <td><x-status-badge :value="$entitlement['capacity_mode']" type="status" /></td>
+                        <td>{{ $entitlement['capacity_mode'] === 'UNLIMITED' ? 'Unlimited' : ($entitlement['limit_value'] ?? 'Not applicable') }}</td>
                         <td><x-status-badge :value="$entitlement['enabled'] ? 'ACTIVE' : 'DISABLED'" type="status" /></td>
                     </tr>
                 @endforeach

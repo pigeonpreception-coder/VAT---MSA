@@ -1,8 +1,6 @@
-import { ensureDatabase } from "@/db/runtime";
 import { AccessDeniedError } from "@/lib/auth";
 import { hasFreshStepUp } from "@/lib/data/mfa-repository";
 import type { UserContext } from "@/lib/domain/types";
-import { STEP_UP_WINDOW_MS, verifySignedStepUpEvidence } from "@/lib/security/step-up-evidence";
 
 /**
  * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #2 —

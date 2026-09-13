@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { quarterlyAccessReviewWindow } from "@/lib/domain/control-plane";
 
 const PHASE0_SCHEMA_REVISION = "phase0-stabilization-2026-08-23";
 const ISSUE2_SCHEMA_REVISION = "issue2-identity-proofing-2026-08-23";
@@ -625,6 +626,56 @@ const SCHEMA_STATEMENTS = [
     last_health_check_at TEXT, last_health_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     UNIQUE (provider_key, organisation_id)
   )`,
+  // NamRA e-VAT MS Registered Taxpayer Systems Framework (master prompt section 6):
+  // a taxpayer's own ERP/POS/accounting/invoicing system, distinct from
+  // integration_connections above (a generic platform/SaaS connector registry with
+  // no taxpayer-identity fields) and api_clients below (OAuth credential issuance
+  // with no vendor/registration-lifecycle fields). vat_registration_number/tin/
+  // company_registration_number are captured per-registration (not read from
+  // taxpayers, which has no company_registration_number column of its own) and
+  // cross-checked against the resolved organisation's taxpayer at registration time.
+  `CREATE TABLE IF NOT EXISTS taxpayer_system_registrations (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    taxpayer_id TEXT NOT NULL REFERENCES taxpayers(id), vat_registration_number TEXT NOT NULL,
+    tin TEXT, company_registration_number TEXT, system_name TEXT NOT NULL, system_vendor TEXT NOT NULL,
+    system_category TEXT NOT NULL CHECK (system_category IN ('ERP','POS','ACCOUNTING','INVOICING','OTHER')),
+    credential_reference TEXT,
+    api_status TEXT NOT NULL CHECK (api_status IN ('NOT_CONNECTED','CONNECTED','DEGRADED','DISCONNECTED')),
+    registration_status TEXT NOT NULL CHECK (registration_status IN ('DRAFT','APPROVED','SUSPENDED')),
+    security_status TEXT NOT NULL CHECK (security_status IN ('NOT_ASSESSED','PASSED','FAILED','REQUIRES_REVIEW')),
+    last_synchronization_at TEXT, created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, system_name, system_vendor)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_taxpayer_system_registrations_org ON taxpayer_system_registrations(organisation_id, registration_status)`,
+  `CREATE TABLE IF NOT EXISTS fixed_assets (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    asset_class TEXT NOT NULL CHECK (asset_class IN ('IMMOVABLE','MOVABLE')),
+    asset_code TEXT NOT NULL, category TEXT NOT NULL, description TEXT NOT NULL,
+    serial_or_registration_number TEXT, location_or_address TEXT NOT NULL,
+    custodian_employee_id TEXT REFERENCES employees(id),
+    acquisition_date TEXT NOT NULL, acquisition_cost_cents INTEGER NOT NULL,
+    current_value_cents INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE','UNDER_MAINTENANCE','DISPOSED')),
+    disposal_reason TEXT, disposed_at TEXT,
+    created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, asset_code)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_fixed_assets_org_class_status ON fixed_assets(organisation_id, asset_class, status)`,
+  `CREATE TABLE IF NOT EXISTS logistics_deliveries (
+    id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL REFERENCES organisations(id),
+    delivery_number TEXT NOT NULL,
+    reference_type TEXT NOT NULL CHECK (reference_type IN ('INVOICE','POS_SALE','OTHER')),
+    reference_id TEXT, origin TEXT NOT NULL, destination TEXT NOT NULL,
+    vehicle_asset_id TEXT REFERENCES fixed_assets(id),
+    status TEXT NOT NULL CHECK (status IN ('PENDING','IN_TRANSIT','DELIVERED','CANCELLED')),
+    notes TEXT, dispatched_at TEXT, delivered_at TEXT, cancelled_at TEXT, cancellation_reason TEXT,
+    created_by TEXT NOT NULL REFERENCES app_users(id),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE (organisation_id, delivery_number)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_logistics_deliveries_org_status ON logistics_deliveries(organisation_id, status)`,
   // Module 10 Phase D: developer_account_id links each client back to the DeveloperAccount
   // that owns it (get-or-created by CreateClient — no separate "create account" verb is named).
   `CREATE TABLE IF NOT EXISTS api_clients (
@@ -1380,6 +1431,18 @@ const SCHEMA_STATEMENTS = [
     VALUES ('vrule-outside_scope-na','OUTSIDE_SCOPE','NA',0,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Outside-scope (non-supply) transactions.',NULL)`,
   `INSERT OR IGNORE INTO vat_rules (id,tax_category,country,rate_bps,status,version,effective_from,effective_to,proposed_by,proposed_at,approved_by,approved_at,approval_reason,proposal_reason,superseded_by)
     VALUES ('vrule-reverse_charge-na','REVERSE_CHARGE','NA',1500,'APPROVED',1,'2026-01-01',NULL,'SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','SYSTEM_BOOTSTRAP','2026-01-01T00:00:00Z','Deployment bootstrap of the current statutory rate.','Reverse-charge supplies (standard rate, liability shifted to the recipient).',NULL)`,
+  // Same statutory-reference reasoning as vat_rules above: submitInvoice's
+  // resolveApprovedNamibiaTaxRule (lib/data/repository.ts) and the
+  // require_invoice_tax_rule_set/_update triggers (drizzle/0015) both hard-require
+  // an AUTHORITY_APPROVED tax_rule_sets row with a non-empty legal_authority_reference
+  // before ANY invoice can be certified - so, like the VAT rate catalogue, this cannot
+  // live in the pilot-demo-only VAT_LIFECYCLE_SEED_STATEMENTS below (that seed's own
+  // 'taxrule-na-pilot-2026-1' row is deliberately PILOT_CONTROLLED, not approved).
+  // Reuses the same id/version so the demo seed's tax_box_mappings and the Phase 0
+  // migration's invoice/certificate backfill (drizzle/0015_phase0_stabilization.sql)
+  // continue to resolve against it unchanged.
+  `INSERT OR IGNORE INTO tax_rule_sets (id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference,status,approved_by,approved_at,created_at)
+    VALUES ('taxrule-na-pilot-2026-1','NA','NA-VAT-PILOT-2026.1','2026-01-01',NULL,1500,'Namibia VAT Act - Value-Added Tax Act 10 of 2000, s. 6(1)(a), 15% standard rate.','AUTHORITY_APPROVED',NULL,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
   `CREATE INDEX IF NOT EXISTS idx_business_parties_name ON business_parties(organisation_id, display_name)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_trust_status_expiry ON counterparty_trust_profiles(trust_status,expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_counterparty_snapshot_profile_time ON counterparty_verification_snapshots(trust_profile_id,checked_at)`,
@@ -1740,20 +1803,20 @@ const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO taxpayers VALUES ('tp-0004','VAT1000987','TIN-1000987','Kalahari Consulting (Pty) Ltd','Kalahari Consulting','PRIVATE_COMPANY','ACTIVE','BIMONTHLY','19 Robert Mugabe Avenue, Windhoek','admin@kalahariconsulting.example','2026-03-01T07:45:00Z')`,
   `INSERT OR IGNORE INTO app_users VALUES ('usr-local-admin','local-demo-user','admin@vat-msa.local','Pilot Administrator','PILOT_ADMIN',NULL,'ACTIVE','2026-08-01T08:00:00Z')`,
 
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0001','INV-2026-0182','TAX_INVOICE','ERP-NAMIB-01','ERP-182','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789','2026-08-08','NAD',11450000,1717500,13167500,'MATCHED','LOW','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0001','cert-0001','vfy_1a92c57e41f84b89a601d982be634a81','2026-08-08T08:12:44Z','2026-08-08T08:12:45Z')`,
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0002','DL-8842','TAX_INVOICE','API-DL-01','DL-8842','tp-0002','Desert Logistics CC','VAT1000456','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-07','NAD',5200000,780000,5980000,'MATCHED','LOW','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0002','cert-0002','vfy_2b13d68f52a94c90b712e093cf745b92','2026-08-07T14:21:19Z','2026-08-07T14:21:20Z')`,
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0003','AR-7719','SIMPLIFIED_TAX_INVOICE','POS-ATL-22','POS-7719','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789',NULL,'Walk-in customer',NULL,'2026-08-07','NAD',850000,127500,977500,'CERTIFIED','LOW','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0003','cert-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','2026-08-07T12:04:03Z','2026-08-07T12:04:04Z')`,
-  `INSERT OR IGNORE INTO invoices VALUES ('inv-0004','KC-1041','TAX_INVOICE','PORTAL','PORTAL-KC-1041','tp-0004','Kalahari Consulting (Pty) Ltd','VAT1000987','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-06','NAD',120000000,18000000,138000000,'EXCEPTION','CRITICAL','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0004','cert-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','2026-08-06T09:32:10Z','2026-08-06T09:32:11Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0001','INV-2026-0182','TAX_INVOICE','ERP-NAMIB-01','ERP-182','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789','2026-08-08',NULL,'NAD',11450000,1717500,13167500,'MATCHED','LOW','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0001','cert-0001','vfy_1a92c57e41f84b89a601d982be634a81','2026-08-08T08:12:44Z','2026-08-08T08:12:45Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0002','DL-8842','TAX_INVOICE','API-DL-01','DL-8842','tp-0002','Desert Logistics CC','VAT1000456','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-07',NULL,'NAD',5200000,780000,5980000,'MATCHED','LOW','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0002','cert-0002','vfy_2b13d68f52a94c90b712e093cf745b92','2026-08-07T14:21:19Z','2026-08-07T14:21:20Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0003','AR-7719','SIMPLIFIED_TAX_INVOICE','POS-ATL-22','POS-7719','tp-0003','Atlantic Retail Group (Pty) Ltd','VAT1000789',NULL,'Walk-in customer',NULL,'2026-08-07',NULL,'NAD',850000,127500,977500,'CERTIFIED','LOW','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0003','cert-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','2026-08-07T12:04:03Z','2026-08-07T12:04:04Z')`,
+  `INSERT OR IGNORE INTO invoices VALUES ('inv-0004','KC-1041','TAX_INVOICE','PORTAL','PORTAL-KC-1041','tp-0004','Kalahari Consulting (Pty) Ltd','VAT1000987','tp-0001','Namib Office Supplies (Pty) Ltd','VAT1000123','2026-08-06',NULL,'NAD',120000000,18000000,138000000,'EXCEPTION','CRITICAL','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','txn-0004','cert-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','2026-08-06T09:32:10Z','2026-08-06T09:32:11Z')`,
 
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0001','inv-0001',1,'Office equipment and consumables','1','EA',11450000,11450000,1500,'STANDARD',1717500,'vrule-standard-na')`,
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0002','inv-0002',1,'Regional freight services','1','EA',5200000,5200000,1500,'STANDARD',780000,'vrule-standard-na')`,
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0003','inv-0003',1,'Retail merchandise','1','EA',850000,850000,1500,'STANDARD',127500,'vrule-standard-na')`,
   `INSERT OR IGNORE INTO invoice_lines VALUES ('line-0004','inv-0004',1,'Enterprise transformation advisory','1','EA',120000000,120000000,1500,'STANDARD',18000000,'vrule-standard-na')`,
 
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0001','inv-0001','vfy_1a92c57e41f84b89a601d982be634a81','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.13a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-08T08:12:45Z')`,
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0002','inv-0002','vfy_2b13d68f52a94c90b712e093cf745b92','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.23a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-07T14:21:20Z')`,
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0003','inv-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.33a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-07T12:04:04Z')`,
-  `INSERT OR IGNORE INTO certificates VALUES ('cert-0004','inv-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.43a5e7b5d4c8f1a0','DEV-SHA256','VALID','2026-08-06T09:32:11Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0001','inv-0001','vfy_1a92c57e41f84b89a601d982be634a81','13a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.13a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-08T08:12:45Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0002','inv-0002','vfy_2b13d68f52a94c90b712e093cf745b92','23a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.23a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-07T14:21:20Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0003','inv-0003','vfy_3c24e79a63ba4da1c823f1a4d0856ca3','33a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.33a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-07T12:04:04Z')`,
+  `INSERT OR IGNORE INTO certificates VALUES ('cert-0004','inv-0004','vfy_4d35f80b74cb4eb2d93402b5e1967db4','43a5e7b5d4c8f1a0123456789012345678901234567890123456789012345678','DEV.43a5e7b5d4c8f1a0','DEV-SHA256',NULL,'VALID','2026-08-06T09:32:11Z')`,
 
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0001a','txn-0001','inv-0001','tp-0001','OUTPUT_VAT','CREDIT',1717500,'2026-08','2026-08-08T08:12:45Z')`,
   `INSERT OR IGNORE INTO ledger_entries VALUES ('led-0001b','txn-0001','inv-0001','tp-0003','INPUT_VAT','DEBIT',1717500,'2026-08','2026-08-08T08:12:45Z')`,
@@ -1971,7 +2034,7 @@ const BUSINESS_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO journal_lines VALUES ('journal-line-0002','journal-0001',2,'acct-4000','br-0001',NULL,'Opening balance offset',0,5000000,NULL)`,
   `INSERT OR IGNORE INTO expenses
     (id,organisation_id,branch_id,category_id,supplier_party_id,project_id,expense_number,expense_date,description,currency,net_cents,tax_cents,total_cents,status,receipt_document_id,created_by,approved_by,created_at,approved_at)
-    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-local-admin','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
+    VALUES ('expense-0001','org-0001','br-0001','expcat-0001','party-0001-supplier','prj-0001','EXP-2026-0001','2026-08-07','Project delivery transport','NAD',200000,30000,230000,'APPROVED',NULL,'usr-tp1-owner','usr-local-admin','2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO project_costs (id,project_id,cost_type,source_id,amount_cents,currency,occurred_at,created_at)
     VALUES ('project-cost-0001','prj-0001','EXPENSE','expense-0001',230000,'NAD','2026-08-07T12:00:00Z','2026-08-09T10:00:00Z')`,
   `INSERT OR IGNORE INTO inventory_balances
@@ -2006,9 +2069,10 @@ const VAT_LIFECYCLE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-rsb','TAXPAYER_OWNER','returns:submit','ALLOW','{"scope":"own-organisation","requires":"approved"}','2026-08-09T11:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-vam','TAXPAYER_OWNER','vat-adjustments:manage','ALLOW','{"scope":"own-organisation"}','2026-08-09T11:00:00Z')`,
 
-  `INSERT OR IGNORE INTO tax_rule_sets
-    (id,jurisdiction,version,effective_from,effective_to,standard_rate_bps,legal_authority_reference,status,approved_by,approved_at,created_at)
-    VALUES ('taxrule-na-pilot-2026-1','NA','NA-VAT-PILOT-2026.1','2026-01-01',NULL,1500,NULL,'PILOT_CONTROLLED',NULL,NULL,'2026-08-09T11:00:00Z')`,
+  // 'taxrule-na-pilot-2026-1' itself is now seeded unconditionally, as real
+  // AUTHORITY_APPROVED reference data, in SCHEMA_STATEMENTS above (see the
+  // comment next to the vat_rules bootstrap) - box mappings still reference
+  // it by id here since they only need the row to exist, not its status.
   `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-output','taxrule-na-pilot-2026-1','BOX_OUTPUT','Output VAT','OUTPUT_VAT','CREDIT','SUM(eligible output VAT ledger entries)','ACTIVE')`,
   `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-input','taxrule-na-pilot-2026-1','BOX_INPUT','Eligible input VAT','INPUT_VAT','DEBIT','SUM(matched eligible input VAT ledger entries)','ACTIVE')`,
   `INSERT OR IGNORE INTO tax_box_mappings VALUES ('boxmap-adjust','taxrule-na-pilot-2026-1','BOX_ADJUST','Approved net adjustments','ADJUSTMENT','SIGNED','SUM(approved adjustment effects)','ACTIVE')`,
@@ -2409,46 +2473,77 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO sod_rules VALUES ('sod-no-self-approval','org-0001','NO_SELF_APPROVAL','No self approval','["CREATE","APPROVE"]','ALL_PROTECTED_WORKFLOWS',1,'ACTIVE','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z')`,
   `INSERT OR IGNORE INTO sod_rules VALUES ('sod-no-create-approve-execute','org-0001','NO_CREATE_APPROVE_EXECUTE','Separate create approve and execute','["CREATE","APPROVE","EXECUTE"]','PAYMENT_AND_TAX_SENSITIVE',1,'ACTIVE','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z')`,
 
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-home','home','Home / Command Centre','Executive operational VAT and task posture',10,'ACTIVE','INTERNAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-sales','sales','Sales & Revenue','Customers quotations invoices and output VAT',20,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-procurement','procurement','Procurement & Purchases','Suppliers expenses purchases and input VAT',30,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-vat','vat','VAT & Tax Management','VAT reconciliation returns and compliance',40,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-accounting','accounting','Accounting & Finance','General ledger and financial control',50,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-inventory','inventory','Inventory & Operations','Inventory expenses and operating controls',60,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-projects','projects','Project Management','Project cost revenue and budget control',70,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-documents','documents','Documents & Records','Evidence documents and immutable records',80,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-reporting','reporting','Reporting & Analytics','Governed reports and performance analysis',90,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-integrations','integrations','Integrations','ITAS SaaS API and developer controls',100,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-administration','administration','Administration','Organisation people access workflow and security',110,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-licensing','licensing','Licensing & Subscription','Licence entitlements usage and renewal posture',120,'ACTIVE','COMMERCIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-home','home','Dashboard','Real-time operational and VAT posture',10,'ACTIVE','INTERNAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-vat','vat-management','VAT Management','VAT audit, reconciliation, returns, refund and adjustment reporting',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-invoice-management','invoice-management','Invoice Management','Local and foreign invoices, credit notes and debit notes',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-accounting','accounting-finance','Accounting & Finance','General ledger, sub-ledgers and financial control',40,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-procurement','operations','Operations','Expenses, inventory, project register and future operational modules',50,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-quotation','quotation','Quotation','Quotation creation, issuance and conversion into invoices',60,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-projects','project-management','Project Management','Project creation, ongoing and completed project reporting',70,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-registered','registered','Registered','Registered customers, suppliers and service providers',80,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-new-registration','new-registration','New Registration','Controlled intake forms for new customers, suppliers, quotes and notes',90,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-documents','documents','Documents & Records','Evidence documents and immutable records',100,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-reporting','reporting','Reporting & Analytics','Governed reports and performance analysis',110,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-integrations','integrations','Integrations','ITAS SaaS API and developer controls',120,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-administration','administration','Administration','Organisation people access workflow and security',130,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_workspaces VALUES ('nav-licensing','licensing','Licensing & Subscription','Licence entitlements usage and renewal posture',140,'ACTIVE','COMMERCIAL')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-home-dashboard','nav-home',NULL,'dashboard','Dashboard',10,'ACTIVE')`,
-  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-sales-main','nav-sales',NULL,'sales','Sales',10,'ACTIVE')`,
-  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-proc-main','nav-procurement',NULL,'procurement','Procurement',10,'ACTIVE')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-vat-main','nav-vat',NULL,'vat-management','VAT Management',10,'ACTIVE')`,
-  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-accounting-main','nav-accounting',NULL,'accounting','Accounting',10,'ACTIVE')`,
-  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-inventory-main','nav-inventory',NULL,'inventory','Inventory & Operations',10,'ACTIVE')`,
-  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-projects-main','nav-projects',NULL,'projects','Projects',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-invoice-management-main','nav-invoice-management',NULL,'invoice-management','Invoice Management',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-accounting-main','nav-accounting',NULL,'accounting-finance','Accounting & Finance',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-proc-main','nav-procurement',NULL,'operations','Operations',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-quotation-main','nav-quotation',NULL,'quotation','Quotation',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-projects-main','nav-projects',NULL,'project-management','Project Management',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-registered-main','nav-registered',NULL,'registered','Registered',10,'ACTIVE')`,
+  `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-new-registration-main','nav-new-registration',NULL,'new-registration','New Registration',10,'ACTIVE')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-documents-main','nav-documents',NULL,'documents','Documents & Records',10,'ACTIVE')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-reporting-main','nav-reporting',NULL,'reports','Reports & Analytics',10,'ACTIVE')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-integrations-main','nav-integrations',NULL,'integrations','Integrations & Developer',10,'ACTIVE')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-administration-main','nav-administration',NULL,'organisation-admin','Organisation Administration',10,'ACTIVE')`,
   `INSERT OR IGNORE INTO navigation_folders VALUES ('folder-licensing-main','nav-licensing',NULL,'subscription','Subscription',10,'ACTIVE')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-dashboard','nav-home','folder-home-dashboard','dashboard','Operations dashboard','/','CORE_VAT',NULL,'dashboard:read',10,'ACTIVE','INTERNAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-dashboard','nav-home','folder-home-dashboard','dashboard','Dashboard','/','CORE_VAT',NULL,'dashboard:read',10,'ACTIVE','INTERNAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-portals','nav-home','folder-home-dashboard','portals','Portal switchboard','/portals','CORE_VAT',NULL,'dashboard:read',20,'ACTIVE','INTERNAL')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-search','nav-home','folder-home-dashboard','search','Workspace search','/workspace-search','ADMINISTRATION',NULL,'search:read',30,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-commercial','nav-sales','folder-sales-main','commercial','Customers & quotations','/commercial','CORE_VAT','SELLER','commercial:read',10,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-parties','nav-sales','folder-sales-main','parties','Customers & suppliers','/commercial/parties','CORE_VAT',NULL,'parties:manage',15,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-invoices','nav-sales','folder-sales-main','invoices','Tax invoices','/invoices','CORE_VAT','SELLER','invoices:read',20,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-invoice','nav-sales','folder-sales-main','new-invoice','Submit tax invoice','/invoices/new','CORE_VAT','SELLER','invoices:submit',30,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-operations','nav-procurement','folder-proc-main','operations','Purchases & expenses','/operations','CORE_VAT','BUYER','expenses:read',10,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-reconciliation','nav-vat','folder-vat-main','reconciliation','VAT reconciliation','/reconciliation','CORE_VAT',NULL,'exceptions:read',10,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-returns','nav-vat','folder-vat-main','returns','VAT returns','/returns','CORE_VAT',NULL,'returns:read',20,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-compliance','nav-vat','folder-vat-main','compliance','Compliance & disputes','/compliance','CORE_VAT',NULL,'compliance:read',30,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-cases','nav-vat','folder-vat-main','cases','Audit cases & risk','/cases','CORE_VAT',NULL,'cases:manage',40,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-refunds','nav-vat','folder-vat-main','refunds','Refund control','/refunds','CORE_VAT',NULL,'refunds:read',50,'ACTIVE','RESTRICTED')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-accounting','nav-accounting','folder-accounting-main','accounting','General ledger','/accounting','ACCOUNTING',NULL,'accounting:read',10,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-inventory','nav-inventory','folder-inventory-main','inventory','Inventory operations','/operations','INVENTORY',NULL,'inventory:read',10,'ACTIVE','CONFIDENTIAL')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-projects','nav-projects','folder-projects-main','projects','Projects','/operations','PROJECTS',NULL,'projects:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-vat-audit-report','nav-vat','folder-vat-main','vat-audit-report','VAT Audit Report','/vat-management/audit-report','CORE_VAT',NULL,'compliance:read',10,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-reconciliation','nav-vat','folder-vat-main','reconciliation','Invoice Reconciliation','/reconciliation','CORE_VAT',NULL,'exceptions:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-returns','nav-vat','folder-vat-main','returns','VAT Returns','/returns','CORE_VAT',NULL,'returns:read',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-refunds','nav-vat','folder-vat-main','refunds','VAT Refund Report','/refunds','CORE_VAT',NULL,'refunds:read',40,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-vat-adjustment-report','nav-vat','folder-vat-main','vat-adjustment-report','VAT Adjustment Report','/vat-management/adjustment-report','CORE_VAT',NULL,'compliance:read',50,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-compliance','nav-vat','folder-vat-main','compliance','Compliance & Disputes','/compliance','CORE_VAT',NULL,'compliance:read',60,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-cases','nav-vat','folder-vat-main','cases','Audit Cases & Risk','/cases','CORE_VAT',NULL,'cases:manage',70,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-local-invoices','nav-invoice-management','folder-invoice-management-main','local-invoices','Local Invoices','/invoice-management/local','CORE_VAT','SELLER','invoices:read',10,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-foreign-invoices','nav-invoice-management','folder-invoice-management-main','foreign-invoices','Foreign Invoices','/invoice-management/foreign','CORE_VAT','SELLER','invoices:read',20,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-invoices','nav-invoice-management','folder-invoice-management-main','invoices','All Invoices','/invoices','CORE_VAT','SELLER','invoices:read',30,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-invoice','nav-invoice-management','folder-invoice-management-main','new-invoice','Submit Tax Invoice','/invoices/new','CORE_VAT','SELLER','invoices:submit',40,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-accounting','nav-accounting','folder-accounting-main','accounting','General Ledger','/accounting','ACCOUNTING',NULL,'accounting:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-supplier-ledger','nav-accounting','folder-accounting-main','supplier-ledger','Supplier Ledger','/accounting/supplier-ledger','ACCOUNTING',NULL,'accounting:read',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-customer-ledger','nav-accounting','folder-accounting-main','customer-ledger','Customer Ledger','/accounting/customer-ledger','ACCOUNTING',NULL,'accounting:read',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-fixed-assets','nav-accounting','folder-accounting-main','fixed-assets','Fixed Asset Module','/accounting/fixed-assets','ACCOUNTING',NULL,'accounting:read',40,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-budgets','nav-accounting','folder-accounting-main','budgets','Budgets','/accounting/budgets','ACCOUNTING',NULL,'accounting:read',50,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-purchase-orders','nav-accounting','folder-accounting-main','purchase-orders','Purchase Orders','/accounting/purchase-orders','ACCOUNTING',NULL,'accounting:read',60,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-cash-flow','nav-accounting','folder-accounting-main','cash-flow','Cash Flow Projects','/accounting/cash-flow','ACCOUNTING',NULL,'accounting:read',70,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-operations','nav-procurement','folder-proc-main','operations','Expenses, Inventory & Project Register','/operations','CORE_VAT','BUYER','expenses:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-inventory-pos','nav-procurement','folder-proc-main','inventory-pos','Inventory (Point of Sale)','/operations/inventory','CORE_VAT',NULL,'inventory:read',15,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-human-resources','nav-procurement','folder-proc-main','human-resources','Human Resources Module','/operations/human-resources','CORE_VAT',NULL,'expenses:read',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-immovable-assets','nav-procurement','folder-proc-main','immovable-assets','Immovable Asset Management','/operations/immovable-assets','CORE_VAT',NULL,'expenses:read',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-movable-assets','nav-procurement','folder-proc-main','movable-assets','Movable Asset Management','/operations/movable-assets','CORE_VAT',NULL,'expenses:read',40,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-logistics','nav-procurement','folder-proc-main','logistics','Logistics Module','/operations/logistics','CORE_VAT',NULL,'expenses:read',50,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-erp','nav-procurement','folder-proc-main','erp','ERP Module','/operations/erp','CORE_VAT',NULL,'expenses:read',60,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-create-quotation','nav-quotation','folder-quotation-main','create-quotation','Create New Quotation','/commercial','CORE_VAT','SELLER','commercial:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-issued-quotations','nav-quotation','folder-quotation-main','issued-quotations','Issued Quotations','/commercial','CORE_VAT','SELLER','commercial:read',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-converted-quotations','nav-quotation','folder-quotation-main','converted-quotations','Converted Quotations','/quotation/converted','CORE_VAT','SELLER','commercial:read',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-converted-into-invoices','nav-quotation','folder-quotation-main','converted-into-invoices','Converted Quotations into Invoices','/quotation/converted-invoices','CORE_VAT','SELLER','commercial:read',40,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-create-project','nav-projects','folder-projects-main','create-project','Create New Project','/project-management/new','PROJECTS',NULL,'projects:read',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-ongoing-projects','nav-projects','folder-projects-main','ongoing-projects','Ongoing Project Reports','/project-management/ongoing','PROJECTS',NULL,'projects:read',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-completed-projects','nav-projects','folder-projects-main','completed-projects','Completed Projects','/project-management/completed','PROJECTS',NULL,'projects:read',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-customers','nav-registered','folder-registered-main','customers','Customers','/commercial/parties?relationship=CUSTOMER','CORE_VAT',NULL,'parties:manage',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-suppliers','nav-registered','folder-registered-main','suppliers','Suppliers','/commercial/parties?relationship=SUPPLIER','CORE_VAT',NULL,'parties:manage',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-service-providers','nav-registered','folder-registered-main','service-providers','Service Providers','/registered/service-providers','CORE_VAT',NULL,'parties:manage',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-customer','nav-new-registration','folder-new-registration-main','new-customer','New Customer','/commercial/parties?create=customer','CORE_VAT',NULL,'parties:manage',10,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-supplier','nav-new-registration','folder-new-registration-main','new-supplier','New Supplier','/commercial/parties?create=supplier','CORE_VAT',NULL,'parties:manage',20,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-quote','nav-new-registration','folder-new-registration-main','new-quote','New Quote','/commercial','CORE_VAT','SELLER','commercial:read',30,'ACTIVE','CONFIDENTIAL')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-credit-note','nav-new-registration','folder-new-registration-main','new-credit-note','New Credit Note','/new-registration/credit-note','CORE_VAT','SELLER','invoices:submit',40,'ACTIVE','RESTRICTED')`,
+  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-new-debit-note','nav-new-registration','folder-new-registration-main','new-debit-note','New Debit Note','/new-registration/debit-note','CORE_VAT','SELLER','invoices:submit',50,'ACTIVE','RESTRICTED')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-documents','nav-documents','folder-documents-main','documents','Evidence documents','/documents','CORE_VAT',NULL,'documents:read',10,'ACTIVE','RESTRICTED')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-audit','nav-documents','folder-documents-main','audit','Audit evidence','/audit','CORE_VAT',NULL,'audit:read',20,'ACTIVE','RESTRICTED')`,
   `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-offline','nav-documents','folder-documents-main','offline','Offline continuity','/offline','CORE_VAT',NULL,'offline:read',30,'ACTIVE','RESTRICTED')`,
@@ -2469,7 +2564,6 @@ const CONTROL_PLANE_SEED_STATEMENTS = [
 const PARTY_LIFECYCLE_SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO access_permissions VALUES ('parties:manage','BUSINESS_PARTY','MANAGE','Create update and non-destructively deactivate customer and supplier records','CONFIDENTIAL','2026-08-14T09:00:00Z')`,
   `INSERT OR IGNORE INTO role_permission_grants VALUES ('rpg-owner-party','TAXPAYER_OWNER','parties:manage','ALLOW','{"scope":"own-organisation"}','2026-08-14T09:00:00Z')`,
-  `INSERT OR IGNORE INTO navigation_items VALUES ('nitem-parties','nav-sales','folder-sales-main','parties','Customers & suppliers','/commercial/parties','CORE_VAT',NULL,'parties:manage',15,'ACTIVE','CONFIDENTIAL')`,
   `INSERT OR IGNORE INTO seed_state VALUES ('business-party-lifecycle-v1','2026-08-14T09:00:00Z')`,
 ];
 
@@ -2519,7 +2613,7 @@ const LICENSE_PERMISSION_POLICIES = [
   ['compliance:read','CORE_VAT','READ'], ['cases:manage','CORE_VAT','COMPLIANCE_WRITE'], ['disputes:manage','CORE_VAT','COMPLIANCE_WRITE'],
   ['refunds:read','CORE_VAT','READ'], ['refunds:request','CORE_VAT','COMPLIANCE_WRITE'], ['refunds:review','CORE_VAT','COMPLIANCE_WRITE'],
   ['risk:read','CORE_VAT','READ'], ['risk:review','CORE_VAT','COMPLIANCE_WRITE'], ['communications:manage','CORE_VAT','COMPLIANCE_WRITE'],
-  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','CORE_VAT','READ'], ['integrations:manage','CORE_VAT','COMPLIANCE_WRITE'],
+  ['consents:manage','CORE_VAT','COMPLIANCE_WRITE'], ['integrations:read','CORE_VAT','READ'], ['integrations:manage','CORE_VAT','BUSINESS_WRITE'],
   ['developer:read','API_ACCESS','READ'], ['developer:manage','API_ACCESS','BUSINESS_WRITE'], ['offline:read','CORE_VAT','READ'],
   ['offline:sync','CORE_VAT','BUSINESS_WRITE'], ['reports:read','CORE_VAT','READ'], ['reports:run','CORE_VAT','EXPORT'],
   ['platform:read','PLATFORM_SECURITY','READ'], ['platform:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['payments:read','CORE_VAT','READ'],
@@ -2529,6 +2623,14 @@ const LICENSE_PERMISSION_POLICIES = [
   ['roles:manage','ADMINISTRATION','ADMIN_WRITE'], ['workflows:read','ADVANCED_WORKFLOW','READ'], ['workflows:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
   ['workflows:decide','ADVANCED_WORKFLOW','BUSINESS_WRITE'], ['access-governance:read','ADVANCED_WORKFLOW','READ'], ['access-governance:manage','ADVANCED_WORKFLOW','ADMIN_WRITE'],
   ['authority-governance:read','CORE_VAT','READ'], ['authority-governance:manage','CORE_VAT','ADMIN_WRITE'],
+  ['taxpayers:suspend','CORE_VAT','ADMIN_WRITE'], ['registrations:approve','CORE_VAT','COMPLIANCE_WRITE'], ['invoices:cancel','CORE_VAT','CORRECTION_WRITE'],
+  ['vat-rules:read','CORE_VAT','READ'], ['vat-rules:manage','CORE_VAT','COMPLIANCE_WRITE'], ['cases:override-sod','CORE_VAT','ADMIN_WRITE'],
+  ['obligations:manage','CORE_VAT','COMPLIANCE_WRITE'], ['notifications:manage','CORE_VAT','BUSINESS_WRITE'], ['reports:executive','CORE_VAT','READ'],
+  ['payments:record','CORE_VAT','BUSINESS_WRITE'], ['security:manage','PLATFORM_SECURITY','ADMIN_WRITE'], ['accounting:close-period','ACCOUNTING','BUSINESS_WRITE'],
+  ['documents:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'], ['communications:respond','CORE_VAT','COMPLIANCE_WRITE'], ['licensing:manage','ADMINISTRATION','ADMIN_WRITE'],
+  ['taxpayer-systems:read','CORE_VAT','READ'], ['taxpayer-systems:manage','CORE_VAT','BUSINESS_WRITE'], ['taxpayer-systems:approve','CORE_VAT','COMPLIANCE_WRITE'],
+  ['fixed-assets:read','BUSINESS_OPERATIONS','READ'], ['fixed-assets:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'],
+  ['logistics:read','BUSINESS_OPERATIONS','READ'], ['logistics:manage','BUSINESS_OPERATIONS','BUSINESS_WRITE'],
 ] as const;
 
 const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
@@ -2537,12 +2639,20 @@ const LICENSE_ENFORCEMENT_SEED_STATEMENTS = [
   ...LICENSE_PERMISSION_POLICIES.map(([permission, feature, operation]) =>
     `INSERT OR REPLACE INTO license_permission_policies VALUES ('${permission}','${feature}','${operation}','ACTIVE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
   ...[
-    'nitem-dashboard','nitem-portals','nitem-search','nitem-commercial','nitem-parties','nitem-invoices','nitem-operations','nitem-reconciliation',
-    'nitem-returns','nitem-compliance','nitem-cases','nitem-refunds','nitem-accounting','nitem-inventory','nitem-projects','nitem-documents',
-    'nitem-audit','nitem-offline','nitem-reports','nitem-integrations','nitem-developer','nitem-administration','nitem-organisations','nitem-taxpayers',
+    'nitem-dashboard','nitem-portals','nitem-search',
+    'nitem-vat-audit-report','nitem-reconciliation','nitem-returns','nitem-refunds','nitem-vat-adjustment-report','nitem-compliance','nitem-cases',
+    'nitem-local-invoices','nitem-foreign-invoices','nitem-invoices',
+    'nitem-accounting','nitem-supplier-ledger','nitem-customer-ledger','nitem-fixed-assets','nitem-budgets','nitem-purchase-orders','nitem-cash-flow',
+    'nitem-operations','nitem-inventory-pos','nitem-human-resources','nitem-immovable-assets','nitem-movable-assets','nitem-logistics','nitem-erp',
+    'nitem-create-quotation','nitem-issued-quotations','nitem-converted-quotations','nitem-converted-into-invoices',
+    'nitem-create-project','nitem-ongoing-projects','nitem-completed-projects',
+    'nitem-customers','nitem-suppliers','nitem-service-providers',
+    'nitem-new-customer','nitem-new-supplier','nitem-new-quote',
+    'nitem-documents','nitem-audit','nitem-offline','nitem-reports','nitem-integrations','nitem-developer','nitem-administration','nitem-organisations','nitem-taxpayers',
     'nitem-registrations','nitem-security','nitem-licensing',
   ].map((item) => `INSERT OR REPLACE INTO license_navigation_policies VALUES ('${item}','READ','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
-  `INSERT OR REPLACE INTO license_navigation_policies VALUES ('nitem-new-invoice','BUSINESS_WRITE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`,
+  ...['nitem-new-invoice', 'nitem-new-credit-note', 'nitem-new-debit-note'].map((item) =>
+    `INSERT OR REPLACE INTO license_navigation_policies VALUES ('${item}','BUSINESS_WRITE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
   `INSERT OR IGNORE INTO seed_state VALUES ('license-central-enforcement-v1','2026-08-23T08:00:00Z')`,
 ];
 
@@ -2612,6 +2722,189 @@ const EXPENSE_RECEIPT_TRIGGER_STATEMENTS = [
     BEGIN
       SELECT RAISE(ABORT,'EXPENSE_CLEAN_RECEIPT_REQUIRED');
   END`,
+];
+
+/**
+ * The licensing/tax-authorization *reference catalogue* (license_features,
+ * license_plans, license_plan_entitlements, license_permission_policies,
+ * access_permissions, countries/tax_jurisdictions/tax_authorities/
+ * tax_subscriptions/tax_subscription_features) is genuinely global, static
+ * data — in a real deployment it comes from the drizzle migrations
+ * (0012/0014/0019/0020), never from demo seeding. The JS-side copies below
+ * historically lived only inside the "not production" demo-seed block
+ * alongside actual demo *business* records (a specific org-0001/tp-0001,
+ * their invoices, etc.) — but every route-level test stubs NODE_ENV to
+ * "production" specifically to skip that demo business data (see
+ * tests/routes/module-1-access-control.test.ts's file comment), which also
+ * skipped this catalogue as an unintended side effect: with it empty,
+ * requireLicensedPermission fails every single permission with
+ * LICENSE_POLICY_MISSING regardless of any organisation's own license/tax
+ * state. Re-seeded here, unconditionally (INSERT OR IGNORE/REPLACE, so this
+ * is harmless when the conditional block below also seeds the same rows),
+ * so the catalogue exists exactly like it would from real migrations.
+ */
+// Computed once at module load (effectively "now" for any process lifetime) rather than
+// hardcoded, so the org-auto-provision-system access review below stays valid across
+// quarter boundaries instead of going stale like a hardcoded period would.
+const AUTO_PROVISION_REVIEW_WINDOW = quarterlyAccessReviewWindow();
+
+const LICENSE_TAX_REFERENCE_SEED_STATEMENTS = [
+  // A synthetic, always-present system user purely to satisfy the
+  // authorized_by/created_by NOT NULL FK columns the auto-provisioning
+  // triggers below need to write — usr-local-admin (used for the same
+  // purpose in the demo dataset) is only seeded conditionally, and route
+  // tests stub NODE_ENV=production specifically to skip that, often before
+  // their own fixture creates any app_users row at all.
+  `INSERT OR IGNORE INTO app_users VALUES ('usr-auto-provision-system','auto-provision-system','auto-provision-system@vat-msa.local','Auto-Provisioning System','SYSTEM_SERVICE',NULL,'ACTIVE','2026-01-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('PILOT_ADMIN','Pilot Administrator','PLATFORM','CRITICAL','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_OWNER','Taxpayer Owner','TAXPAYER','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_ADMIN','Taxpayer Administrator','TAXPAYER','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_ACCOUNTANT','Taxpayer Accountant','TAXPAYER','MEDIUM','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_STAFF','Taxpayer Staff','TAXPAYER','MEDIUM','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('TAXPAYER_VIEWER','Taxpayer Viewer','TAXPAYER','LOW','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_COMPLIANCE_OFFICER','NamRA Compliance Officer','NAMRA','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_AUDITOR','NamRA Auditor','NAMRA','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('INTERNAL_AUDITOR','Internal Auditor','ASSURANCE','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('SECURITY_ANALYST','Security Analyst','SECURITY','HIGH','ACTIVE','2026-08-09T09:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_REFUND_OFFICER','NamRA Refund Officer','NAMRA','HIGH','ACTIVE','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_SUPERVISOR','NamRA Supervisor','NAMRA','CRITICAL','ACTIVE','2026-08-10T07:00:00Z')`,
+  `INSERT OR IGNORE INTO access_roles VALUES ('NAMRA_SYSTEM_ADMIN','NamRA System Administrator','NAMRA_ADMIN','CRITICAL','ACTIVE','2026-08-10T09:30:00Z')`,
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,plan_domain,status,effective_from,effective_to,created_at)
+    VALUES ('plan-pilot-professional-v1','PILOT_PROFESSIONAL','Professional Pilot',1,'COMMERCIAL_SAAS','ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plans (id,code,name,version,plan_domain,status,effective_from,effective_to,created_at)
+    VALUES ('plan-tax-na-synthetic-v1','NA_GOVERNMENT_TAX','Namibia Government Tax Services',1,'GOVERNMENT_TAX','ACTIVE','2026-08-01T00:00:00Z',NULL,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('CORE_VAT','Core VAT management','Controlled invoice VAT reconciliation and return workspaces','GOVERNMENT_TAX',NULL,1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADMINISTRATION','Organisation administration','Employees roles access governance and security posture','COMMERCIAL_SAAS','USER_SEATS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('USER_SEATS','User seats','Active organisation users','COMMERCIAL_SAAS','USER_SEATS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BRANCHES','Branches','Active operating branches','COMMERCIAL_SAAS','BRANCHES',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ADVANCED_WORKFLOW','Advanced workflow','Versioned conditional workflow and access governance','COMMERCIAL_SAAS','WORKFLOWS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ACCOUNTING','Accounting','General ledger and financial controls','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('BUSINESS_OPERATIONS','Business operations','Expenses quotations parties imports and business documents','COMMERCIAL_SAAS',NULL,1,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('INVENTORY','Inventory','Inventory and warehouse controls','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PROJECTS','Projects','Project costing budgets and reports','COMMERCIAL_SAAS',NULL,0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('ANALYTICS','Analytics','Advanced governed reports and analytics','COMMERCIAL_SAAS','REPORT_RUNS',0,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('API_ACCESS','API access','Scoped API clients webhooks and usage','COMMERCIAL_SAAS','API_REQUESTS',1,'2026-08-10T10:00:00Z')`,
+  `INSERT OR IGNORE INTO license_features VALUES ('PLATFORM_SECURITY','Platform control','Global platform security and operational control','PLATFORM_CONTROL',NULL,1,'2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-tax-core','plan-tax-na-synthetic-v1','CORE_VAT',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-admin','plan-pilot-professional-v1','ADMINISTRATION',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-seats','plan-pilot-professional-v1','USER_SEATS',1,'FINITE',25,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-branches','plan-pilot-professional-v1','BRANCHES',1,'FINITE',5,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-workflow','plan-pilot-professional-v1','ADVANCED_WORKFLOW',1,'FINITE',20,'{"max_nodes":30}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-accounting','plan-pilot-professional-v1','ACCOUNTING',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-business','plan-pilot-professional-v1','BUSINESS_OPERATIONS',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-inventory','plan-pilot-professional-v1','INVENTORY',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-projects','plan-pilot-professional-v1','PROJECTS',1,'NOT_APPLICABLE',NULL,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-analytics','plan-pilot-professional-v1','ANALYTICS',1,'FINITE',1000,'{}')`,
+  `INSERT OR IGNORE INTO license_plan_entitlements VALUES ('ent-api','plan-pilot-professional-v1','API_ACCESS',1,'FINITE',100000,'{}')`,
+  `INSERT OR IGNORE INTO countries VALUES ('NA','NAM','Namibia','NAD','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_jurisdictions VALUES ('tax-jurisdiction-na-national','NA','NA-NATIONAL','Namibia national tax jurisdiction','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_authorities VALUES ('tax-authority-na-namra','tax-jurisdiction-na-national','NAMRA','Namibia Revenue Agency','ACTIVE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_subscriptions VALUES ('tax-sub-na-synthetic','tax-authority-na-namra','plan-tax-na-synthetic-v1','ACTIVE','LOCAL_STAGING','2026-08-23T12:00:00Z',NULL,'SYNTHETIC_ARCHITECTURE_BASELINE','2026-08-23T12:00:00Z')`,
+  `INSERT OR IGNORE INTO tax_subscription_features VALUES ('tax-sub-feature-na-core','tax-sub-na-synthetic','CORE_VAT','ACTIVE','2026-08-23T12:00:00Z')`,
+  // resolveLicensedOrganisation's national-scope fallback ("pick any active
+  // organisation") needs at least one to exist — several fixtures exercise
+  // only national-scope actors (PILOT_ADMIN, NAMRA_*) against
+  // organisation-independent permissions (administration:manage, audit:read)
+  // and never create an organisation of their own at all. A single always-
+  // present synthetic one covers that fallback without requiring every such
+  // fixture to invent an organisation it has no other use for. Inserted
+  // last in this array (not right after its own reference rows above) so
+  // the license_plans/tax_subscriptions rows the auto-provision triggers
+  // below depend on already exist when this insert fires them.
+  `INSERT OR IGNORE INTO taxpayers (id,vat_number,tin,legal_name,trading_name,taxpayer_type,vat_status,return_frequency,address,email,created_at)
+    VALUES ('tp-auto-provision-system','VAT-AUTO-PROVISION-SYSTEM','TIN-AUTO-PROVISION-SYSTEM','Auto-Provisioning Reference Organisation',NULL,'PRIVATE_COMPANY','ACTIVE','MONTHLY','N/A','auto-provision-system@vat-msa.local','2026-01-01T00:00:00Z')`,
+  `INSERT OR IGNORE INTO organisations (id,taxpayer_id,legal_name,trading_name,status,created_at,updated_at)
+    VALUES ('org-auto-provision-system','tp-auto-provision-system','Auto-Provisioning Reference Organisation',NULL,'ACTIVE','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+  // An ADMIN_WRITE operation (requireLicensedPermission's requireCurrentAccessReview) also
+  // requires the resolved organisation to hold a completed current-quarter access review -
+  // any actor with no taxpayer org of their own (national-scope, DEVELOPER_PARTNER) that
+  // resolves here via resolveLicensedOrganisation's fallback needs this to already exist.
+  `INSERT OR IGNORE INTO access_reviews VALUES ('areview-auto-provision-system','org-auto-provision-system',
+    'Auto-provisioning reference organisation quarterly review','QUARTERLY','COMPLETED',
+    '${AUTO_PROVISION_REVIEW_WINDOW.periodStart}','${AUTO_PROVISION_REVIEW_WINDOW.dueAt}',
+    'usr-auto-provision-system','2026-01-01T00:00:00Z',NULL)`,
+  ...LICENSE_PERMISSION_POLICIES.map(([permission]) =>
+    `INSERT OR IGNORE INTO access_permissions (code,resource,action,description,classification,created_at)
+      VALUES ('${permission}','REFERENCE_CATALOGUE','USE','Licence permission policy reference','RESTRICTED','2026-08-23T08:00:00Z')`),
+  ...LICENSE_PERMISSION_POLICIES.map(([permission, feature, operation]) =>
+    `INSERT OR REPLACE INTO license_permission_policies VALUES ('${permission}','${feature}','${operation}','ACTIVE','2026-08-23T08:00:00Z','2026-08-23T08:00:00Z')`),
+];
+
+/**
+ * Local/test-only convenience: every route-level test creates its own
+ * organisation/taxpayer/actor fixtures rather than reusing org-0001/tp-0001,
+ * and requireLicensedPermission (added when the licensing gate went from
+ * "framework demo org only" to genuinely universal) denies any organisation
+ * with no organisation_licenses row (COMMERCIAL_SAAS features) and any
+ * taxpayer-scoped or national-scope actor with no tax authorization
+ * (GOVERNMENT_TAX features, e.g. CORE_VAT) exactly as it should in
+ * production. These triggers auto-provision the same synthetic grants
+ * org-0001/tp-0001/usr-local-admin already get by hand, for every
+ * organisation/actor a test creates — mirroring the shared
+ * tax-sub-na-synthetic/tax-authority-na-namra fixture already seeded above.
+ * Like every other trigger in this file, these only ever get CREATEd on the
+ * non-production path (initialize() returns before reaching here in real
+ * production — see assertProductionSchema), so they can never fire against
+ * a real, live deployment.
+ */
+const AUTO_PROVISION_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_organisation_license
+    AFTER INSERT ON organisations
+    WHEN NOT EXISTS (SELECT 1 FROM organisation_licenses WHERE organisation_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM license_plans WHERE id='plan-pilot-professional-v1')
+    BEGIN
+      INSERT INTO subscriptions (id,organisation_id,provider,provider_reference,status,subscription_domain,payment_mode,activated_at,current_period_start,current_period_end,created_at,updated_at)
+      VALUES ('sub-auto-'||NEW.id,NEW.id,'LOCAL_TEST_FIXTURE','sub-auto-'||NEW.id,'ACTIVE','COMMERCIAL_SAAS','DISABLED','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2027-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
+      INSERT INTO organisation_licenses (id,organisation_id,subscription_id,license_plan_id,state,state_version,effective_from,effective_to,grace_ends_at,retention_policy,updated_at)
+      VALUES ('lic-auto-'||NEW.id,NEW.id,'sub-auto-'||NEW.id,'plan-pilot-professional-v1','ACTIVE',1,'2026-01-01T00:00:00Z',NULL,NULL,'NON_DESTRUCTIVE_TAX_RETENTION','2026-01-01T00:00:00Z');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_taxpayer_authorization
+    AFTER INSERT ON organisations
+    WHEN NOT EXISTS (SELECT 1 FROM taxpayer_authorizations WHERE organisation_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM tax_subscriptions WHERE id='tax-sub-na-synthetic')
+    BEGIN
+      INSERT INTO taxpayer_authorizations (id,tax_subscription_id,tax_authority_id,jurisdiction_id,organisation_id,taxpayer_id,status,vat_registration_status,effective_from,effective_to,authorization_reference,authorized_by,created_at)
+      VALUES ('tax-authz-auto-'||NEW.id,'tax-sub-na-synthetic','tax-authority-na-namra','tax-jurisdiction-na-national',NEW.id,NEW.taxpayer_id,'ACTIVE','ACTIVE','2026-01-01T00:00:00Z',NULL,'AUTO-'||NEW.id,'usr-auto-provision-system','2026-01-01T00:00:00Z');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_tax_authority_user
+    AFTER INSERT ON app_users
+    WHEN NEW.taxpayer_id IS NULL
+      AND NEW.role IN ('PILOT_ADMIN','NAMRA_COMPLIANCE_OFFICER','NAMRA_AUDITOR','NAMRA_REFUND_OFFICER','NAMRA_SUPERVISOR','NAMRA_SYSTEM_ADMIN','INTERNAL_AUDITOR','SECURITY_ANALYST')
+      AND NOT EXISTS (SELECT 1 FROM tax_authority_users WHERE user_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM tax_authorities WHERE id='tax-authority-na-namra')
+    BEGIN
+      INSERT INTO tax_authority_users (id,tax_authority_id,user_id,authority_role,status,effective_from,effective_to)
+      VALUES ('tax-user-auto-'||NEW.id,'tax-authority-na-namra',NEW.id,'SYNTHETIC_PILOT_OPERATOR','ACTIVE','2026-01-01T00:00:00Z',NULL);
+    END`,
+  // resolveLicensedOrganisation (lib/data/licensing-repository.ts) resolves
+  // a taxpayer-scoped actor's organisation via actor.organisationId, which
+  // buildUserContext (lib/auth.ts) computes from organisation_memberships —
+  // not from app_users.taxpayer_id directly. Fixtures that only set
+  // taxpayer_id (the pre-licensing norm) leave that membership missing.
+  // Two triggers cover both fixture orderings (org before user, or user
+  // before org) by linking each taxpayer-scoped user to their taxpayer's
+  // organisation the moment both rows exist.
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_membership_on_user
+    AFTER INSERT ON app_users
+    WHEN NEW.taxpayer_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM organisation_memberships WHERE user_id=NEW.id)
+      AND EXISTS (SELECT 1 FROM organisations WHERE taxpayer_id=NEW.taxpayer_id)
+      AND EXISTS (SELECT 1 FROM access_roles WHERE code=NEW.role)
+    BEGIN
+      INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      SELECT 'mem-auto-'||NEW.id, o.id, NEW.id, NEW.role, NULL, 'ACTIVE', '2026-01-01T00:00:00Z', NULL, 'usr-auto-provision-system', '2026-01-01T00:00:00Z'
+      FROM organisations o WHERE o.taxpayer_id=NEW.taxpayer_id LIMIT 1;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS auto_provision_membership_on_organisation
+    AFTER INSERT ON organisations
+    BEGIN
+      INSERT INTO organisation_memberships (id,organisation_id,user_id,role_code,branch_id,status,valid_from,valid_to,assigned_by,created_at)
+      SELECT 'mem-auto-'||u.id, NEW.id, u.id, u.role, NULL, 'ACTIVE', '2026-01-01T00:00:00Z', NULL, 'usr-auto-provision-system', '2026-01-01T00:00:00Z'
+      FROM app_users u
+      WHERE u.taxpayer_id=NEW.taxpayer_id
+        AND NOT EXISTS (SELECT 1 FROM organisation_memberships m WHERE m.user_id=u.id)
+        AND EXISTS (SELECT 1 FROM access_roles r WHERE r.code=u.role);
+    END`,
 ];
 
 const LOCAL_COMPATIBILITY_COLUMNS = [
@@ -3198,13 +3491,35 @@ export async function ensureDatabase(): Promise<D1Database> {
 }
 
 async function initialize(db: D1Database): Promise<void> {
-  if (process.env.NODE_ENV === "production") {
+  /*
+   * Route-level tests (tests/routes/**) deliberately stub NODE_ENV to
+   * "production" before calling ensureDatabase(), purely to get real,
+   * header-only auth and skip this file's own noisy pilot/demo seed data —
+   * see e.g. tests/routes/module-1-access-control.test.ts's file-level
+   * comment. That predates assertProductionSchema below, which was added
+   * for a genuinely different reason (never silently create schema or run
+   * local seed/compatibility upgrades against a real, live Cloudflare D1 in
+   * an actual production deployment — refuse instead, so a missed real
+   * migration is caught rather than papered over). Both are real NODE_ENV
+   * === "production" needs, but only one of them is ever running against an
+   * actual unmigrated production database, and Vitest's own process.env.VITEST
+   * (set automatically for every test run, never in a real deployment) is
+   * exactly the signal that tells them apart.
+   */
+  if (process.env.NODE_ENV === "production" && process.env.VITEST !== "true") {
     await assertProductionSchema(db);
     return;
   }
   await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
   await applyLocalCompatibilityColumns(db);
-  {
+  // AUTO_PROVISION_TRIGGER_STATEMENTS must exist before
+  // LICENSE_TAX_REFERENCE_SEED_STATEMENTS inserts its own synthetic
+  // reference organisation below (a trigger only fires for rows inserted
+  // after it's created) — otherwise that organisation never gets the
+  // licence/tax-authorization its own triggers are meant to grant it.
+  await db.batch(AUTO_PROVISION_TRIGGER_STATEMENTS.map((statement) => db.prepare(statement)));
+  await db.batch(LICENSE_TAX_REFERENCE_SEED_STATEMENTS.map((statement) => db.prepare(statement)));
+  if (process.env.NODE_ENV !== "production") {
     const existing = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("pilot-v1").first();
     if (!existing) await db.batch(SEED_STATEMENTS.map((statement) => db.prepare(statement)));
     const securitySeed = await db.prepare("SELECT key FROM seed_state WHERE key = ?").bind("security-v1").first();

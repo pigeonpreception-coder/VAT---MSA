@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { allocateRefundPayment, getOutstandingRefunds, PaymentResourceError, recordRefundPayment } from "@/lib/data/payment-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { PaymentValidationError } from "@/lib/domain/payment";
@@ -24,7 +25,7 @@ export async function handlePaymentCommand(request: Request, command: PaymentCom
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "payments:record");
+    await requireLicensedPermission(user, "payments:record", { operationClass: "BUSINESS_WRITE" });
     await enforceRateLimits([
       { key: `payments:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
       { key: `payments:${command}:global`, limit: 1_000, windowSeconds: 60 },
@@ -61,7 +62,7 @@ export async function handleOutstandingRefunds(request: Request) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "payments:read");
+    await requireLicensedPermission(user, "payments:read", { operationClass: "READ" });
     const result = await getOutstandingRefunds(user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {

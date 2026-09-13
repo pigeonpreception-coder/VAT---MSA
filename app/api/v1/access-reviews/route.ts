@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const context = await requestContext(request);
   try {
     const actor = await getCurrentUser();
-    requirePermission(actor, "access-governance:manage");
+    await requireLicensedPermission(actor, "access-governance:manage", { operationClass: "ADMIN_WRITE" });
     await requireStepUp(request, actor);
     return controlPlaneJson({ review: await openQuarterlyAccessReview(actor, organisationIdFrom(request)) }, context, 201);
   } catch (error) { return controlPlaneProblem(error, context); }

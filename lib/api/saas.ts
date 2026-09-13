@@ -1,4 +1,5 @@
-import { AccessDeniedError, getCurrentUser, requirePermission } from "@/lib/auth";
+import { AccessDeniedError, getCurrentUser } from "@/lib/auth";
+import { requireLicensedPermission } from "@/lib/data/licensing-repository";
 import { getUsage, registerProvider, SaasResourceError, submitConformance } from "@/lib/data/saas-repository";
 import { RepositoryConflictError } from "@/lib/data/repository";
 import { SaasValidationError } from "@/lib/domain/saas";
@@ -18,7 +19,7 @@ export async function handleSaasCommand(request: Request, command: SaasCommand, 
   try {
     const user = await getCurrentUser();
     actorId = user.userId;
-    requirePermission(user, "developer:manage");
+    await requireLicensedPermission(user, "developer:manage", { operationClass: "BUSINESS_WRITE" });
     await enforceRateLimits([
       { key: `saas:${command}:actor:${user.userId}`, limit: 30, windowSeconds: 60 },
       { key: `saas:${command}:global`, limit: 1_000, windowSeconds: 60 },
@@ -59,7 +60,7 @@ export async function handleSaasUsage(request: Request, resourceId: string) {
   const context = await requestContext(request);
   try {
     const user = await getCurrentUser();
-    requirePermission(user, "developer:read");
+    await requireLicensedPermission(user, "developer:read", { operationClass: "READ" });
     const result = await getUsage(resourceId, user);
     return Response.json(result, { headers: { "x-correlation-id": context.correlationId, "cache-control": "no-store" } });
   } catch (error) {
