@@ -1,12 +1,15 @@
 # VAT-MSA: Launch Readiness Backlog
 
-Compiled 2026-09-03. `docs/MIGRATION_MATRIX.md` remains the authoritative,
-continuously-updated record of what's been built; this document is a
-prioritized view specifically answering "what's left before a real
-launch," pulling from that record, `docs/DEPLOYMENT.md`'s "What is not
-done yet," and `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`. Every item below
-was checked against the actual codebase, not inferred from memory alone --
-see each item's "Evidence" line.
+Compiled 2026-09-03, refreshed 2026-09-13. `docs/MIGRATION_MATRIX.md`
+remains the authoritative, continuously-updated record of what's been
+built; this document is a prioritized view specifically answering "what's
+left before a real launch," pulling from that record, `docs/DEPLOYMENT.md`'s
+"What is not done yet," and `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.
+Every item below was re-checked against the actual codebase as it stands
+today, not inferred from memory or the original 2026-09-03 pass alone --
+see each item's "Evidence" line. Items closed since the original compile
+are marked **CLOSED** with the date and what closed them, not deleted --
+same convention `docs/MIGRATION_MATRIX.md` uses throughout.
 
 ## How to read this
 
@@ -48,29 +51,29 @@ and the exact request/response contract for `submitVatReturn` and
 this migration already expects).
 
 ### 2. UI coverage: 3 of ~20+ backend modules on `main`, 5 in an open PR
-**Status: Buildable now, no external dependency.**
+**Status: CLOSED (2026-09-13).** ~~Buildable now, no external dependency.~~
 
-11 Blade view files exist on `main` against 196 registered routes:
-Dashboard, Invoices, and VAT Returns/Periods have real screens.
-[PR #2](https://github.com/pigeonpreception-coder/VAT---MSA/pull/2)
-(open, not yet merged as of this writing) adds a vertical sidebar nav
-plus two more full modules -- VAT Returns/Periods' real write actions
-(generate/adjust/approve/submit) and Refund claims (request/review/
-dispute) -- bringing it to 5 of ~20+ once merged. Everything else is
-still JSON-API-only, reachable only by a direct HTTP client, not a
-browser: disputes, audit cases, communications, notifications,
-licensing & entitlements, organisation administration, the whole
-business/accounting/expenses/inventory/projects suite, reports &
-analytics, access governance, the workflow engine.
+This was the single largest concrete, no-external-dependency gap at the
+2026-09-03 compile: 14 Blade views against 196 registered routes, with
+only Dashboard, Invoices, and VAT Returns/Periods reachable through a
+browser. It no longer describes the system. Across the sessions since,
+every remaining backend module gained a real Blade UI: VAT Returns'
+write actions, Refund claims, disputes, audit cases, risk indicators,
+compliance overview, tax obligations, organisations & identity, business
+parties, quotations, accounting, business operations (expenses/
+inventory/projects/HR/logistics/fixed assets), administration,
+documents, reports & analytics, licensing & entitlements, platform
+config, the workflow authoring console, all six portal dashboards plus
+the switchboard, and (this session) the Super Admin/NamRA System Admin
+access-rights screen. A taxpayer or NamRA officer can now use essentially
+every module through the actual application, not just invoices and VAT
+returns.
 
-No taxpayer or NamRA officer can use any of those through the actual
-application yet -- a "launch" today would only cover invoice
-certification and VAT return generation/approval, not the compliance,
-refund, audit-case, or commercial-accounting workflows the platform is
-meant to provide.
-
-**Evidence**: `find resources/views -name "*.blade.php" | wc -l` = 14;
-`grep -c "Route::" routes/web.php` = 196 (near-all under `api/v1`).
+**Evidence**: `find resources/views -name "*.blade.php" | wc -l` = 56 (up
+from 14); `grep -c "Route::" routes/web.php` = 308. `docs/MIGRATION_MATRIX.md`'s
+own "Next steps" section independently confirms: "every phase this
+migration originally scoped (1 through 15) is now COMPLETE for its own
+actual scope."
 
 ---
 
@@ -100,16 +103,23 @@ ever sent a real message.
 RT-005 verification (read the actual logged email rather than an inbox).
 
 ### 5. Production runtime re-verification
-**Status: Buildable now, once a target host is available to test against.**
+**Status: CLOSED (verified prior to this session's start).** ~~Buildable
+now, once a target host is available to test against.~~
 
-Every verification in this migration ran on PHP 8.2.12 and MariaDB
-10.4.32 (XAMPP) -- the target is PHP 8.3+ and MySQL 8, flagged
-throughout as a substitution, never confirmed. Code was deliberately
-written to avoid anything that needs 8.3+ or MySQL-8-only syntax, but
-that's a design intent, not a verified fact about the target.
+Every verification up to 2026-09-03 ran on PHP 8.2.12 and MariaDB
+10.4.32 (XAMPP) -- a substitution for the PHP 8.3+/MySQL 8 target, never
+confirmed. That confirmation has since happened: `migrate:fresh --seed`
+and the full suite both ran clean against real PHP 8.4.19 and real
+MySQL 8.0.46 (not MariaDB), which caught and fixed a genuine MariaDB-vs-
+MySQL portability gap (4 migrations gave a `TEXT` column a literal
+`->default(...)`, which MySQL 8 rejects outright per the SQL standard --
+each now uses MySQL 8.0.13+'s parenthesized-expression syntax instead).
+This session's own full suite (573 tests) also ran against that same
+real MySQL, not SQLite or MariaDB.
 
-**Evidence**: `docs/DEPLOYMENT.md`'s "Requirements" section;
-`docs/MIGRATION_MATRIX.md`'s "Next steps".
+**Evidence**: `docs/MIGRATION_MATRIX.md`'s "Next steps" section, "Re-
+verified against the actual target runtime: PHP 8.4.19 and real MySQL
+8.0.46" entry.
 
 ### 6. OPcache + release-caching, verified on the real host
 **Status: Documentation complete (RT-004); verification blocked on production server access.**
@@ -149,17 +159,32 @@ schema-only -- nothing reads or writes them yet.
 ## Medium priority (hardening, not launch-blocking on their own)
 
 ### 9. Platform-config values not wired to a real downstream consumer
-**Status: Buildable now.** See `docs/MIGRATION_MATRIX.md`'s "Platform
-config & change-management" section -- values can be set and change-
-managed today, but nothing downstream actually consumes them yet.
+**Status: CLOSED (Phase 13, prior to this session).** ~~Buildable now.~~
+Three platform-config/access-policy values (`STEP_UP_WINDOW`'s
+`window_seconds`, the reports export size limit, and the min cell-
+suppression threshold) are now read live via
+`App\Support\Platform\PlatformConfigReader` from `StepUp` and
+`ReportExportService` -- change-managing one of them through the
+Platform console genuinely changes runtime behaviour, not just a stored
+row. Every other seeded value remains illustrative only, wired only when
+a real consumer needs it -- see `docs/MIGRATION_MATRIX.md`'s "Platform
+config now feeds three real consumers" section.
 
-### 10. Broader security review of the API-only modules
+**Evidence**: `grep -rn PlatformConfigReader app/` shows real call sites
+in `App\Support\Access\StepUp` and `App\Services\Platform\ReportExportService`.
+
+### 10. Broader security review of the modules beyond the original red-team scope
 **Status: Buildable now** (curl/fetch-based, doesn't need a UI). The
 red-team assessment this session was explicitly UI-only and scoped to
-the 3 modules that have UI (Dashboard, Invoices, VAT Returns). The other
-~17+ API-only modules -- disputes, refunds, audit cases, licensing,
-access governance, the workflow engine, and the rest -- have had zero
-adversarial testing. That's untested surface, not verified-safe surface.
+the 3 modules that had a UI at the time (Dashboard, Invoices, VAT
+Returns). Every other module now has a UI too (see #2, closed), but
+having a UI is not the same as having been adversarially tested --
+disputes, refunds, audit cases, licensing, access governance (including
+this session's new grant-a-user-an-access-right screen), the workflow
+engine, and the rest of the now-56-view surface have had zero
+adversarial testing beyond their own feature tests. That's untested
+surface, not verified-safe surface -- and it's now a larger surface than
+it was at the original compile, not a smaller one.
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made
@@ -195,11 +220,25 @@ cutover. No visibility into any of this from the codebase alone.
 
 ---
 
-## Recommended next step
+## Recommended next step (refreshed 2026-09-13)
 
-With ITAS confirmed blocked (2026-09-03) and background-job wiring
-corrected off this list, **the highest-value buildable-now item is
-continuing the frontend UI build-out (#2)** -- it's the largest concrete
-gap with no external dependency, and every module built brings the
-system closer to something a real taxpayer or NamRA officer could
-actually use end to end.
+The frontend UI build-out (#2) that was the previous recommendation is
+now closed. With ITAS (#1) still the one genuine launch-blocker and
+still blocked on external NamRA credentials/API access no amount of
+further engineering here can obtain, and #3/#4/#6/#7/#11 all similarly
+blocked on external credentials or production host access, **the two
+remaining buildable-now items with no external dependency are #8 (TOTP
+step-up parity) and #10 (a broader security review of the now much
+larger UI surface)**. Between the two, #10 is the more urgent: every
+module this migration has built since the original 3-module red-team
+pass has shipped with feature-test coverage but zero adversarial
+testing, and that gap has only grown as more UI shipped. #8 is a larger,
+more self-contained scope (real secret provisioning, QR enrollment,
+backup codes) that can be picked up independently whenever there's
+appetite for it.
+
+Everything else genuinely needs something only NamRA/the deploying
+organisation can supply -- real ITAS credentials, a mail provider, S3/R2
+bucket credentials, production host access for OPcache/load-testing
+verification, and a real legacy dataset -- and cannot be closed by
+further code changes alone.
