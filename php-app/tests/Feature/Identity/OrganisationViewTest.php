@@ -71,7 +71,7 @@ class OrganisationViewTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'Admin', 'email' => 'admin-'.Str::random(8).'@test.test',
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -235,7 +235,7 @@ class OrganisationViewTest extends TestCase
         $response = $this->actingAs($owner)
             ->withSession(['auth.password_confirmed_at' => time()])
             ->post(route('organisations.memberships.store', $fx['organisation']->id), [
-                'email' => 'staff@view-org-0009.test', 'role_code' => 'PILOT_ADMIN',
+                'email' => 'staff@view-org-0009.test', 'role_code' => 'NAMRA_STAFF',
             ]);
 
         $response->assertRedirect();

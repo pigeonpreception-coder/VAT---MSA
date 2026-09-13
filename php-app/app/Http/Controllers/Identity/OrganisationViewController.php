@@ -39,9 +39,9 @@ use Illuminate\View\View;
  * Permissions::ROLE_PERMISSIONS), so the organisations list/detail stays
  * readable widely; `organisations:manage` (branch create/update, membership
  * assignment) is held by an organisation's own TAXPAYER_OWNER/ADMIN as well
- * as PILOT_ADMIN/NAMRA_SYSTEM_ADMIN -- self-service organisation
+ * as NAMRA_STAFF/NAMRA_SYSTEM_ADMIN -- self-service organisation
  * administration, not officer-only, confirmed against the permission map
- * before writing any UI. `taxpayers:suspend` is rarer still (PILOT_ADMIN/
+ * before writing any UI. `taxpayers:suspend` is rarer still (NAMRA_STAFF/
  * NAMRA_SYSTEM_ADMIN only) and already carries its own step-up
  * requirement -- the `password.confirm` middleware already registered on
  * this app's JSON `/taxpayers/{id}/suspension` and

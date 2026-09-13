@@ -15,7 +15,7 @@ namespace App\Support\Access;
  * dynamically-granted permissions on top via User::dynamicPermissions,
  * exactly as the source's UserContext.dynamicPermissions did.
  *
- * `authority-governance:read`/`authority-governance:manage` (PILOT_ADMIN
+ * `authority-governance:read`/`authority-governance:manage` (NAMRA_STAFF
  * and NAMRA_SYSTEM_ADMIN only) are the one exception to "from access.ts":
  * the source never grants either permission through lib/domain/access.ts's
  * own static ROLE_PERMISSIONS map at all -- it grants them exclusively
@@ -36,27 +36,43 @@ final class Permissions
 {
     /** @var array<string, list<string>> */
     public const ROLE_PERMISSIONS = [
-        'PILOT_ADMIN' => [
+        // NamRA Staff (formerly PILOT_ADMIN): retains every other national
+        // operations permission it always had, but no longer includes
+        // developer:read/manage or authority-governance:read/manage --
+        // this role must not reach the Developer or NamRA Administration
+        // portals (nor their raw JSON mirrors, PlatformSnapshotController::
+        // developerPortal and AuthorityGovernanceController, which check
+        // these permissions directly with no portal-role-list re-check).
+        // platform:read is kept -- it also gates the separate Platform
+        // Config feature (PlatformConfigController/ViewController), not
+        // just the Super Administration portal; PortalDefinitions' own
+        // 'super-admin' role list (not this permission) is what actually
+        // blocks this role from that specific portal, via
+        // SuperAdminPortalController's own getAvailablePortals() re-check.
+        'NAMRA_STAFF' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'taxpayers:suspend', 'registrations:read', 'registrations:submit',
             'registrations:approve', 'organisations:manage', 'invoices:read', 'invoices:submit', 'invoices:cancel', 'exceptions:read',
             'returns:read', 'returns:generate', 'returns:approve', 'returns:submit', 'vat-adjustments:manage', 'vat-rules:read',
             'vat-rules:manage', 'reconciliation:manage', 'compliance:read', 'cases:manage', 'cases:override-sod', 'disputes:manage',
             'obligations:manage', 'refunds:read', 'refunds:request', 'refunds:review', 'risk:read', 'risk:review',
             'communications:manage', 'notifications:manage', 'consents:manage', 'integrations:read', 'integrations:manage',
-            'developer:read', 'developer:manage', 'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'reports:executive',
+            'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'reports:executive',
             'platform:read', 'payments:read', 'payments:record', 'audit:read', 'security:read', 'security:manage', 'commercial:read',
             'parties:manage', 'quotations:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read',
             'expenses:manage', 'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read',
             'imports:manage', 'documents:read', 'documents:upload', 'documents:manage',
-            'authority-governance:read', 'authority-governance:manage',
             'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
         ],
+        // TAXPAYER_OWNER: no longer includes developer:read/manage -- this
+        // role must not reach the Developer portal or its raw JSON mirror
+        // (PlatformSnapshotController::developerPortal, which checks
+        // developer:read directly with no portal-role-list re-check).
         'TAXPAYER_OWNER' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'registrations:submit', 'organisations:manage',
             'invoices:read', 'invoices:submit', 'exceptions:read', 'returns:read', 'returns:generate', 'returns:approve',
             'returns:submit', 'vat-adjustments:manage', 'compliance:read', 'communications:respond', 'disputes:manage',
-            'refunds:read', 'refunds:request', 'consents:manage', 'integrations:read', 'integrations:manage', 'developer:read',
-            'developer:manage', 'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'commercial:read', 'parties:manage',
+            'refunds:read', 'refunds:request', 'consents:manage', 'integrations:read', 'integrations:manage',
+            'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'commercial:read', 'parties:manage',
             'quotations:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read', 'expenses:manage',
             'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read', 'imports:manage',
             'documents:read', 'documents:upload', 'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
@@ -136,9 +152,14 @@ final class Permissions
             'organisations:manage', 'administration:read', 'administration:manage', 'vat-rules:read', 'vat-rules:manage',
             'invoices:cancel', 'documents:manage', 'authority-governance:read', 'authority-governance:manage',
         ],
+        // SUPER_ADMIN: global/national scope (see NATIONAL_SCOPE_ROLES
+        // below), with access to both the Super Administration and
+        // Developer portals -- developer:read/manage added so it can
+        // reach /portal/developer and its raw JSON mirror, matching its
+        // presence on PortalDefinitions' own 'developer' role list.
         'SUPER_ADMIN' => [
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'integrations:manage', 'security:read',
-            'security:manage',
+            'security:manage', 'developer:read', 'developer:manage',
         ],
         'INFRASTRUCTURE_ADMIN' => [
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'security:read', 'security:manage',
@@ -163,7 +184,7 @@ final class Permissions
 
     /** @var array<string, list<string>> */
     public const CONTROL_PLANE_PERMISSIONS = [
-        'PILOT_ADMIN' => self::ORGANISATION_CONTROL,
+        'NAMRA_STAFF' => self::ORGANISATION_CONTROL,
         'TAXPAYER_OWNER' => self::ORGANISATION_CONTROL,
         'TAXPAYER_ADMIN' => self::ORGANISATION_CONTROL,
         'TAXPAYER_ACCOUNTANT' => [...self::WORKSPACE_READ, 'employees:read', 'roles:read', 'workflows:read', 'workflows:decide', 'access-governance:read'],
@@ -174,13 +195,13 @@ final class Permissions
 
     /** @var list<string> */
     public const NATIONAL_SCOPE_ROLES = [
-        'PILOT_ADMIN', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
-        'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST',
+        'NAMRA_STAFF', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
+        'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST', 'SUPER_ADMIN',
     ];
 
     /** Roles that never represent a tenant/organisation -- national tax-administration roles plus platform-technical roles. */
     private const NATIONAL_OR_PLATFORM_ONLY_ROLES = [
-        'PILOT_ADMIN', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
+        'NAMRA_STAFF', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
         'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST',
         'SUPER_ADMIN', 'INFRASTRUCTURE_ADMIN',
     ];

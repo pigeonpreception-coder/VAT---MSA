@@ -50,7 +50,7 @@ class PlatformSnapshotTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -244,7 +244,14 @@ class PlatformSnapshotTest extends TestCase
         $notYetLinked->assertStatus(200)->assertExactJson(['clients' => [], 'webhooks' => [], 'provisioning' => 'ORGANISATION_LINK_REQUIRED']);
 
         $tp = $this->makeTaxpayer('VAT-PLAT-0004');
-        $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'dev-owner@platformtest.test');
+        // TAXPAYER_OWNER no longer holds developer:read (see
+        // Permissions::ROLE_PERMISSIONS' own comment on that role) --
+        // TAXPAYER_ADMIN still does, so it exercises the linked/org-scoped
+        // path here instead.
+        $owner = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Taxpayer Admin', 'email' => 'dev-owner@platformtest.test',
+            'password' => bcrypt('password'), 'role' => 'TAXPAYER_ADMIN', 'taxpayer_id' => $tp['taxpayer']->id, 'status' => 'ACTIVE',
+        ]);
         $apiClientId = (string) Str::uuid();
         DB::table('api_clients')->insert([
             'id' => $apiClientId, 'organisation_id' => $tp['organisation']->id, 'name' => 'My Integration', 'client_key' => 'ck_'.Str::random(16),

@@ -62,11 +62,19 @@ class PortalViewTest extends TestCase
         ]);
     }
 
-    private function pilotAdmin(string $email = 'pilot@portalview.test'): User
+    private function namraStaff(string $email = 'namra-staff@portalview.test'): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => $email,
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+    }
+
+    private function superAdmin(string $email = 'super-admin@portalview.test'): User
+    {
+        return User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => $email,
+            'password' => bcrypt('password'), 'role' => 'SUPER_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -84,22 +92,25 @@ class PortalViewTest extends TestCase
         $this->get('/portals')->assertRedirect('/login');
     }
 
-    public function test_a_taxpayer_owner_without_buyer_or_seller_capability_sees_only_the_developer_portal(): void
+    public function test_a_taxpayer_owner_without_buyer_or_seller_capability_sees_the_empty_state(): void
     {
         $tp = $this->makeTaxpayer('VAT-PORTALVIEW-0001');
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'owner@portalview.test');
 
         $response = $this->actingAs($owner)->get('/portals');
 
+        // TAXPAYER_OWNER is deliberately excluded from developer's own role
+        // list now (see Permissions::ROLE_PERMISSIONS' own comment on that
+        // role) -- with no BUYER/SELLER capability either, this owner is on
+        // no portal's role list at all.
         $response->assertOk()->assertViewIs('portals.index');
         $response->assertSee('Choose an authorised VAT-MSA experience');
-        $response->assertSee('Developer and sandbox');
-        $response->assertDontSee('>Buyer<', false);
-        $response->assertDontSee('>Seller<', false);
-        $this->assertSame(['developer'], collect($response->viewData('portals'))->pluck('key')->all());
+        $response->assertSee('No portal assignment.');
+        $response->assertDontSee('Developer and sandbox');
+        $this->assertSame([], $response->viewData('portals'));
     }
 
-    public function test_a_taxpayer_owner_with_buyer_capability_also_sees_the_buyer_portal(): void
+    public function test_a_taxpayer_owner_with_buyer_capability_sees_only_the_buyer_portal(): void
     {
         $tp = $this->makeTaxpayer('VAT-PORTALVIEW-0002', ['BUYER']);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'owner-buyer@portalview.test');
@@ -109,7 +120,7 @@ class PortalViewTest extends TestCase
         $response->assertOk();
         $keys = collect($response->viewData('portals'))->pluck('key')->all();
         $this->assertContains('buyer', $keys);
-        $this->assertContains('developer', $keys);
+        $this->assertNotContains('developer', $keys);
         $this->assertNotContains('seller', $keys);
         // Every "Open X" link resolves to the one real authenticated
         // landing page this port has, not a dead link to a portal
@@ -117,16 +128,27 @@ class PortalViewTest extends TestCase
         $response->assertSee(route('dashboard'), false);
     }
 
-    public function test_a_pilot_admin_sees_every_portal(): void
+    public function test_namra_staff_sees_only_the_namra_portal(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->namraStaff();
+
+        $response = $this->actingAs($admin)->get('/portals');
+
+        $response->assertOk();
+        $keys = collect($response->viewData('portals'))->pluck('key')->all();
+        $this->assertSame(['namra'], $keys);
+    }
+
+    public function test_super_admin_sees_the_super_admin_and_developer_portals(): void
+    {
+        $admin = $this->superAdmin();
 
         $response = $this->actingAs($admin)->get('/portals');
 
         $response->assertOk();
         $keys = collect($response->viewData('portals'))->pluck('key')->all();
         sort($keys);
-        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
+        $this->assertSame(['developer', 'super-admin'], $keys);
     }
 
     public function test_an_actor_on_no_portals_role_list_sees_the_empty_state(): void

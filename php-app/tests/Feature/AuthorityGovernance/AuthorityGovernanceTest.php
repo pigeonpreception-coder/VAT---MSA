@@ -32,11 +32,19 @@ class AuthorityGovernanceTest extends TestCase
         $this->seed(AuthorityGovernanceSeeder::class);
     }
 
-    private function pilotAdmin(string $email = 'pilot@authoritygov.test'): User
+    /**
+     * NAMRA_STAFF (formerly PILOT_ADMIN) no longer holds authority-
+     * governance:read/manage (see Permissions::ROLE_PERMISSIONS' own
+     * comment on that role) -- NAMRA_SYSTEM_ADMIN is the only remaining
+     * role that does, so this fixture (used throughout this file, and as
+     * the "reviewer" in the maker-checker tests below alongside a
+     * separately-created namraSystemAdmin() "maker") now uses it too.
+     */
+    private function authorityAdmin(string $email = 'authority-admin@authoritygov.test'): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Admin', 'email' => $email,
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -62,7 +70,7 @@ class AuthorityGovernanceTest extends TestCase
         DB::table('tax_authority_access_reviews')->insert([
             'id' => (string) Str::uuid(), 'tax_authority_id' => 'tax-authority-na-namra', 'review_type' => 'QUARTERLY',
             'period_start' => now()->startOfQuarter()->toDateString(), 'due_at' => now()->addMonth(), 'status' => 'OPEN',
-            'owner_id' => $this->pilotAdmin('review-owner@authoritygov.test')->id, 'completed_by' => null, 'completed_at' => null, 'created_at' => now(),
+            'owner_id' => $this->authorityAdmin('review-owner@authoritygov.test')->id, 'completed_by' => null, 'completed_at' => null, 'created_at' => now(),
         ]);
     }
 
@@ -86,14 +94,14 @@ class AuthorityGovernanceTest extends TestCase
 
     public function test_the_snapshot_denies_an_actor_with_no_governed_authority_scope(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->authorityAdmin();
 
         $this->actingAs($admin)->getJson('/api/v1/tax-authority-onboarding-cases')->assertStatus(403);
     }
 
     public function test_the_snapshot_returns_the_actors_administered_authorities_and_reference_data(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
 
         $response = $this->actingAs($admin)->getJson('/api/v1/tax-authority-onboarding-cases');
@@ -107,7 +115,7 @@ class AuthorityGovernanceTest extends TestCase
 
     public function test_an_onboarding_case_can_be_created_for_local_staging(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
 
         $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
@@ -119,7 +127,7 @@ class AuthorityGovernanceTest extends TestCase
 
     public function test_a_production_onboarding_case_is_created_blocked(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
 
         $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
@@ -130,7 +138,7 @@ class AuthorityGovernanceTest extends TestCase
 
     public function test_creating_a_case_without_administrator_scope_is_denied(): void
     {
-        $admin = $this->pilotAdmin(); // not registered as an administrator
+        $admin = $this->authorityAdmin(); // not registered as an administrator
 
         $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-create-0003']);
@@ -140,7 +148,7 @@ class AuthorityGovernanceTest extends TestCase
 
     public function test_a_duplicate_open_case_for_the_same_authority_and_environment_is_a_conflict(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
         $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-dup-0001'])
@@ -154,7 +162,7 @@ class AuthorityGovernanceTest extends TestCase
 
     public function test_creating_a_case_without_step_up_confirmation_is_denied(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
 
         $response = $this->actingAs($admin)
@@ -183,7 +191,7 @@ class AuthorityGovernanceTest extends TestCase
     public function test_a_distinct_reviewer_can_approve_local_staging(): void
     {
         $maker = $this->namraSystemAdmin('maker@authoritygov.test');
-        $reviewer = $this->pilotAdmin('reviewer@authoritygov.test');
+        $reviewer = $this->authorityAdmin('reviewer@authoritygov.test');
         $this->makeAdministrator($maker);
         $this->makeAdministrator($reviewer);
         $this->makeCurrentAccessReview();
@@ -203,7 +211,7 @@ class AuthorityGovernanceTest extends TestCase
     public function test_a_decision_without_a_current_access_review_is_denied(): void
     {
         $maker = $this->namraSystemAdmin('maker2@authoritygov.test');
-        $reviewer = $this->pilotAdmin('reviewer2@authoritygov.test');
+        $reviewer = $this->authorityAdmin('reviewer2@authoritygov.test');
         $this->makeAdministrator($maker);
         $this->makeAdministrator($reviewer);
         $this->makeCurrentAccessReview();

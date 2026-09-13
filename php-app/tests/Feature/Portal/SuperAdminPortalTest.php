@@ -31,11 +31,26 @@ class SuperAdminPortalTest extends TestCase
         $this->seed(RoleSeeder::class);
     }
 
-    private function pilotAdmin(): User
+    private function superAdmin(): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => 'pilot@superadminportal.test',
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => 'super-admin@superadminportal.test',
+            'password' => bcrypt('password'), 'role' => 'SUPER_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+    }
+
+    /**
+     * NAMRA_STAFF (formerly PILOT_ADMIN) is no longer on the Super
+     * Administration portal's own role list (see Permissions::
+     * ROLE_PERMISSIONS' own comment on that role) -- kept here purely to
+     * create the real obligation below, since SUPER_ADMIN itself holds no
+     * obligations:manage permission.
+     */
+    private function namraStaff(): User
+    {
+        return User::create([
+            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => 'namra-staff@superadminportal.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -77,13 +92,24 @@ class SuperAdminPortalTest extends TestCase
         $this->actingAs($analyst)->get('/portal/super-admin')->assertForbidden();
     }
 
+    /**
+     * NAMRA_STAFF (formerly PILOT_ADMIN) is no longer on this portal's own
+     * role list -- deliberately narrowed at the user's own explicit
+     * request, see Permissions::ROLE_PERMISSIONS' own comment on that role.
+     */
+    public function test_namra_staff_is_denied_the_super_admin_portal(): void
+    {
+        $this->actingAs($this->namraStaff())->get('/portal/super-admin')->assertForbidden();
+    }
+
     public function test_the_super_admin_portal_renders_component_integration_and_event_metrics(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->superAdmin();
 
         // A real command for a real PENDING outbox row -- every command in
-        // this migration writes one via CommandLedger::outbox.
-        $this->actingAs($admin)->postJson('/api/v1/obligations', [
+        // this migration writes one via CommandLedger::outbox. SUPER_ADMIN
+        // itself holds no obligations:manage, so NAMRA_STAFF creates it.
+        $this->actingAs($this->namraStaff())->postJson('/api/v1/obligations', [
             'schema_version' => '1.0.0', 'taxpayer_id' => $this->seedTaxpayer()->id, 'obligation_type' => 'VAT_RETURN',
             'period_code' => '2026-07', 'due_date' => '2026-08-25', 'amount_cents' => 100000, 'currency' => 'NAD',
         ], ['Idempotency-Key' => 'test-idem-superadminportal-obligation-0001'])->assertStatus(201);

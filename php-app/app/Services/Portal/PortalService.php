@@ -40,9 +40,12 @@ class PortalService
     ];
 
     /**
-     * `capabilitySet` in the source: PILOT_ADMIN gets both BUYER and
-     * SELLER unconditionally (a national actor isn't scoped to one
-     * organisation's own held capabilities); every other role without a
+     * NamRA Staff (formerly PILOT_ADMIN) no longer gets an unconditional
+     * BUYER/SELLER capability grant here -- that role must not reach the
+     * Buyer/Seller portals at all now (see Permissions::ROLE_PERMISSIONS'
+     * own comment on it), so it falls through to the same "no
+     * taxpayer_id, no capabilities" branch every other national role
+     * without a Buyer/Seller portal already used. Every role without a
      * taxpayer_id gets none (matching the source's own `!user.taxpayerId
      * ? new Set() : ...` short-circuit -- national NamRA/platform roles
      * never need a capability-gated portal anyway, since none of their
@@ -57,9 +60,6 @@ class PortalService
      */
     private function capabilitySet(User $actor): array
     {
-        if ($actor->role === 'PILOT_ADMIN') {
-            return ['BUYER' => true, 'SELLER' => true];
-        }
         if (! $actor->taxpayer_id) {
             return [];
         }

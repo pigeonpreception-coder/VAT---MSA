@@ -90,7 +90,7 @@ class IdentityFoundationSnapshotTest extends TestCase
         $b = $this->makeTaxpayerWithOrganisation('VAT-IDFOUND-0004');
         $nationalAdmin = User::create([
             'id' => (string) Str::uuid(), 'name' => 'National Admin', 'email' => 'national-idfound-0003@test.test',
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $response = $this->actingAs($nationalAdmin)->getJson('/api/v1/identity');

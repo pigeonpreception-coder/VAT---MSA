@@ -58,31 +58,46 @@ class PortalTest extends TestCase
         // against both portals' own `roles`.
         $this->assertContains('seller', $keys);
         $this->assertNotContains('buyer', $keys);
-        // developer has no capability gate at all -- visible purely on role.
-        $this->assertContains('developer', $keys);
+        // TAXPAYER_OWNER is deliberately excluded from developer's own role
+        // list (see Permissions::ROLE_PERMISSIONS' own comment on that role).
+        $this->assertNotContains('developer', $keys);
         // Not listed in namra/namra-admin/super-admin's own roles at all.
         $this->assertNotContains('namra', $keys);
         $this->assertNotContains('namra-admin', $keys);
         $this->assertNotContains('super-admin', $keys);
     }
 
-    public function test_a_pilot_admin_sees_every_portal_unconditionally(): void
+    public function test_namra_staff_sees_only_the_namra_portal(): void
     {
         $admin = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => 'pilot-admin-0002@test.test', 'password' => bcrypt('password'),
-            'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => 'namra-staff-0002@test.test', 'password' => bcrypt('password'),
+            'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $response = $this->actingAs($admin)->getJson('/api/v1/portals');
         $response->assertStatus(200);
         $keys = collect($response->json('portals'))->pluck('key')->all();
 
-        // PILOT_ADMIN is listed against all six portals, and gets both
-        // BUYER and SELLER capabilities unconditionally (no organisation
-        // to hold them against), so nothing is filtered out.
-        $this->assertCount(6, $keys);
-        foreach (['buyer', 'seller', 'namra', 'namra-admin', 'super-admin', 'developer'] as $expected) {
-            $this->assertContains($expected, $keys);
-        }
+        // NAMRA_STAFF (formerly PILOT_ADMIN, renamed and narrowed at the
+        // user's own explicit request) is listed against only the NamRA
+        // portal's own role list now -- no unconditional BUYER/SELLER
+        // capability grant either (PortalService::capabilitySet no longer
+        // special-cases this role).
+        $this->assertSame(['namra'], $keys);
+    }
+
+    public function test_super_admin_sees_the_super_admin_and_developer_portals(): void
+    {
+        $admin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => 'super-admin-0003@test.test', 'password' => bcrypt('password'),
+            'role' => 'SUPER_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->actingAs($admin)->getJson('/api/v1/portals');
+        $response->assertStatus(200);
+        $keys = collect($response->json('portals'))->pluck('key')->all();
+        sort($keys);
+
+        $this->assertSame(['developer', 'super-admin'], $keys);
     }
 }

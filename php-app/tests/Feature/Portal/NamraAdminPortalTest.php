@@ -35,11 +35,11 @@ class NamraAdminPortalTest extends TestCase
         $this->seed(AuthorityGovernanceSeeder::class);
     }
 
-    private function pilotAdmin(string $email = 'pilot@namraadminportal.test'): User
+    private function namraSystemAdmin(string $email = 'system-admin@namraadminportal.test'): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Admin', 'email' => $email,
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -69,14 +69,30 @@ class NamraAdminPortalTest extends TestCase
 
     public function test_an_administrator_with_no_governed_authority_scope_is_denied(): void
     {
-        $admin = $this->pilotAdmin(); // authority-governance:read present, but no tax_authority_administrators row
+        $admin = $this->namraSystemAdmin(); // authority-governance:read present, but no tax_authority_administrators row
 
         $this->actingAs($admin)->get('/portal/namra-admin')->assertForbidden();
     }
 
+    /**
+     * NAMRA_STAFF (formerly PILOT_ADMIN) is no longer on this portal's own
+     * role list, nor does it hold authority-governance:read any more --
+     * deliberately narrowed at the user's own explicit request, see
+     * Permissions::ROLE_PERMISSIONS' own comment on that role.
+     */
+    public function test_namra_staff_is_denied_the_namra_admin_portal(): void
+    {
+        $staff = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => 'namra-staff@namraadminportal.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $this->actingAs($staff)->get('/portal/namra-admin')->assertForbidden();
+    }
+
     public function test_the_namra_admin_portal_renders_units_federation_assignments_and_providers(): void
     {
-        $admin = $this->pilotAdmin();
+        $admin = $this->namraSystemAdmin();
         $this->makeAdministrator($admin);
         DB::table('tax_authority_units')->insert([
             'id' => (string) Str::uuid(), 'tax_authority_id' => 'tax-authority-na-namra', 'parent_unit_id' => null,

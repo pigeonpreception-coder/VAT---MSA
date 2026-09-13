@@ -19,12 +19,19 @@ class PortalDefinitions
     public static function all(): array
     {
         return [
-            ['key' => 'buyer', 'name' => 'Buyer', 'audience' => 'Procurement and finance', 'description' => 'Purchases, input VAT, expenses, evidence and returns.', 'href' => '/portal/buyer', 'capability' => 'BUYER', 'roles' => [...self::TAXPAYER_ROLES, 'BUYER_ADMIN', 'BUYER_USER', 'PILOT_ADMIN']],
-            ['key' => 'seller', 'name' => 'Seller', 'audience' => 'Sales and finance', 'description' => 'Quotations, sales, output VAT, inventory, projects and returns.', 'href' => '/portal/seller', 'capability' => 'SELLER', 'roles' => [...self::TAXPAYER_ROLES, 'SELLER_ADMIN', 'SELLER_OPERATOR', 'SELLER_VIEWER', 'PILOT_ADMIN']],
-            ['key' => 'namra', 'name' => 'NamRA', 'audience' => 'Compliance, audit and refunds', 'description' => 'National work queues, taxpayer timelines, evidence and controlled decisions.', 'href' => '/portal/namra', 'capability' => null, 'roles' => ['NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER', 'NAMRA_SUPERVISOR', 'PILOT_ADMIN']],
-            ['key' => 'namra-admin', 'name' => 'NamRA Administration', 'audience' => 'Access administrators', 'description' => 'Identity, taxpayer activation, roles, memberships and provider posture.', 'href' => '/portal/namra-admin', 'capability' => null, 'roles' => ['NAMRA_SYSTEM_ADMIN', 'PILOT_ADMIN']],
-            ['key' => 'super-admin', 'name' => 'Super Administration', 'audience' => 'Platform, SRE and security', 'description' => 'Technical health, integrations, eventing and security configuration without tax-data inheritance.', 'href' => '/portal/super-admin', 'capability' => null, 'roles' => ['SUPER_ADMIN', 'INFRASTRUCTURE_ADMIN', 'SECURITY_ANALYST', 'PILOT_ADMIN']],
-            ['key' => 'developer', 'name' => 'Developer and sandbox', 'audience' => 'Approved SaaS and ERP teams', 'description' => 'API clients, contracts, webhooks, quotas and conformance posture.', 'href' => '/portal/developer', 'capability' => null, 'roles' => ['TAXPAYER_OWNER', 'TAXPAYER_ADMIN', 'SELLER_ADMIN', 'DEVELOPER_PARTNER', 'PILOT_ADMIN']],
+            ['key' => 'buyer', 'name' => 'Buyer', 'audience' => 'Procurement and finance', 'description' => 'Purchases, input VAT, expenses, evidence and returns.', 'href' => '/portal/buyer', 'capability' => 'BUYER', 'roles' => [...self::TAXPAYER_ROLES, 'BUYER_ADMIN', 'BUYER_USER']],
+            ['key' => 'seller', 'name' => 'Seller', 'audience' => 'Sales and finance', 'description' => 'Quotations, sales, output VAT, inventory, projects and returns.', 'href' => '/portal/seller', 'capability' => 'SELLER', 'roles' => [...self::TAXPAYER_ROLES, 'SELLER_ADMIN', 'SELLER_OPERATOR', 'SELLER_VIEWER']],
+            // NamRA Staff (formerly PILOT_ADMIN) keeps only this one portal --
+            // see Permissions::ROLE_PERMISSIONS' own comment on that role for
+            // why Buyer/Seller/NamRA Administration/Super Administration/
+            // Developer were all deliberately removed from its role lists.
+            ['key' => 'namra', 'name' => 'NamRA', 'audience' => 'Compliance, audit and refunds', 'description' => 'National work queues, taxpayer timelines, evidence and controlled decisions.', 'href' => '/portal/namra', 'capability' => null, 'roles' => ['NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER', 'NAMRA_SUPERVISOR', 'NAMRA_STAFF']],
+            ['key' => 'namra-admin', 'name' => 'NamRA Administration', 'audience' => 'Access administrators', 'description' => 'Identity, taxpayer activation, roles, memberships and provider posture.', 'href' => '/portal/namra-admin', 'capability' => null, 'roles' => ['NAMRA_SYSTEM_ADMIN']],
+            ['key' => 'super-admin', 'name' => 'Super Administration', 'audience' => 'Platform, SRE and security', 'description' => 'Technical health, integrations, eventing and security configuration without tax-data inheritance.', 'href' => '/portal/super-admin', 'capability' => null, 'roles' => ['SUPER_ADMIN', 'INFRASTRUCTURE_ADMIN', 'SECURITY_ANALYST']],
+            // TAXPAYER_OWNER deliberately excluded (see Permissions::
+            // ROLE_PERMISSIONS' own comment on that role); SUPER_ADMIN added
+            // per that role's own global-scope Developer access grant.
+            ['key' => 'developer', 'name' => 'Developer and sandbox', 'audience' => 'Approved SaaS and ERP teams', 'description' => 'API clients, contracts, webhooks, quotas and conformance posture.', 'href' => '/portal/developer', 'capability' => null, 'roles' => ['TAXPAYER_ADMIN', 'SELLER_ADMIN', 'DEVELOPER_PARTNER', 'SUPER_ADMIN']],
         ];
     }
 

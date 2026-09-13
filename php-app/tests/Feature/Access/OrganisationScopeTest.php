@@ -95,7 +95,7 @@ class OrganisationScopeTest extends TestCase
         $tenantB = $this->makeTenant('VAT-SCOPE-0006');
         $admin = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => 'admin@scope.test',
-            'password' => bcrypt('password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($admin);
@@ -123,17 +123,38 @@ class OrganisationScopeTest extends TestCase
     public function test_an_actor_with_neither_national_scope_nor_a_taxpayer_sees_nothing(): void
     {
         $this->makeTenant('VAT-SCOPE-0009');
-        // SUPER_ADMIN is taxpayer_id=null but not in Permissions::NATIONAL_SCOPE_ROLES
-        // (it is a platform-technical role, not a tax-administration one) --
-        // the scope must not mistake "no taxpayer" for "sees everything".
+        // INFRASTRUCTURE_ADMIN is taxpayer_id=null but not in Permissions::
+        // NATIONAL_SCOPE_ROLES (it is a platform-technical role, not a
+        // tax-administration one, and -- unlike SUPER_ADMIN, deliberately
+        // made global scope at the user's own explicit request -- was not
+        // added to that list) -- the scope must not mistake "no taxpayer"
+        // for "sees everything".
+        $infrastructureAdmin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Infrastructure Admin', 'email' => 'infra@scope.test',
+            'password' => bcrypt('password'), 'role' => 'INFRASTRUCTURE_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $this->actingAs($infrastructureAdmin);
+        $all = BusinessParty::all();
+
+        $this->assertCount(0, $all);
+    }
+
+    public function test_super_admin_is_global_scope_and_sees_every_organisations_rows(): void
+    {
+        $tenantA = $this->makeTenant('VAT-SCOPE-0010');
+        $tenantB = $this->makeTenant('VAT-SCOPE-0011');
+        // SUPER_ADMIN was deliberately added to Permissions::NATIONAL_SCOPE_ROLES
+        // at the user's own explicit request ("SUPER_ADMIN's scope must be Global").
         $superAdmin = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => 'super@scope.test',
+            'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => 'super-global@scope.test',
             'password' => bcrypt('password'), 'role' => 'SUPER_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($superAdmin);
         $all = BusinessParty::all();
 
-        $this->assertCount(0, $all);
+        $this->assertTrue($all->contains('id', $tenantA['party']->id));
+        $this->assertTrue($all->contains('id', $tenantB['party']->id));
     }
 }

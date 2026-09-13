@@ -79,12 +79,43 @@ class DeveloperPortalTest extends TestCase
         $this->actingAs($sellerAdmin)->get('/portal/developer')->assertForbidden();
     }
 
+    /**
+     * TAXPAYER_OWNER is deliberately excluded from this portal's own role
+     * list (see Permissions::ROLE_PERMISSIONS' own comment on that role) --
+     * TAXPAYER_ADMIN is still on it, so this is now the fixture used to
+     * cover the "renders real data" path instead.
+     */
+    public function test_a_taxpayer_owner_is_denied_the_developer_portal(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DEVPORTAL-0005');
+        $owner = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Taxpayer Owner', 'email' => 'owner-denied@developerportal.test',
+            'password' => bcrypt('password'), 'role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $tp['taxpayer']->id, 'status' => 'ACTIVE',
+        ]);
+
+        $this->actingAs($owner)->get('/portal/developer')->assertForbidden();
+    }
+
+    public function test_super_admin_reaches_the_developer_portal(): void
+    {
+        // SUPER_ADMIN is national/global scope (Permissions::NATIONAL_SCOPE_ROLES),
+        // so OrganisationResolver::resolve picks the lowest-id active
+        // organisation rather than one of its own -- needs at least one to exist.
+        $this->makeTaxpayer('VAT-DEVPORTAL-0006');
+        $admin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => 'super-admin@developerportal.test',
+            'password' => bcrypt('password'), 'role' => 'SUPER_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $this->actingAs($admin)->get('/portal/developer')->assertOk();
+    }
+
     public function test_the_developer_portal_renders_applications_and_webhooks(): void
     {
         $tp = $this->makeTaxpayer('VAT-DEVPORTAL-0002');
         $owner = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Taxpayer Owner', 'email' => 'owner@developerportal.test',
-            'password' => bcrypt('password'), 'role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $tp['taxpayer']->id, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'Taxpayer Admin', 'email' => 'admin@developerportal.test',
+            'password' => bcrypt('password'), 'role' => 'TAXPAYER_ADMIN', 'taxpayer_id' => $tp['taxpayer']->id, 'status' => 'ACTIVE',
         ]);
 
         // api_clients/webhook_subscriptions have no write command anywhere

@@ -29,7 +29,7 @@ class ConfirmPasswordTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'Officer', 'email' => 'officer@confirm-test.test',
-            'password' => bcrypt('correct-password'), 'role' => 'PILOT_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('correct-password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 

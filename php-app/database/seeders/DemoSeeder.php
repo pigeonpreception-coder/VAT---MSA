@@ -204,9 +204,9 @@ class DemoSeeder extends Seeder
         $admin = User::updateOrCreate(
             ['email' => 'admin@vat-msa.test'],
             [
-                'name' => 'NamRA Pilot Admin',
+                'name' => 'NamRA Staff',
                 'password' => Hash::make('password'),
-                'role' => 'PILOT_ADMIN',
+                'role' => 'NAMRA_STAFF',
                 'taxpayer_id' => null,
                 'status' => 'ACTIVE',
                 'email_verified_at' => now(),
@@ -388,7 +388,7 @@ class DemoSeeder extends Seeder
         // actually seeded one for local/staging use, silently leaving the
         // real Reports/Analytics/Platform config UI with an empty catalogue
         // to browse and nothing runnable. Audiences below are chosen so
-        // $admin (PILOT_ADMIN, national scope, reports:executive, and --
+        // $admin (NAMRA_STAFF, national scope, reports:executive, and --
         // via the delegations row above -- an active PRACTITIONER
         // delegation for the demo taxpayer) can exercise every guardrail
         // tier end to end; CASE_EVIDENCE_SUMMARY still needs a real
@@ -553,7 +553,7 @@ class DemoSeeder extends Seeder
 
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
-        $this->command?->info("Admin login: admin@vat-msa.test / password (PILOT_ADMIN, national scope)");
+        $this->command?->info("Admin login: admin@vat-msa.test / password (NAMRA_STAFF, national scope)");
         $this->command?->info("NamRA admin login: namra-admin@vat-msa.test / password (NAMRA_SYSTEM_ADMIN)");
         $this->command?->info("Platform admin login: platform-admin@vat-msa.test / password (SUPER_ADMIN)");
         $this->command?->info("Infrastructure admin login: infra-admin@vat-msa.test / password (INFRASTRUCTURE_ADMIN)");
