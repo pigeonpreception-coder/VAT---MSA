@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-PHP_VERSION="8.4"
+PHP_VERSION="8.3"
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${APP_DIR}"
 

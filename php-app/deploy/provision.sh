@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# One-time provisioning for a fresh Ubuntu 22.04/24.04 VPS: PHP 8.4-FPM,
+# One-time provisioning for a fresh Ubuntu 22.04/24.04 VPS: PHP 8.3-FPM,
 # MySQL 8, nginx, Composer, Node 20, certbot -- everything docs/DEPLOYMENT.md
 # lists under "Requirements", installed and wired together for
-# vat.safi-nuru.com specifically. Debian instead of Ubuntu: swap the
-# `add-apt-repository ppa:ondrej/php` step for Sury's own repo
-# (https://deb.sury.org/#debian-instructions) -- the package names below
-# are identical either way.
+# vat.safi-nuru.com specifically. PHP 8.3 matches the actual production
+# host (Hostinger VPS), not merely composer.json's ^8.2 floor -- keep this
+# in sync with whatever PHP version that host is actually running. Debian
+# instead of Ubuntu: swap the `add-apt-repository ppa:ondrej/php` step for
+# Sury's own repo (https://deb.sury.org/#debian-instructions) -- the
+# package names below are identical either way.
 #
 # Run as root (or with sudo) on the target VPS itself -- this is not meant
 # to run anywhere else, and does nothing remote. Safe to re-run: each step
@@ -30,7 +32,7 @@ set -euo pipefail
 DOMAIN="vat.safi-nuru.com"
 APP_USER="vatmsa"
 APP_DIR="/var/www/vat-msa"
-PHP_VERSION="8.4"
+PHP_VERSION="8.3"
 DB_NAME="vat_msa"
 DB_USER="vatmsa"
 REPO_URL="${REPO_URL:-}"   # export REPO_URL=https://github.com/<owner>/<repo>.git before running, or edit here
@@ -44,7 +46,7 @@ echo "==> Base packages"
 apt-get update -y
 apt-get install -y software-properties-common curl gnupg2 lsb-release unzip git ca-certificates
 
-echo "==> PHP ${PHP_VERSION} (Ondrej Sury's PPA -- Ubuntu's own repos don't carry 8.4 yet)"
+echo "==> PHP ${PHP_VERSION} (Ondrej Sury's PPA -- Ubuntu 24.04 carries 8.3 already, but the PPA also covers 22.04 and pins the exact point release)"
 add-apt-repository -y ppa:ondrej/php
 apt-get update -y
 apt-get install -y \
@@ -52,7 +54,7 @@ apt-get install -y \
     "php${PHP_VERSION}-mysql" "php${PHP_VERSION}-mbstring" "php${PHP_VERSION}-xml" \
     "php${PHP_VERSION}-bcmath" "php${PHP_VERSION}-curl" "php${PHP_VERSION}-zip" \
     "php${PHP_VERSION}-opcache" "php${PHP_VERSION}-sqlite3"
-# php8.4-sqlite3 is only needed if the Phase 14 legacy importer
+# php8.3-sqlite3 is only needed if the Phase 14 legacy importer
 # (php artisan legacy:import-d1) will ever run on this host -- see
 # docs/DEPLOYMENT.md's "Legacy data cutover" section. Harmless if unused.
 
