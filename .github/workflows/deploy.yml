@@ -1,0 +1,54 @@
+name: Deploy php-app to production
+
+# Runs deploy/deploy.sh on the production Hostinger VPS over SSH, from
+# GitHub's own runners -- see php-app/deploy/README.md for why this exists:
+# the VPS is not reachable from an interactive Claude Code session, but it
+# is reachable from here, so this is the actual automated-deploy path.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   DEPLOY_SSH_KEY   - private key matching a public key already added to
+#                      the deploy user's ~/.ssh/authorized_keys on the VPS
+#   DEPLOY_HOST      - the VPS hostname or IP
+#   DEPLOY_USER      - the SSH user deploy.sh runs as (see provision.sh's
+#                      APP_USER, "vatmsa" by default) -- must NOT be root
+# Optional secrets (fall back to the defaults provision.sh itself uses):
+#   DEPLOY_PORT      - SSH port, default 22
+#   DEPLOY_APP_DIR   - path to the php-app checkout, default
+#                      /var/www/vat-msa/php-app
+
+on:
+  push:
+    branches: [main]
+    paths: ["php-app/**"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: SSH deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Load deploy SSH key
+        uses: webfactory/ssh-agent@a6f90b1f127823b31d4d4a8d96047790581349bd # v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Trust the VPS host key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT || '22' }}" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Run deploy.sh on the VPS
+        run: |
+          ssh -p "${{ secrets.DEPLOY_PORT || '22' }}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd '${{ secrets.DEPLOY_APP_DIR || '/var/www/vat-msa/php-app' }}' && ./deploy/deploy.sh"

@@ -47,13 +47,42 @@ bash provision.sh
 # it deliberately does NOT automate.
 ```
 
-Every release against the live host:
+Every release against the live host, run manually:
 
 ```bash
 su - vatmsa
 cd /var/www/vat-msa/php-app
 ./deploy/deploy.sh
 ```
+
+...or automatically, via `.github/workflows/deploy.yml` -- see the next
+section.
+
+## Automated deploys (GitHub Actions)
+
+No interactive Claude Code session can reach the VPS directly (it has no
+general outbound network access), so `.github/workflows/deploy.yml` runs
+`deploy.sh` over SSH from GitHub's own runners instead, on every push to
+`main` that touches `php-app/**` (or on a manual `workflow_dispatch`).
+
+To enable it, add these repository secrets (Settings -> Secrets and
+variables -> Actions -> New repository secret), ideally scoped to a
+`production` environment with required reviewers if this repo has that
+available:
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_SSH_KEY` | The **private** key matching a public key you've added to `vatmsa`'s `~/.ssh/authorized_keys` on the VPS. Generate a dedicated keypair for this rather than reusing a personal one. |
+| `DEPLOY_HOST` | The VPS's hostname or IP. |
+| `DEPLOY_USER` | The SSH user `deploy.sh` runs as -- `vatmsa`, matching `provision.sh`'s `APP_USER`. Must not be `root` (`deploy.sh` itself refuses to run as root). |
+
+Optional secrets (omit to use the same defaults `provision.sh` sets up):
+`DEPLOY_PORT` (default `22`), `DEPLOY_APP_DIR` (default
+`/var/www/vat-msa/php-app`).
+
+Until those secrets exist, the workflow will simply fail at the SSH step
+with no other effect -- it's safe to merge this workflow file ahead of
+configuring them.
 
 ## Why some things are deliberately not here
 
