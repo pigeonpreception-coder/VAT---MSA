@@ -69,12 +69,12 @@
                     ];
                     $activeGroup = collect($groups)->search(fn ($patterns) => request()->routeIs(...$patterns)) ?: 'dashboard';
                 @endphp
-                <ul class="nav flex-column sidebar-nav flex-grow-1">
+                <ul class="nav flex-column sidebar-nav flex-grow-1" id="sidebar-accordion">
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-dashboard" aria-expanded="{{ $activeGroup === 'dashboard' ? 'true' : 'false' }}">
                             <span>Dashboard</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'dashboard') show @endif" id="group-dashboard">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'dashboard') show @endif" id="group-dashboard" data-bs-parent="#sidebar-accordion">
                             <li><a class="nav-link" href="{{ route('dashboard') }}" @if (request()->routeIs('dashboard')) aria-current="page" @endif>Dashboard</a></li>
                             <li><a class="nav-link" href="{{ route('portals.index') }}" @if (request()->routeIs('portals.*')) aria-current="page" @endif>Portals</a></li>
                         </ul>
@@ -84,7 +84,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-vat-management" aria-expanded="{{ $activeGroup === 'vat-management' ? 'true' : 'false' }}">
                             <span>VAT Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'vat-management') show @endif" id="group-vat-management">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'vat-management') show @endif" id="group-vat-management" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'compliance:read')
                                 <li><a class="nav-link" href="{{ route('vat-management.audit-report') }}" @if (request()->routeIs('vat-management.audit-report')) aria-current="page" @endif>VAT Audit Report</a></li>
                             @endcan
@@ -122,7 +122,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-invoice-management" aria-expanded="{{ $activeGroup === 'invoice-management' ? 'true' : 'false' }}">
                             <span>Invoice Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'invoice-management') show @endif" id="group-invoice-management">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'invoice-management') show @endif" id="group-invoice-management" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'invoices:read')
                                 <li><a class="nav-link" href="{{ route('invoice-management.local') }}" @if (request()->routeIs('invoice-management.local')) aria-current="page" @endif>Local Invoices</a></li>
                                 <li><a class="nav-link" href="{{ route('invoice-management.foreign') }}" @if (request()->routeIs('invoice-management.foreign')) aria-current="page" @endif>Foreign Invoices</a></li>
@@ -135,7 +135,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-accounting-finance" aria-expanded="{{ $activeGroup === 'accounting-finance' ? 'true' : 'false' }}">
                             <span>Accounting &amp; Finance</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'accounting-finance') show @endif" id="group-accounting-finance">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'accounting-finance') show @endif" id="group-accounting-finance" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'accounting:read')
                                 <li><a class="nav-link" href="{{ route('accounting.index') }}" @if (request()->routeIs('accounting.index')) aria-current="page" @endif>General Ledger</a></li>
                                 <li><a class="nav-link" href="{{ route('accounting.supplier-ledger') }}" @if (request()->routeIs('accounting.supplier-ledger')) aria-current="page" @endif>Supplier Ledger</a></li>
@@ -152,7 +152,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-operations" aria-expanded="{{ $activeGroup === 'operations' ? 'true' : 'false' }}">
                             <span>Operations</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'operations') show @endif" id="group-operations">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'operations') show @endif" id="group-operations" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'expenses:read')
                                 <li><a class="nav-link" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.index')) aria-current="page" @endif>Expenses, Inventory &amp; Project Register</a></li>
                                 <li><a class="nav-link" href="{{ route('operations.human-resources') }}" @if (request()->routeIs('operations.human-resources')) aria-current="page" @endif>Human Resources Module</a></li>
@@ -168,7 +168,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-quotation" aria-expanded="{{ $activeGroup === 'quotation' ? 'true' : 'false' }}">
                             <span>Quotation</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'quotation') show @endif" id="group-quotation">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'quotation') show @endif" id="group-quotation" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'commercial:read')
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Create New Quotation</a></li>
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}">Issued Quotations</a></li>
@@ -182,7 +182,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-project-management" aria-expanded="{{ $activeGroup === 'project-management' ? 'true' : 'false' }}">
                             <span>Project Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'project-management') show @endif" id="group-project-management">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'project-management') show @endif" id="group-project-management" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'projects:read')
                                 <li><a class="nav-link" href="{{ route('project-management.new') }}" @if (request()->routeIs('project-management.new')) aria-current="page" @endif>Create New Project</a></li>
                                 <li><a class="nav-link" href="{{ route('project-management.ongoing') }}" @if (request()->routeIs('project-management.ongoing')) aria-current="page" @endif>Ongoing Project Reports</a></li>
@@ -195,7 +195,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-registered" aria-expanded="{{ $activeGroup === 'registered' ? 'true' : 'false' }}">
                             <span>Registered</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'registered') show @endif" id="group-registered">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'registered') show @endif" id="group-registered" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'parties:manage')
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'CUSTOMER') aria-current="page" @endif>Customers</a></li>
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SUPPLIER') aria-current="page" @endif>Suppliers</a></li>
@@ -208,7 +208,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-new-registration" aria-expanded="{{ $activeGroup === 'new-registration' ? 'true' : 'false' }}">
                             <span>New Registration</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'new-registration') show @endif" id="group-new-registration">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'new-registration') show @endif" id="group-new-registration" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'parties:manage')
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}">New Customer</a></li>
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}">New Supplier</a></li>
@@ -234,7 +234,7 @@
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-administration" aria-expanded="{{ $activeGroup === 'administration' ? 'true' : 'false' }}">
                             <span>Administration</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'administration') show @endif" id="group-administration">
+                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'administration') show @endif" id="group-administration" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'administration:read')
                                 <li><a class="nav-link" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration Command Centre</a></li>
                             @endcan
