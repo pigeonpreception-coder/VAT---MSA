@@ -22,6 +22,7 @@
         'PASS' => 'text-bg-success', 'PAYMENT_PENDING' => 'text-bg-success', 'PRESERVED' => 'text-bg-success', 'SATISFIED' => 'text-bg-success', 'DELIVERED' => 'text-bg-success',
         'ACCEPTED' => 'text-bg-success', 'CONVERTED' => 'text-bg-success',
         'MATCHED' => 'text-bg-info', 'PENDING' => 'text-bg-info', 'PENDING_APPROVAL' => 'text-bg-info', 'AWAITING_PROVIDER' => 'text-bg-info',
+        'IN_TRANSIT' => 'text-bg-info', 'UNDER_MAINTENANCE' => 'text-bg-warning', 'DISPOSED' => 'text-bg-secondary',
         'PENDING_VERIFICATION' => 'text-bg-info', 'UNDER_REVIEW' => 'text-bg-info', 'VERIFIED' => 'text-bg-info', 'ISSUED' => 'text-bg-info',
         'RECEIVED' => 'text-bg-info', 'RISK_REVIEW' => 'text-bg-info', 'OFFICER_REVIEW' => 'text-bg-info', 'PAYMENT_AUTHORISATION' => 'text-bg-info',
         'PROPOSED' => 'text-bg-info', 'AUTHORIZED' => 'text-bg-info', 'ASSIGNED' => 'text-bg-info', 'PLANNING' => 'text-bg-info',

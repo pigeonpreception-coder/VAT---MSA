@@ -50,6 +50,11 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Licensing\LicensingViewController;
 use App\Http\Controllers\Navigation\NavigationController;
+use App\Http\Controllers\Operations\ErpViewController;
+use App\Http\Controllers\Operations\FixedAssetViewController;
+use App\Http\Controllers\Operations\HumanResourcesViewController;
+use App\Http\Controllers\Operations\LogisticsViewController;
+use App\Http\Controllers\Operations\PosViewController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\OfflineSyncController;
@@ -257,6 +262,37 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
     Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
 
+    // The five Operations modules (NamRA e-VAT MS master prompt section
+    // 16E): Human Resources, Immovable/Movable Asset Management, the
+    // Inventory Module (point of sale) and Logistics, plus a read-only ERP
+    // cross-module overview. Route names match the placeholders the
+    // sidebar restructuring already wired up, so layouts/app.blade.php
+    // needed no changes for these five links.
+    Route::get('/operations/human-resources', [HumanResourcesViewController::class, 'index'])->name('operations.human-resources');
+    Route::post('/operations/human-resources/employees', [HumanResourcesViewController::class, 'storeEmployee'])
+        ->name('operations.human-resources.employees.store')->middleware('password.confirm');
+    Route::post('/operations/human-resources/employees/{id}/termination', [HumanResourcesViewController::class, 'terminateEmployee'])
+        ->name('operations.human-resources.employees.termination')->middleware('password.confirm');
+
+    Route::get('/operations/immovable-assets', [FixedAssetViewController::class, 'indexImmovable'])->name('operations.immovable-assets');
+    Route::get('/operations/movable-assets', [FixedAssetViewController::class, 'indexMovable'])->name('operations.movable-assets');
+    Route::post('/operations/fixed-assets', [FixedAssetViewController::class, 'store'])->name('operations.fixed-assets.store');
+    Route::post('/operations/fixed-assets/{id}/valuation', [FixedAssetViewController::class, 'valuation'])->name('operations.fixed-assets.valuation');
+    Route::post('/operations/fixed-assets/{id}/maintenance', [FixedAssetViewController::class, 'maintenance'])->name('operations.fixed-assets.maintenance');
+    Route::post('/operations/fixed-assets/{id}/restoration', [FixedAssetViewController::class, 'restoration'])->name('operations.fixed-assets.restoration');
+    Route::post('/operations/fixed-assets/{id}/disposal', [FixedAssetViewController::class, 'disposal'])->name('operations.fixed-assets.disposal');
+
+    Route::get('/operations/logistics', [LogisticsViewController::class, 'index'])->name('operations.logistics');
+    Route::post('/operations/logistics', [LogisticsViewController::class, 'store'])->name('operations.logistics.store');
+    Route::post('/operations/logistics/{id}/dispatch', [LogisticsViewController::class, 'dispatch'])->name('operations.logistics.dispatch');
+    Route::post('/operations/logistics/{id}/delivery', [LogisticsViewController::class, 'deliver'])->name('operations.logistics.delivery');
+    Route::post('/operations/logistics/{id}/cancellation', [LogisticsViewController::class, 'cancel'])->name('operations.logistics.cancellation');
+
+    Route::get('/operations/inventory', [PosViewController::class, 'index'])->name('operations.inventory');
+    Route::post('/operations/inventory/checkout', [PosViewController::class, 'checkout'])->name('operations.inventory.checkout');
+
+    Route::get('/operations/erp', [ErpViewController::class, 'index'])->name('operations.erp');
+
     // Ported from the source's own app/administration/page.tsx +
     // AdministrationActions.tsx -- the Administration command centre
     // (licensing/entitlements, employees, roles, workflows, access
@@ -389,9 +425,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     $plannedRoute('/accounting/customer-ledger', 'accounting.customer-ledger', 'accounting:read', 'Accounting & Finance', 'Customer Ledger',
         'Per-customer posted balances derived from the general ledger.',
         'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
-    $plannedRoute('/accounting/fixed-assets', 'accounting.fixed-assets', 'accounting:read', 'Accounting & Finance', 'Fixed Asset Module',
-        'Asset register, depreciation schedules and disposal tracking.',
-        'Not yet built. No fixed-asset domain model exists in the platform today.');
+    // Superseded by the real Immovable/Movable Asset Management modules
+    // below (accounting:read is still the gate, matching the placeholder
+    // this replaces): a fixed-asset domain model now exists, so this is a
+    // thin real page linking to the two, rather than a planned-module
+    // placeholder claiming no such model exists.
+    Route::get('/accounting/fixed-assets', function () {
+        Gate::authorize('permission', 'accounting:read');
+
+        return view('accounting.fixed-assets');
+    })->name('accounting.fixed-assets');
     $plannedRoute('/accounting/budgets', 'accounting.budgets', 'accounting:read', 'Accounting & Finance', 'Budgets',
         'Budget planning and budget-versus-actual tracking.',
         'Not yet built. No budget domain model exists in the platform today.');
@@ -401,21 +444,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     $plannedRoute('/accounting/cash-flow', 'accounting.cash-flow', 'accounting:read', 'Accounting & Finance', 'Cash Flow Projects',
         'Project-level cash flow forecasting and monitoring.',
         'Not yet built. Project Management does not yet have a dedicated project domain model to derive cash flow from.');
-    $plannedRoute('/operations/human-resources', 'operations.human-resources', 'expenses:read', 'Operations', 'Human Resources Module',
-        'Employee records, payroll integration boundaries and HR workflows.',
-        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
-    $plannedRoute('/operations/immovable-assets', 'operations.immovable-assets', 'expenses:read', 'Operations', 'Immovable Asset Management',
-        'Land and buildings register, valuation and disposal tracking.',
-        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
-    $plannedRoute('/operations/movable-assets', 'operations.movable-assets', 'expenses:read', 'Operations', 'Movable Asset Management',
-        'Vehicles, equipment and other movable assets register and tracking.',
-        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
-    $plannedRoute('/operations/logistics', 'operations.logistics', 'expenses:read', 'Operations', 'Logistics Module',
-        'Delivery, dispatch and fleet-adjacent logistics tracking.',
-        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
-    $plannedRoute('/operations/erp', 'operations.erp', 'expenses:read', 'Operations', 'ERP Module',
-        'Broader enterprise resource planning integration boundary.',
-        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
+    // The five Operations modules (Human Resources, Immovable/Movable
+    // Asset Management, Logistics, ERP) are now real routes -- see the
+    // '/operations/human-resources' etc. block above, defined alongside
+    // the rest of the Operations routes rather than here among the
+    // remaining placeholders.
     $plannedRoute('/quotation/converted', 'quotation.converted', 'commercial:read', 'Quotation', 'Converted Quotations',
         'Quotations that have progressed to a purchase order or invoice.',
         'Not yet built as a dedicated view. Quotation status and conversion actions already exist on the quotation register.');

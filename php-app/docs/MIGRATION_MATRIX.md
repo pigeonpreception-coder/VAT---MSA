@@ -4726,6 +4726,152 @@ suite: 518 tests, 0 regressions, run against real MySQL after a cold
 environment rebuild (`composer install`, starting MySQL, `npm run
 build` for the Vite manifest `layouts.app` needs to render at all).
 
+### The five Operations modules (the fifteenth UI slice)
+
+Replaces the sidebar restructuring's five Operations placeholders --
+Human Resources, Immovable Asset Management, Movable Asset Management,
+Inventory ("functioning like a Point-of-Sale System"), and Logistics,
+plus a read-only ERP overview -- with real modules, directly following
+the equivalent build in the TypeScript source (this same session,
+`lib/domain/{fixed-asset,logistics}.ts`, `lib/data/{fixed-asset,
+logistics}-repository.ts`, `app/operations/**`), ported the same way
+every prior slice was: domain validator first, then service, then
+controller/view, then tests, checked against the source file by file
+rather than re-derived from the master prompt alone.
+
+**New tables** (`database/migrations/2026_09_13_000000` and `_000001`):
+`fixed_assets` (`asset_class` IMMOVABLE|MOVABLE discriminator, one table
+serving both Asset Management pages rather than two near-duplicates --
+matching the source's own design, per `lib/domain/fixed-asset.ts`'s own
+doc comment) and `logistics_deliveries` (always references the invoice
+or POS sale it fulfils via `reference_type`/`reference_id`; an optional
+`vehicle_asset_id` cites a MOVABLE row in `fixed_assets`, validated in
+the service layer since MySQL cannot express a class-conditional FK).
+New permissions `fixed-assets:read`/`manage` and `logistics:read`/
+`manage`, added to `App\Support\Access\Permissions::ROLE_PERMISSIONS`
+with the same distribution as the source's own `lib/domain/access.ts`
+diff: full read+manage for PILOT_ADMIN/TAXPAYER_OWNER/TAXPAYER_ADMIN/
+TAXPAYER_STAFF, read-only for TAXPAYER_VIEWER, and `fixed-assets:read`
+only (no logistics) for TAXPAYER_ACCOUNTANT.
+
+**One genuine bug caught and fixed before it ever shipped, not
+inherited from the source:** wiring the Inventory module's checkout to
+the already-existing `App\Services\Business\InventoryService::
+recordMovement` surfaced that `stock_movements.reference_id` had been
+typed `uuid()` (CHAR(36)) in this migration's own earlier Phase 10
+work, but `db/schema.ts`'s own `stockMovements` table declares it plain
+TEXT with no UUID-shape constraint -- and the source's own POS checkout
+(`PosTerminal.tsx`) genuinely writes a composite value there,
+`${invoiceId}:${lineNumber}`, to keep each cart line's movement row
+distinct under the `ux_stock_movement_reference` unique index. That
+value is longer than 36 characters and would be silently truncated (or
+rejected under strict SQL mode) by the narrower column. Caught by
+comparing `db/schema.ts` against the existing migration while designing
+this slice's checkout, before any code ran against it -- fixed by a new
+`widen_stock_movements_reference_id` migration (`VARCHAR(100)`),
+following this migration's own established "widen rather than invent a
+narrower constraint the source never had" convention (see the VAT
+transaction type widening entry above). Confirmed by this slice's own
+live end-to-end verification below, not left as a known gap.
+
+**Fixed Assets** (`App\Domain\Operations\FixedAssetValidator`,
+`App\Services\Operations\FixedAssetService`,
+`App\Http\Controllers\Operations\FixedAssetViewController`,
+`resources/views/operations/fixed-assets/index.blade.php`): one shared
+controller/service/view renders both `/operations/immovable-assets`
+and `/operations/movable-assets` (two thin `indexImmovable`/
+`indexMovable` methods calling one private renderer), matching the
+one-table design above. Register -> (ACTIVE <-> UNDER_MAINTENANCE) ->
+DISPOSED, ported field-for-field from `lib/domain/fixed-asset.ts`
+including its category enums per asset class (LAND/BUILDING/OTHER for
+IMMOVABLE; VEHICLE/EQUIPMENT/FURNITURE/IT_HARDWARE/OTHER for MOVABLE)
+and its `FIXED_ASSET_ACTION_EVENT_TYPE` outbox-event map. Also replaces
+the Accounting & Finance sidebar's own "Fixed Asset Module" placeholder
+(`resources/views/accounting/fixed-assets.blade.php`) -- previously
+correct that "no fixed-asset domain model exists," now a thin page
+linking to the two real registers, mirroring the TypeScript source's
+own identical swap in the same session.
+
+**Logistics** (`App\Domain\Operations\LogisticsValidator`,
+`App\Services\Operations\LogisticsService`,
+`App\Http\Controllers\Operations\LogisticsViewController`,
+`resources/views/operations/logistics/index.blade.php`): create (always
+PENDING) -> dispatch -> deliver, or cancel from either PENDING or
+IN_TRANSIT, ported field-for-field from `lib/domain/logistics.ts`
+including its `LOGISTICS_ACTION_EVENT_TYPE` map. A vehicle picker on the
+create form lists the organisation's own MOVABLE fixed assets.
+
+**Human Resources** (`App\Http\Controllers\Operations\
+HumanResourcesViewController`, `resources/views/operations/human-
+resources/index.blade.php`): not a new domain -- reuses
+`App\Services\Administration\AdministrationSnapshotService::
+getAdministrationSnapshot` for the read and `App\Services\
+OrganisationAdmin\OrganisationAdminService::inviteEmployee/
+terminateEmployee` for the two writes, the exact same commands
+`AdministrationViewController` already serves from the Administration
+command centre -- a second entry point onto the same employee lifecycle,
+not a competing one, matching the source's own reuse of
+`getAdministrationSnapshot` for this page. Both writes carry the same
+`password.confirm` step-up substitution as every other sensitive command
+in this migration.
+
+**Inventory Module, "functioning like a Point-of-Sale System"**
+(`App\Services\Operations\PosService`, `App\Http\Controllers\
+Operations\PosViewController`, `resources/views/operations/pos/
+index.blade.php`): reuses `Product`/`Warehouse`/`InventoryBalance`
+directly (the same reads `App\Http\Controllers\Business\
+InventoryController` and `OperationsViewController` already serve) and
+adds one write, checkout. The source's own `PosTerminal.tsx` builds this
+client-side as two separate `fetch()` calls (`POST /api/v1/invoices`,
+then one `POST /api/v1/inventory/movements` per cart line); this port
+does the same two steps server-side in a single request, reusing
+`App\Services\Invoice\InvoiceService::submit` (Phase 9's certification
+pipeline, unchanged) and `InventoryService::recordMovement` (Phase 10's
+ISSUE-type movement, which negates the quantity automatically) rather
+than inventing a third command path. Matches the source's own partial-
+failure handling exactly: the invoice is certified first and is never
+rolled back if a stock movement afterwards fails to record (each
+movement is separately idempotent and separately auditable) -- the
+till operator sees the certified invoice plus a list of any line-level
+stock failures to reconcile manually, exactly as the source's own
+banner describes. Cart building is a small vanilla-JS helper in the
+Blade view (add/remove/quantity, running totals) posting one array-
+keyed form rather than the source's own two-call client fetch sequence.
+
+Verified by five new files under `tests/Feature/Operations/`
+(`FixedAssetViewTest`, `LogisticsViewTest`, `HumanResourcesViewTest`,
+`PosViewTest`, `ErpViewTest`; 25 tests): access gates for all five
+pages; the full register -> maintenance -> restore -> dispose lifecycle
+and a duplicate-asset-code conflict; the delivery create -> dispatch ->
+deliver lifecycle, a vehicle-must-be-a-movable-asset-in-this-
+organisation check, and cancellation; inviting and terminating an
+employee through this second entry point (including the step-up-
+missing lock, ported from `AdministrationViewTest`'s own identical
+case); a walk-in sale certifying a `SIMPLIFIED_TAX_INVOICE` and issuing
+matching stock, a registered-customer sale certifying a `TAX_INVOICE`,
+and a sale that would exceed on-hand stock certifying the invoice
+regardless while surfacing the stock shortfall as a failure (the
+documented partial-failure behaviour above, not a bug to fix); and the
+ERP overview aggregating real counts across all four modules with
+permission-gated tiles. One fixity note the tests themselves caught:
+`App\Models\Scopes\OrganisationScope`'s automatic tenant-scope backstop
+(Phase 7) means a cross-tenant fixed-asset/delivery lookup returns "not
+found" (the row is filtered out of the query entirely) rather than a
+403 from this service's own explicit `TenantScope::requireTaxpayer`
+check -- consistent with how every other `BelongsToOrganisation` model
+in this migration already behaves, not a gap introduced here. Full
+suite: 542 tests, 0 regressions, run against real MySQL. Also verified
+live end-to-end over real HTTP against the actual dev server as the
+demo organisation owner: registered a real immovable asset (visible on
+its register immediately), and completed a real POS sale (created a
+real product and warehouse via the JSON API, received real opening
+stock, then posted a real checkout through the Blade route) --
+confirmed a genuine `SIMPLIFIED_TAX_INVOICE` (`POS-20260913-ISMX8W`,
+NAD 862.50 including 15% VAT) and a matching `ISSUE` stock movement
+(`{invoice_id}:1`) both landed intact under the real, full-length
+composite `reference_id`, and the warehouse balance correctly dropped
+from 10,000,000 to 7,000,000 micros.
+
 ## Legacy D1 importer (Phase 14)
 
 `php artisan legacy:import-d1 {path} [--dry-run] [--only=table1,table2]`
