@@ -13,6 +13,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -676,5 +677,36 @@ class ReportExportTest extends TestCase
         $this->assertStringContainsString('invoices,1', $content);
         $this->assertStringContainsString('total_cents,100000', $content);
         $this->assertStringContainsString('tax_cents,15000', $content);
+    }
+
+    /**
+     * Regression test for the FILESYSTEM_DISK-driven storage swap
+     * (App\Services\Platform\ReportExportService::disk(), the same
+     * mechanism App\Services\Document\DocumentService::disk() uses):
+     * proves a requested export's bytes actually land on whichever disk
+     * `filesystems.default` resolves to, and can be downloaded back from
+     * there, rather than a disk named 'local' hardcoded in the service.
+     */
+    public function test_export_storage_follows_the_configured_filesystem_disk(): void
+    {
+        config(['filesystems.default' => 'r2_test']);
+        Storage::fake('r2_test');
+
+        $tp = $this->makeTaxpayer('VAT-RPT-0030');
+        $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
+        $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'disk-swap@reporttest.test');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+
+        $exportId = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-disk-swap-0001'])
+            ->json('report_export.id');
+
+        $objectKey = DB::table('document_metadata')->where('owner_domain', 'REPORT_EXPORT')->where('owner_resource_id', $runId)->value('object_key');
+        $this->assertNotNull($objectKey);
+        Storage::disk('r2_test')->assertExists($objectKey);
+        Storage::disk('local')->assertMissing($objectKey);
+
+        $download = $this->actingAs($owner)->get("/api/v1/reports/exports/{$exportId}/download");
+        $download->assertStatus(200);
     }
 }

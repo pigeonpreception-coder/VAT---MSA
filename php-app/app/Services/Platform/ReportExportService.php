@@ -13,6 +13,7 @@ use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
 use App\Support\Platform\PlatformConfigReader;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -35,11 +36,12 @@ use Illuminate\Support\Str;
  * single mixed-table transaction shape rather than mixing an Eloquent
  * write into an otherwise-DB::table() command.
  *
- * `env.DOCUMENTS` (Cloudflare R2 in the source) is Laravel's own `local`
- * filesystem disk here, same substitution `App\Services\Document\
- * DocumentService` already established -- an export's object key is
- * `exports/{organisation_id}/{document_id}/{file_name}`, distinct from a
- * regular upload's `quarantine/...` prefix, matching the source exactly.
+ * `env.DOCUMENTS` (Cloudflare R2 in the source) is `$this->disk()` here
+ * (`FILESYSTEM_DISK`, `local` by default), same substitution `App\
+ * Services\Document\DocumentService` already established -- an export's
+ * object key is `exports/{organisation_id}/{document_id}/{file_name}`,
+ * distinct from a regular upload's `quarantine/...` prefix, matching the
+ * source exactly.
  */
 class ReportExportService
 {
@@ -60,6 +62,12 @@ class ReportExportService
     private const CURRENCY_BASIS = 'NAD';
 
     public function __construct(private readonly OrganisationResolver $organisations) {}
+
+    /** See App\Services\Document\DocumentService::disk() -- same FILESYSTEM_DISK-driven swap point. */
+    private function disk(): Filesystem
+    {
+        return Storage::disk(config('filesystems.default'));
+    }
 
     /**
      * Module 7 Phase A RunReport: computes and persists one inline report
@@ -243,7 +251,7 @@ class ReportExportService
         $exportId = (string) Str::uuid();
         $expiresAt = $now->copy()->addSeconds(self::EXPORT_EXPIRY_SECONDS);
 
-        Storage::disk('local')->put($objectKey, $bytes);
+        $this->disk()->put($objectKey, $bytes);
         try {
             DB::transaction(function () use (
                 $documentId, $scope, $run, $objectKey, $fileName, $bytes, $checksum, $documentStatus, $actor, $now,
@@ -271,7 +279,7 @@ class ReportExportService
                 ], $now);
             });
         } catch (\Throwable $e) {
-            Storage::disk('local')->delete($objectKey);
+            $this->disk()->delete($objectKey);
             throw $e;
         }
 
@@ -395,10 +403,10 @@ class ReportExportService
         if (! $document || $document->status !== 'ACTIVE') {
             throw new PlatformResourceException('The report export document is not available for download.', 404);
         }
-        if (! Storage::disk('local')->exists($document->object_key)) {
+        if (! $this->disk()->exists($document->object_key)) {
             throw new PlatformResourceException('The report export object could not be located in storage.', 404);
         }
-        $bytes = Storage::disk('local')->get($document->object_key);
+        $bytes = $this->disk()->get($document->object_key);
 
         $now = now();
         AuditService::append($actor, 'REPORT_EXPORT_DOWNLOADED', 'REPORT_EXPORT', $exportId, ['documentId' => $row->document_id, 'correlationId' => $correlationId], $now);

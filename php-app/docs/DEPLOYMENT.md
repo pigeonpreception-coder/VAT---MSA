@@ -257,10 +257,42 @@ directory is:
 - The thing to back up. There is no redundancy at the storage-driver
   level the way R2 had; either put it on redundant storage at the
   infrastructure layer, or swap `FILESYSTEM_DISK` to a real S3/
-  R2-compatible driver (a config change only -- Laravel's `local` and
-  `s3` drivers share the same `Storage::disk(...)->put()/get()/
-  exists()/delete()` interface every service in this codebase already
-  uses).
+  R2-compatible driver as described below.
+
+### Switching to a real S3/R2-compatible disk
+
+Both write sites (`DocumentService::disk()`, `ReportExportService::disk()`)
+resolve the disk via `Storage::disk(config('filesystems.default'))` --
+i.e. `FILESYSTEM_DISK` -- rather than a hardcoded `'local'`, and
+`config/filesystems.php`'s `s3` disk entry is a stock Laravel S3 disk
+(generic S3-API-compatible, which R2 is). Switching is a config change
+only, no code change:
+
+1. `composer require league/flysystem-aws-s3-v3` (already a `require`,
+   not `require-dev`, dependency -- this is what actually lets Laravel's
+   `s3` driver run; `config/filesystems.php` defining the disk is not
+   enough by itself).
+2. Create an R2 bucket and an R2 API token (Cloudflare dashboard -- R2 ->
+   Manage API tokens) scoped to that bucket only.
+3. Set in `.env`:
+   ```
+   FILESYSTEM_DISK=s3
+   AWS_ACCESS_KEY_ID=<r2 access key id>
+   AWS_SECRET_ACCESS_KEY=<r2 secret access key>
+   AWS_DEFAULT_REGION=auto
+   AWS_BUCKET=<r2 bucket name>
+   AWS_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+   AWS_USE_PATH_STYLE_ENDPOINT=true
+   ```
+   (A real AWS S3 bucket instead of R2 works the same way -- drop
+   `AWS_ENDPOINT`/`AWS_USE_PATH_STYLE_ENDPOINT` and use a real
+   `AWS_DEFAULT_REGION`.)
+4. Verify before relying on it: `php artisan tinker --execute="dd(
+   Storage::disk('s3')->put('healthcheck.txt', 'ok'),
+   Storage::disk('s3')->get('healthcheck.txt'))"`, then delete that
+   test object. Existing `quarantine/`/`exports/` object keys already on
+   `local` are not migrated automatically -- copy them across first if
+   switching an environment that already has real documents stored.
 
 ## Running the test suite
 

@@ -6376,13 +6376,28 @@ away by a fully-green test suite:
   downstream consumer via `App\Support\Platform\PlatformConfigReader`
   (Phase 13's "Platform config now feeds three real consumers" above);
   every other seeded row remains illustrative only, wired only when a
-  real consumer needs it, and no real S3/R2-compatible object-storage
-  driver is
-  configured (`docs/DEPLOYMENT.md`'s "Storage" section) -- a config
-  change only, given every service already goes through Laravel's
-  `Storage::disk(...)` interface. (Self-service password reset -- once
+  real consumer needs it. (Self-service password reset -- once
   listed here as a gap -- was closed 2026-09-02 per red team finding
   RT-005; see `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.)
+- **A real S3/R2-compatible object-storage disk is now genuinely a
+  config-only swap, not just documented as one.** `DocumentService`
+  and `ReportExportService` previously wrote/read via a literal
+  `Storage::disk('local')` at every call site -- `FILESYSTEM_DISK`
+  existed as a Laravel default but had no actual effect on where
+  documents/exports landed. Both services now resolve their disk
+  through a `disk()` helper reading `config('filesystems.default')`,
+  so `FILESYSTEM_DISK` (and the already-generic `s3` disk in
+  `config/filesystems.php`, which works for R2 via `AWS_ENDPOINT`/
+  `AWS_USE_PATH_STYLE_ENDPOINT`) genuinely governs both. Also added
+  the `league/flysystem-aws-s3-v3` package Laravel's `s3` driver
+  requires at runtime and was missing entirely. See `docs/
+  DEPLOYMENT.md`'s "Switching to a real S3/R2-compatible disk" for the
+  exact steps. Verified by two new regression tests --
+  `DocumentTest::test_document_storage_follows_the_configured_
+  filesystem_disk` and `ReportExportTest::test_export_storage_follows_
+  the_configured_filesystem_disk` -- each pointing `FILESYSTEM_DISK`
+  at a second, distinct fake disk and proving the object actually
+  lands there (and not on `local`), not just that config parses.
 - **Re-verification against the actual target runtime.** Every
   verification in this session ran on PHP 8.2.12 and MariaDB 10.4.32
   (XAMPP), flagged throughout as differing from a PHP 8.3+/MySQL 8
