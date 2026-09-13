@@ -109,6 +109,41 @@ body {
     font-weight: 600;
 }
 
+/* Sidebar restructuring: each top-level group is a Bootstrap-collapse
+   dropdown (data-bs-toggle="collapse") rather than a flat link list --
+   these three rules style the group trigger button, its caret, and the
+   indented submenu it reveals, reusing the same dark palette and
+   aria-current highlight the flat list already had above. */
+.sidebar-group-trigger {
+    width: 100%;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: none;
+    border: 0;
+}
+
+.sidebar-group-caret {
+    transition: transform 0.15s ease;
+    font-size: 0.7rem;
+}
+
+.sidebar-group-trigger[aria-expanded="true"] .sidebar-group-caret {
+    transform: rotate(180deg);
+}
+
+.sidebar-subnav {
+    list-style: none;
+    padding-left: 0.75rem;
+    margin: 0.15rem 0 0.35rem;
+}
+
+.sidebar-subnav .nav-link {
+    font-size: 0.92rem;
+    padding: 0.4rem 0.9rem;
+}
+
 .sidebar-user {
     padding: 1rem 1.25rem;
     border-top: 1px solid rgba(255, 255, 255, 0.12);

@@ -69,6 +69,7 @@ use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowAuthoringViewController;
 use App\Http\Controllers\Workflow\WorkflowController;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -354,6 +355,91 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/portal/namra-admin', [NamraAdminPortalController::class, 'index'])->name('portal.namra-admin');
     Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
     Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
+
+    // Sidebar restructuring (master prompt sections 16-21): reserved
+    // navigation/architecture placeholders for subfolders the new 9-group
+    // sidebar names but that have no backing feature yet -- mirrors the
+    // source's own app/vat-management, app/invoice-management etc.
+    // PlannedModule pages 1:1 (route path, permission and copy match).
+    $plannedRoute = function (string $path, string $name, string $permission, string $eyebrow, string $title, string $description, string $scopeNote) {
+        Route::get($path, function () use ($permission, $eyebrow, $title, $description, $scopeNote) {
+            Gate::authorize('permission', $permission);
+            return view('planned.show', compact('eyebrow', 'title', 'description', 'scopeNote'));
+        })->name($name);
+    };
+
+    $plannedRoute('/vat-management/audit-report', 'vat-management.audit-report', 'compliance:read', 'VAT Management', 'VAT Audit Report',
+        'A real-time invoice and VAT summary drawn from certified invoices and reconciliation evidence.',
+        'This report format is not yet approved. Today, the closest equivalent data lives in Audit Cases and Compliance Overview.');
+    $plannedRoute('/vat-management/reconciliation', 'vat-management.reconciliation', 'compliance:read', 'VAT Management', 'Invoice Reconciliation',
+        'Matching of issued invoices, received invoices and unlocated issued invoices.',
+        'Not yet built. Risk Indicators is the closest existing equivalent today.');
+    $plannedRoute('/vat-management/adjustment-report', 'vat-management.adjustment-report', 'compliance:read', 'VAT Management', 'VAT Adjustment Report',
+        'A summary of credit and debit note adjustments against filed VAT periods.',
+        'This report format is not yet approved. The underlying VAT-period and adjustment data already exists in the platform.');
+    $plannedRoute('/invoice-management/local', 'invoice-management.local', 'invoices:read', 'Invoice Management', 'Local Invoices',
+        'Issued invoices, received invoices, credit notes and debit notes classified as domestic (Namibia).',
+        'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
+    $plannedRoute('/invoice-management/foreign', 'invoice-management.foreign', 'invoices:read', 'Invoice Management', 'Foreign Invoices',
+        'Issued invoices, received invoices, credit notes and debit notes classified as foreign (non-Namibia).',
+        'Automatic local/foreign classification requires recording the counterparty\'s registered country on business-party records, which is not yet captured. Until that data and the classification rule ship, see All Invoices for the unified register.');
+    $plannedRoute('/accounting/supplier-ledger', 'accounting.supplier-ledger', 'accounting:read', 'Accounting & Finance', 'Supplier Ledger',
+        'Per-supplier posted balances derived from the general ledger.',
+        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    $plannedRoute('/accounting/customer-ledger', 'accounting.customer-ledger', 'accounting:read', 'Accounting & Finance', 'Customer Ledger',
+        'Per-customer posted balances derived from the general ledger.',
+        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    $plannedRoute('/accounting/fixed-assets', 'accounting.fixed-assets', 'accounting:read', 'Accounting & Finance', 'Fixed Asset Module',
+        'Asset register, depreciation schedules and disposal tracking.',
+        'Not yet built. No fixed-asset domain model exists in the platform today.');
+    $plannedRoute('/accounting/budgets', 'accounting.budgets', 'accounting:read', 'Accounting & Finance', 'Budgets',
+        'Budget planning and budget-versus-actual tracking.',
+        'Not yet built. No budget domain model exists in the platform today.');
+    $plannedRoute('/accounting/purchase-orders', 'accounting.purchase-orders', 'accounting:read', 'Accounting & Finance', 'Purchase Orders',
+        'Purchase order issuance, approval and conversion to supplier invoices.',
+        'Not yet built. No purchase-order domain model exists in the platform today.');
+    $plannedRoute('/accounting/cash-flow', 'accounting.cash-flow', 'accounting:read', 'Accounting & Finance', 'Cash Flow Projects',
+        'Project-level cash flow forecasting and monitoring.',
+        'Not yet built. Project Management does not yet have a dedicated project domain model to derive cash flow from.');
+    $plannedRoute('/operations/human-resources', 'operations.human-resources', 'expenses:read', 'Operations', 'Human Resources Module',
+        'Employee records, payroll integration boundaries and HR workflows.',
+        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
+    $plannedRoute('/operations/immovable-assets', 'operations.immovable-assets', 'expenses:read', 'Operations', 'Immovable Asset Management',
+        'Land and buildings register, valuation and disposal tracking.',
+        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
+    $plannedRoute('/operations/movable-assets', 'operations.movable-assets', 'expenses:read', 'Operations', 'Movable Asset Management',
+        'Vehicles, equipment and other movable assets register and tracking.',
+        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
+    $plannedRoute('/operations/logistics', 'operations.logistics', 'expenses:read', 'Operations', 'Logistics Module',
+        'Delivery, dispatch and fleet-adjacent logistics tracking.',
+        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
+    $plannedRoute('/operations/erp', 'operations.erp', 'expenses:read', 'Operations', 'ERP Module',
+        'Broader enterprise resource planning integration boundary.',
+        'Reserved navigation only, by design. This module is not to be developed until separately instructed.');
+    $plannedRoute('/quotation/converted', 'quotation.converted', 'commercial:read', 'Quotation', 'Converted Quotations',
+        'Quotations that have progressed to a purchase order or invoice.',
+        'Not yet built as a dedicated view. Quotation status and conversion actions already exist on the quotation register.');
+    $plannedRoute('/quotation/converted-invoices', 'quotation.converted-invoices', 'commercial:read', 'Quotation', 'Converted Quotations into Invoices',
+        'The invoice, credit notes, debit notes and related quotation for each converted quotation, in one list.',
+        'Not yet built as a dedicated cross-reference view. The invoice and quotation records this would join already exist independently.');
+    $plannedRoute('/project-management/new', 'project-management.new', 'projects:read', 'Project Management', 'Create New Project',
+        'Capture project name, customer, description, location, dates, budget, expected revenue, category, VAT treatment and owner.',
+        'Not yet built. No dedicated project domain model exists in the platform today.');
+    $plannedRoute('/project-management/ongoing', 'project-management.ongoing', 'projects:read', 'Project Management', 'Ongoing Project Reports',
+        'Real-time/periodic progress reporting for active projects.',
+        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
+    $plannedRoute('/project-management/completed', 'project-management.completed', 'projects:read', 'Project Management', 'Completed Projects',
+        'Summary lists and reports for finished projects.',
+        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
+    $plannedRoute('/registered/service-providers', 'registered.service-providers', 'parties:manage', 'Registered', 'Service Providers',
+        'A categorised register of service providers, distinct from customers and suppliers.',
+        'Not yet built. Business-party records do not yet carry a service-provider relationship or category; Customers and Suppliers are available today under Registered.');
+    $plannedRoute('/new-registration/credit-note', 'new-registration.credit-note', 'invoices:read', 'New Registration', 'New Credit Note',
+        'A controlled form to issue a credit note against an original tax invoice.',
+        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the credit, and the lines to reverse -- with amounts recorded as a reduction. Awaiting approval before the UI is built.');
+    $plannedRoute('/new-registration/debit-note', 'new-registration.debit-note', 'invoices:read', 'New Registration', 'New Debit Note',
+        'A controlled form to issue a debit note against an original tax invoice.',
+        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the debit, and the additional lines/amounts. Awaiting approval before the UI is built.');
 
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
