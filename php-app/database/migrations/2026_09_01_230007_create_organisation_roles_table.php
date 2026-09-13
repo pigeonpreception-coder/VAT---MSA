@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /** Ported from db/runtime.ts's `organisation_roles` table -- an organisation-defined, least-privilege role assembled from the platform's own `access_permissions` catalogue. */
@@ -15,7 +16,7 @@ return new class extends Migration
             $table->string('name');
             $table->text('description');
             $table->unsignedInteger('version')->default(1);
-            $table->text('branch_scope')->default('[]');
+            $table->text('branch_scope')->default(DB::raw("('[]')"));
             $table->bigInteger('approval_limit_cents')->nullable();
             $table->string('status', 20);
             $table->foreignUuid('created_by')->constrained('users');

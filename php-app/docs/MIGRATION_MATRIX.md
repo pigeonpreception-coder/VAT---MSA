@@ -6398,12 +6398,23 @@ away by a fully-green test suite:
   the_configured_filesystem_disk` -- each pointing `FILESYSTEM_DISK`
   at a second, distinct fake disk and proving the object actually
   lands there (and not on `local`), not just that config parses.
-- **Re-verification against the actual target runtime.** Every
-  verification in this session ran on PHP 8.2.12 and MariaDB 10.4.32
-  (XAMPP), flagged throughout as differing from a PHP 8.3+/MySQL 8
-  target; code was deliberately written to avoid anything that needs
-  8.3+ or MySQL-8-only syntax, but this substitution should be
-  confirmed, not assumed, before production use.
+- **Re-verified against the actual target runtime: PHP 8.4.19 and real
+  MySQL 8.0.46** (not MariaDB) -- `migrate:fresh --seed` and the full
+  suite (548/548) both run clean. This re-verification caught a real,
+  previously-undetected MariaDB-vs-MySQL portability gap: 4 migrations
+  gave a `TEXT` column a literal `->default(...)` (`license_plan_
+  entitlements.configuration`, `report_definitions.guardrail`,
+  `workflow_delegations.reason`, `organisation_roles.branch_scope`).
+  MariaDB accepts this as an extension; real MySQL 8 enforces the SQL
+  standard and rejects it outright (`Error 1101: BLOB, TEXT, GEOMETRY or
+  JSON column can't have a default value`), so `migrate:fresh` failed
+  immediately on real MySQL 8 before this fix. Each now uses MySQL
+  8.0.13+'s parenthesized-expression default syntax instead
+  (`->default(DB::raw("('{}')"))` etc.), verified to produce the
+  identical stored default and behave identically on both engines.
+  This was genuinely undetected until this runtime swap -- every prior
+  verification in this migration ran on MariaDB (10.4.32 via XAMPP,
+  later 10.11.14), which silently tolerated the non-standard syntax.
 - **A real legacy-data cutover, if one is ever needed.** The Phase 14
   importer (`php artisan legacy:import-d1`) is real and generic, but it
   has only ever run against a synthetic fixture -- there is no actual

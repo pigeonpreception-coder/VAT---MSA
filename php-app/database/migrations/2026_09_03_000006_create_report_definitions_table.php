@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -24,7 +25,7 @@ return new class extends Migration
             $table->string('status', 20);
             $table->timestamp('created_at')->useCurrent();
             $table->string('freshness_tier', 20)->default('DAILY');
-            $table->text('guardrail')->nullable(false)->default('');
+            $table->text('guardrail')->nullable(false)->default(DB::raw("('')"));
         });
     }
 
