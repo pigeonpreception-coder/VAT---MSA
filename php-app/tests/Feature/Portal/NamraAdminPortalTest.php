@@ -75,19 +75,32 @@ class NamraAdminPortalTest extends TestCase
     }
 
     /**
-     * NAMRA_STAFF (formerly PILOT_ADMIN) is no longer on this portal's own
-     * role list, nor does it hold authority-governance:read any more --
-     * deliberately narrowed at the user's own explicit request, see
-     * Permissions::ROLE_PERMISSIONS' own comment on that role.
+     * NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN, then NAMRA_STAFF) was put
+     * back on this portal's own role list and regained authority-
+     * governance:read, both at the user's own explicit request -- see
+     * Permissions::ROLE_PERMISSIONS' own comment on that role. Still 403s
+     * without a governed tax_authority_administrators scope, same as every
+     * other role on this portal's list.
      */
-    public function test_namra_staff_is_denied_the_namra_admin_portal(): void
+    public function test_namra_system_support_is_denied_without_governed_authority_scope(): void
     {
         $staff = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => 'namra-staff@namraadminportal.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Support', 'email' => 'namra-system-support@namraadminportal.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($staff)->get('/portal/namra-admin')->assertForbidden();
+    }
+
+    public function test_namra_system_support_reaches_the_namra_admin_portal_with_governed_scope(): void
+    {
+        $staff = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Support', 'email' => 'namra-system-support-2@namraadminportal.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+        $this->makeAdministrator($staff);
+
+        $this->actingAs($staff)->get('/portal/namra-admin')->assertOk();
     }
 
     public function test_the_namra_admin_portal_renders_units_federation_assignments_and_providers(): void

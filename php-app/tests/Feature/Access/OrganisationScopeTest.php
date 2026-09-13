@@ -95,7 +95,7 @@ class OrganisationScopeTest extends TestCase
         $tenantB = $this->makeTenant('VAT-SCOPE-0006');
         $admin = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => 'admin@scope.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $this->actingAs($admin);
@@ -123,18 +123,21 @@ class OrganisationScopeTest extends TestCase
     public function test_an_actor_with_neither_national_scope_nor_a_taxpayer_sees_nothing(): void
     {
         $this->makeTenant('VAT-SCOPE-0009');
-        // INFRASTRUCTURE_ADMIN is taxpayer_id=null but not in Permissions::
-        // NATIONAL_SCOPE_ROLES (it is a platform-technical role, not a
-        // tax-administration one, and -- unlike SUPER_ADMIN, deliberately
-        // made global scope at the user's own explicit request -- was not
-        // added to that list) -- the scope must not mistake "no taxpayer"
-        // for "sees everything".
-        $infrastructureAdmin = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'Infrastructure Admin', 'email' => 'infra@scope.test',
-            'password' => bcrypt('password'), 'role' => 'INFRASTRUCTURE_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        // An unlinked DEVELOPER_PARTNER is taxpayer_id=null but not in
+        // Permissions::NATIONAL_SCOPE_ROLES (a genuine, legitimate state --
+        // signed up, not yet linked to an organisation -- matching
+        // PlatformSnapshotService::developerPortalSnapshot's own precedent
+        // for this exact role/state combination) -- the scope must not
+        // mistake "no taxpayer" for "sees everything". SUPER_ADMIN and
+        // INFRASTRUCTURE_ADMIN no longer fit this fixture: both were
+        // deliberately made global scope at the user's own explicit
+        // request (see the two tests below).
+        $unlinkedPartner = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Developer Partner', 'email' => 'partner@scope.test',
+            'password' => bcrypt('password'), 'role' => 'DEVELOPER_PARTNER', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
-        $this->actingAs($infrastructureAdmin);
+        $this->actingAs($unlinkedPartner);
         $all = BusinessParty::all();
 
         $this->assertCount(0, $all);
@@ -152,6 +155,25 @@ class OrganisationScopeTest extends TestCase
         ]);
 
         $this->actingAs($superAdmin);
+        $all = BusinessParty::all();
+
+        $this->assertTrue($all->contains('id', $tenantA['party']->id));
+        $this->assertTrue($all->contains('id', $tenantB['party']->id));
+    }
+
+    public function test_infrastructure_admin_is_global_scope_and_sees_every_organisations_rows(): void
+    {
+        $tenantA = $this->makeTenant('VAT-SCOPE-0012');
+        $tenantB = $this->makeTenant('VAT-SCOPE-0013');
+        // INFRASTRUCTURE_ADMIN was deliberately added to Permissions::
+        // NATIONAL_SCOPE_ROLES at the user's own explicit request
+        // ("the scope must be Global").
+        $infrastructureAdmin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Infrastructure Admin', 'email' => 'infra-global@scope.test',
+            'password' => bcrypt('password'), 'role' => 'INFRASTRUCTURE_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $this->actingAs($infrastructureAdmin);
         $all = BusinessParty::all();
 
         $this->assertTrue($all->contains('id', $tenantA['party']->id));

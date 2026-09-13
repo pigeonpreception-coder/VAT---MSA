@@ -55,7 +55,7 @@ class DashboardTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'Pilot Admin', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 

@@ -71,7 +71,7 @@ below for the specific commands.
      permission list that matches `lib/domain/access.ts`'s `TAXPAYER_OWNER`
      entry exactly (`access-governance:manage`, `accounting:close-period`,
      `documents:upload`, etc.).
-   - `POST /login` with the NAMRA_STAFF demo user -> dashboard correctly
+   - `POST /login` with the NAMRA_SYSTEM_SUPPORT demo user -> dashboard correctly
      shows "National scope" (no `taxpayer_id`, national-only role).
    - `POST /login` with a wrong password -> 302 back to the login page; the
      *same session's* subsequent `GET /dashboard` is still redirected to
@@ -87,7 +87,7 @@ SQLite -- see `phpunit.xml`'s own note) confirm:
 
 - **Registration -> approval materializes the full record set in one
   transaction**: submitting as a `TAXPAYER_OWNER` and approving as a
-  `NAMRA_STAFF` creates a real `taxpayers` row (`vat_status='ACTIVE'`), an
+  `NAMRA_SYSTEM_SUPPORT` creates a real `taxpayers` row (`vat_status='ACTIVE'`), an
   `organisations` row, a `HEAD` branch (`is_head_office=1`), `BUYER` and
   `SELLER` capabilities, a `TAXPAYER_OWNER` membership for the submitter, and
   two chained `audit_events` rows -- checked directly against the database,
@@ -100,7 +100,7 @@ SQLite -- see `phpunit.xml`'s own note) confirm:
   attempting to submit a registration gets a real 403; a `TAXPAYER_OWNER`
   attempting to suspend a taxpayer gets a real 403.
 - **The step-up gate genuinely blocks the action, not just decorates it**: a
-  `NAMRA_STAFF` attempting a registration decision *without* first confirming
+  `NAMRA_SYSTEM_SUPPORT` attempting a registration decision *without* first confirming
   their password gets a real `423 Locked` (`RequirePassword` middleware) and
   the registration is provably still `PENDING_VERIFICATION` in the database
   afterward; confirming the password and retrying succeeds. Verified for all
@@ -118,7 +118,7 @@ SQLite -- see `phpunit.xml`'s own note) confirm:
   decision stage (matching the source's own two-checkpoint duplicate
   detection).
 - **The privilege-escalation ceiling on membership assignment holds**:
-  attempting to grant a national-scope role (e.g. `NAMRA_STAFF`) via
+  attempting to grant a national-scope role (e.g. `NAMRA_SYSTEM_SUPPORT`) via
   `AssignMembership` is rejected by validation before it ever reaches the
   database.
 - A genuine bug this session's own migration introduced was caught by this
@@ -191,7 +191,7 @@ IdentityFoundationSnapshotTest.php`, run against real MySQL) confirms:
   count `1`, not just "at least one", ruling out an unscoped query that
   happens to return a small number by coincidence.
 - **National scope is genuinely platform-wide**: the same two
-  organisations both appear for a `NAMRA_STAFF` actor, and the access
+  organisations both appear for a `NAMRA_SYSTEM_SUPPORT` actor, and the access
   counts cover both taxpayers' branches/memberships together.
 - **Identity providers are returned in the source's own priority
   ordering** (`ITAS`, then `SITES_WORKSPACE`, then everything else),
@@ -255,7 +255,7 @@ run against real MySQL via `vat_msa_testing`) confirm:
 - **Tenant scope is genuinely enforced on submission, not just on read**: a
   `TAXPAYER_OWNER` scoped to a different taxpayer than the invoice's
   supplier is denied `403` and nothing is written; a national-scope
-  `NAMRA_STAFF` can submit on behalf of any supplier, matching
+  `NAMRA_SYSTEM_SUPPORT` can submit on behalf of any supplier, matching
   `TenantScope::requireTaxpayer`'s existing (Phase 7) semantics reused here
   unchanged.
 - **RBAC is genuinely enforced**: a role without `invoices:submit` gets a
@@ -1514,7 +1514,7 @@ for exactly that reason.
 Two source behaviours preserved deliberately rather than "corrected":
 - **`getPlatformSnapshot`'s `$scoped` branch is unreachable by any role
   seeded today**, confirmed by checking every role holding `platform:read`
-  (`NAMRA_STAFF`/`NAMRA_COMPLIANCE_OFFICER`/`NAMRA_SUPERVISOR`, all
+  (`NAMRA_SYSTEM_SUPPORT`/`NAMRA_COMPLIANCE_OFFICER`/`NAMRA_SUPERVISOR`, all
   national-scope, plus `SUPER_ADMIN`/`INFRASTRUCTURE_ADMIN`, routed
   straight to the technical snapshot instead) against
   `Permissions::NATIONAL_SCOPE_ROLES` -- no taxpayer role holds
@@ -2176,7 +2176,7 @@ claim via the same direct `refund_claims`/`vat_return_versions` insert
 `ComplianceSnapshotTest` already established, since `RefundClaimTest`
 already covers the `RequestRefund` command chain itself), and taxpayer
 scoping. Also verified visually over a real HTTP session (logged in as
-the seeded `admin@vat-msa.test` NAMRA_STAFF demo user, screenshot +
+the seeded `admin@vat-msa.test` NAMRA_SYSTEM_SUPPORT demo user, screenshot +
 rendered-text inspection on all three pages, no console errors) --
 following the same convention the dashboard/invoices slices established.
 296 tests total, 0 new regressions (28 pre-existing failures, all in
@@ -2232,13 +2232,13 @@ Verified by a new `tests/Feature/Portal/PortalViewTest.php` (5 tests):
 authentication is required; a taxpayer owner with no Buyer/Seller
 capability sees only the capability-free Developer portal; granting a
 Buyer capability adds exactly the Buyer portal (not Seller); a
-NAMRA_STAFF sees all six; and `INTERNAL_AUDITOR` -- on no portal's role
+NAMRA_SYSTEM_SUPPORT sees all six; and `INTERNAL_AUDITOR` -- on no portal's role
 list at all -- renders the source's own empty state. 278 tests total, 0
 new regressions (the same 28 pre-existing, invoice-certification-
 dependent failures noted in the compliance/audit-cases/refunds section
 above, reproduced identically on the pre-slice tree), run against real
 MySQL/MariaDB, plus a clean `migrate:fresh --seed` cycle. Also verified
-visually over a real HTTP session (NAMRA_STAFF, screenshot + rendered-
+visually over a real HTTP session (NAMRA_SYSTEM_SUPPORT, screenshot + rendered-
 text inspection, all six cards present with working links, no console
 errors).
 
@@ -2281,7 +2281,7 @@ No HTML/Blade markup structure changed -- every existing `.card`/
 view left it; only the CSS/component-color layer changed. Verified: same
 278 tests, same 273 passing/28 pre-existing failures as the portal-
 switchboard slice above (a pure CSS change touches no test-asserted
-behaviour), a clean `npm run build`, and a live HTTP session (NAMRA_STAFF,
+behaviour), a clean `npm run build`, and a live HTTP session (NAMRA_SYSTEM_SUPPORT,
 screenshots of `/portals`, `/dashboard` and `/cases`) confirming the navy
 navbar, teal buttons/links, and corrected status colours render
 consistently across every screen this initiative has shipped so far.
@@ -2562,7 +2562,7 @@ this investigation surfaced rather than introduced. Fixing it wholesale
 was deliberately *not* done here: `authority-governance:read` does not
 exist anywhere in `Permissions::ROLE_PERMISSIONS` yet (would make
 `namra-admin` disappear from the switchboard for every role, including
-`NAMRA_STAFF`), and `SELLER_ADMIN` -- a legitimate `developer` portal
+`NAMRA_SYSTEM_SUPPORT`), and `SELLER_ADMIN` -- a legitimate `developer` portal
 role per `PortalDefinitions` -- does not hold `developer:read` either
 (would make `developer` disappear for that role too). Both are real,
 narrower fidelity gaps of the same shape as this one, left for whichever
@@ -2668,7 +2668,7 @@ other portal built so far:
   the application layer, matching this migration's own established
   convention throughout.
 - **`authority-governance:read`/`authority-governance:manage`** added to
-  `Permissions::ROLE_PERMISSIONS` for `NAMRA_STAFF`/`NAMRA_SYSTEM_ADMIN`
+  `Permissions::ROLE_PERMISSIONS` for `NAMRA_SYSTEM_SUPPORT`/`NAMRA_SYSTEM_ADMIN`
   only -- the one exception to that class's own "line-for-line port of
   access.ts" doc comment, since the source never grants either
   permission through its static role-permission map at all: it grants
@@ -3449,7 +3449,7 @@ login. `DemoSeeder` now seeds the 7 report codes this migration
 implements (`VAT_POSITION`, `SALES_VAT_SUMMARY`, `COMPLIANCE_CASELOAD`,
 `PORTFOLIO_EXCEPTIONS`, `REVENUE_COMPLIANCE_TRENDS`,
 `CASE_EVIDENCE_SUMMARY`, `NATIONAL_VAT_AGGREGATE`) with audiences chosen
-so the demo `admin@vat-msa.test` login (`NAMRA_STAFF`, national scope,
+so the demo `admin@vat-msa.test` login (`NAMRA_SYSTEM_SUPPORT`, national scope,
 `reports:executive`, and -- via the pre-existing demo `delegations` row --
 an active `PRACTITIONER` delegation) can exercise every audience-tier
 guardrail end to end, plus one `VAT_TRENDS` data product sourced from
@@ -3785,7 +3785,7 @@ row); requesting approval moves a return to `PENDING_APPROVAL`; a
 same-user self-approval attempt is caught and shown as a friendly form
 error, *not* the RT-002 clean-403 error page (that page is reserved for
 authorization failures the controller doesn't expect and catch itself);
-a different user (a `NAMRA_STAFF`) can approve, which locks the period;
+a different user (a `NAMRA_SYSTEM_SUPPORT`) can approve, which locks the period;
 submitting an approved return records a real `vat_return_submissions`
 row; and a cross-tenant return version correctly gets the RT-002
 clean-403 page (matching the JSON API's own behaviour for that specific
@@ -4113,7 +4113,7 @@ Like Risk Indicators (officer-only writes) but *unlike* Disputes
 `::markSatisfied()` both independently throw `AuthorizationException`
 unless the actor is national-scope, regardless of what the controller
 checks -- `obligations:manage` is confirmed (against
-`Permissions::ROLE_PERMISSIONS`) to be held only by `NAMRA_STAFF` and
+`Permissions::ROLE_PERMISSIONS`) to be held only by `NAMRA_SYSTEM_SUPPORT` and
 the `NAMRA_*` national roles, never by a taxpayer role. The list
 itself stays readable by a taxpayer for their own obligations though
 (`ObligationService::search()` scopes by tenant like every other
@@ -4193,9 +4193,9 @@ meaningfully).
 the organisations list/detail stays readable widely. `organisations:manage`
 (branch create/update, membership assignment) is held by an
 organisation's own `TAXPAYER_OWNER`/`TAXPAYER_ADMIN` as well as
-`NAMRA_STAFF`/`NAMRA_SYSTEM_ADMIN` -- genuinely self-service
+`NAMRA_SYSTEM_SUPPORT`/`NAMRA_SYSTEM_ADMIN` -- genuinely self-service
 organisation administration, not officer-only, confirmed before
-writing any UI. `taxpayers:suspend` is rarer still (`NAMRA_STAFF`/
+writing any UI. `taxpayers:suspend` is rarer still (`NAMRA_SYSTEM_SUPPORT`/
 `NAMRA_SYSTEM_ADMIN` only) and, like membership assignment, already
 carries its own step-up requirement in the JSON API
 (`password.confirm` middleware, RT-005's `ConfirmPasswordController`)
@@ -4289,7 +4289,7 @@ membership assignment with an already-confirmed session creates a real
 row; the same action without a confirmed session correctly redirects
 through step-up and back to the real organisation page (the regression
 test for the bug above); assigning a national role or an unknown email
-are both friendly field errors; a NAMRA_STAFF can suspend a taxpayer
+are both friendly field errors; a NAMRA_SYSTEM_SUPPORT can suspend a taxpayer
 from the page and a taxpayer owner never even sees that card. 343
 tests total, 0 regressions, run against real MySQL.
 
@@ -4298,7 +4298,7 @@ Also verified live end-to-end in the browser: as `owner@demo-trading.test`
 uppercase) and, after being correctly bounced through the step-up
 screen on the first attempt and landing back on the real organisation
 page (not a 404), assigned a real membership to a fresh demo user; as
-`admin@vat-msa.test` (NAMRA_STAFF), suspended a real demo taxpayer
+`admin@vat-msa.test` (NAMRA_SYSTEM_SUPPORT), suspended a real demo taxpayer
 (Red Team Outsider Co) through the same step-up flow and confirmed the
 badge flipped to a red "Suspended" via the new `type="taxpayer"` map,
 with the suspend form correctly replaced by "This taxpayer is already
@@ -4343,7 +4343,7 @@ backend accessor or model relation was needed --
 already existed. `parties:manage` gates every route here, read and
 write alike, matching `BusinessPartyController` exactly (it has no
 separate lighter read permission either) -- held broadly by
-business-facing roles (NAMRA_STAFF, taxpayer roles, seller/buyer
+business-facing roles (NAMRA_SYSTEM_SUPPORT, taxpayer roles, seller/buyer
 portal roles), never by NamRA roles, confirmed against
 `Permissions::ROLE_PERMISSIONS` before writing any UI: customers/
 suppliers are the taxpayer's own commercial data, not a compliance
@@ -5017,11 +5017,11 @@ renders its real snapshot data, correctly scoped to the actor's own
 organisation; an unlinked `DEVELOPER_PARTNER` sees the empty
 application registry rather than erroring; the switchboard shows
 exactly the portals a given role/capability combination is entitled
-to, from the empty state through to a `NAMRA_STAFF` seeing all six.
+to, from the empty state through to a `NAMRA_SYSTEM_SUPPORT` seeing all six.
 441 tests total, 0 regressions, run against real MySQL.
 
 Also verified live end-to-end against the real dev database: logged in
-as `admin@vat-msa.test` (`NAMRA_STAFF`, already holding a real
+as `admin@vat-msa.test` (`NAMRA_SYSTEM_SUPPORT`, already holding a real
 `tax_authority_administrators` row from the Authority Governance
 slice's own live verification) via `curl` with an explicit cookie jar
 -- the switchboard listed all six "Open X" buttons, and all six portal
@@ -5163,7 +5163,7 @@ the service layer since MySQL cannot express a class-conditional FK).
 New permissions `fixed-assets:read`/`manage` and `logistics:read`/
 `manage`, added to `App\Support\Access\Permissions::ROLE_PERMISSIONS`
 with the same distribution as the source's own `lib/domain/access.ts`
-diff: full read+manage for NAMRA_STAFF/TAXPAYER_OWNER/TAXPAYER_ADMIN/
+diff: full read+manage for NAMRA_SYSTEM_SUPPORT/TAXPAYER_OWNER/TAXPAYER_ADMIN/
 TAXPAYER_STAFF, read-only for TAXPAYER_VIEWER, and `fixed-assets:read`
 only (no logistics) for TAXPAYER_ACCOUNTANT.
 
@@ -6055,7 +6055,7 @@ PortalTest.php`, run against real MySQL) confirms:
   `TAXPAYER_OWNER` whose organisation holds `SELLER` but not `BUYER` sees
   the `seller` portal (capability-gated) but not `buyer`, despite being
   listed in both portals' own `roles`, while still seeing the
-  capability-free `developer` portal; a `NAMRA_STAFF` sees all six
+  capability-free `developer` portal; a `NAMRA_SYSTEM_SUPPORT` sees all six
   unconditionally.
 
 **A genuine SQL-compatibility bug was caught and fixed by this
@@ -6212,7 +6212,7 @@ exception to this codebase's own "every permission traces to
 grants these two through a `role_permission_grants` table row this
 migration's `Permissions::roleHas()` was never wired to read, not
 through the static map at all); reproduced as a direct, targeted
-transcription of that table's effective grant (`NAMRA_STAFF` and
+transcription of that table's effective grant (`NAMRA_SYSTEM_SUPPORT` and
 `NAMRA_SYSTEM_ADMIN` only), not a new permission mechanism.
 
 Verified by the ported `tests/Feature/AuthorityGovernance/AuthorityGovernanceTest.php`
@@ -6426,14 +6426,17 @@ None of these block a pilot/demo deployment on the ported functionality
 itself; they are the honest difference between "every phase is
 complete" and "nothing is left to ever think about again."
 
-## Post-launch access-model change (2026-09-13): PILOT_ADMIN renamed and narrowed, SUPER_ADMIN made global scope
+## Post-launch access-model change (2026-09-13, part 1): PILOT_ADMIN renamed to NAMRA_STAFF and narrowed, SUPER_ADMIN made global scope
 
 At the user's own explicit request, made directly against the live
 system rather than as a source-fidelity fix -- every earlier mention of
 `PILOT_ADMIN` throughout this document (portal-access sections in
 particular) describes the role's behaviour *before* this change and is
 left as the historical record of what was actually verified at the
-time, not retroactively edited:
+time, not retroactively edited. (This role was renamed a second time
+shortly after, to `NAMRA_SYSTEM_SUPPORT` -- see "part 2" below; every
+`NAMRA_STAFF` reference in this section is this entry's own historical
+record of that intermediate name, not retroactively edited either.)
 
 - **`PILOT_ADMIN` renamed to `NAMRA_STAFF`** everywhere (code, seeders,
   tests, and a new data migration --
@@ -6472,7 +6475,53 @@ time, not retroactively edited:
 
 Verified live (not just via the updated test suite -- all 555 tests
 green): logged in as `owner@demo-trading.test`, `admin@vat-msa.test`
-(now `NAMRA_STAFF`), `platform-admin@vat-msa.test` (`SUPER_ADMIN`), and
+(then `NAMRA_STAFF`), `platform-admin@vat-msa.test` (`SUPER_ADMIN`), and
 `infra-admin@vat-msa.test` in a real browser, hit `/portals` and every
 `/portal/*` route directly, and confirmed the switchboard cards and
-every 200/403 match this new model exactly.
+every 200/403 matched that model exactly.
+
+## Post-launch access-model change (2026-09-13, part 2): NAMRA_SYSTEM_ADMIN/INFRASTRUCTURE_ADMIN/SUPER_ADMIN portal grants widened, NAMRA_STAFF renamed to NAMRA_SYSTEM_SUPPORT and regranted
+
+Three more explicit, direct requests, following immediately after part 1
+above (its own `NAMRA_STAFF` references stand as the historical record
+of that intermediate state, not retroactively edited):
+
+- **`NAMRA_SYSTEM_ADMIN` gained Buyer, Seller and NamRA** (added to each
+  one's own `PortalDefinitions` role list; already had NamRA
+  Administration). `PortalService::capabilitySet` grants it BUYER/SELLER
+  unconditionally, the same national/global-scope mechanism
+  `PILOT_ADMIN`/`NAMRA_STAFF` used to have.
+- **`INFRASTRUCTURE_ADMIN` gained Buyer, Seller, NamRA and NamRA
+  Administration** (all four added to their own role lists; already had
+  Super Administration), explicitly *not* Developer, and was added to
+  `Permissions::NATIONAL_SCOPE_ROLES` (global scope, matching `SUPER_ADMIN`'s
+  own part-1 change). Also gained `authority-governance:read` for the
+  NamRA Administration portal's own permission gate.
+- **`SUPER_ADMIN` gained Buyer, Seller, NamRA and NamRA Administration**
+  (added to each one's own role list; already had Super Administration
+  and Developer from part 1) -- it now reaches all six portals. Also
+  gained `authority-governance:read`.
+- **`NAMRA_STAFF` renamed to `NAMRA_SYSTEM_SUPPORT`** (second rename for
+  this role in one day; another new data migration --
+  `2026_09_13_000004_rename_namra_staff_role_to_namra_system_support.php`
+  -- same enum-swap/access_roles-rename mechanics as part 1's), and
+  regranted Buyer, Seller and NamRA Administration (added back to each
+  one's own role list) plus `authority-governance:read` -- still not
+  Super Administration or Developer.
+- A real functional gap this surfaced and fixed in `DemoSeeder.php`:
+  granting `INFRASTRUCTURE_ADMIN`/`SUPER_ADMIN` role-list + permission
+  access to NamRA Administration wasn't enough on its own --
+  `NamraAdminPortalController`'s own `AuthorityGovernanceService::
+  getSnapshot` still 403s an actor with no `tax_authority_administrators`
+  row, which would have left the demo `infra-admin@vat-msa.test`/
+  `platform-admin@vat-msa.test` logins showing a switchboard card that
+  then always 403s. Both now get one, the same as `admin@vat-msa.test`/
+  `namra-admin@vat-msa.test` already had.
+
+Verified live (not just via the updated test suite -- all 559 tests
+green): logged in as every demo login above (including the now-
+`NAMRA_SYSTEM_SUPPORT` `admin@vat-msa.test`) in a real browser, hit
+`/portals` and every `/portal/*` route directly, and confirmed the
+switchboard cards and every 200/403 match this model exactly -- with
+zero mismatches between what the switchboard shows and what actually
+loads.

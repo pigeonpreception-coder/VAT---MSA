@@ -17,7 +17,7 @@ class TaxpayerSuspensionTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'Admin', 'email' => 'admin@test.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 

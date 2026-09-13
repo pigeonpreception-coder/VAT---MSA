@@ -27,15 +27,16 @@ class RoleSeeder extends Seeder
         $now = now();
 
         $roles = [
-            // NAMRA_STAFF (formerly PILOT_ADMIN, renamed at the user's own
-            // explicit request -- see Permissions::ROLE_PERMISSIONS' own
-            // comment on this role): name/audience/risk_tier updated to
-            // reflect its narrowed scope (NamRA operations only, no longer
-            // a platform-tier superuser) -- a deliberate deviation from the
-            // otherwise-verbatim db/runtime.ts source row, not an inherited
-            // value. Every row below this one is still verbatim from
-            // db/runtime.ts SECURITY_SEED_STATEMENTS / CONTROL_PLANE_SEED_STATEMENTS.
-            ['NAMRA_STAFF', 'NamRA Staff', 'NAMRA', 'HIGH'],
+            // NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN, then NAMRA_STAFF,
+            // renamed twice at the user's own explicit request -- see
+            // Permissions::ROLE_PERMISSIONS' own comment on this role):
+            // name/audience/risk_tier updated to reflect its scope (Buyer/
+            // Seller/NamRA/NamRA Administration, no Super Administration or
+            // Developer) -- a deliberate deviation from the otherwise-
+            // verbatim db/runtime.ts source row, not an inherited value.
+            // Every row below this one is still verbatim from db/runtime.ts
+            // SECURITY_SEED_STATEMENTS / CONTROL_PLANE_SEED_STATEMENTS.
+            ['NAMRA_SYSTEM_SUPPORT', 'NamRA System Support', 'NAMRA', 'HIGH'],
             ['TAXPAYER_OWNER', 'Taxpayer Owner', 'TAXPAYER', 'HIGH'],
             ['TAXPAYER_ADMIN', 'Taxpayer Administrator', 'TAXPAYER', 'HIGH'],
             ['TAXPAYER_ACCOUNTANT', 'Taxpayer Accountant', 'TAXPAYER', 'MEDIUM'],

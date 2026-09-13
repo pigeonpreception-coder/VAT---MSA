@@ -40,7 +40,7 @@ class SuperAdminPortalTest extends TestCase
     }
 
     /**
-     * NAMRA_STAFF (formerly PILOT_ADMIN) is no longer on the Super
+     * NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN) is no longer on the Super
      * Administration portal's own role list (see Permissions::
      * ROLE_PERMISSIONS' own comment on that role) -- kept here purely to
      * create the real obligation below, since SUPER_ADMIN itself holds no
@@ -50,7 +50,7 @@ class SuperAdminPortalTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => 'namra-staff@superadminportal.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -93,7 +93,7 @@ class SuperAdminPortalTest extends TestCase
     }
 
     /**
-     * NAMRA_STAFF (formerly PILOT_ADMIN) is no longer on this portal's own
+     * NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN) is no longer on this portal's own
      * role list -- deliberately narrowed at the user's own explicit
      * request, see Permissions::ROLE_PERMISSIONS' own comment on that role.
      */
@@ -108,7 +108,7 @@ class SuperAdminPortalTest extends TestCase
 
         // A real command for a real PENDING outbox row -- every command in
         // this migration writes one via CommandLedger::outbox. SUPER_ADMIN
-        // itself holds no obligations:manage, so NAMRA_STAFF creates it.
+        // itself holds no obligations:manage, so NAMRA_SYSTEM_SUPPORT creates it.
         $this->actingAs($this->namraStaff())->postJson('/api/v1/obligations', [
             'schema_version' => '1.0.0', 'taxpayer_id' => $this->seedTaxpayer()->id, 'obligation_type' => 'VAT_RETURN',
             'period_code' => '2026-07', 'due_date' => '2026-08-25', 'amount_cents' => 100000, 'currency' => 'NAD',

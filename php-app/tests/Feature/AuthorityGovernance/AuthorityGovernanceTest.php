@@ -33,7 +33,7 @@ class AuthorityGovernanceTest extends TestCase
     }
 
     /**
-     * NAMRA_STAFF (formerly PILOT_ADMIN) no longer holds authority-
+     * NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN) no longer holds authority-
      * governance:read/manage (see Permissions::ROLE_PERMISSIONS' own
      * comment on that role) -- NAMRA_SYSTEM_ADMIN is the only remaining
      * role that does, so this fixture (used throughout this file, and as

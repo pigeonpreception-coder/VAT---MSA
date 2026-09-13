@@ -62,11 +62,11 @@ class PortalViewTest extends TestCase
         ]);
     }
 
-    private function namraStaff(string $email = 'namra-staff@portalview.test'): User
+    private function namraSystemSupport(string $email = 'namra-system-support@portalview.test'): User
     {
         return User::create([
-            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => $email,
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Support', 'email' => $email,
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -128,18 +128,19 @@ class PortalViewTest extends TestCase
         $response->assertSee(route('dashboard'), false);
     }
 
-    public function test_namra_staff_sees_only_the_namra_portal(): void
+    public function test_namra_system_support_sees_buyer_seller_namra_and_namra_admin(): void
     {
-        $admin = $this->namraStaff();
+        $admin = $this->namraSystemSupport();
 
         $response = $this->actingAs($admin)->get('/portals');
 
         $response->assertOk();
         $keys = collect($response->viewData('portals'))->pluck('key')->all();
-        $this->assertSame(['namra'], $keys);
+        sort($keys);
+        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller'], $keys);
     }
 
-    public function test_super_admin_sees_the_super_admin_and_developer_portals(): void
+    public function test_super_admin_sees_every_portal(): void
     {
         $admin = $this->superAdmin();
 
@@ -148,7 +149,8 @@ class PortalViewTest extends TestCase
         $response->assertOk();
         $keys = collect($response->viewData('portals'))->pluck('key')->all();
         sort($keys);
-        $this->assertSame(['developer', 'super-admin'], $keys);
+        // User's own explicit request: SUPER_ADMIN reaches all six.
+        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
     }
 
     public function test_an_actor_on_no_portals_role_list_sees_the_empty_state(): void

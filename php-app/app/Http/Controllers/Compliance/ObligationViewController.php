@@ -25,7 +25,7 @@ use Illuminate\View\View;
  * only), obligations are entirely NamRA-imposed: ObligationService::create()
  * and ::markSatisfied() both independently throw AuthorizationException
  * unless the actor is national-scope, regardless of what the controller
- * checks -- `obligations:manage` is held only by NAMRA_STAFF and the
+ * checks -- `obligations:manage` is held only by NAMRA_SYSTEM_SUPPORT and the
  * NAMRA_* national roles in Permissions::ROLE_PERMISSIONS, never by a
  * taxpayer role. A taxpayer can still read their own obligations via
  * `compliance:read` (ObligationService::search() scopes by tenant like

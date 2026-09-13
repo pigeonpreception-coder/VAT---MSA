@@ -46,7 +46,7 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * `parties:manage` gates every route here, read and write alike -- matching
  * `BusinessPartyController` exactly, which has no separate lighter read
- * permission either. Held broadly by business-facing roles (NAMRA_STAFF,
+ * permission either. Held broadly by business-facing roles (NAMRA_SYSTEM_SUPPORT,
  * taxpayer roles, seller/buyer portal roles), never by NamRA roles:
  * customers/suppliers are the taxpayer's own commercial data, not a
  * compliance concern.

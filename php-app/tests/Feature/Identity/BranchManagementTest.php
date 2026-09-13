@@ -113,11 +113,11 @@ class BranchManagementTest extends TestCase
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
-        // NAMRA_STAFF is not in AssignMembershipRequest::ASSIGNABLE_ROLES -- privilege-escalation ceiling.
+        // NAMRA_SYSTEM_SUPPORT is not in AssignMembershipRequest::ASSIGNABLE_ROLES -- privilege-escalation ceiling.
         $response = $this->actingAs($owner)
             ->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/organisations/{$organisation->id}/memberships", [
-                'user_id' => $newMember->id, 'role_code' => 'NAMRA_STAFF',
+                'user_id' => $newMember->id, 'role_code' => 'NAMRA_SYSTEM_SUPPORT',
             ]);
 
         $response->assertStatus(422);

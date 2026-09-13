@@ -40,17 +40,19 @@ class PortalService
     ];
 
     /**
-     * NamRA Staff (formerly PILOT_ADMIN) no longer gets an unconditional
-     * BUYER/SELLER capability grant here -- that role must not reach the
-     * Buyer/Seller portals at all now (see Permissions::ROLE_PERMISSIONS'
-     * own comment on it), so it falls through to the same "no
-     * taxpayer_id, no capabilities" branch every other national role
-     * without a Buyer/Seller portal already used. Every role without a
-     * taxpayer_id gets none (matching the source's own `!user.taxpayerId
-     * ? new Set() : ...` short-circuit -- national NamRA/platform roles
-     * never need a capability-gated portal anyway, since none of their
-     * own portals declare one). Deliberately filters on the capability's
-     * own effective_from/effective_to window -- stricter than
+     * NAMRA_SYSTEM_ADMIN, INFRASTRUCTURE_ADMIN, SUPER_ADMIN and
+     * NAMRA_SYSTEM_SUPPORT all reach the Buyer/Seller portals (user's own
+     * explicit requests, made across several turns) -- all four are
+     * national/global-scope roles with no organisation of their own to
+     * hold an `organisation_capabilities` row against, so they get BUYER/
+     * SELLER unconditionally here rather than through the query below
+     * (the same grant PILOT_ADMIN/NAMRA_STAFF held before an earlier
+     * request narrowed that role off Buyer/Seller entirely, then a later
+     * request -- the rename to NAMRA_SYSTEM_SUPPORT -- put it back on).
+     * Every role without a taxpayer_id and not in this unconditional set
+     * gets none (matching the source's own `!user.taxpayerId ? new Set()
+     * : ...` short-circuit). Deliberately filters on the capability's own
+     * effective_from/effective_to window -- stricter than
      * `NavigationService::accessContext()`'s own simpler organisation-
      * capability lookup, because this is a genuinely different source
      * function (`lib/portals.ts`'s own `capabilitySet`, not
@@ -60,6 +62,9 @@ class PortalService
      */
     private function capabilitySet(User $actor): array
     {
+        if (in_array($actor->role, ['NAMRA_SYSTEM_ADMIN', 'INFRASTRUCTURE_ADMIN', 'SUPER_ADMIN', 'NAMRA_SYSTEM_SUPPORT'], true)) {
+            return ['BUYER' => true, 'SELLER' => true];
+        }
         if (! $actor->taxpayer_id) {
             return [];
         }

@@ -7,7 +7,7 @@ use Illuminate\Foundation\Http\FormRequest;
 /**
  * Ported from lib/domain/identity.ts's normalizeMembershipAssignment and its
  * ASSIGNABLE_MEMBERSHIP_ROLES ceiling -- deliberately excludes NamRA,
- * NAMRA_STAFF, platform and seller/buyer portal roles; granting those here
+ * NAMRA_SYSTEM_SUPPORT, platform and seller/buyer portal roles; granting those here
  * would be a privilege-escalation path for an organisation admin.
  */
 class AssignMembershipRequest extends FormRequest

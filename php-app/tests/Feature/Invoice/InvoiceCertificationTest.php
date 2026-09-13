@@ -240,7 +240,7 @@ class InvoiceCertificationTest extends TestCase
         $this->makeTradingParty('VAT-CUS-0001');
         $admin = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Admin', 'email' => 'admin@test.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $response = $this->actingAs($admin)->postJson('/api/v1/invoices', $this->invoicePayload(), ['Idempotency-Key' => 'test-idem-key-admin-0001']);

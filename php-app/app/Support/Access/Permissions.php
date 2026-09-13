@@ -15,7 +15,7 @@ namespace App\Support\Access;
  * dynamically-granted permissions on top via User::dynamicPermissions,
  * exactly as the source's UserContext.dynamicPermissions did.
  *
- * `authority-governance:read`/`authority-governance:manage` (NAMRA_STAFF
+ * `authority-governance:read`/`authority-governance:manage` (NAMRA_SYSTEM_SUPPORT
  * and NAMRA_SYSTEM_ADMIN only) are the one exception to "from access.ts":
  * the source never grants either permission through lib/domain/access.ts's
  * own static ROLE_PERMISSIONS map at all -- it grants them exclusively
@@ -36,20 +36,23 @@ final class Permissions
 {
     /** @var array<string, list<string>> */
     public const ROLE_PERMISSIONS = [
-        // NamRA Staff (formerly PILOT_ADMIN): retains every other national
-        // operations permission it always had, but no longer includes
-        // developer:read/manage or authority-governance:read/manage --
-        // this role must not reach the Developer or NamRA Administration
-        // portals (nor their raw JSON mirrors, PlatformSnapshotController::
-        // developerPortal and AuthorityGovernanceController, which check
-        // these permissions directly with no portal-role-list re-check).
-        // platform:read is kept -- it also gates the separate Platform
-        // Config feature (PlatformConfigController/ViewController), not
-        // just the Super Administration portal; PortalDefinitions' own
-        // 'super-admin' role list (not this permission) is what actually
-        // blocks this role from that specific portal, via
-        // SuperAdminPortalController's own getAvailablePortals() re-check.
-        'NAMRA_STAFF' => [
+        // NamRA System Support (formerly PILOT_ADMIN, then NAMRA_STAFF, both
+        // renamed at the user's own explicit request): retains every other
+        // national operations permission it always had, and regained
+        // authority-governance:read (needed for /portal/namra-admin, whose
+        // own permission gate checks it directly, not just role-list
+        // membership) now that it's back on that portal's role list. Still
+        // no developer:read/manage -- this role must not reach the
+        // Developer portal (nor its raw JSON mirror,
+        // PlatformSnapshotController::developerPortal, which checks that
+        // permission directly). platform:read is kept -- it also gates the
+        // separate Platform Config feature (PlatformConfigController/
+        // ViewController), not just the Super Administration portal;
+        // PortalDefinitions' own 'super-admin' role list (not this
+        // permission) is what actually blocks this role from that specific
+        // portal, via SuperAdminPortalController's own getAvailablePortals()
+        // re-check.
+        'NAMRA_SYSTEM_SUPPORT' => [
             'dashboard:read', 'identity:read', 'taxpayers:read', 'taxpayers:suspend', 'registrations:read', 'registrations:submit',
             'registrations:approve', 'organisations:manage', 'invoices:read', 'invoices:submit', 'invoices:cancel', 'exceptions:read',
             'returns:read', 'returns:generate', 'returns:approve', 'returns:submit', 'vat-adjustments:manage', 'vat-rules:read',
@@ -61,6 +64,7 @@ final class Permissions
             'parties:manage', 'quotations:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read',
             'expenses:manage', 'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read',
             'imports:manage', 'documents:read', 'documents:upload', 'documents:manage',
+            'authority-governance:read',
             'fixed-assets:read', 'fixed-assets:manage', 'logistics:read', 'logistics:manage',
         ],
         // TAXPAYER_OWNER: no longer includes developer:read/manage -- this
@@ -153,16 +157,27 @@ final class Permissions
             'invoices:cancel', 'documents:manage', 'authority-governance:read', 'authority-governance:manage',
         ],
         // SUPER_ADMIN: global/national scope (see NATIONAL_SCOPE_ROLES
-        // below), with access to both the Super Administration and
-        // Developer portals -- developer:read/manage added so it can
-        // reach /portal/developer and its raw JSON mirror, matching its
-        // presence on PortalDefinitions' own 'developer' role list.
+        // below), with access to all six portals (user's own explicit
+        // request) -- developer:read/manage for Developer, authority-
+        // governance:read for NamRA Administration (whose own permission
+        // gate checks it directly, not just role-list membership);
+        // dashboard:read (already held) covers Buyer/Seller/NamRA,
+        // platform:read (already held) covers Super Administration.
         'SUPER_ADMIN' => [
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'integrations:manage', 'security:read',
-            'security:manage', 'developer:read', 'developer:manage',
+            'security:manage', 'developer:read', 'developer:manage', 'authority-governance:read',
         ],
+        // INFRASTRUCTURE_ADMIN: made global/national scope (see
+        // NATIONAL_SCOPE_ROLES below) at the user's own explicit request,
+        // with access to Buyer, Seller, NamRA, NamRA Administration and
+        // Super Administration (not Developer) -- authority-governance:read
+        // added so it can reach /portal/namra-admin, whose own permission
+        // gate checks that directly (not just PortalDefinitions' role
+        // list). dashboard:read (already held) covers Buyer/Seller/NamRA;
+        // platform:read (already held) covers Super Administration.
         'INFRASTRUCTURE_ADMIN' => [
             'dashboard:read', 'platform:read', 'platform:manage', 'integrations:read', 'security:read', 'security:manage',
+            'authority-governance:read',
         ],
         'DEVELOPER_PARTNER' => ['dashboard:read', 'developer:read', 'developer:manage', 'integrations:read'],
         'INTERNAL_AUDITOR' => ['dashboard:read', 'audit:read'],
@@ -184,7 +199,7 @@ final class Permissions
 
     /** @var array<string, list<string>> */
     public const CONTROL_PLANE_PERMISSIONS = [
-        'NAMRA_STAFF' => self::ORGANISATION_CONTROL,
+        'NAMRA_SYSTEM_SUPPORT' => self::ORGANISATION_CONTROL,
         'TAXPAYER_OWNER' => self::ORGANISATION_CONTROL,
         'TAXPAYER_ADMIN' => self::ORGANISATION_CONTROL,
         'TAXPAYER_ACCOUNTANT' => [...self::WORKSPACE_READ, 'employees:read', 'roles:read', 'workflows:read', 'workflows:decide', 'access-governance:read'],
@@ -195,13 +210,14 @@ final class Permissions
 
     /** @var list<string> */
     public const NATIONAL_SCOPE_ROLES = [
-        'NAMRA_STAFF', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
+        'NAMRA_SYSTEM_SUPPORT', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
         'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST', 'SUPER_ADMIN',
+        'INFRASTRUCTURE_ADMIN',
     ];
 
     /** Roles that never represent a tenant/organisation -- national tax-administration roles plus platform-technical roles. */
     private const NATIONAL_OR_PLATFORM_ONLY_ROLES = [
-        'NAMRA_STAFF', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
+        'NAMRA_SYSTEM_SUPPORT', 'NAMRA_COMPLIANCE_OFFICER', 'NAMRA_AUDITOR', 'NAMRA_REFUND_OFFICER',
         'NAMRA_SUPERVISOR', 'NAMRA_SYSTEM_ADMIN', 'INTERNAL_AUDITOR', 'SECURITY_ANALYST',
         'SUPER_ADMIN', 'INFRASTRUCTURE_ADMIN',
     ];

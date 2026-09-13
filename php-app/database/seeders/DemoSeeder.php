@@ -206,7 +206,7 @@ class DemoSeeder extends Seeder
             [
                 'name' => 'NamRA Staff',
                 'password' => Hash::make('password'),
-                'role' => 'NAMRA_STAFF',
+                'role' => 'NAMRA_SYSTEM_SUPPORT',
                 'taxpayer_id' => null,
                 'status' => 'ACTIVE',
                 'email_verified_at' => now(),
@@ -388,7 +388,7 @@ class DemoSeeder extends Seeder
         // actually seeded one for local/staging use, silently leaving the
         // real Reports/Analytics/Platform config UI with an empty catalogue
         // to browse and nothing runnable. Audiences below are chosen so
-        // $admin (NAMRA_STAFF, national scope, reports:executive, and --
+        // $admin (NAMRA_SYSTEM_SUPPORT, national scope, reports:executive, and --
         // via the delegations row above -- an active PRACTITIONER
         // delegation for the demo taxpayer) can exercise every guardrail
         // tier end to end; CASE_EVIDENCE_SUMMARY still needs a real
@@ -457,20 +457,39 @@ class DemoSeeder extends Seeder
         // real accounts, not just readable -- the same reasoning that
         // already justified $namraAdmin as a second Authority Governance
         // login above.
-        User::updateOrCreate(
+        $platformAdmin = User::updateOrCreate(
             ['email' => 'platform-admin@vat-msa.test'],
             [
                 'name' => 'Platform Super Admin', 'password' => Hash::make('password'), 'role' => 'SUPER_ADMIN',
                 'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
             ],
         );
-        User::updateOrCreate(
+        $infraAdmin = User::updateOrCreate(
             ['email' => 'infra-admin@vat-msa.test'],
             [
                 'name' => 'Infrastructure Admin', 'password' => Hash::make('password'), 'role' => 'INFRASTRUCTURE_ADMIN',
                 'taxpayer_id' => null, 'status' => 'ACTIVE', 'email_verified_at' => now(),
             ],
         );
+        // SUPER_ADMIN and INFRASTRUCTURE_ADMIN were both granted NamRA
+        // Administration portal access at the user's own explicit request
+        // -- role-list membership and authority-governance:read alone are
+        // not enough to actually reach it, though:
+        // NamraAdminPortalController's own AuthorityGovernanceService::
+        // getSnapshot still 403s an actor with no tax_authority_
+        // administrators row (the same "governed scope" check $admin/
+        // $namraAdmin already needed above), which would otherwise leave
+        // the /portals switchboard showing a card that then always 403s
+        // -- confirmed live before adding this.
+        foreach ([$platformAdmin->id, $infraAdmin->id] as $userId) {
+            DB::table('tax_authority_administrators')->updateOrInsert(
+                ['tax_authority_id' => 'tax-authority-na-namra', 'user_id' => $userId],
+                [
+                    'id' => (string) Str::uuid(), 'status' => 'ACTIVE', 'effective_from' => now()->subMonth(), 'effective_to' => null,
+                    'appointed_by' => 'SYNTHETIC_ARCHITECTURE_BASELINE', 'approval_reference' => 'LOCAL-STAGING-ADR-030',
+                ],
+            );
+        }
 
         $flagId = DB::table('feature_flags')->where('key', 'offline_sync.enabled')->value('id') ?: (string) Str::uuid();
         DB::table('feature_flags')->updateOrInsert(
@@ -553,7 +572,7 @@ class DemoSeeder extends Seeder
 
         $this->command?->info("Demo login: owner@demo-trading.test / password (TAXPAYER_OWNER)");
         $this->command?->info("Demo customer VAT number for invoice testing: VAT-DEMO-0002");
-        $this->command?->info("Admin login: admin@vat-msa.test / password (NAMRA_STAFF, national scope)");
+        $this->command?->info("Admin login: admin@vat-msa.test / password (NAMRA_SYSTEM_SUPPORT, national scope)");
         $this->command?->info("NamRA admin login: namra-admin@vat-msa.test / password (NAMRA_SYSTEM_ADMIN)");
         $this->command?->info("Platform admin login: platform-admin@vat-msa.test / password (SUPER_ADMIN)");
         $this->command?->info("Infrastructure admin login: infra-admin@vat-msa.test / password (INFRASTRUCTURE_ADMIN)");

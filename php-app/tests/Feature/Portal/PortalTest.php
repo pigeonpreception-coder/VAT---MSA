@@ -67,26 +67,28 @@ class PortalTest extends TestCase
         $this->assertNotContains('super-admin', $keys);
     }
 
-    public function test_namra_staff_sees_only_the_namra_portal(): void
+    public function test_namra_system_support_sees_buyer_seller_namra_and_namra_admin(): void
     {
         $admin = User::create([
-            'id' => (string) Str::uuid(), 'name' => 'NamRA Staff', 'email' => 'namra-staff-0002@test.test', 'password' => bcrypt('password'),
-            'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Support', 'email' => 'namra-system-support-0002@test.test', 'password' => bcrypt('password'),
+            'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
 
         $response = $this->actingAs($admin)->getJson('/api/v1/portals');
         $response->assertStatus(200);
         $keys = collect($response->json('portals'))->pluck('key')->all();
+        sort($keys);
 
-        // NAMRA_STAFF (formerly PILOT_ADMIN, renamed and narrowed at the
-        // user's own explicit request) is listed against only the NamRA
-        // portal's own role list now -- no unconditional BUYER/SELLER
-        // capability grant either (PortalService::capabilitySet no longer
-        // special-cases this role).
-        $this->assertSame(['namra'], $keys);
+        // NAMRA_SYSTEM_SUPPORT (formerly PILOT_ADMIN, then NAMRA_STAFF, both
+        // renamed at the user's own explicit request) is on Buyer/Seller's
+        // own role list plus NamRA and NamRA Administration's own -- not
+        // Super Administration or Developer. PortalService::capabilitySet
+        // grants it BUYER/SELLER unconditionally, same as the other three
+        // national/global-scope roles.
+        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller'], $keys);
     }
 
-    public function test_super_admin_sees_the_super_admin_and_developer_portals(): void
+    public function test_super_admin_sees_every_portal(): void
     {
         $admin = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Super Admin', 'email' => 'super-admin-0003@test.test', 'password' => bcrypt('password'),
@@ -98,6 +100,39 @@ class PortalTest extends TestCase
         $keys = collect($response->json('portals'))->pluck('key')->all();
         sort($keys);
 
-        $this->assertSame(['developer', 'super-admin'], $keys);
+        // User's own explicit request: SUPER_ADMIN reaches all six.
+        $this->assertSame(['buyer', 'developer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
+    }
+
+    public function test_namra_system_admin_sees_buyer_seller_namra_and_namra_admin(): void
+    {
+        $admin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'NamRA System Admin', 'email' => 'namra-sysadmin-0004@test.test', 'password' => bcrypt('password'),
+            'role' => 'NAMRA_SYSTEM_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->actingAs($admin)->getJson('/api/v1/portals');
+        $response->assertStatus(200);
+        $keys = collect($response->json('portals'))->pluck('key')->all();
+        sort($keys);
+
+        // User's own explicit request. No Super Administration or Developer.
+        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller'], $keys);
+    }
+
+    public function test_infrastructure_admin_sees_every_portal_except_developer(): void
+    {
+        $admin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Infrastructure Admin', 'email' => 'infra-admin-0005@test.test', 'password' => bcrypt('password'),
+            'role' => 'INFRASTRUCTURE_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->actingAs($admin)->getJson('/api/v1/portals');
+        $response->assertStatus(200);
+        $keys = collect($response->json('portals'))->pluck('key')->all();
+        sort($keys);
+
+        // User's own explicit request: every portal except Developer.
+        $this->assertSame(['buyer', 'namra', 'namra-admin', 'seller', 'super-admin'], $keys);
     }
 }

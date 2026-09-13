@@ -48,7 +48,7 @@ class RegistrationApplicationTest extends TestCase
     {
         return User::create([
             'id' => (string) Str::uuid(), 'name' => 'Admin', 'email' => 'admin@test.test',
-            'password' => bcrypt('password'), 'role' => 'NAMRA_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
     }
 
@@ -128,7 +128,7 @@ class RegistrationApplicationTest extends TestCase
     public function test_the_submitting_user_cannot_decide_their_own_registration_application(): void
     {
         $owner = $this->taxpayerOwner();
-        $owner->update(['role' => 'NAMRA_STAFF', 'taxpayer_id' => null]); // grant registrations:approve too, to isolate the self-approval check
+        $owner->update(['role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null]); // grant registrations:approve too, to isolate the self-approval check
 
         $submit = $this->actingAs($owner)->postJson('/api/v1/registration-applications', $this->submissionPayload(), [
             'Idempotency-Key' => 'test-idempotency-key-000004',
