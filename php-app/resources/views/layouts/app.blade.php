@@ -68,6 +68,27 @@
                         'platform' => ['platform.*'],
                     ];
                     $activeGroup = collect($groups)->search(fn ($patterns) => request()->routeIs(...$patterns)) ?: 'dashboard';
+
+                    // Sidebar audit (2026-09-14): a group whose every item is
+                    // gated on a permission the current user lacks still
+                    // rendered its own header as a clickable accordion
+                    // trigger -- clicking it expanded to a visibly empty
+                    // list, not a 403 (every item's own @can already hid it
+                    // correctly), but still a dead end the user has no way
+                    // to know is empty ahead of time. Most visible for
+                    // permission-light roles like SUPER_ADMIN, which can
+                    // hold as few as two of these groups' permissions
+                    // combined. Each flag below is true only if the user
+                    // holds at least one permission that group's items
+                    // actually check -- same OR-across-items relationship
+                    // the group's own contents already have -- so the
+                    // header itself now follows the same "don't show what
+                    // you can't use" rule RT-021 already applied per link.
+                    $showVatManagement = collect(['compliance:read', 'returns:read', 'refunds:read', 'risk:read'])->contains(fn ($p) => Gate::allows('permission', $p));
+                    $showInvoiceManagement = collect(['invoices:read', 'imports:read'])->contains(fn ($p) => Gate::allows('permission', $p));
+                    $showOperations = collect(['expenses:read', 'employees:read', 'fixed-assets:read', 'logistics:read', 'inventory:read'])->contains(fn ($p) => Gate::allows('permission', $p));
+                    $showNewRegistration = collect(['parties:manage', 'commercial:read', 'invoices:read'])->contains(fn ($p) => Gate::allows('permission', $p));
+                    $showAdministration = collect(['administration:read', 'identity:read', 'workflows:read'])->contains(fn ($p) => Gate::allows('permission', $p));
                 @endphp
                 <ul class="nav flex-column sidebar-nav flex-grow-1" id="sidebar-accordion">
                     <li class="nav-item sidebar-group">
@@ -80,6 +101,7 @@
                         </ul>
                     </li>
 
+                    @if ($showVatManagement)
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-vat-management" aria-expanded="{{ $activeGroup === 'vat-management' ? 'true' : 'false' }}">
                             <span>VAT Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
@@ -117,7 +139,9 @@
                             @endcan
                         </ul>
                     </li>
+                    @endif
 
+                    @if ($showInvoiceManagement)
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-invoice-management" aria-expanded="{{ $activeGroup === 'invoice-management' ? 'true' : 'false' }}">
                             <span>Invoice Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
@@ -139,13 +163,14 @@
                             @endcan
                         </ul>
                     </li>
+                    @endif
 
+                    @can('permission', 'accounting:read')
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-accounting-finance" aria-expanded="{{ $activeGroup === 'accounting-finance' ? 'true' : 'false' }}">
                             <span>Accounting &amp; Finance</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'accounting-finance') show @endif" id="group-accounting-finance" data-bs-parent="#sidebar-accordion">
-                            @can('permission', 'accounting:read')
                                 <li><a class="nav-link" href="{{ route('accounting.index') }}" @if (request()->routeIs('accounting.index')) aria-current="page" @endif>General Ledger</a></li>
                                 <li><a class="nav-link" href="{{ route('accounting.supplier-ledger') }}" @if (request()->routeIs('accounting.supplier-ledger')) aria-current="page" @endif>Supplier Ledger</a></li>
                                 <li><a class="nav-link" href="{{ route('accounting.customer-ledger') }}" @if (request()->routeIs('accounting.customer-ledger')) aria-current="page" @endif>Customer Ledger</a></li>
@@ -153,10 +178,11 @@
                                 <li><a class="nav-link" href="{{ route('accounting.budgets') }}" @if (request()->routeIs('accounting.budgets')) aria-current="page" @endif>Budgets</a></li>
                                 <li><a class="nav-link" href="{{ route('accounting.purchase-orders') }}" @if (request()->routeIs('accounting.purchase-orders')) aria-current="page" @endif>Purchase Orders</a></li>
                                 <li><a class="nav-link" href="{{ route('accounting.cash-flow') }}" @if (request()->routeIs('accounting.cash-flow')) aria-current="page" @endif>Cash Flow Projects</a></li>
-                            @endcan
                         </ul>
                     </li>
+                    @endcan
 
+                    @if ($showOperations)
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-operations" aria-expanded="{{ $activeGroup === 'operations' ? 'true' : 'false' }}">
                             <span>Operations</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
@@ -183,52 +209,62 @@
                             @can('permission', 'logistics:read')
                                 <li><a class="nav-link" href="{{ route('operations.logistics') }}" @if (request()->routeIs('operations.logistics')) aria-current="page" @endif>Logistics Module</a></li>
                             @endcan
+                            {{-- Sidebar audit (2026-09-14): PosViewController's Inventory Module
+                                 (a real, fully built Operations > Inventory page functioning as a
+                                 point-of-sale terminal, gated on inventory:read) had no sidebar
+                                 entry at all -- reachable only by typing the URL directly. Every
+                                 other built Operations page has a link; this closes the gap. --}}
+                            @can('permission', 'inventory:read')
+                                <li><a class="nav-link" href="{{ route('operations.inventory') }}" @if (request()->routeIs('operations.inventory')) aria-current="page" @endif>Inventory Module</a></li>
+                            @endcan
                             @can('permission', 'expenses:read')
                                 <li><a class="nav-link" href="{{ route('operations.erp') }}" @if (request()->routeIs('operations.erp')) aria-current="page" @endif>ERP Module</a></li>
                             @endcan
                         </ul>
                     </li>
+                    @endif
 
+                    @can('permission', 'commercial:read')
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-quotation" aria-expanded="{{ $activeGroup === 'quotation' ? 'true' : 'false' }}">
                             <span>Quotation</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'quotation') show @endif" id="group-quotation" data-bs-parent="#sidebar-accordion">
-                            @can('permission', 'commercial:read')
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Create New Quotation</a></li>
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}">Issued Quotations</a></li>
                                 <li><a class="nav-link" href="{{ route('quotation.converted') }}" @if (request()->routeIs('quotation.converted')) aria-current="page" @endif>Converted Quotations</a></li>
                                 <li><a class="nav-link" href="{{ route('quotation.converted-invoices') }}" @if (request()->routeIs('quotation.converted-invoices')) aria-current="page" @endif>Converted Quotations into Invoices</a></li>
-                            @endcan
                         </ul>
                     </li>
+                    @endcan
 
+                    @can('permission', 'projects:read')
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-project-management" aria-expanded="{{ $activeGroup === 'project-management' ? 'true' : 'false' }}">
                             <span>Project Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'project-management') show @endif" id="group-project-management" data-bs-parent="#sidebar-accordion">
-                            @can('permission', 'projects:read')
                                 <li><a class="nav-link" href="{{ route('project-management.new') }}" @if (request()->routeIs('project-management.new')) aria-current="page" @endif>Create New Project</a></li>
                                 <li><a class="nav-link" href="{{ route('project-management.ongoing') }}" @if (request()->routeIs('project-management.ongoing')) aria-current="page" @endif>Ongoing Project Reports</a></li>
                                 <li><a class="nav-link" href="{{ route('project-management.completed') }}" @if (request()->routeIs('project-management.completed')) aria-current="page" @endif>Completed Projects</a></li>
-                            @endcan
                         </ul>
                     </li>
+                    @endcan
 
+                    @can('permission', 'parties:manage')
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-registered" aria-expanded="{{ $activeGroup === 'registered' ? 'true' : 'false' }}">
                             <span>Registered</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
                         </button>
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'registered') show @endif" id="group-registered" data-bs-parent="#sidebar-accordion">
-                            @can('permission', 'parties:manage')
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'CUSTOMER') aria-current="page" @endif>Customers</a></li>
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SUPPLIER') aria-current="page" @endif>Suppliers</a></li>
                                 <li><a class="nav-link" href="{{ route('registered.service-providers') }}" @if (request()->routeIs('registered.service-providers')) aria-current="page" @endif>Service Providers</a></li>
-                            @endcan
                         </ul>
                     </li>
+                    @endcan
 
+                    @if ($showNewRegistration)
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-new-registration" aria-expanded="{{ $activeGroup === 'new-registration' ? 'true' : 'false' }}">
                             <span>New Registration</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
@@ -247,6 +283,7 @@
                             @endcan
                         </ul>
                     </li>
+                    @endif
 
                     @can('permission', 'documents:read')
                         <li class="nav-item"><a class="nav-link" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents &amp; Records</a></li>
@@ -255,6 +292,7 @@
                         <li class="nav-item"><a class="nav-link" href="{{ route('reports.index') }}" @if (request()->routeIs('reports.*')) aria-current="page" @endif>Reporting &amp; Analytics</a></li>
                     @endcan
 
+                    @if ($showAdministration)
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-administration" aria-expanded="{{ $activeGroup === 'administration' ? 'true' : 'false' }}">
                             <span>Administration</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
@@ -271,6 +309,7 @@
                             @endcan
                         </ul>
                     </li>
+                    @endif
 
                     @can('permission', 'licensing:read')
                         <li class="nav-item"><a class="nav-link" href="{{ route('licensing.index') }}" @if (request()->routeIs('licensing.*')) aria-current="page" @endif>Licensing &amp; Subscription</a></li>

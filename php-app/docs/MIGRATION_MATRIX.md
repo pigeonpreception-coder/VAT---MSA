@@ -7523,3 +7523,36 @@ render() callback is the thing actually under test. Full suite: 643
 tests, 0 regressions. Full findings and methodology (including the
 `PHP_CLI_SERVER_WORKERS` true-concurrency technique, reusable by any
 future pass): `docs/RED_TEAM_ASSESSMENT_2026-09-14-CONCURRENT-USER-SIMULATION.md`.
+
+## Sidebar audit: missing link and empty-group findings (2026-09-14)
+
+User-directed pass: asked why a `SUPER_ADMIN`-type account's sidebar
+"worked properly" in an environment outside this session's reach, then
+asked to fix the sidebar for all users. Re-ran RT-021's own
+link-permission cross-reference method from scratch (rather than
+assuming it was exhaustive) and additionally checked the other
+direction -- every page route against the sidebar's own links -- to
+catch a route with *no* entry, not only a mismatched one.
+
+Two findings, both fixed. First: `PosViewController`'s Inventory Module
+(`/operations/inventory`, a real, fully built point-of-sale page gated on
+`inventory:read`) had no sidebar link at all -- reachable only by typing
+the URL directly. Added a link to the Operations group, gated on the
+exact permission the controller itself checks. Second, and the direct
+answer to the user's original question: `SUPER_ADMIN` holds only 10 of
+the app's permissions, none of them the ones gating most of the sidebar's
+nine accordion-style groups -- so while every individual link inside
+those groups correctly disappeared for it, the group's own clickable
+header did not, and expanded to a visibly empty dropdown on click. Fixed
+by making each group's header conditional on the user holding at least
+one of that group's underlying permissions, the same "don't show what
+you can't use" rule RT-021 already applied per link, now applied one
+level up. Live-verified via Playwright screenshots: `SUPER_ADMIN`'s
+sidebar now shows only Dashboard, Platform, and Access Rights (what it
+actually holds), while `TAXPAYER_OWNER` (which holds every group's
+permissions) is visually unchanged.
+
+Verified: 2 new permanent regression tests in
+`tests/Feature/Navigation/SidebarLinkPermissionTest.php`. Full suite: 645
+tests, 0 regressions. Full findings and methodology:
+`docs/RED_TEAM_ASSESSMENT_2026-09-14-SIDEBAR-AUDIT.md`.
