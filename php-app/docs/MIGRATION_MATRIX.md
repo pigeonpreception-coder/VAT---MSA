@@ -7098,3 +7098,73 @@ individually verified in this pass -- recorded explicitly as follow-up,
 not silently dropped. Full findings, reproduction evidence, and
 engineering prompts: `docs/RED_TEAM_ASSESSMENT_2026-09-13-DUPLICATE-
 SUBMISSION-SWEEP.md`.
+
+## Red-team pass, continued again: the defeated-idempotency-key sweep (2026-09-14)
+
+The user's own explicit follow-up: individually verify the 7 files the
+prior pass's grep flagged but left unread. Reading each file's
+underlying service in full (rather than re-running the same
+`@csrf`-vs-`<x-idempotency-key/>` grep) surfaced a second, more
+insidious variant of the same root cause across `PlatformConfigViewController`
+and `ReportViewController`: nine write actions whose **service method
+already had correct, complete `CommandLedger` support**, silently
+defeated by the controller passing a fresh `(string) Str::uuid()` on
+every request instead of `Controller::formIdempotencyKey($request)`'s
+stable per-render key -- exactly the failure mode that helper's own doc
+comment already warns about by name. It looks protected on a grep for
+`CommandLedger::record`; the bug is entirely one layer up, in the exact
+literal argument passed at the call site.
+
+**RT-011 (High):** `PlatformChangeService::requestChange()` -- no
+natural guard exists against two `PENDING` `change_requests` for one
+target. Live double-submit reproduction: 0 → 2 identical `PENDING` rows.
+Governance-audit-trail duplication in the maker-checker queue, the same
+family as RT-009.
+
+**RT-012 (High):** `ReportExportService::requestExport()` -- no natural
+guard. Live double-submit reproduction: 0 → 2 `report_exports` rows,
+**each with its own `document_metadata` row and its own file written to
+disk**. For a sensitive report needing step-up + independent approval,
+this means two separate quarantined copies of confidential tax data
+awaiting approval from one double-click -- the same "duplicate
+approval-gated resource" shape as RT-010, applied to confidential-data
+export.
+
+**RT-013 (Medium):** `DataProductService::runModel()` -- no natural
+guard. Live double-submit reproduction: 0 → 2 `analytics_model_runs`
+rows. Lower severity than RT-011/012 because `publish()`'s own
+`model_run_id` uniqueness check means at most one duplicate can ever
+actually reach a live snapshot -- the real cost is a cluttered "runs to
+publish" list and a duplicate audit entry, not a state-corruption risk.
+
+**Hardened anyway, not independently exploitable:** the same defeated-key
+bug existed on 6 more call sites (`decideChange()`, `provisionStaff()`,
+`publish()`/`approveExport()`/`cancelExport()` on `ReportExportService`,
+`DataProductService::publish()`) but each already has its own natural
+status-transition or uniqueness guard that happens to catch a duplicate
+a different way. Fixed identically regardless -- a visibly-present but
+silently-defeated `CommandLedger` call is a real defect in its own
+right, the same "fix cheap, strictly-more-correct hardening same day"
+precedent `publishWorkflowVersion()` received in the prior pass.
+
+**Positive controls (not findings):** `inviteEmployee()`, `terminateEmployee()`,
+`BranchService::create()`, `MembershipService::assign()`,
+`TaxpayerService::suspend()`, and `LicensingService::changeState()` were
+each read and found to already have a natural duplicate-safe guard, with
+no `CommandLedger` involvement needed at all.
+
+Verified: 5 new regression tests across `tests/Feature/Platform/
+PlatformConfigViewTest.php` and `tests/Feature/Platform/ReportViewTest.php`.
+Full suite: 617 tests, 0 regressions. All three confirmed findings
+re-verified live against a running instance with the exact original
+double-submit reproduction steps, pre- and post-fix. Explicit follow-ups
+recorded, not silently dropped: `DocumentService::upload()` (no
+idempotency support, no natural guard), `ReportExportService::runInline()`
+(same), `OrganisationAdminService::createOrganisationRole()` (no
+uniqueness guard on role name), and the "unconditional side effect after
+a guarded UPDATE" latent-race pattern found to also exist in
+`decideChange()`/`publish()`/`approveExport()`/`cancelExport()` (same
+family as `publishWorkflowVersion()`'s own hardened instance, not
+independently reproducible in this environment). Full findings,
+reproduction evidence, and engineering detail: `docs/
+RED_TEAM_ASSESSMENT_2026-09-14-DEFEATED-IDEMPOTENCY-SWEEP.md`.

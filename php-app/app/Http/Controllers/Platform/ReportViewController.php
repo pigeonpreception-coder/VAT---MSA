@@ -128,7 +128,7 @@ class ReportViewController extends Controller
         $this->authorize('permission', 'reports:run');
 
         try {
-            $this->reports->publish($reportRunId, ['schema_version' => '1.0.0'], $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->reports->publish($reportRunId, ['schema_version' => '1.0.0'], $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {
             return redirect()->route('reports.index')->withErrors(['publish' => $e->getMessage()]);
         }
@@ -141,7 +141,7 @@ class ReportViewController extends Controller
         $this->authorize('permission', 'reports:run');
 
         try {
-            $this->reports->requestExport($reportRunId, ['schema_version' => '1.0.0'], $request->user(), (string) Str::uuid(), (string) Str::uuid(), StepUp::isFresh($request));
+            $this->reports->requestExport($reportRunId, ['schema_version' => '1.0.0'], $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), StepUp::isFresh($request));
         } catch (AuthorizationException $e) {
             return $this->stepUpOrError($request, $e, 'export');
         } catch (PlatformResourceException|RepositoryConflictException $e) {
@@ -156,7 +156,7 @@ class ReportViewController extends Controller
         $this->authorize('permission', 'reports:run');
 
         try {
-            $this->reports->approveExport($exportId, ['schema_version' => '1.0.0'], $request->user(), (string) Str::uuid(), (string) Str::uuid(), StepUp::isFresh($request));
+            $this->reports->approveExport($exportId, ['schema_version' => '1.0.0'], $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), StepUp::isFresh($request));
         } catch (AuthorizationException $e) {
             return $this->stepUpOrError($request, $e, 'approve');
         } catch (PlatformResourceException|RepositoryConflictException $e) {
@@ -172,7 +172,7 @@ class ReportViewController extends Controller
         $reason = (string) $request->input('reason', 'Cancelled from the reports console.');
 
         try {
-            $this->reports->cancelExport($exportId, ['schema_version' => '1.0.0', 'reason' => $reason], $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->reports->cancelExport($exportId, ['schema_version' => '1.0.0', 'reason' => $reason], $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformValidationException $e) {
             return redirect()->route('reports.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -205,7 +205,7 @@ class ReportViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'report_run_id' => (string) $request->input('report_run_id')];
 
         try {
-            $this->dataProducts->runModel($dataProductId, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->dataProducts->runModel($dataProductId, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformValidationException $e) {
             return redirect()->route('reports.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -221,7 +221,7 @@ class ReportViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'model_run_id' => (string) $request->input('model_run_id')];
 
         try {
-            $this->dataProducts->publish($dataProductId, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->dataProducts->publish($dataProductId, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformValidationException $e) {
             return redirect()->route('reports.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {

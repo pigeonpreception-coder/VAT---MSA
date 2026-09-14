@@ -67,7 +67,7 @@ class PlatformConfigViewController extends Controller
         ];
 
         try {
-            $this->platform->requestChange($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->platform->requestChange($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformValidationException $e) {
             return redirect()->route('platform.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -86,7 +86,7 @@ class PlatformConfigViewController extends Controller
         ];
 
         try {
-            $this->platform->decideChange($changeRequestId, $payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->platform->decideChange($changeRequestId, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformValidationException $e) {
             return redirect()->route('platform.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {
@@ -106,7 +106,7 @@ class PlatformConfigViewController extends Controller
         ];
 
         try {
-            $this->platform->provisionStaff($payload, $request->user(), (string) Str::uuid(), (string) Str::uuid());
+            $this->platform->provisionStaff($payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformValidationException $e) {
             return redirect()->route('platform.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all())->withInput();
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {

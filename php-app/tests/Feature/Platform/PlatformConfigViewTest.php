@@ -162,6 +162,39 @@ class PlatformConfigViewTest extends TestCase
         $this->assertDatabaseHas('change_requests', ['target_id' => $configId, 'status' => 'PENDING']);
     }
 
+    /** RT-011: PlatformChangeService::requestChange() already had real CommandLedger support -- the bug was PlatformConfigViewController passing a fresh Str::uuid() per request instead of a stable per-render key, silently defeating it. */
+    public function test_double_submitting_the_same_rendered_propose_change_form_creates_only_one_change_request(): void
+    {
+        $configId = $this->seedPlatformConfig('7200');
+        $admin = $this->superAdmin();
+        $payload = [
+            'idempotency_key' => (string) Str::uuid(), 'target_type' => 'PLATFORM_CONFIG', 'target_id' => $configId,
+            'value' => '14400', 'reason' => 'Widen the freshness window.',
+        ];
+
+        $this->actingAs($admin)->post('/platform/change-requests', $payload);
+        $this->actingAs($admin)->post('/platform/change-requests', $payload);
+
+        $this->assertSame(1, DB::table('change_requests')->where('target_id', $configId)->count());
+    }
+
+    public function test_a_genuinely_new_change_request_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $configId = $this->seedPlatformConfig('7200');
+        $admin = $this->superAdmin();
+
+        $this->actingAs($admin)->post('/platform/change-requests', [
+            'idempotency_key' => (string) Str::uuid(), 'target_type' => 'PLATFORM_CONFIG', 'target_id' => $configId,
+            'value' => '14400', 'reason' => 'First proposal.',
+        ]);
+        $this->actingAs($admin)->post('/platform/change-requests', [
+            'idempotency_key' => (string) Str::uuid(), 'target_type' => 'PLATFORM_CONFIG', 'target_id' => $configId,
+            'value' => '21600', 'reason' => 'Second, genuinely new proposal after a fresh page load.',
+        ]);
+
+        $this->assertSame(2, DB::table('change_requests')->where('target_id', $configId)->count());
+    }
+
     public function test_an_access_policy_change_with_invalid_json_parameters_is_refused(): void
     {
         $policyId = $this->seedAccessPolicy();
