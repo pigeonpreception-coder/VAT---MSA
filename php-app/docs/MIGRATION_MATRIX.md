@@ -7043,3 +7043,58 @@ state actually changed (one row instead of two; one audit entry instead
 of three), not just that a unit test passed. Full findings, reproduction
 evidence, and standalone engineering prompts for each:
 `docs/RED_TEAM_ASSESSMENT_2026-09-13-INVOICE-MANAGEMENT-POS.md`.
+
+## Red-team pass, continued: systemic duplicate-submission sweep (2026-09-13)
+
+A deliberate follow-on to the pass above, going deep on the specific
+question it raised: which *other* write actions across this codebase,
+built after the 2026-09-09 hardening pass, have the same missing-
+idempotency gap? A mechanical check (every Blade `@csrf` occurrence
+cross-referenced against `<x-idempotency-key/>` usage) found 9 candidate
+files; the two highest-privilege ones were read at the service layer,
+confirmed genuinely unguarded, live-reproduced against a running
+instance, and fixed with the same established mechanism.
+
+**RT-009 (High):** `App\Services\Access\UserRoleScopeGrantService::
+grant()` -- the Super Admin/NamRA System Admin "grant a user an access
+right" feature -- had no idempotency protection. A live double-submit
+reproduction created two distinct `ACTIVE` `user_role_scope_grants` rows
+for one admin action, corrupting this feature's own most sensitive audit
+trail (revoking one leaves the other silently active). Fixed the same
+way as RT-007/008.
+
+**RT-010 (Critical):** `App\Services\Workflow\WorkflowService::
+assignWorkflow()` -- the entry point to the entire workflow/approval
+engine -- also had no idempotency protection, in either its JSON API or
+its Blade UI. A live double-submit reproduction created two independent
+`workflow_instances` for the same business resource; for a workflow with
+an `APPROVAL` node this means two independent, independently-satisfiable
+pending approval tasks for what was meant to be a single gated decision
+-- a genuine segregation-of-duty defect, not just a data-quality
+nuisance. Fixed the same way, with the JSON API (`WorkflowController::
+storeInstance()`) now requiring a real `Idempotency-Key` header matching
+the existing `InvoiceController::store()` convention; 7 pre-existing
+test call sites were updated to supply one.
+
+**Hardening, not independently reproduced:** `publishWorkflowVersion()`'s
+own duplicate-publish guard was real, but the `license_usage` increment
+and audit entry that followed it ran unconditionally regardless of
+whether the guarded UPDATE actually matched a row -- a genuine race
+would double-count a licensing/billing metric. Not reproducible against
+this environment's own single-worker dev server (confirmed: concurrent
+`curl` requests never actually raced at the database layer), so recorded
+honestly as a code-level defect confirmed by inspection rather than a
+live-reproduced exploit; fixed regardless since the fix is cheap and
+strictly more correct.
+
+Verified: 4 new regression tests across `tests/Feature/Access/
+AccessRightsViewTest.php` and `tests/Feature/Workflow/
+WorkflowAuthoringViewTest.php`. Full suite: 612 tests, 0 regressions.
+Both fixes re-verified live against a running instance with the exact
+original reproduction steps. 7 of the 9 grep-identified candidate files
+(`administration`, `documents`, `licensing`, `organisations`,
+`operations/human-resources`, `platform`, `reports`) were **not**
+individually verified in this pass -- recorded explicitly as follow-up,
+not silently dropped. Full findings, reproduction evidence, and
+engineering prompts: `docs/RED_TEAM_ASSESSMENT_2026-09-13-DUPLICATE-
+SUBMISSION-SWEEP.md`.

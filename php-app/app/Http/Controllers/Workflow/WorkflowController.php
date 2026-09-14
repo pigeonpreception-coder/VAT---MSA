@@ -56,7 +56,8 @@ class WorkflowController extends Controller
     public function storeInstance(Request $request): JsonResponse
     {
         $this->authorize('permission', 'workflows:manage');
-        $instance = $this->workflows->assignWorkflow((array) $request->json()->all(), $request->user(), $request->query('organisation_id'));
+        $idempotencyKey = (string) $request->header('Idempotency-Key', '');
+        $instance = $this->workflows->assignWorkflow((array) $request->json()->all(), $request->user(), $request->query('organisation_id'), $idempotencyKey);
 
         return response()->json(['instance' => $instance], Response::HTTP_CREATED);
     }

@@ -82,6 +82,7 @@
         <div class="card-body">
             <form method="POST" action="{{ route('access-rights.store') }}">
                 @csrf
+                <x-idempotency-key/>
                 <div class="row">
                     <div class="col-md-3 mb-3">
                         <label for="user_id" class="form-label">User</label>

@@ -14,6 +14,7 @@ use App\Models\Workflow;
 use App\Models\WorkflowVersion;
 use App\Services\Audit\AuditService;
 use App\Support\Access\DynamicPermissions;
+use App\Support\Business\CommandLedger;
 use App\Support\Licensing\EntitlementGate;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -104,8 +105,25 @@ class WorkflowService
 
         $now = now();
         DB::transaction(function () use ($version, $organisation, $license, $actor, $now) {
-            DB::table('workflow_versions')->where('id', $version->id)->where('status', 'DRAFT')
+            // Hardening (2026-09-13 red-team pass): the guarded UPDATE below is
+            // this method's own real defence against a concurrent double-publish
+            // race (two requests both passing the plain-read check above before
+            // either commits) -- but every side effect that followed it
+            // previously ran unconditionally, regardless of whether this UPDATE
+            // actually matched a row. Under a genuine race the second
+            // transaction's UPDATE affects zero rows (the first has already
+            // committed PUBLISHED), yet would still have double-incremented
+            // license_usage.used_value and written a second, misleading
+            // WORKFLOW_VERSION_PUBLISHED audit entry. Not reproducible against
+            // this environment's own single-worker dev server (which
+            // serialises "concurrent" requests before they ever reach MySQL),
+            // so recorded as a code-level hardening confirmed by inspection,
+            // not a live-reproduced exploit -- see the red-team report.
+            $published = DB::table('workflow_versions')->where('id', $version->id)->where('status', 'DRAFT')
                 ->update(['status' => 'PUBLISHED', 'effective_from' => $now, 'published_by' => $actor->id, 'approved_by' => $actor->id, 'published_at' => $now]);
+            if ($published === 0) {
+                throw new RepositoryConflictException('Only a draft workflow version can be published.');
+            }
             DB::table('workflows')->where('id', $version->workflow_id)->update(['status' => 'ACTIVE', 'updated_at' => $now]);
             DB::table('license_usage')->where('organisation_license_id', $license['id'])->where('metric_key', 'WORKFLOWS')
                 ->update(['used_value' => DB::raw('used_value + 1'), 'reserved_value' => DB::raw('GREATEST(0, reserved_value - 1)'), 'version' => DB::raw('version + 1'), 'updated_at' => $now]);
@@ -258,10 +276,17 @@ class WorkflowService
      *
      * @return array<string, mixed>
      */
-    public function assignWorkflow(array $payload, User $actor, ?string $requestedOrganisationId): array
+    public function assignWorkflow(array $payload, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $assignment = WorkflowValidator::assignment($payload);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'BUSINESS_WRITE', 0, $requestedOrganisationId);
+
+        $requestHash = CommandLedger::requestHash($assignment);
+        $prior = CommandLedger::prior($actor->id, 'ASSIGN_WORKFLOW', $idempotencyKey, $requestHash);
+        if ($prior !== null) {
+            return $this->presentInstance($prior);
+        }
 
         $workflow = Workflow::where('organisation_id', $organisation->id)->where('domain_action', $assignment['domainAction'])->where('status', 'ACTIVE')->first();
         if (! $workflow) {
@@ -284,7 +309,7 @@ class WorkflowService
         $now = now();
 
         if ($next['nodeType'] === 'END') {
-            DB::transaction(function () use ($instanceId, $organisation, $version, $assignment, $actor, $next, $now) {
+            DB::transaction(function () use ($instanceId, $organisation, $version, $assignment, $actor, $next, $now, $idempotencyKey, $requestHash) {
                 DB::table('workflow_instances')->insert([
                     'id' => $instanceId, 'organisation_id' => $organisation->id, 'workflow_version_id' => $version->id,
                     'resource_type' => $assignment['resourceType'], 'resource_id' => $assignment['resourceId'], 'initiated_by' => $actor->id,
@@ -293,6 +318,7 @@ class WorkflowService
                 ]);
                 $this->outboxInsert($instanceId, 'WorkflowInstanceCompleted', $organisation->id, ['instance_id' => $instanceId, 'domain_action' => $assignment['domainAction'], 'resource_type' => $assignment['resourceType'], 'resource_id' => $assignment['resourceId']], $now);
                 AuditService::append($actor, 'WORKFLOW_INSTANCE_COMPLETED', 'WORKFLOW_INSTANCE', $instanceId, ['organisationId' => $organisation->id, 'domainAction' => $assignment['domainAction']], $now);
+                CommandLedger::record($actor->id, 'ASSIGN_WORKFLOW', $idempotencyKey, $requestHash, 'WORKFLOW_INSTANCE', $instanceId, $now);
             });
 
             return ['id' => $instanceId, 'status' => 'COMPLETED', 'currentNode' => $next['nodeKey'], 'assignmentId' => null];
@@ -300,7 +326,7 @@ class WorkflowService
 
         $assignee = $this->resolveAssignee($organisation, $actor->id, $workflow->id, $next['assigneeType'], $next['assigneeReference']);
         $assignmentId = (string) Str::uuid();
-        DB::transaction(function () use ($instanceId, $assignmentId, $organisation, $version, $assignment, $actor, $next, $assignee, $now) {
+        DB::transaction(function () use ($instanceId, $assignmentId, $organisation, $version, $assignment, $actor, $next, $assignee, $now, $idempotencyKey, $requestHash) {
             DB::table('workflow_instances')->insert([
                 'id' => $instanceId, 'organisation_id' => $organisation->id, 'workflow_version_id' => $version->id,
                 'resource_type' => $assignment['resourceType'], 'resource_id' => $assignment['resourceId'], 'initiated_by' => $actor->id,
@@ -314,9 +340,19 @@ class WorkflowService
             ]);
             $this->outboxInsert($instanceId, 'WorkflowInstanceAssigned', $organisation->id, ['instance_id' => $instanceId, 'assignment_id' => $assignmentId, 'domain_action' => $assignment['domainAction'], 'resource_type' => $assignment['resourceType'], 'resource_id' => $assignment['resourceId'], 'node_key' => $next['nodeKey']], $now);
             AuditService::append($actor, 'WORKFLOW_INSTANCE_ASSIGNED', 'WORKFLOW_INSTANCE', $instanceId, ['organisationId' => $organisation->id, 'domainAction' => $assignment['domainAction'], 'nodeKey' => $next['nodeKey']], $now);
+            CommandLedger::record($actor->id, 'ASSIGN_WORKFLOW', $idempotencyKey, $requestHash, 'WORKFLOW_INSTANCE', $instanceId, $now);
         });
 
         return ['id' => $instanceId, 'status' => 'IN_PROGRESS', 'currentNode' => $next['nodeKey'], 'assignmentId' => $assignmentId];
+    }
+
+    /** Reconstructs assignWorkflow()'s own return shape from an already-created instance, for a recognised replay. */
+    private function presentInstance(string $instanceId): array
+    {
+        $instance = DB::table('workflow_instances')->where('id', $instanceId)->first(['id', 'status', 'current_node_key']);
+        $assignmentId = DB::table('workflow_assignments')->where('workflow_instance_id', $instanceId)->value('id');
+
+        return ['id' => $instance->id, 'status' => $instance->status, 'currentNode' => $instance->current_node_key, 'assignmentId' => $assignmentId];
     }
 
     /**
