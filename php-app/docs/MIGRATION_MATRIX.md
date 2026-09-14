@@ -7440,3 +7440,38 @@ rather than a dedicated test each), one of which
 independently confirmed to fail without the fix by temporarily reverting
 it and re-running. Full suite: 636 tests, 0 regressions. Full findings
 and methodology: `docs/RED_TEAM_ASSESSMENT_2026-09-14-RESILIENCE-TO-USER-ERRORS.md`.
+
+## Red-team pass, a new phase: UX Failure Discovery (2026-09-14)
+
+Phase 9 of the user's original brief: a real Chromium browser (Playwright)
+logged in as each of several demo roles and crawled every sidebar link,
+recording HTTP status and console errors -- a genuinely different method
+from every prior backend-focused pass this session.
+
+**RT-021 (Low, live-verified):** the sidebar's "Invoice Management" and
+"Operations" groups each bundled several links under one `@can` permission
+check, but some links' destinations actually required a different,
+narrower permission. "Foreign Invoices" was gated on `invoices:read` but
+`ForeignInvoiceViewController` requires `imports:read`; four "Operations"
+links (Human Resources, Immovable/Movable Assets, Logistics) were gated
+on `expenses:read` but require `employees:read`/`fixed-assets:read`/
+`logistics:read` respectively. Seven roles (`TAXPAYER_STAFF`,
+`SELLER_ADMIN`, `SELLER_OPERATOR`, `SELLER_VIEWER`,
+`NAMRA_COMPLIANCE_OFFICER`, `NAMRA_VAT_AUDITOR`, `NAMRA_VAT_SUPERVISOR`,
+`TAXPAYER_ACCOUNTANT`, `TAXPAYER_VIEWER`, `BUYER_ADMIN`, `BUYER_USER` --
+eleven, across both groups) saw a sidebar link that 403'd the instant it
+was clicked, confirmed live for `NAMRA_VAT_AUDITOR` and `BUYER_ADMIN`.
+Not a security hole -- every destination's own `authorize()` call already
+refused correctly -- purely a menu showing an item a given user cannot
+use. Fixed by splitting each mismatched link into its own `@can` block
+gated on its real permission; a systematic cross-check of every other
+sidebar link against its controller's actual permission found no further
+mismatches.
+
+Verified: 4 new permanent regression tests in a new
+`tests/Feature/Navigation/SidebarLinkPermissionTest.php`, covering both
+directions (a role missing a permission no longer sees that link; a role
+holding everything still sees and can use everything). Full suite: 642
+tests, 0 regressions. Full findings and methodology (including a
+methodology self-correction on computing a role's true effective
+permission set): `docs/RED_TEAM_ASSESSMENT_2026-09-14-UX-FAILURE-DISCOVERY.md`.

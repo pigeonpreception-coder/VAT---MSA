@@ -195,4 +195,41 @@ class ForeignInvoiceViewTest extends TestCase
             'declaration_number' => 'NAMCUS-2026-9002', 'source' => 'MANUAL', 'verification_status' => 'UNVERIFIED', 'pulled_at' => null,
         ]);
     }
+
+    /**
+     * UX Failure Discovery pass (2026-09-14): the sidebar's "Invoice
+     * Management" group gated all three of its links (Local Invoices,
+     * Foreign Invoices, All Invoices) behind a single `invoices:read`
+     * check, but ForeignInvoiceViewController::index() actually requires
+     * `imports:read` -- a different permission. Several roles hold
+     * `invoices:read` without `imports:read` (NAMRA_VAT_AUDITOR,
+     * NAMRA_VAT_SUPERVISOR, NAMRA_COMPLIANCE_OFFICER, TAXPAYER_STAFF,
+     * SELLER_*), so those users saw a "Foreign Invoices" link in their
+     * sidebar that 403'd the instant they clicked it -- live-confirmed via
+     * a full-sidebar Playwright crawl. The link is now gated on its own
+     * `imports:read` check, independent of its siblings.
+     */
+    public function test_a_role_with_invoices_read_but_not_imports_read_does_not_see_a_dead_foreign_invoices_link(): void
+    {
+        $auditor = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'NamRA Auditor', 'email' => 'auditor-fi-ux@test.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_VAT_AUDITOR', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $dashboard = $this->actingAs($auditor)->get('/dashboard');
+        $dashboard->assertOk()->assertDontSee(route('invoice-management.foreign'), false);
+
+        // Direct navigation is still correctly refused -- the sidebar fix
+        // removes the dead-end click, the controller's own gate is the
+        // real backstop this test also confirms is unchanged.
+        $this->actingAs($auditor)->get('/invoice-management/foreign')->assertForbidden();
+    }
+
+    public function test_a_role_with_both_permissions_still_sees_the_foreign_invoices_link(): void
+    {
+        $org = $this->makeOrganisation('VAT-FI-0008');
+
+        $dashboard = $this->actingAs($org['owner'])->get('/dashboard');
+        $dashboard->assertOk()->assertSee(route('invoice-management.foreign'), false);
+    }
 }
