@@ -179,6 +179,29 @@ class OperationsViewTest extends TestCase
         $this->assertDatabaseHas('expenses', ['expense_number' => 'EXP-FORM-0001', 'status' => 'DRAFT', 'total_cents' => 23000]);
     }
 
+    /**
+     * Input Validation & Robustness pass (2026-09-14): OperationsViewController::store()
+     * used to `(int) $request->input('net_cents', 0)` before validation --
+     * a non-numeric submission silently coerced to 0 rather than being
+     * rejected, creating a real zero-amount DRAFT expense with no error
+     * shown at all. Confirmed live pre-fix; now rejected cleanly via
+     * Controller::safeIntegerInput().
+     */
+    public function test_a_non_numeric_amount_is_rejected_not_silently_zeroed(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0002B');
+        $category = $this->makeCategory($org['organisation']);
+
+        $response = $this->actingAs($org['owner'])->post('/operations/expenses', [
+            'expense_number' => 'EXP-NAN-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'description' => 'Fat-fingered amount', 'net_cents' => 'not-a-number', 'tax_cents' => 'abc',
+        ]);
+
+        $response->assertRedirect('/operations');
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseMissing('expenses', ['expense_number' => 'EXP-NAN-0001']);
+    }
+
     public function test_a_role_without_expenses_manage_cannot_record_an_expense(): void
     {
         $org = $this->makeOrganisation('VAT-SELLER-0003');

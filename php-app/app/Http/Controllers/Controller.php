@@ -34,4 +34,48 @@ abstract class Controller
 
         return is_string($supplied) && $supplied !== '' ? $supplied : (string) Str::uuid();
     }
+
+    /**
+     * A `*ViewController` reading a monetary/count field from a Blade
+     * form should call this instead of `(int) $request->input('key', 0)`
+     * -- a red-team pass (2026-09-14, Input Validation & Robustness)
+     * found that raw `(int)` cast silently coerces any non-numeric
+     * submission ("not-a-number", "1,500" with a thousands separator, a
+     * fat-fingered typo) into `0` rather than being rejected, so a
+     * genuine data-entry error passed validation as a legitimate
+     * zero-amount record with no error shown to the submitter at all --
+     * confirmed live: a `net_cents=not-a-number` expense submission
+     * created a real `DRAFT` expense row with every amount silently
+     * zeroed. `filter_var(..., FILTER_VALIDATE_INT)` returns `false` (not
+     * `0`) for anything that isn't a genuine integer, and `false` fails
+     * `App\Domain\*\*Validator::integerField()`'s own `is_int()` check
+     * exactly like a non-numeric JSON API payload already would --
+     * turning a silent data-corruption bug into the same clean,
+     * field-specific validation message every other malformed input in
+     * this codebase already gets. `$raw === null || $raw === ''` still
+     * returns `$default` unchanged, preserving this method's original
+     * "field not present on the form" behaviour for an optional amount.
+     */
+    protected function safeIntegerInput(mixed $raw, int $default = 0): int|false
+    {
+        return ($raw === null || $raw === '') ? $default : filter_var($raw, FILTER_VALIDATE_INT);
+    }
+
+    /**
+     * Same defect, same fix, for a quantity field submitted as a decimal
+     * (e.g. "12.5") and converted to a `_micros` integer column (`* 1_000_000`)
+     * -- the pre-existing `(int) round((float) $request->input('quantity', 0) * 1_000_000)`
+     * cast silently turned "not-a-number" into `0` the same way. Returns
+     * `false` (not a bogus rounded value) for anything that isn't a
+     * genuine number, so the validator's own `is_int()` check catches it.
+     */
+    protected function safeMicrosInput(mixed $raw, int $default = 0): int|false
+    {
+        if ($raw === null || $raw === '') {
+            return $default;
+        }
+        $float = filter_var($raw, FILTER_VALIDATE_FLOAT);
+
+        return $float === false ? false : (int) round($float * 1_000_000);
+    }
 }

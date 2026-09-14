@@ -131,8 +131,8 @@ class OperationsViewController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $this->authorize('permission', 'expenses:manage');
-        $netCents = (int) $request->input('net_cents', 0);
-        $taxCents = (int) $request->input('tax_cents', 0);
+        $netCents = $this->safeIntegerInput($request->input('net_cents'));
+        $taxCents = $this->safeIntegerInput($request->input('tax_cents'));
         $payload = [
             'schema_version' => '1.0.0', 'category_id' => $request->input('category_id'),
             'supplier_party_id' => $request->input('supplier_party_id') ?: null,

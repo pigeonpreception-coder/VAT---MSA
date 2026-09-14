@@ -197,9 +197,9 @@ class QuotationViewController extends Controller
             'lines' => [[
                 'product_id' => $request->input('product_id') ?: null,
                 'description' => $request->input('description'),
-                'quantity_micros' => (int) round((float) $request->input('quantity', 0) * 1_000_000),
+                'quantity_micros' => $this->safeMicrosInput($request->input('quantity')),
                 'unit_code' => $request->input('unit_code', 'EA'),
-                'unit_price_cents' => (int) $request->input('unit_price_cents', 0),
+                'unit_price_cents' => $this->safeIntegerInput($request->input('unit_price_cents')),
                 'tax_category' => 'STANDARD',
                 'tax_rate_bps' => 1500,
             ]],
@@ -212,11 +212,11 @@ class QuotationViewController extends Controller
         $lines = collect($request->input('lines', []))->map(fn (array $line) => [
             'product_id' => ($line['product_id'] ?? '') !== '' ? $line['product_id'] : null,
             'description' => $line['description'] ?? '',
-            'quantity_micros' => (int) round((float) ($line['quantity'] ?? 0) * 1_000_000),
+            'quantity_micros' => $this->safeMicrosInput($line['quantity'] ?? null),
             'unit_code' => $line['unit_code'] ?? 'EA',
-            'unit_price_cents' => (int) ($line['unit_price_cents'] ?? 0),
+            'unit_price_cents' => $this->safeIntegerInput($line['unit_price_cents'] ?? null),
             'tax_category' => $line['tax_category'] ?? 'STANDARD',
-            'tax_rate_bps' => (int) ($line['tax_rate_bps'] ?? 0),
+            'tax_rate_bps' => $this->safeIntegerInput($line['tax_rate_bps'] ?? null),
         ])->values()->all();
 
         return [

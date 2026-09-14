@@ -7265,3 +7265,44 @@ Full suite: 624 tests, 0 regressions -- all 16 pre-existing
 adds no new restriction for any actor who could legitimately reach the
 screen before. Full findings and methodology: `docs/
 RED_TEAM_ASSESSMENT_2026-09-14-AUTHORIZATION-ISOLATION.md`.
+
+## Red-team pass, a new phase: Input Validation & Robustness (2026-09-14)
+
+Phase 5 of the user's original brief: a mechanical sweep for stored XSS
+(`{!! !!}` raw Blade output), raw-SQL injection (`DB::raw()`/`whereRaw()`/
+`selectRaw()`/`orderByRaw()` calls carrying a variable), and CSV formula
+injection in the report export feature, followed by live black-box
+fuzzing (negative amounts, non-numeric amounts, oversized strings, XSS
+payloads) against real write forms on a running instance.
+
+**RT-017 (Medium, live-verified):** `OperationsViewController::store()`,
+`FixedAssetViewController::store()`/`valuation()`, and
+`QuotationViewController::createPayload()`/`editPayload()` all read a
+monetary/quantity field with a raw `(int) $request->input('key', 0)`
+cast before validation -- PHP silently coerces any non-numeric string
+("not-a-number", "1,500" with a thousands separator, a fat-fingered typo)
+into `0`, so a genuine data-entry error passed validation as a real
+zero-amount record with **no error shown to the submitter at all**.
+Confirmed live: `net_cents=not-a-number` created a real `DRAFT` expense
+row with every amount silently zeroed and a "Expense recorded." success
+message. Fixed with two new shared helpers on the base `Controller`
+class, `safeIntegerInput()`/`safeMicrosInput()`, using `filter_var(...,
+FILTER_VALIDATE_INT/FLOAT)` -- which return `false` (not a bogus zero)
+for non-numeric input, correctly failing the existing validator's own
+`is_int()` check instead of silently succeeding. All seven affected call
+sites across the three controllers fixed identically.
+
+**Positive controls confirmed:** no stored-XSS surface (all 3 raw `{!!
+!!}` Blade occurrences are hardcoded literals, never user input --
+live-confirmed separately: a `<script>` payload submitted as an expense
+description rendered fully HTML-escaped); no raw-SQL-injection surface
+(every `DB::raw()`/`*Raw()` call across `app/` uses a hardcoded literal
+fragment, the one call passing a variable traced to a hardcoded literal
+one line above); no CSV-formula-injection surface (the only CSV export
+path writes only fixed field names and numeric aggregate values, never
+user free text); negative-amount rejection and oversized-string rejection
+both already correct and live-confirmed.
+
+Verified: 3 new regression tests, one per affected controller. Full
+suite: 627 tests, 0 regressions. Full findings and methodology: `docs/
+RED_TEAM_ASSESSMENT_2026-09-14-INPUT-VALIDATION.md`.
