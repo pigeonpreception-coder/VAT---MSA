@@ -109,6 +109,20 @@ class InvoiceService
 
         $customer = $customerVat ? $this->resolveCapableTaxpayer($customerVat, 'BUYER', $now) : null;
 
+        // Fraud Resistance pass (2026-09-14): a registered taxpayer certifying an
+        // invoice to themselves (supplier and customer resolve to the same
+        // Taxpayer row) is not a real supply -- InvoiceCalculator::score() has no
+        // awareness of this at all, so an ordinary-amount self-invoice was
+        // certified as CERTIFIED/MATCHED at LOW risk with a real verification URL
+        // and matching OUTPUT_VAT/INPUT_VAT ledger entries, letting a taxpayer
+        // manufacture zero-substance, government-certified "transactions" to
+        // inflate apparent turnover. Fails closed before any row is written.
+        if ($customer && $customer->id === $supplier->id) {
+            throw new InvoiceValidationException([
+                ['code' => 'SELF_DEALING_NOT_PERMITTED', 'path' => '/customer/identifiers', 'message' => 'Supplier and customer cannot be the same taxpayer.'],
+            ]);
+        }
+
         $documentType = $payload['document_type'];
         $isCorrection = in_array($documentType, ['CREDIT_NOTE', 'DEBIT_NOTE'], true);
         $originalInvoice = $isCorrection ? $this->resolveOriginalInvoice($payload, $supplier, $customer, $customerVat, $calculated) : null;
