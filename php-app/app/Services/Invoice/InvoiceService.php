@@ -450,7 +450,17 @@ class InvoiceService
         $period = mb_substr($invoice->issue_date->toDateString(), 0, 7);
 
         DB::transaction(function () use ($invoice, $actor, $now, $transactionId, $period, $reason, $correlationId) {
-            Invoice::where('id', $invoice->id)->update(['status' => 'CANCELLED']);
+            $updated = Invoice::where('id', $invoice->id)->where('status', '!=', 'CANCELLED')->update(['status' => 'CANCELLED']);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): the
+                // pre-check above reads the invoice once, before this
+                // transaction -- two concurrent cancel() calls on the same
+                // still-active invoice could both pass it and both reach
+                // here, each creating its own reversing VatTransaction/
+                // LedgerEntry pair and double-counting the VAT reversal.
+                // This guard makes only the first writer's reversal land.
+                throw new RepositoryConflictException("Invoice {$invoice->id} was already cancelled by another action.");
+            }
             // Module 2 Phase D: Reverse. A new VATTransaction linked back to the
             // certification it reverses via reference_transaction_id -- the
             // certification row itself is never mutated.

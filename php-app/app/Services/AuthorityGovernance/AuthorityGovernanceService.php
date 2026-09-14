@@ -210,9 +210,17 @@ class AuthorityGovernanceService
                 'requested_by' => $current->requested_by, 'decided_by' => $actor->id, 'evidence_hash' => $evidenceHash,
                 'step_up_evidence_reference' => $stepUpEvidenceReference, 'occurred_at' => $now,
             ]);
-            TaxAuthorityOnboardingCase::where('id', $caseId)->update([
+            $updated = TaxAuthorityOnboardingCase::where('id', $caseId)->where('status', $fromStatus)->update([
                 'status' => $nextStatus, 'approved_at' => $decision['decision'] === 'APPROVE_LOCAL_STAGING' ? $now : null, 'updated_at' => $now,
             ]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): a genuine
+                // concurrent decision raced this one and won between the
+                // read above and this guarded UPDATE -- refuse before
+                // recording a decision/event/command/audit trail that
+                // would claim this decision happened when it did not.
+                throw new RepositoryConflictException("Authority-onboarding case {$caseId} was changed by another action; reload and try again.");
+            }
             TaxAuthorityGovernanceEvent::create([
                 'id' => (string) Str::uuid(), 'tax_authority_id' => $current->tax_authority_id, 'onboarding_case_id' => $caseId,
                 'event_type' => $eventType, 'from_status' => $fromStatus, 'to_status' => $nextStatus, 'reason_code' => $reasonCode,

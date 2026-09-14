@@ -63,7 +63,15 @@ class RiskService
 
         $now = now();
         DB::transaction(function () use ($indicator, $indicatorId, $input, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
-            RiskIndicator::where('id', $indicatorId)->update(['status' => 'UNDER_REVIEW', 'assigned_officer_id' => $input['officerId']]);
+            $updated = RiskIndicator::where('id', $indicatorId)->where('status', 'OPEN')->update(['status' => 'UNDER_REVIEW', 'assigned_officer_id' => $input['officerId']]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): a genuine
+                // concurrent assignment raced this one and won between the
+                // pre-check above and this guarded UPDATE -- refuse before
+                // recording a command/audit trail that would claim this
+                // assignment happened when it did not.
+                throw new RepositoryConflictException("Risk indicator {$indicatorId} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'ASSIGN_RISK_REVIEW', $idempotencyKey, $requestHash, 'RISK_INDICATOR', $indicatorId, $now);
             CommandLedger::outbox('RISK_INDICATOR', $indicatorId, 'RiskReviewAssigned', $indicator->taxpayer_id, ['indicator_id' => $indicatorId, 'officer_id' => $input['officerId'], 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'RISK_REVIEW_ASSIGNED', 'RISK_INDICATOR', $indicatorId, ['officerId' => $input['officerId'], 'correlationId' => $correlationId], $now);
@@ -103,7 +111,10 @@ class RiskService
 
         if ($input['decision'] === 'DISMISS') {
             DB::transaction(function () use ($indicator, $indicatorId, $actor, $now, $idempotencyKey, $requestHash, $correlationId, $input) {
-                RiskIndicator::where('id', $indicatorId)->update(['status' => 'DISMISSED', 'reviewed_by' => $actor->id, 'reviewed_at' => $now]);
+                $updated = RiskIndicator::where('id', $indicatorId)->where('status', 'UNDER_REVIEW')->update(['status' => 'DISMISSED', 'reviewed_by' => $actor->id, 'reviewed_at' => $now]);
+                if ($updated === 0) {
+                    throw new RepositoryConflictException("Risk indicator {$indicatorId} was changed by another action; reload and try again.");
+                }
                 CommandLedger::record($actor->id, 'APPROVE_RISK_ACTION', $idempotencyKey, $requestHash, 'RISK_INDICATOR', $indicatorId, $now);
                 CommandLedger::outbox('RISK_INDICATOR', $indicatorId, 'RiskActionDismissed', $indicator->taxpayer_id, ['indicator_id' => $indicatorId, 'correlation_id' => $correlationId], $now);
                 AuditService::append($actor, 'RISK_ACTION_DISMISSED', 'RISK_INDICATOR', $indicatorId, ['rationale' => $input['rationale'], 'correlationId' => $correlationId], $now);
@@ -120,7 +131,15 @@ class RiskService
                 'case_type' => $input['caseType'], 'title' => $input['caseTitle'], 'opening_reason' => $input['rationale'], 'risk_tier' => $indicator->severity,
                 'status' => 'PROPOSED', 'assigned_officer_id' => null, 'opened_by' => $actor->id, 'opened_at' => $now, 'updated_at' => $now, 'closed_at' => null,
             ]);
-            RiskIndicator::where('id', $indicatorId)->update(['status' => 'ESCALATED_TO_CASE', 'escalated_case_id' => $caseId, 'reviewed_by' => $actor->id, 'reviewed_at' => $now]);
+            $updated = RiskIndicator::where('id', $indicatorId)->where('status', 'UNDER_REVIEW')->update(['status' => 'ESCALATED_TO_CASE', 'escalated_case_id' => $caseId, 'reviewed_by' => $actor->id, 'reviewed_at' => $now]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): see
+                // assignReview()'s own comment on the identical guard --
+                // here it also protects against creating a duplicate
+                // AuditCase row for an indicator a concurrent request
+                // already escalated or dismissed.
+                throw new RepositoryConflictException("Risk indicator {$indicatorId} was changed by another action; reload and try again.");
+            }
             NotificationRecorder::record(null, $indicator->taxpayer_id, 'AUDIT_CASE_OPENED', "Audit case {$caseNumber} opened", $input['caseTitle'], 'HIGH', "/cases/{$caseId}", $now);
             CommandLedger::record($actor->id, 'APPROVE_RISK_ACTION', $idempotencyKey, $requestHash, 'RISK_INDICATOR', $indicatorId, $now);
             CommandLedger::outbox('RISK_INDICATOR', $indicatorId, 'RiskEscalatedToCase', $indicator->taxpayer_id, ['indicator_id' => $indicatorId, 'case_id' => $caseId, 'case_number' => $caseNumber, 'correlation_id' => $correlationId], $now);

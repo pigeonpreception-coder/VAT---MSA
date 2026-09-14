@@ -134,7 +134,15 @@ class LogisticsService
         $now = now();
         $fromStatus = $delivery->status;
         DB::transaction(function () use ($target, $columnUpdates, $now, $actor, $id, $idempotencyKey, $requestHash, $correlationId, $extraDetails, $action, $fromStatus, $command, $delivery) {
-            LogisticsDelivery::where('id', $id)->update([...$columnUpdates, 'status' => $target, 'updated_at' => $now]);
+            $updated = LogisticsDelivery::where('id', $id)->where('status', $fromStatus)->update([...$columnUpdates, 'status' => $target, 'updated_at' => $now]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): a genuine
+                // concurrent transition raced this one and won between
+                // loadForActor()'s read and this guarded UPDATE -- refuse
+                // before recording a command/audit trail that would claim
+                // this transition happened when it did not.
+                throw new RepositoryConflictException("Logistics delivery {$id} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, $command, $idempotencyKey, $requestHash, 'LOGISTICS_DELIVERY', $id, $now);
             CommandLedger::outbox('LOGISTICS_DELIVERY', $id, self::ACTION_EVENT_TYPE[$action], $delivery->organisation_id, [
                 'logistics_delivery_id' => $id, 'from_status' => $fromStatus, 'to_status' => $target, 'correlation_id' => $correlationId, ...$extraDetails,

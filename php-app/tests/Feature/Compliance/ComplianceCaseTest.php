@@ -7,6 +7,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -428,5 +429,85 @@ class ComplianceCaseTest extends TestCase
         $response = $this->actingAs($owner)->getJson('/api/v1/risk-indicators');
 
         $response->assertStatus(403);
+    }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): AuditCaseService::
+     * transition() read the case's status once, validated the requested
+     * action against that in-memory value, then wrote the new status with
+     * a plain `where('id', $caseId)->update(...)` -- no re-check that the
+     * row was still in the status it was read as. Two different action
+     * buttons clicked from the same stale case page (e.g. "Authorize"
+     * then "Cancel", both valid from PROPOSED) could both pass their own
+     * validation against the same stale row.
+     *
+     * A genuinely concurrent double-click can't be produced by a single
+     * synchronous PHPUnit process, so this simulates the exact race
+     * window: a `DB::listen()` hook fires a real, separate CANCEL against
+     * the same case the instant after transition()'s own read query
+     * returns -- i.e. after this request has already decided the case is
+     * PROPOSED but before its own guarded UPDATE runs.
+     */
+    public function test_a_case_status_change_that_races_a_concurrent_transition_is_rejected_not_silently_applied(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-CASE-RACE-0001');
+        $auditor = $this->namraAuditor();
+        $caseId = $this->openCase($auditor, $tp['taxpayer']->id);
+        $this->assertDatabaseHas('audit_cases', ['id' => $caseId, 'status' => 'PROPOSED']);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $caseId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `audit_cases`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('audit_cases')->where('id', $caseId)->update(['status' => 'CANCELLED']);
+        });
+
+        $response = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/transition", [
+            'schema_version' => '1.0.0', 'action' => 'AUTHORIZE', 'reason' => 'Reviewed and authorised for assignment.',
+        ], ['Idempotency-Key' => 'test-idem-case-race-0001']);
+
+        $response->assertStatus(409);
+        $this->assertSame('CANCELLED', DB::table('audit_cases')->where('id', $caseId)->value('status'), 'The concurrent winners status must survive untouched.');
+        $this->assertDatabaseMissing('audit_events', ['action' => 'AUDIT_CASE_AUTHORIZE', 'resource_id' => $caseId]);
+    }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): RiskService::
+     * assignReview() had the identical gap (see the audit-case regression
+     * test above for the full rationale) -- a plain `where('id', ...)->
+     * update(...)` with no re-check that the indicator was still OPEN.
+     * Simulated the same way: a concurrent assignment (a second officer
+     * claiming the same still-OPEN indicator) wins the race.
+     */
+    public function test_a_risk_indicator_assignment_that_races_a_concurrent_assignment_is_rejected_not_silently_applied(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-CASE-RACE-0002');
+        $auditor = $this->namraAuditor();
+        \App\Models\TaxObligation::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'obligation_type' => 'VAT_RETURN', 'period_code' => '2026-06', 'due_date' => '2026-07-25', 'amount_cents' => 100000,
+            'currency' => 'NAD', 'status' => 'PENDING', 'source_system' => 'VAT_MSA', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->actingAs($auditor)->postJson("/api/v1/taxpayers/{$tp['taxpayer']->id}/risk-evaluation", ['schema_version' => '1.0.0'], ['Idempotency-Key' => 'test-idem-race-evaluate-0001'])->assertStatus(200);
+        $indicatorId = \App\Models\RiskIndicator::where('taxpayer_id', $tp['taxpayer']->id)->where('indicator_code', 'OBLIGATION_OVERDUE')->firstOrFail()->id;
+
+        $secondOfficer = $this->namraAuditor('second-officer@namra.test');
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $indicatorId, $secondOfficer) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `risk_indicators`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('risk_indicators')->where('id', $indicatorId)->update(['status' => 'UNDER_REVIEW', 'assigned_officer_id' => $secondOfficer->id]);
+        });
+
+        $response = $this->actingAs($auditor)->postJson("/api/v1/risk-indicators/{$indicatorId}/assignment", [
+            'schema_version' => '1.0.0', 'officer_id' => $auditor->id,
+        ], ['Idempotency-Key' => 'test-idem-race-assign-0001']);
+
+        $response->assertStatus(409);
+        $this->assertSame($secondOfficer->id, DB::table('risk_indicators')->where('id', $indicatorId)->value('assigned_officer_id'), 'The concurrent winners assignment must survive untouched.');
     }
 }

@@ -2,12 +2,15 @@
 
 namespace Tests\Feature\Operations;
 
+use App\Exceptions\RepositoryConflictException;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\Taxpayer;
 use App\Models\User;
+use App\Services\Operations\FixedAssetService;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -179,5 +182,60 @@ class FixedAssetViewTest extends TestCase
         $response = $this->actingAs($orgA['owner'])->post("/operations/fixed-assets/{$assetId}/maintenance");
         $response->assertRedirect(route('operations.immovable-assets'));
         $response->assertSessionHasErrors('asset');
+    }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): FixedAssetService::
+     * transition() read the asset's status once, validated the requested
+     * action against that in-memory value, then wrote the new status with
+     * a plain `where('id', $id)->update(...)` -- no re-check that the row
+     * was still in the status it was read as. Two different action
+     * buttons clicked from the same stale page (e.g. "Flag for
+     * Maintenance" then "Dispose") could both pass their own validation
+     * against the same stale row and both writes would land, the second
+     * silently overwriting the first with no conflict signal and an
+     * audit/outbox trail inconsistent with the row's real history.
+     *
+     * A genuinely concurrent double-click can't be produced by a single
+     * synchronous PHPUnit process, so this test simulates the exact race
+     * window instead of merely asserting the end state: a `DB::listen()`
+     * hook fires a real, separate UPDATE against the same row the instant
+     * after `transition()`'s own read query returns -- i.e. after this
+     * request has already decided the asset is ACTIVE but before its own
+     * guarded UPDATE runs -- reproducing precisely what a second, faster
+     * concurrent request would have done.
+     */
+    public function test_a_status_change_that_races_a_concurrent_transition_is_rejected_not_silently_applied(): void
+    {
+        $org = $this->makeOrganisation('VAT-FA-0007');
+        $service = app(FixedAssetService::class);
+        $created = $service->register([
+            'schema_version' => '1.0.0', 'asset_class' => 'MOVABLE', 'asset_code' => 'VEH-RACE-001', 'category' => 'VEHICLE', 'description' => 'Race-condition probe vehicle',
+            'location_or_address' => 'Main depot', 'acquisition_date' => '2022-06-01', 'acquisition_cost_cents' => 250_000_00,
+        ], $org['owner'], (string) Str::uuid(), (string) Str::uuid(), null);
+        $assetId = $created['id'];
+        $this->assertSame('ACTIVE', $created['status']);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $assetId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `fixed_assets`')) {
+                return;
+            }
+            $sabotaged = true;
+            // Simulates a second, concurrent request (e.g. "Dispose") that
+            // completes its own transition first, changing the row's real
+            // status out from under this still-in-flight request.
+            DB::table('fixed_assets')->where('id', $assetId)->update(['status' => 'DISPOSED']);
+        });
+
+        try {
+            $this->expectException(RepositoryConflictException::class);
+            $service->flagMaintenance($assetId, $org['owner'], (string) Str::uuid(), (string) Str::uuid());
+        } finally {
+            DB::flushQueryLog();
+        }
+
+        $this->assertSame('DISPOSED', DB::table('fixed_assets')->where('id', $assetId)->value('status'), 'The concurrent winners status must survive untouched.');
+        $this->assertDatabaseMissing('audit_events', ['action' => 'FIXED_ASSET_FLAG_MAINTENANCED', 'resource_id' => $assetId]);
     }
 }

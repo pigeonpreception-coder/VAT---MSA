@@ -127,13 +127,22 @@ class AuditCaseService
         $now = now();
         $fromStatus = $auditCase->status;
         DB::transaction(function () use ($auditCase, $caseId, $input, $targetStatus, $nextSuspendedFrom, $fromStatus, $actor, $now, $idempotencyKey, $requestHash, $correlationId, $sodOverrideApplied) {
-            AuditCase::where('id', $caseId)->update([
+            $updated = AuditCase::where('id', $caseId)->where('status', $fromStatus)->update([
                 'status' => $targetStatus, 'updated_at' => $now, 'suspended_from_status' => $nextSuspendedFrom,
                 'assigned_officer_id' => $input['action'] === 'ASSIGN' ? $input['officerId'] : $auditCase->assigned_officer_id,
                 'closed_at' => $input['action'] === 'CLOSE' ? $now : $auditCase->closed_at,
                 'appeal_reference' => $input['action'] === 'LINK_APPEAL' ? $input['appealReference'] : $auditCase->appeal_reference,
                 'appeal_linked_at' => $input['action'] === 'LINK_APPEAL' ? $now : $auditCase->appeal_linked_at,
             ]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): a genuine
+                // concurrent transition (e.g. two action buttons clicked
+                // from the same stale case page) raced this one and won
+                // between the read above and this guarded UPDATE -- refuse
+                // before recording a transition/command/audit trail that
+                // would claim this action happened when it did not.
+                throw new RepositoryConflictException("Audit case {$caseId} was changed by another action; reload and try again.");
+            }
             AuditCaseTransition::create([
                 'id' => (string) Str::uuid(), 'audit_case_id' => $caseId, 'action' => $input['action'], 'from_status' => $fromStatus,
                 'to_status' => $targetStatus, 'actor_id' => $actor->id, 'reason' => $input['reason'], 'occurred_at' => $now,

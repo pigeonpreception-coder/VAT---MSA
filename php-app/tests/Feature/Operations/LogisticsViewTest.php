@@ -2,12 +2,15 @@
 
 namespace Tests\Feature\Operations;
 
+use App\Exceptions\RepositoryConflictException;
 use App\Models\FixedAsset;
 use App\Models\Organisation;
 use App\Models\Taxpayer;
 use App\Models\User;
+use App\Services\Operations\LogisticsService;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -123,5 +126,39 @@ class LogisticsViewTest extends TestCase
         $this->actingAs($org['owner'])->post("/operations/logistics/{$deliveryId}/cancellation", ['reason' => 'Customer cancelled the order.'])
             ->assertRedirect(route('operations.logistics'));
         $this->assertDatabaseHas('logistics_deliveries', ['id' => $deliveryId, 'status' => 'CANCELLED', 'cancellation_reason' => 'Customer cancelled the order.']);
+    }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): LogisticsService::
+     * transition() had the identical gap as FixedAssetService::transition()
+     * (see FixedAssetViewTest's own regression test for the full
+     * rationale) -- a plain `where('id', $id)->update(...)` with no
+     * re-check that the row was still in the status it was read as, so a
+     * "Dispatch" and a "Cancel" clicked from the same stale PENDING
+     * delivery page could both land. Simulated the same way: a
+     * `DB::listen()` hook fires a real concurrent CANCEL the instant after
+     * the transition's own read query returns.
+     */
+    public function test_a_status_change_that_races_a_concurrent_transition_is_rejected_not_silently_applied(): void
+    {
+        $org = $this->makeOrganisation('VAT-LOG-0006');
+        $service = app(LogisticsService::class);
+        $created = $service->create([
+            'schema_version' => '1.0.0', 'delivery_number' => 'DEL-RACE-001', 'reference_type' => 'OTHER', 'origin' => 'Depot', 'destination' => 'Site',
+        ], $org['owner'], (string) Str::uuid(), (string) Str::uuid(), null);
+        $deliveryId = $created['id'];
+        $this->assertSame('PENDING', $created['status']);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $deliveryId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `logistics_deliveries`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('logistics_deliveries')->where('id', $deliveryId)->update(['status' => 'CANCELLED']);
+        });
+
+        $this->expectException(RepositoryConflictException::class);
+        $service->dispatch($deliveryId, $org['owner'], (string) Str::uuid(), (string) Str::uuid());
     }
 }

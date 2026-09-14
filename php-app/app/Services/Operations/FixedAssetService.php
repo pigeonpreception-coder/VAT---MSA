@@ -177,7 +177,16 @@ class FixedAssetService
         $now = now();
         $fromStatus = $asset->status;
         DB::transaction(function () use ($asset, $target, $columnUpdates, $now, $actor, $id, $idempotencyKey, $requestHash, $correlationId, $extraDetails, $action, $fromStatus, $command) {
-            FixedAsset::where('id', $id)->update([...$columnUpdates, 'status' => $target, 'updated_at' => $now]);
+            $updated = FixedAsset::where('id', $id)->where('status', $fromStatus)->update([...$columnUpdates, 'status' => $target, 'updated_at' => $now]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): a genuine
+                // concurrent transition (e.g. two action buttons clicked
+                // from the same stale page) raced this one and won between
+                // loadForActor()'s read and this guarded UPDATE -- refuse
+                // before recording a command/audit trail that would claim
+                // this transition happened when it did not.
+                throw new RepositoryConflictException("Fixed asset {$id} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, $command, $idempotencyKey, $requestHash, 'FIXED_ASSET', $id, $now);
             CommandLedger::outbox('FIXED_ASSET', $id, self::ACTION_EVENT_TYPE[$action], $asset->organisation_id, [
                 'fixed_asset_id' => $id, 'from_status' => $fromStatus, 'to_status' => $target, 'correlation_id' => $correlationId, ...$extraDetails,
