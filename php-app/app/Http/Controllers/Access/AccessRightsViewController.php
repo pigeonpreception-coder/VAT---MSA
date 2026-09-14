@@ -9,6 +9,7 @@ use App\Models\AccessRole;
 use App\Models\User;
 use App\Models\UserRoleScopeGrant;
 use App\Services\Access\UserRoleScopeGrantService;
+use App\Support\Access\TenantScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -25,6 +26,14 @@ class AccessRightsViewController extends Controller
     public function index(Request $request): View
     {
         $this->authorize('permission', 'access-rights:read');
+        // Defense-in-depth (2026-09-14 authorization-isolation audit):
+        // this listing has no query-level tenant scope of its own -- it
+        // shows every user and grant system-wide, relying entirely on
+        // access-rights:read being held only by national-scope roles.
+        // See UserRoleScopeGrantService's own doc comment for why that
+        // assumption is asserted directly here too, not just implied by
+        // the permission map.
+        abort_unless(TenantScope::isNational($request->user()), 403);
 
         return view('access-rights.index', [
             'users' => User::orderBy('name')->get(['id', 'name', 'email', 'role', 'taxpayer_id']),

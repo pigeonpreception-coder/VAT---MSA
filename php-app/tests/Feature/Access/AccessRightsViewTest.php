@@ -282,4 +282,31 @@ class AccessRightsViewTest extends TestCase
         $response->assertRedirect('/access-rights');
         $response->assertSessionHasErrors('revoke');
     }
+
+    /**
+     * Defense-in-depth (2026-09-14 authorization-isolation audit):
+     * UserRoleScopeGrantService::grant()/revoke() assert national scope
+     * directly now, not just relying on access-rights:manage being held
+     * only by national-scope roles in the static permission map. Calls
+     * the service directly (bypassing the controller's own permission
+     * gate entirely) to prove the service's own guard holds independent
+     * of that map, in case a future role grant ever drifts.
+     */
+    public function test_the_service_itself_refuses_a_tenant_scoped_actor_regardless_of_the_permission_map(): void
+    {
+        $taxpayer = \App\Models\Taxpayer::create([
+            'id' => (string) Str::uuid(), 'vat_number' => 'VAT-ACCESSRIGHTS-0001', 'tin' => 'TIN-ACCESSRIGHTS-0001',
+            'legal_name' => 'Tenant Actor Trading Co', 'taxpayer_type' => 'PRIVATE_COMPANY', 'vat_status' => 'ACTIVE',
+            'return_frequency' => 'MONTHLY', 'address' => '1 Test Street, Windhoek', 'email' => 'tenant-actor-taxpayer@accessrights.test',
+        ]);
+        $tenantScopedActor = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Tenant-scoped Actor', 'email' => 'tenant-actor@accessrights.test',
+            'password' => bcrypt('password'), 'role' => 'SUPER_ADMIN', 'taxpayer_id' => $taxpayer->id, 'status' => 'ACTIVE',
+        ]);
+        $target = $this->taxpayerViewer();
+        $service = app(\App\Services\Access\UserRoleScopeGrantService::class);
+
+        $this->expectException(\Illuminate\Auth\Access\AuthorizationException::class);
+        $service->grant(['user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL'], $tenantScopedActor, (string) Str::uuid());
+    }
 }
