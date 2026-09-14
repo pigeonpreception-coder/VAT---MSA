@@ -7,6 +7,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
@@ -122,6 +123,59 @@ class PasswordResetTest extends TestCase
         $loginResponse = $this->post('/login', ['email' => $user->email, 'password' => 'NewStrongPass1']);
         $loginResponse->assertRedirect('/dashboard');
         $this->assertAuthenticatedAs($user);
+    }
+
+    /**
+     * Authentication & Session Robustness pass (2026-09-14): live-confirmed
+     * against a real running instance that a genuine password reset left
+     * every pre-existing session (a stolen-credential attacker's included)
+     * fully valid -- Laravel's session guard trusts an already-established
+     * cookie without re-checking the password hash. Now every `sessions`
+     * row for the user is deleted as part of the reset, forcing re-login
+     * everywhere.
+     */
+    public function test_a_password_reset_invalidates_every_existing_session_for_that_user(): void
+    {
+        Notification::fake();
+        $user = $this->makeUser();
+
+        // Simulate two already-active sessions for this user (e.g. the
+        // legitimate owner's own second device, and/or an attacker who
+        // obtained the now-compromised credentials) -- the real driver in
+        // production is 'database' (see config/session.php), so these rows
+        // are exactly what a real prior login would have left behind.
+        DB::table('sessions')->insert([
+            ['id' => 'sess-device-a', 'user_id' => $user->id, 'ip_address' => '10.0.0.1', 'user_agent' => 'Device A', 'payload' => base64_encode('x'), 'last_activity' => time()],
+            ['id' => 'sess-device-b', 'user_id' => $user->id, 'ip_address' => '10.0.0.2', 'user_agent' => 'Device B (attacker)', 'payload' => base64_encode('x'), 'last_activity' => time()],
+        ]);
+        $bystanderTaxpayer = Taxpayer::create([
+            'id' => (string) Str::uuid(), 'vat_number' => 'VAT-RESET-0002', 'tin' => 'TIN-RESET-0002',
+            'legal_name' => 'Bystander Co', 'taxpayer_type' => 'PRIVATE_COMPANY', 'vat_status' => 'ACTIVE',
+            'return_frequency' => 'MONTHLY', 'address' => '1 Test Street, Windhoek', 'email' => 'reset-bystander-taxpayer@test.test',
+        ]);
+        $otherUser = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Bystander Owner', 'email' => 'reset-bystander@test.test',
+            'password' => bcrypt('original-password'), 'role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $bystanderTaxpayer->id, 'status' => 'ACTIVE',
+        ]);
+        DB::table('sessions')->insert([
+            'id' => 'sess-bystander', 'user_id' => $otherUser->id, 'ip_address' => '10.0.0.3', 'user_agent' => 'Bystander', 'payload' => base64_encode('x'), 'last_activity' => time(),
+        ]);
+
+        $this->post('/forgot-password', ['email' => $user->email]);
+        $token = null;
+        Notification::assertSentTo($user, ResetPassword::class, function (ResetPassword $notification) use (&$token) {
+            $token = $notification->token;
+
+            return true;
+        });
+
+        $this->post('/reset-password', [
+            'token' => $token, 'email' => $user->email,
+            'password' => 'NewStrongPass1', 'password_confirmation' => 'NewStrongPass1',
+        ])->assertRedirect('/login');
+
+        $this->assertSame(0, DB::table('sessions')->where('user_id', $user->id)->count(), 'Every session for the reset user must be gone.');
+        $this->assertSame(1, DB::table('sessions')->where('user_id', $otherUser->id)->count(), 'A different users own session must be left untouched.');
     }
 
     public function test_an_expired_or_invalid_token_is_rejected_with_a_generic_message(): void
