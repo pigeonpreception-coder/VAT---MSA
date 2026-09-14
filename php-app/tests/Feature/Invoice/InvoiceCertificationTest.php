@@ -95,6 +95,28 @@ class InvoiceCertificationTest extends TestCase
         $this->assertDatabaseHas('outbox_events', ['aggregate_id' => $response->json('invoice_id'), 'event_type' => 'InvoiceCertified']);
     }
 
+    /**
+     * Fraud Resistance pass (2026-09-14): a taxpayer certifying an invoice to
+     * themselves (supplier and customer VAT numbers both resolve to the same
+     * Taxpayer row) used to be accepted -- CERTIFIED/MATCHED at LOW risk with
+     * a real verification URL and matching OUTPUT_VAT/INPUT_VAT ledger
+     * entries, since InvoiceCalculator::score() has no self-dealing check at
+     * all. Now rejected before any row is written.
+     */
+    public function test_a_self_dealing_invoice_where_supplier_and_customer_are_the_same_taxpayer_is_rejected(): void
+    {
+        $party = $this->makeTradingParty('VAT-SELF-0001');
+
+        $response = $this->actingAs($party['owner'])->postJson('/api/v1/invoices', $this->invoicePayload([
+            'supplier' => ['identifiers' => [['value' => 'VAT-SELF-0001']]],
+            'customer' => ['identifiers' => [['value' => 'VAT-SELF-0001']]],
+        ]), ['Idempotency-Key' => 'test-idem-key-selfdeal-0001']);
+
+        $response->assertStatus(422)->assertJsonPath('errors.0.code', 'SELF_DEALING_NOT_PERMITTED');
+        $this->assertDatabaseMissing('invoices', ['invoice_number' => 'INV-TEST-0001']);
+        $this->assertDatabaseMissing('ledger_entries', ['taxpayer_id' => $party['taxpayer']->id]);
+    }
+
     public function test_an_invoice_to_an_unregistered_buyer_is_still_certified_but_flagged(): void
     {
         $this->makeTradingParty('VAT-SUP-0001');

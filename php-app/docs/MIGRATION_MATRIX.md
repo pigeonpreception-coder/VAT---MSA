@@ -7306,3 +7306,44 @@ both already correct and live-confirmed.
 Verified: 3 new regression tests, one per affected controller. Full
 suite: 627 tests, 0 regressions. Full findings and methodology: `docs/
 RED_TEAM_ASSESSMENT_2026-09-14-INPUT-VALIDATION.md`.
+
+## Red-team pass, a new phase: Fraud Resistance (2026-09-14)
+
+Phase 6 of the user's original brief: whether the invoice-certification
+path resists a taxpayer manufacturing zero-substance, government-certified
+"transactions" against themselves, rather than only checking that
+legitimately-different-party invoices are computed and authorised
+correctly.
+
+**RT-018 (High, live-verified):** `InvoiceService::submit()` resolves the
+supplier and customer independently but never compared the two resolved
+`Taxpayer` IDs, and `InvoiceCalculator::score()` (the risk engine deciding
+`risk_level`/`EXCEPTION` status) has zero awareness of the supplier/
+customer relationship -- its checks are purely value- and category-based.
+A taxpayer submitting an invoice with their own VAT number as both
+supplier and customer was certified exactly like a real two-party
+transaction. Confirmed live via PHPUnit `postJson` against real MySQL:
+first with a large amount (N$1,150,000), which coincidentally triggered
+`risk_level: CRITICAL` purely from the unrelated amount threshold; then
+with an ordinary amount (N$1,150), which certified as `status: CERTIFIED`,
+`processing_status: MATCHED`, `risk_level: LOW` -- fully undetected, with
+a real verification URL/QR payload and matching `OUTPUT_VAT`/`INPUT_VAT`
+ledger entries for the same taxpayer in the same period. Fixed with an
+explicit same-taxpayer check in `InvoiceService::submit()`, inserted
+immediately after customer resolution, throwing a new
+`SELF_DEALING_NOT_PERMITTED` `InvoiceValidationException` before any row
+is written -- following the exact established pattern already used in
+that method for `NO_APPROVED_VAT_RULE`/`SUPPLIER_NOT_AUTHORISED`.
+
+**Positive controls confirmed:** tenant-scope enforcement on the supplier
+side is unaffected and already correct; a single self-invoice is
+VAT-neutral on its own (both ledger entries land in the same period/
+taxpayer, ruling out a direct one-invoice refund exploit, though the
+detection gap itself remains a real turnover-inflation and trust-model
+concern); the new check does not interact adversely with the existing
+idempotency or duplicate-detection paths.
+
+Verified: 1 new permanent regression test
+(`InvoiceCertificationTest::test_a_self_dealing_invoice_where_supplier_and_customer_are_the_same_taxpayer_is_rejected`).
+Full suite: 628 tests, 0 regressions. Full findings and methodology:
+`docs/RED_TEAM_ASSESSMENT_2026-09-14-FRAUD-RESISTANCE.md`.
