@@ -52,6 +52,7 @@
                             <td>
                                 <form method="POST" action="{{ route('platform.change-requests.store') }}" class="d-flex gap-2">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <input type="hidden" name="target_type" value="FEATURE_FLAG">
                                     <input type="hidden" name="target_id" value="{{ $flag['id'] }}">
                                     <input type="hidden" name="enabled" value="{{ $flag['enabled'] ? '0' : '1' }}">
@@ -94,6 +95,7 @@
                             <td>
                                 <form method="POST" action="{{ route('platform.change-requests.store') }}" class="d-flex gap-2">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <input type="hidden" name="target_type" value="PLATFORM_CONFIG">
                                     <input type="hidden" name="target_id" value="{{ $entry['id'] }}">
                                     <input type="text" name="value" class="form-control form-control-sm" placeholder="New value" required style="width: 8rem;">
@@ -136,6 +138,7 @@
                             <td>
                                 <form method="POST" action="{{ route('platform.change-requests.store') }}" class="d-flex gap-2">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <input type="hidden" name="target_type" value="ACCESS_POLICY">
                                     <input type="hidden" name="target_id" value="{{ $policy['id'] }}">
                                     <input type="text" name="parameters" class="form-control form-control-sm font-monospace" placeholder='{"key":"value"}' required style="width: 10rem;" value="{{ json_encode($policy['parameters']) }}">
@@ -184,6 +187,7 @@
                                 @if ($change['status'] === 'PENDING')
                                     <form method="POST" action="{{ route('platform.change-requests.decide', $change['id']) }}" class="d-flex gap-2">
                                         @csrf
+                                        <x-idempotency-key/>
                                         <input type="text" name="notes" class="form-control form-control-sm" placeholder="Decision notes" style="width: 10rem;">
                                         <button type="submit" name="decision" value="APPROVE" class="btn btn-sm btn-outline-success text-nowrap">Approve</button>
                                         <button type="submit" name="decision" value="REJECT" class="btn btn-sm btn-outline-danger text-nowrap">Reject</button>
@@ -209,6 +213,7 @@
         <div class="card-body">
             <form method="POST" action="{{ route('platform.staff.store') }}">
                 @csrf
+                <x-idempotency-key/>
                 <div class="row">
                     <div class="col-md-3 mb-3">
                         <label for="external_user_id" class="form-label">External user ID</label>

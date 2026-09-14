@@ -182,6 +182,58 @@ class ReportViewTest extends TestCase
         $this->assertStringStartsWith('text/csv', $download->headers->get('Content-Type'));
     }
 
+    /** RT-012: ReportExportService::requestExport() already had real CommandLedger support -- the bug was ReportViewController passing a fresh Str::uuid() per request instead of a stable per-render key, silently defeating it. Unlike publish/approve/cancel, requestExport has no natural status guard against a duplicate (nothing stops two report_exports rows existing for one run), so this was live-exploitable. */
+    public function test_double_submitting_the_same_rendered_export_request_form_creates_only_one_export(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0014');
+        $this->seedDefinition('NATIONAL_VAT_AGGREGATE', 'OPEN_DATA', 'PUBLIC');
+        $admin = $this->pilotAdmin();
+        $this->actingAs($admin)->post('/reports/NATIONAL_VAT_AGGREGATE/run');
+        $runId = DB::table('report_runs')->where('requested_by', $admin->id)->value('id');
+        $key = (string) Str::uuid();
+
+        $this->actingAs($admin)->post("/reports/runs/{$runId}/export", ['idempotency_key' => $key]);
+        $this->actingAs($admin)->post("/reports/runs/{$runId}/export", ['idempotency_key' => $key]);
+
+        $this->assertSame(1, DB::table('report_exports')->where('report_run_id', $runId)->count());
+    }
+
+    public function test_a_genuinely_new_export_request_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0015');
+        $this->seedDefinition('NATIONAL_VAT_AGGREGATE', 'OPEN_DATA', 'PUBLIC');
+        $admin = $this->pilotAdmin();
+        $this->actingAs($admin)->post('/reports/NATIONAL_VAT_AGGREGATE/run');
+        $runId = DB::table('report_runs')->where('requested_by', $admin->id)->value('id');
+
+        $this->actingAs($admin)->post("/reports/runs/{$runId}/export", ['idempotency_key' => (string) Str::uuid()]);
+        $this->actingAs($admin)->post("/reports/runs/{$runId}/export", ['idempotency_key' => (string) Str::uuid()]);
+
+        $this->assertSame(2, DB::table('report_exports')->where('report_run_id', $runId)->count());
+    }
+
+    /** RT-013: same defeated-CommandLedger bug as RT-012, on DataProductService::runModel() -- no natural guard prevents two analytics_model_runs rows for the same data product/report run pair. */
+    public function test_double_submitting_the_same_rendered_run_model_form_creates_only_one_model_run(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0016');
+        $definitionId = $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'TAX_CONFIDENTIAL');
+        $productId = (string) Str::uuid();
+        DB::table('data_products')->insert([
+            'id' => $productId, 'code' => 'RV_TRENDS3', 'name' => 'RV trends 3', 'description' => 'Test product.',
+            'source_report_definition_id' => $definitionId, 'status' => 'ACTIVE', 'created_at' => now(),
+        ]);
+        $admin = $this->pilotAdmin();
+        $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run');
+        $runId = DB::table('report_runs')->where('requested_by', $admin->id)->value('id');
+        $this->actingAs($admin)->post("/reports/runs/{$runId}/publish");
+        $key = (string) Str::uuid();
+
+        $this->actingAs($admin)->post("/analytics/data-products/{$productId}/run-model", ['idempotency_key' => $key, 'report_run_id' => $runId]);
+        $this->actingAs($admin)->post("/analytics/data-products/{$productId}/run-model", ['idempotency_key' => $key, 'report_run_id' => $runId]);
+
+        $this->assertSame(1, DB::table('analytics_model_runs')->where('data_product_id', $productId)->count());
+    }
+
     public function test_a_sensitive_export_without_a_fresh_step_up_redirects_to_password_confirmation(): void
     {
         $this->makeTaxpayer('VAT-RV-0008');

@@ -98,12 +98,14 @@
                             @if ($run->status === 'COMPLETED_INLINE')
                                 <form method="POST" action="{{ route('reports.publish', $run->id) }}">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <button type="submit" class="btn btn-sm btn-outline-success">Publish</button>
                                 </form>
                             @endif
                             @if (in_array($run->status, ['COMPLETED_INLINE', 'PUBLISHED'], true))
                                 <form method="POST" action="{{ route('reports.export.request', $run->id) }}">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <button type="submit" class="btn btn-sm btn-outline-primary">Request export</button>
                                 </form>
                             @endif
@@ -145,6 +147,7 @@
                             @if ($export->status === 'PENDING_APPROVAL')
                                 <form method="POST" action="{{ route('reports.export.cancel', $export->id) }}">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <input type="hidden" name="reason" value="Cancelled by the requester from the reports console.">
                                     <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
                                 </form>
@@ -186,10 +189,12 @@
                             <td class="d-flex gap-2">
                                 <form method="POST" action="{{ route('reports.export.approve', $export->id) }}">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <button type="submit" class="btn btn-sm btn-outline-success">Approve</button>
                                 </form>
                                 <form method="POST" action="{{ route('reports.export.cancel', $export->id) }}">
                                     @csrf
+                                    <x-idempotency-key/>
                                     <input type="hidden" name="reason" value="Cancelled by a national reviewer from the reports console.">
                                     <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
                                 </form>
@@ -237,6 +242,7 @@
                         <hr>
                         <form method="POST" action="{{ route('reports.analytics.run-model', $product['id']) }}" class="d-flex gap-2 mb-2">
                             @csrf
+                            <x-idempotency-key/>
                             <select class="form-select form-select-sm" name="report_run_id" required>
                                 <option value="" selected disabled>Published run to model</option>
                                 @foreach ($publishedRuns as $run)
@@ -247,6 +253,7 @@
                         </form>
                         <form method="POST" action="{{ route('reports.analytics.publish', $product['id']) }}" class="d-flex gap-2">
                             @csrf
+                            <x-idempotency-key/>
                             <select class="form-select form-select-sm" name="model_run_id" required>
                                 <option value="" selected disabled>Completed model run to publish</option>
                                 @foreach ($publishableModelRuns as $modelRun)
