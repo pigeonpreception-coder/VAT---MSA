@@ -227,4 +227,50 @@ class AuthorityGovernanceTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): AuthorityGovernanceService::
+     * decideOnboardingCase() read the case's status once, validated the
+     * decision against that in-memory value, then wrote the new status
+     * with a plain `where('id', $caseId)->update(...)` -- no re-check that
+     * the row was still in the status it was read as. Two reviewers
+     * deciding the same case at nearly the same moment (one approving,
+     * one rejecting) could both pass their own validation against the
+     * same stale SUBMITTED row.
+     *
+     * A genuinely concurrent double-decide can't be produced by a single
+     * synchronous PHPUnit process, so this simulates the exact race
+     * window: a `DB::listen()` hook fires a real, separate REJECT decision
+     * against the same case the instant after this request's own read
+     * query returns.
+     */
+    public function test_a_decision_that_races_a_concurrent_decision_is_rejected_not_silently_applied(): void
+    {
+        $maker = $this->namraSystemAdmin('maker3@authoritygov.test');
+        $reviewer = $this->authorityAdmin('reviewer3@authoritygov.test');
+        $this->makeAdministrator($maker);
+        $this->makeAdministrator($reviewer);
+        $this->makeCurrentAccessReview();
+        $caseId = $this->actingAs($maker)->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-race-0001'])
+            ->assertStatus(201)->json('onboarding_case.id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $caseId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `tax_authority_onboarding_cases`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('tax_authority_onboarding_cases')->where('id', $caseId)->update(['status' => 'REJECTED']);
+        });
+
+        $response = $this->actingAs($reviewer)->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson("/api/v1/tax-authority-onboarding-cases/{$caseId}/decisions", [
+                'schema_version' => '1.0.0', 'decision' => 'APPROVE_LOCAL_STAGING', 'reason' => 'Reviewed the submitted evidence bundle.',
+            ], ['Idempotency-Key' => 'test-idem-agov-race-0002']);
+
+        $response->assertStatus(409);
+        $this->assertSame('REJECTED', DB::table('tax_authority_onboarding_cases')->where('id', $caseId)->value('status'), 'The concurrent winners status must survive untouched.');
+        $this->assertDatabaseMissing('tax_authority_onboarding_decisions', ['onboarding_case_id' => $caseId, 'decision' => 'APPROVE']);
+    }
 }

@@ -204,13 +204,21 @@ class RefundService
         $fromStatus = $claim->status;
         $eventType = 'RefundClaim'.mb_substr($input['action'], 0, 1).mb_strtolower(str_replace('_', '', mb_substr($input['action'], 1)));
         DB::transaction(function () use ($claim, $claimId, $targetStatus, $nextResumeFrom, $offsetAmountCents, $netPayableCents, $input, $fromStatus, $actor, $now, $idempotencyKey, $requestHash, $correlationId, $eventType) {
-            RefundClaim::where('id', $claimId)->update([
+            $updated = RefundClaim::where('id', $claimId)->where('status', $fromStatus)->update([
                 'status' => $targetStatus, 'resume_status' => $nextResumeFrom,
                 'approved_by' => $targetStatus === 'PAYMENT_PENDING' ? $actor->id : $claim->approved_by,
                 'approved_at' => $targetStatus === 'PAYMENT_PENDING' ? $now : $claim->approved_at,
                 'offset_amount_cents' => $offsetAmountCents ?? $claim->offset_amount_cents,
                 'net_payable_cents' => $netPayableCents ?? $claim->net_payable_cents,
             ]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): a genuine
+                // concurrent transition raced this one and won between the
+                // read above and this guarded UPDATE -- refuse before
+                // recording a transition/command/audit trail that would
+                // claim this action happened when it did not.
+                throw new RepositoryConflictException("Refund claim {$claimId} was changed by another action; reload and try again.");
+            }
             RefundClaimTransition::create([
                 'id' => (string) Str::uuid(), 'refund_claim_id' => $claimId, 'action' => $input['action'],
                 'from_status' => $fromStatus, 'to_status' => $targetStatus, 'actor_id' => $actor->id,
@@ -266,7 +274,12 @@ class RefundService
         $now = now();
         $fromStatus = $claim->status;
         DB::transaction(function () use ($claim, $claimId, $targetStatus, $input, $fromStatus, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
-            RefundClaim::where('id', $claimId)->update(['status' => $targetStatus, 'dispute_reason' => $input['findings']]);
+            $updated = RefundClaim::where('id', $claimId)->where('status', $fromStatus)->update(['status' => $targetStatus, 'dispute_reason' => $input['findings']]);
+            if ($updated === 0) {
+                // Resilience to User Errors pass (2026-09-14): see
+                // transition()'s own comment on the identical guard.
+                throw new RepositoryConflictException("Refund claim {$claimId} was changed by another action; reload and try again.");
+            }
             RefundClaimTransition::create([
                 'id' => (string) Str::uuid(), 'refund_claim_id' => $claimId, 'action' => 'DISPUTE',
                 'from_status' => $fromStatus, 'to_status' => $targetStatus, 'actor_id' => $actor->id,

@@ -7396,3 +7396,47 @@ session driver's own semantics, since the test environment's
 `SESSION_DRIVER=array` can't otherwise exercise this). Full suite: 629
 tests, 0 regressions. Full findings and methodology: `docs/
 RED_TEAM_ASSESSMENT_2026-09-14-AUTHENTICATION-SESSION-ROBUSTNESS.md`.
+
+## Red-team pass, a new phase: Resilience to User Errors (2026-09-14)
+
+Phase 8 of the user's original brief: "a normal user does something out
+of order" failure modes -- missing date-range checks, unbounded field
+values, unhandled exceptions on plausible IDs, and status transitions
+that don't survive two different action buttons clicked from the same
+stale page. A broad recon sweep (delegated to an Explore subagent) found
+every date-range/numeric-bound/format check already correct across all
+17 `Domain/**Validator.php` files, but surfaced one systemically-repeated
+gap.
+
+**RT-020 (High, live-verified):** seven services managing a status/state
+machine (`FixedAssetService`, `LogisticsService`, `AuditCaseService`,
+`RefundService` -- two methods, `RiskService` -- three call sites,
+`AuthorityGovernanceService`, and `InvoiceService::cancel()`) all read a
+resource's status once, validated the action against that in-memory
+value, then wrote the new status with a plain `Model::where('id', $id)->
+update(...)` -- never re-checking the row was still in the status it was
+read as, unlike the ten-plus sibling services elsewhere in this codebase
+(`QuotationService`, `VatLifecycleService`, `WorkflowService`,
+`PlatformChangeService`, etc.) that already guard this correctly.
+`InvoiceService::cancel()` was the most severe instance: its own
+"already cancelled" pre-check only protects a *sequential* double-cancel,
+not a concurrent one, so two overlapping cancellations could each create
+their own reversing `VatTransaction`/`LedgerEntry` pair and double-count
+the VAT reversal on the taxpayer's ledger. A genuinely concurrent
+double-click can't be produced by a single synchronous PHPUnit process,
+so each regression test uses a real `DB::listen()` hook to fire a
+separate, real `UPDATE` against the same row in the exact window between
+the service's own read and write -- reproducing the race without true OS
+concurrency. Fixed by adding the identical `->where('status', ...)` guard
+plus an affected-row check (throwing `RepositoryConflictException`) to
+all nine call sites, matching the codebase's own established pattern
+exactly.
+
+Verified: 7 new permanent regression tests (one per affected service;
+`RiskService`'s other two call sites and `RefundService::dispute()`
+received the identical mechanical fix, verified by code review parity
+rather than a dedicated test each), one of which
+(`FixedAssetViewTest::test_a_status_change_that_races_a_concurrent_transition_is_rejected_not_silently_applied`)
+independently confirmed to fail without the fix by temporarily reverting
+it and re-running. Full suite: 636 tests, 0 regressions. Full findings
+and methodology: `docs/RED_TEAM_ASSESSMENT_2026-09-14-RESILIENCE-TO-USER-ERRORS.md`.

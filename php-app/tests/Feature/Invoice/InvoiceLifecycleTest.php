@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -154,6 +155,48 @@ class InvoiceLifecycleTest extends TestCase
 
         $timeline = $this->actingAs($ctx['supplier']['owner'])->getJson("/api/v1/invoices/{$ctx['invoiceId']}/transaction-timeline");
         $timeline->assertStatus(200)->assertJsonCount(2, 'events');
+    }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): the test above proves
+     * cancel() is idempotent for a *sequential* double-cancel (the second
+     * call reads status=CANCELLED and short-circuits before writing
+     * anything). It does not prove the genuinely concurrent case: two
+     * overlapping cancel() calls on the same still-active invoice could
+     * both pass that pre-check before either commits, and (pre-fix) both
+     * would then create their own reversing VatTransaction/LedgerEntry
+     * pair -- double-counting the VAT reversal. Simulated the same way as
+     * this pass's other race regression tests: a `DB::listen()` hook fires
+     * a real, separate cancel the instant after this request's own read
+     * query returns.
+     */
+    public function test_a_cancellation_that_races_a_concurrent_cancellation_does_not_double_reverse_the_ledger(): void
+    {
+        $ctx = $this->certifyInvoice();
+        $admin = $this->pilotAdmin();
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $ctx) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `invoices`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('invoices')->where('id', $ctx['invoiceId'])->update(['status' => 'CANCELLED']);
+            DB::table('vat_transactions')->insert([
+                'id' => (string) Str::uuid(), 'invoice_id' => $ctx['invoiceId'], 'taxpayer_id' => $ctx['supplier']['taxpayer']->id,
+                'transaction_type' => 'CANCELLATION', 'reference_transaction_id' => null, 'created_at' => now(),
+            ]);
+        });
+
+        $response = $this->actingAs($admin)
+            ->withSession(['auth.password_confirmed_at' => time()])
+            ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Concurrent cancellation attempt.']);
+
+        $response->assertStatus(409);
+        // Only the concurrent winners own CANCELLATION transaction should exist -- not a second, doubled reversal.
+        $this->assertDatabaseCount('vat_transactions', 2);
+        // The concurrent winner reversed once; this request must not have added a second reversal.
+        $this->assertDatabaseCount('ledger_entries', 2);
     }
 
     public function test_cancellation_requires_permission_a_valid_reason_and_step_up_confirmation(): void

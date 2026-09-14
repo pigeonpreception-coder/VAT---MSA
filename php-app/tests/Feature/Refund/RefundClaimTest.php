@@ -14,6 +14,7 @@ use Database\Seeders\RoleSeeder;
 use Database\Seeders\TaxRuleSetSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -298,5 +299,53 @@ class RefundClaimTest extends TestCase
             'schema_version' => '1.0.0', 'action' => 'RESOLVE_DISPUTE_UPHOLD', 'findings' => 'Original rejection stands on review.',
         ], ['Idempotency-Key' => 'uphold-'.Str::random(20)]);
         $upheld->assertStatus(200)->assertJsonPath('resource.status', 'CLOSED');
+    }
+
+    /**
+     * Resilience to User Errors pass (2026-09-14): RefundService::
+     * transition() read the claim's status once, validated the requested
+     * action against that in-memory value, then wrote the new status (plus
+     * several other conditionally-set columns) with a plain
+     * `where('id', $claimId)->update(...)` -- no re-check that the row was
+     * still in the status it was read as. Two different officers clicking
+     * two different action buttons from the same stale claim page (e.g.
+     * "Approve" then "Reject", both valid from RECEIVED) could both pass
+     * their own validation against the same stale row.
+     *
+     * A genuinely concurrent double-click can't be produced by a single
+     * synchronous PHPUnit process, so this simulates the exact race
+     * window: a `DB::listen()` hook fires a real, separate REJECT against
+     * the same claim the instant after transition()'s own read query
+     * returns.
+     */
+    public function test_a_refund_claim_status_change_that_races_a_concurrent_transition_is_rejected_not_silently_applied(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-SUP-2003');
+        $customer = $this->makeTradingParty('VAT-CUS-2003');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        VatReturnVersion::where('id', $version->id)->update(['status' => 'FILED']);
+
+        $claimId = $this->actingAs($customer['owner'])->postJson('/api/v1/refunds', [
+            'schema_version' => '1.0.0', 'vat_return_version_id' => $version->id,
+        ], ['Idempotency-Key' => 'race-refund-'.Str::random(20)])->json('resource.id');
+        $this->assertDatabaseHas('refund_claims', ['id' => $claimId, 'status' => 'RECEIVED']);
+
+        $officer = $this->makeRefundOfficer();
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $claimId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `refund_claims`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('refund_claims')->where('id', $claimId)->update(['status' => 'REJECTED']);
+        });
+
+        $response = $this->actingAs($officer)->postJson("/api/v1/refunds/{$claimId}/transition", [
+            'schema_version' => '1.0.0', 'action' => 'APPROVE', 'findings' => 'Risk screen clean.',
+        ], ['Idempotency-Key' => 'race-approve-'.Str::random(20)]);
+
+        $response->assertStatus(409);
+        $this->assertSame('REJECTED', DB::table('refund_claims')->where('id', $claimId)->value('status'), 'The concurrent winners status must survive untouched.');
+        $this->assertDatabaseMissing('refund_claim_transitions', ['refund_claim_id' => $claimId, 'action' => 'APPROVE']);
     }
 }
