@@ -125,7 +125,16 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'invoice-management') show @endif" id="group-invoice-management" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'invoices:read')
                                 <li><a class="nav-link" href="{{ route('invoice-management.local') }}" @if (request()->routeIs('invoice-management.local')) aria-current="page" @endif>Local Invoices</a></li>
+                            @endcan
+                            {{-- UX Failure Discovery pass (2026-09-14): ForeignInvoiceViewController::index()
+                                 requires imports:read (it pulls customs/E-Tariff import records), not
+                                 invoices:read -- several roles (NAMRA_VAT_AUDITOR, NAMRA_VAT_SUPERVISOR,
+                                 NAMRA_COMPLIANCE_OFFICER, TAXPAYER_STAFF, SELLER_*) hold invoices:read
+                                 without imports:read, so this link was rendered and then 403'd on click. --}}
+                            @can('permission', 'imports:read')
                                 <li><a class="nav-link" href="{{ route('invoice-management.foreign') }}" @if (request()->routeIs('invoice-management.foreign')) aria-current="page" @endif>Foreign Invoices</a></li>
+                            @endcan
+                            @can('permission', 'invoices:read')
                                 <li><a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>All Invoices</a></li>
                             @endcan
                         </ul>
@@ -155,10 +164,26 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'operations') show @endif" id="group-operations" data-bs-parent="#sidebar-accordion">
                             @can('permission', 'expenses:read')
                                 <li><a class="nav-link" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.index')) aria-current="page" @endif>Expenses, Inventory &amp; Project Register</a></li>
+                            @endcan
+                            {{-- UX Failure Discovery pass (2026-09-14): the four links below were all
+                                 gated on expenses:read, but their controllers actually require
+                                 employees:read/fixed-assets:read/logistics:read -- several roles
+                                 (TAXPAYER_STAFF, TAXPAYER_VIEWER, TAXPAYER_ACCOUNTANT, BUYER_ADMIN,
+                                 BUYER_USER) hold expenses:read without one or more of those, so these
+                                 links were rendered and then 403'd on click. Live-confirmed via a
+                                 full-sidebar Playwright crawl. Each is now gated on its own actual
+                                 required permission. --}}
+                            @can('permission', 'employees:read')
                                 <li><a class="nav-link" href="{{ route('operations.human-resources') }}" @if (request()->routeIs('operations.human-resources')) aria-current="page" @endif>Human Resources Module</a></li>
+                            @endcan
+                            @can('permission', 'fixed-assets:read')
                                 <li><a class="nav-link" href="{{ route('operations.immovable-assets') }}" @if (request()->routeIs('operations.immovable-assets')) aria-current="page" @endif>Immovable Asset Management</a></li>
                                 <li><a class="nav-link" href="{{ route('operations.movable-assets') }}" @if (request()->routeIs('operations.movable-assets')) aria-current="page" @endif>Movable Asset Management</a></li>
+                            @endcan
+                            @can('permission', 'logistics:read')
                                 <li><a class="nav-link" href="{{ route('operations.logistics') }}" @if (request()->routeIs('operations.logistics')) aria-current="page" @endif>Logistics Module</a></li>
+                            @endcan
+                            @can('permission', 'expenses:read')
                                 <li><a class="nav-link" href="{{ route('operations.erp') }}" @if (request()->routeIs('operations.erp')) aria-current="page" @endif>ERP Module</a></li>
                             @endcan
                         </ul>
