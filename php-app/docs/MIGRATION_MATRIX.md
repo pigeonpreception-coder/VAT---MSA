@@ -7475,3 +7475,51 @@ holding everything still sees and can use everything). Full suite: 642
 tests, 0 regressions. Full findings and methodology (including a
 methodology self-correction on computing a role's true effective
 permission set): `docs/RED_TEAM_ASSESSMENT_2026-09-14-UX-FAILURE-DISCOVERY.md`.
+
+## Red-team pass: Concurrent User Simulation, High Interaction Stress, Performance Under Heavy Use (2026-09-14)
+
+Phases 5-7 of the user's original brief, previously treated as infeasible
+in every earlier pass because PHP's built-in `artisan serve` dev server
+handles one request at a time. This pass first unblocks that: PHP's
+built-in server supports genuine multi-process concurrency via
+`PHP_CLI_SERVER_WORKERS`, reachable by replicating `artisan serve`'s own
+underlying `php -S` invocation directly (`artisan serve` itself fails to
+pass the variable through to its child process -- a Symfony Process
+quirk, not an app issue). With a real 8-worker server running, genuinely
+simultaneous `curl` requests were fired at a live instance for all three
+phases.
+
+**Every scenario tested came back as a positive control -- no new code
+fix was needed.** RT-020's guarded-UPDATE pattern (from the prior
+Resilience pass) was re-confirmed under true concurrency, not just
+simulation, and its row lock was found to incidentally also close the
+`CommandLedger` idempotency-key race for every guarded call site. A
+plain-CREATE action with no prior guarded UPDATE
+(`FixedAssetService::register()`) was specifically targeted next, since
+the reasoning above predicts it should remain exposed -- confirmed live:
+a real `UniqueConstraintViolationException` occurs under a genuine
+duplicate-`asset_code` race. But the losing request's response was
+already a clean, friendly redirect, not a raw SQL leak or a 500 --
+`bootstrap/app.php` already carries a global `QueryException` handler
+from an earlier pass (RT-001, 2026-09-09) that catches any SQLSTATE
+23000 duplicate-entry violation *anywhere in the app* and converts it
+generically, which already covers this exact race (and every other
+plain-CREATE action with its own unique constraint, not only fixed
+assets). High Interaction Stress testing found the same result for the
+realistic "double-click submit" case: the existing `<x-idempotency-key/>`
+component bakes a fixed key into each rendered form, so a double-click
+always replays the identical key, landing in the same already-verified-
+safe path. A 20-request concurrent burst against the dashboard completed
+with zero errors. The one honest gap: this dev environment's seed data
+is too small to meaningfully test query performance/N+1 behavior at
+production scale -- flagged as a real limitation rather than glossed
+over.
+
+Verified: one new permanent regression test
+(`FixedAssetViewTest::test_a_genuine_concurrent_registration_race_that_bypasses_the_pre_check_is_still_a_friendly_conflict`)
+covering the plain-CREATE race via the established `DB::listen()`-
+simulation technique, exercised at the HTTP layer so `bootstrap/app.php`'s
+render() callback is the thing actually under test. Full suite: 643
+tests, 0 regressions. Full findings and methodology (including the
+`PHP_CLI_SERVER_WORKERS` true-concurrency technique, reusable by any
+future pass): `docs/RED_TEAM_ASSESSMENT_2026-09-14-CONCURRENT-USER-SIMULATION.md`.
