@@ -120,6 +120,7 @@
                 <div class="card-body">
                     <form method="POST" action="{{ route('administration.roles.store') }}">
                         @csrf
+                        <x-idempotency-key/>
                         <div class="mb-3">
                             <label for="name" class="form-label">Role name</label>
                             <input type="text" class="form-control" id="name" name="name" required maxlength="80" placeholder="Branch VAT Reviewer" value="{{ old('name') }}">

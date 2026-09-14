@@ -155,8 +155,16 @@ class PlatformChangeService
         $now = now();
         $newStatus = $input['decision'] === 'APPROVE' ? 'APPLIED' : 'REJECTED';
         DB::transaction(function () use ($changeRequestId, $row, $input, $newStatus, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
-            DB::table('change_requests')->where('id', $changeRequestId)->where('status', 'PENDING')
+            $decided = DB::table('change_requests')->where('id', $changeRequestId)->where('status', 'PENDING')
                 ->update(['status' => $newStatus, 'decided_by' => $actor->id, 'decided_at' => $now, 'decision_notes' => $input['notes']]);
+            if ($decided === 0) {
+                // A genuine concurrent decide raced this one and won between
+                // the pre-check above and this guarded UPDATE -- refuse
+                // before applying the target value or recording anything,
+                // rather than double-applying/double-auditing a decision
+                // that already happened.
+                throw new RepositoryConflictException('Only a pending change request can be decided.');
+            }
             if ($input['decision'] === 'APPROVE') {
                 $proposed = json_decode($row->proposed_value, true) ?? [];
                 if ($row->target_type === 'FEATURE_FLAG') {

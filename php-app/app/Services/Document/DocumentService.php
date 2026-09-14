@@ -83,9 +83,16 @@ class DocumentService
      * that file's own exported normalizers use), so this mirrors that
      * placement rather than inventing a normalizer the source doesn't have.
      *
+     * RT-014: originally had no idempotency-key support at all -- a
+     * double-submit of the upload form wrote two separate files to disk
+     * and created two QUARANTINED rows needing two independent scan
+     * decisions. Guarded like every other write command in this codebase:
+     * the request hash covers the file's own checksum (not its raw bytes),
+     * so a recognised replay short-circuits before ever touching disk.
+     *
      * @return array<string, mixed>
      */
-    public function upload(UploadedFile $file, array $input, User $actor, ?string $requestedOrganisationId, string $correlationId): array
+    public function upload(UploadedFile $file, array $input, User $actor, ?string $requestedOrganisationId, string $idempotencyKey, string $correlationId): array
     {
         $scope = $this->organisations->resolve($actor, $requestedOrganisationId);
 
@@ -102,7 +109,16 @@ class DocumentService
             throw new PlatformResourceException('Document classification is invalid.');
         }
 
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         ['bytes' => $bytes, 'checksum' => $checksum, 'fileName' => $fileName] = $this->validateAndHashFile($file);
+
+        $requestHash = CommandLedger::requestHash([
+            'owner_domain' => $ownerDomain, 'owner_resource_id' => $ownerResourceId, 'classification' => $classification, 'checksum' => $checksum,
+        ]);
+        $prior = CommandLedger::prior($actor->id, 'UPLOAD_DOCUMENT', $idempotencyKey, $requestHash);
+        if ($prior) {
+            return $this->present(DocumentMetadata::findOrFail($prior));
+        }
 
         $id = (string) Str::uuid();
         $objectKey = "quarantine/{$scope->id}/{$id}/{$fileName}";
@@ -110,7 +126,7 @@ class DocumentService
 
         $this->disk()->put($objectKey, $bytes);
         try {
-            DB::transaction(function () use ($id, $scope, $ownerDomain, $ownerResourceId, $objectKey, $fileName, $file, $checksum, $classification, $actor, $now, $correlationId) {
+            DB::transaction(function () use ($id, $scope, $ownerDomain, $ownerResourceId, $objectKey, $fileName, $file, $checksum, $classification, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
                 DocumentMetadata::create([
                     'id' => $id, 'organisation_id' => $scope->id, 'owner_domain' => $ownerDomain, 'owner_resource_id' => $ownerResourceId,
                     'object_key' => $objectKey, 'file_name' => $fileName, 'content_type' => $file->getClientMimeType(), 'size_bytes' => $file->getSize(),
@@ -118,6 +134,7 @@ class DocumentService
                     'status' => 'QUARANTINED', 'uploaded_by' => $actor->id, 'uploaded_at' => $now, 'retained_until' => null,
                     'legal_hold' => false, 'scanned_by' => null, 'scanned_at' => null, 'supersedes_document_id' => null,
                 ]);
+                CommandLedger::record($actor->id, 'UPLOAD_DOCUMENT', $idempotencyKey, $requestHash, 'DOCUMENT', $id, $now);
                 CommandLedger::outbox('DOCUMENT', $id, 'DocumentQuarantined', $scope->taxpayer_id, ['document_id' => $id, 'owner_domain' => $ownerDomain, 'owner_resource_id' => $ownerResourceId, 'correlation_id' => $correlationId], $now);
                 AuditService::append($actor, 'DOCUMENT_QUARANTINED', 'DOCUMENT', $id, ['organisationId' => $scope->id, 'ownerDomain' => $ownerDomain, 'ownerResourceId' => $ownerResourceId, 'checksum' => $checksum, 'correlationId' => $correlationId], $now);
             });

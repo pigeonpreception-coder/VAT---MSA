@@ -137,6 +137,32 @@ class ReportViewTest extends TestCase
         $this->assertDatabaseHas('report_runs', ['status' => 'COMPLETED_INLINE', 'requested_by' => $admin->id]);
     }
 
+    /** RT-015: ReportExportService::runInline() originally had no idempotency-key support at all -- a double-submit of "Run report" created two duplicate COMPLETED_INLINE rows. */
+    public function test_double_submitting_the_same_rendered_run_form_creates_only_one_report_run(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0018');
+        $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'TAX_CONFIDENTIAL');
+        $admin = $this->pilotAdmin();
+        $key = (string) Str::uuid();
+
+        $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run', ['idempotency_key' => $key]);
+        $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run', ['idempotency_key' => $key]);
+
+        $this->assertSame(1, DB::table('report_runs')->where('requested_by', $admin->id)->count());
+    }
+
+    public function test_a_genuinely_new_run_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0019');
+        $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'TAX_CONFIDENTIAL');
+        $admin = $this->pilotAdmin();
+
+        $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run', ['idempotency_key' => (string) Str::uuid()]);
+        $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run', ['idempotency_key' => (string) Str::uuid()]);
+
+        $this->assertSame(2, DB::table('report_runs')->where('requested_by', $admin->id)->count());
+    }
+
     public function test_case_evidence_summary_without_a_case_id_is_refused(): void
     {
         $this->makeTaxpayer('VAT-RV-0005');

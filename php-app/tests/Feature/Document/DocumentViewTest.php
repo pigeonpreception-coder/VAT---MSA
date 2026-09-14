@@ -122,6 +122,38 @@ class DocumentViewTest extends TestCase
         ]);
     }
 
+    /** RT-014: DocumentService::upload() originally had no idempotency-key support at all -- a double-submit wrote two separate files to disk and created two QUARANTINED rows. */
+    public function test_double_submitting_the_same_rendered_upload_form_quarantines_only_one_document(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0006');
+        $bytes = $this->minimalPdfBytes();
+        $payload = [
+            'idempotency_key' => (string) Str::uuid(), 'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'exp-0006', 'classification' => 'TAX_CONFIDENTIAL',
+        ];
+
+        $this->actingAs($org['owner'])->post('/documents', $payload + ['file' => $this->fakeUpload($bytes, 'application/pdf')]);
+        $this->actingAs($org['owner'])->post('/documents', $payload + ['file' => $this->fakeUpload($bytes, 'application/pdf')]);
+
+        $this->assertSame(1, DocumentMetadata::where('organisation_id', $org['organisation']->id)->where('owner_resource_id', 'exp-0006')->count());
+    }
+
+    public function test_a_genuinely_new_upload_after_a_new_page_load_is_not_treated_as_a_replay(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0007');
+        $bytes = $this->minimalPdfBytes();
+
+        $this->actingAs($org['owner'])->post('/documents', [
+            'idempotency_key' => (string) Str::uuid(), 'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'exp-0007', 'classification' => 'TAX_CONFIDENTIAL',
+            'file' => $this->fakeUpload($bytes, 'application/pdf'),
+        ]);
+        $this->actingAs($org['owner'])->post('/documents', [
+            'idempotency_key' => (string) Str::uuid(), 'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'exp-0007', 'classification' => 'TAX_CONFIDENTIAL',
+            'file' => $this->fakeUpload($bytes, 'application/pdf'),
+        ]);
+
+        $this->assertSame(2, DocumentMetadata::where('organisation_id', $org['organisation']->id)->where('owner_resource_id', 'exp-0007')->count());
+    }
+
     public function test_a_role_without_documents_upload_cannot_upload(): void
     {
         $org = $this->makeOrganisation('VAT-SELLER-0003');

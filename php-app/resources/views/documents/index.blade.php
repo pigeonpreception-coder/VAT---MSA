@@ -63,6 +63,7 @@
         <div class="card-body">
             <form method="POST" action="{{ route('documents.store') }}" enctype="multipart/form-data">
                 @csrf
+                <x-idempotency-key/>
                 <div class="row">
                     <div class="col-md-4 mb-3">
                         <label for="owner_domain" class="form-label">Evidence domain</label>

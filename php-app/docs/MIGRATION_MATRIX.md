@@ -7168,3 +7168,60 @@ family as `publishWorkflowVersion()`'s own hardened instance, not
 independently reproducible in this environment). Full findings,
 reproduction evidence, and engineering detail: `docs/
 RED_TEAM_ASSESSMENT_2026-09-14-DEFEATED-IDEMPOTENCY-SWEEP.md`.
+
+## Red-team pass, closing out the series: the remaining follow-up gaps (2026-09-14)
+
+The three items the pass above explicitly named as not-fixed follow-ups,
+plus the one hardening pattern it flagged without applying everywhere it
+appeared. With this pass, every open item named across the whole
+2026-09-13/2026-09-14 duplicate-submission series is closed.
+
+**RT-014 (Medium):** `DocumentService::upload()` had no idempotency
+support at all -- a double-submit wrote **two separate files to disk**
+and created two `QUARANTINED` `document_metadata` rows. Live-reproduced
+and re-verified fixed against a running instance (`doc_rows` 0 → 2 → 1).
+The request hash covers the file's own SHA-256 checksum, so a recognised
+replay short-circuits before ever touching disk. The JSON API
+(`DocumentController::store()`) now requires a real `Idempotency-Key`
+header, matching `completeScan()`/`setRetentionHold()`'s own existing
+convention in the same controller; 16 pre-existing test call sites in
+`DocumentTest.php` and 4 in `PlatformSnapshotTest.php` updated.
+
+**RT-015 (Low):** `ReportExportService::runInline()` had no idempotency
+support -- a double-submit created two duplicate `COMPLETED_INLINE`
+`report_runs` rows. Lowest severity in the series: a run is read-only
+until `publish()`, which is already guarded. Fixed the same way; 36
+pre-existing `POST /api/v1/reports/{code}/runs` test call sites updated
+with a real header.
+
+**RT-016 (Medium):** `OrganisationAdminService::createOrganisationRole()`
+had no idempotency support and, deliberately, no uniqueness guard on
+`name` either -- `version` intentionally increments on a genuinely new
+same-name resubmission (this codebase's own versioning design, not a
+bug), so a uniqueness check would have broken legitimate role revisions.
+`CommandLedger` distinguishes the two cases correctly instead: an exact
+replay returns the existing role; a genuinely new request (different
+permissions, different key) still versions normally. Without the fix, a
+double-click minted two indistinguishable `ACTIVE` versions of the same
+role -- a governance/RBAC-catalogue duplication in the same family as
+RT-009.
+
+**Hardening, completing a pattern from the prior pass:** the
+"unconditional side effect after a guarded UPDATE" latent race
+`publishWorkflowVersion()` was hardened against on 2026-09-13 was found,
+as flagged then, to also exist in `PlatformChangeService::decideChange()`
+and `ReportExportService::publish()`/`approveExport()`/`cancelExport()`.
+All four now check their guarded UPDATE's own affected-row count before
+running any target mutation, ledger record, outbox event, or audit entry
+-- not independently live-reproducible in this single-worker dev
+environment (same reasoning as `publishWorkflowVersion()`'s own case),
+fixed regardless as a one-line, strictly-more-correct change.
+
+Verified: 6 new regression tests across `DocumentViewTest.php`,
+`ReportViewTest.php`, and `AdministrationViewTest.php`. Full suite: 623
+tests, 0 regressions. RT-014 re-verified live against a running instance
+with the exact original reproduction steps; RT-015/RT-016 verified via
+the equally-rigorous real PHPUnit/MySQL suite (the more direct path given
+the demo report/role fixtures already in place from the same day's
+earlier work). Full findings, reproduction evidence, and engineering
+detail: `docs/RED_TEAM_ASSESSMENT_2026-09-14-REMAINING-GAPS.md`.

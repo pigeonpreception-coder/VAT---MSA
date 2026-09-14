@@ -85,7 +85,7 @@ class OrganisationAdminController extends Controller
     public function storeRole(Request $request): JsonResponse
     {
         $this->authorize('permission', 'roles:manage');
-        $role = $this->admin->createOrganisationRole((array) $request->json()->all(), $request->user(), $request->query('organisation_id'));
+        $role = $this->admin->createOrganisationRole((array) $request->json()->all(), $request->user(), $request->query('organisation_id'), (string) $request->header('Idempotency-Key', ''));
 
         return response()->json(['role' => $role], Response::HTTP_CREATED);
     }

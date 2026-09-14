@@ -98,7 +98,7 @@ class DocumentTest extends TestCase
         $response = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'expense', 'owner_resource_id' => 'expense-0001', 'classification' => 'confidential',
             'file' => $this->fakeUpload($bytes, 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0001']);
 
         $response->assertStatus(201)
             ->assertJsonPath('document.status', 'QUARANTINED')
@@ -131,7 +131,7 @@ class DocumentTest extends TestCase
         $response = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0002', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($pngBytes, 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0002']);
 
         $response->assertStatus(415);
         $this->assertDatabaseCount('document_metadata', 0);
@@ -145,7 +145,7 @@ class DocumentTest extends TestCase
         $response = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0003', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload('plain text content', 'text/plain', 'notes.txt'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0003']);
 
         $response->assertStatus(415);
     }
@@ -158,13 +158,13 @@ class DocumentTest extends TestCase
         $empty = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0004a', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload('', 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0004a']);
         $empty->assertStatus(413);
 
         $oversized = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0004b', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload("%PDF-1.4\n".str_repeat('A', 10_485_760), 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0004b']);
         $oversized->assertStatus(413);
     }
 
@@ -177,13 +177,13 @@ class DocumentTest extends TestCase
         $badDomain = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'NOT_A_REAL_DOMAIN', 'owner_resource_id' => 'expense-0005', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($bytes, 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0005a']);
         $badDomain->assertStatus(422);
 
         $badClassification = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0005', 'classification' => 'NOT_A_REAL_CLASSIFICATION',
             'file' => $this->fakeUpload($bytes, 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0005b']);
         $badClassification->assertStatus(422);
     }
 
@@ -194,7 +194,7 @@ class DocumentTest extends TestCase
         $upload = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0006', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0006'])->json('document.id');
 
         // The uploading taxpayer has documents:upload but not documents:manage.
         $denied = $this->actingAs($owner)->postJson("/api/v1/documents/{$upload}/scan-result",
@@ -211,11 +211,11 @@ class DocumentTest extends TestCase
         $cleanId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0007a', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0007a'])->json('document.id');
         $infectedId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0007b', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0007b'])->json('document.id');
 
         $clean = $this->actingAs($admin)->postJson("/api/v1/documents/{$cleanId}/scan-result",
             ['schema_version' => '1.0.0', 'outcome' => 'clean'], ['Idempotency-Key' => 'test-idem-scan-clean-0001']);
@@ -250,7 +250,7 @@ class DocumentTest extends TestCase
         $documentId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'AUDIT_CASE', 'owner_resource_id' => 'audit-0008', 'classification' => 'TAX_CONFIDENTIAL',
             'file' => $this->fakeUpload($bytes, 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0008'])->json('document.id');
 
         $caseResponse = $this->actingAs($auditor)->postJson('/api/v1/audit-cases', [
             'schema_version' => '1.0.0', 'taxpayer_id' => $tp['taxpayer']->id, 'case_type' => 'VAT_AUDIT',
@@ -304,7 +304,7 @@ class DocumentTest extends TestCase
         $id = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => $ownerResourceId, 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-active-upload-'.Str::random(20)])->json('document.id');
         $this->actingAs($admin)->postJson("/api/v1/documents/{$id}/scan-result",
             ['schema_version' => '1.0.0', 'outcome' => 'CLEAN'], ['Idempotency-Key' => 'test-idem-active-'.Str::random(20)])->assertStatus(200);
 
@@ -344,7 +344,7 @@ class DocumentTest extends TestCase
         $quarantinedId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0010', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0010'])->json('document.id');
 
         $conflict = $this->actingAs($owner)->post("/api/v1/documents/{$quarantinedId}/supersession", [
             'file' => $this->fakeUpload("%PDF-1.4\n%replacement\n%%EOF", 'application/pdf'),
@@ -439,7 +439,7 @@ class DocumentTest extends TestCase
         $quarantinedId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0015', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($bytes, 'application/pdf', 'evidence.pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0015'])->json('document.id');
 
         $tooSoon = $this->actingAs($owner)->get("/api/v1/documents/{$quarantinedId}/download");
         $tooSoon->assertStatus(409);
@@ -463,7 +463,7 @@ class DocumentTest extends TestCase
         $infectedId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0016', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-upload-0016'])->json('document.id');
         $this->actingAs($admin)->postJson("/api/v1/documents/{$infectedId}/scan-result",
             ['schema_version' => '1.0.0', 'outcome' => 'INFECTED'], ['Idempotency-Key' => 'test-idem-download-infected-0016'])->assertStatus(200);
 
@@ -490,7 +490,7 @@ class DocumentTest extends TestCase
         $response = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-0017', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($bytes, 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-upload-0017']);
         $response->assertStatus(201);
 
         $documentId = $response->json('document.id');

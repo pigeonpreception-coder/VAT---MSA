@@ -44,7 +44,7 @@ class DocumentController extends Controller
         ];
         $organisationId = $request->input('organisation_id') ?: null;
 
-        $document = $this->documents->upload($file, $input, $request->user(), $organisationId, $correlationId);
+        $document = $this->documents->upload($file, $input, $request->user(), $organisationId, (string) $request->header('Idempotency-Key', ''), $correlationId);
 
         return response()->json([
             'document' => $document,

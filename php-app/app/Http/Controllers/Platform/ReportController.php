@@ -25,7 +25,7 @@ class ReportController extends Controller
     public function run(Request $request, string $code): JsonResponse
     {
         $this->authorize('permission', 'reports:run');
-        $result = $this->reports->runInline($code, (array) $request->json()->all(), $request->user());
+        $result = $this->reports->runInline($code, (array) $request->json()->all(), $request->user(), (string) $request->header('Idempotency-Key', ''));
 
         return response()->json(['report_run' => $result], Response::HTTP_CREATED);
     }

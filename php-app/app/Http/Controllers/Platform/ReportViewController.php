@@ -113,7 +113,7 @@ class ReportViewController extends Controller
         $parameters = array_filter(['case_id' => $request->input('case_id')], fn ($v) => $v !== null && $v !== '');
 
         try {
-            $this->reports->runInline($code, $parameters, $request->user());
+            $this->reports->runInline($code, $parameters, $request->user(), $this->formIdempotencyKey($request));
         } catch (PlatformValidationException $e) {
             return redirect()->route('reports.index')->withErrors(collect($e->errors())->pluck('message', 'path')->all());
         } catch (PlatformResourceException|RepositoryConflictException|AuthorizationException $e) {

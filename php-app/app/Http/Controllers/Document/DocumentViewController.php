@@ -82,7 +82,7 @@ class DocumentViewController extends Controller
         ];
 
         try {
-            $document = $this->documents->upload($file, $input, $request->user(), null, (string) Str::uuid());
+            $document = $this->documents->upload($file, $input, $request->user(), null, $this->formIdempotencyKey($request), (string) Str::uuid());
         } catch (PlatformResourceException|RepositoryConflictException $e) {
             return redirect()->route('documents.index', $prefill)->withErrors(['file' => $e->getMessage()])->withInput();
         }
