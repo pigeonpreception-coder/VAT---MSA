@@ -122,6 +122,28 @@ class QuotationViewTest extends TestCase
         $this->assertDatabaseHas('quotations', ['quotation_number' => 'QUO-VIEW-0001', 'status' => 'DRAFT', 'total_cents' => 115000]);
     }
 
+    /**
+     * Input Validation & Robustness pass (2026-09-14): createPayload()
+     * used to `(int) $request->input('unit_price_cents', 0)` and
+     * `(int) round((float) $request->input('quantity', 0) * 1_000_000)`
+     * before validation -- a non-numeric submission silently coerced to
+     * 0 rather than being rejected. Now rejected cleanly via
+     * Controller::safeIntegerInput()/safeMicrosInput().
+     */
+    public function test_a_non_numeric_unit_price_or_quantity_is_rejected_not_silently_zeroed(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0002B');
+        $customerPartyId = $this->createCustomerParty($seller['owner']);
+
+        $response = $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, [
+            'quotation_number' => 'QUO-NAN-0001', 'unit_price_cents' => 'not-a-number', 'quantity' => 'also-not-a-number',
+        ]));
+
+        $response->assertRedirect('/quotations');
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseMissing('quotations', ['quotation_number' => 'QUO-NAN-0001']);
+    }
+
     public function test_a_role_without_quotations_manage_cannot_issue_a_quotation(): void
     {
         $seller = $this->makeOrganisation('VAT-SELLER-0003');

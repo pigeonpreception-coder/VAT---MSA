@@ -87,6 +87,29 @@ class FixedAssetViewTest extends TestCase
         $movable->assertOk()->assertDontSee('BLD-001');
     }
 
+    /**
+     * Input Validation & Robustness pass (2026-09-14): store() used to
+     * `(int) $request->input('acquisition_cost_cents', 0)` before
+     * validation -- a non-numeric submission silently coerced to 0
+     * rather than being rejected. Now rejected cleanly via
+     * Controller::safeIntegerInput().
+     */
+    public function test_a_non_numeric_acquisition_cost_is_rejected_not_silently_zeroed(): void
+    {
+        $org = $this->makeOrganisation('VAT-FA-0002B');
+
+        $response = $this->actingAs($org['owner'])->post('/operations/fixed-assets', [
+            'asset_class' => 'IMMOVABLE', 'asset_code' => 'BLD-NAN-001', 'category' => 'BUILDING',
+            'description' => 'Fat-fingered cost', 'location_or_address' => '10 Independence Ave, Windhoek',
+            'acquisition_date' => '2020-01-15', 'acquisition_cost_cents' => 'not-a-number',
+            'return_to' => 'operations.immovable-assets',
+        ]);
+
+        $response->assertRedirect(route('operations.immovable-assets'));
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseMissing('fixed_assets', ['asset_code' => 'BLD-NAN-001']);
+    }
+
     public function test_a_duplicate_asset_code_is_a_friendly_form_error_not_a_raw_409(): void
     {
         $org = $this->makeOrganisation('VAT-FA-0003');

@@ -66,9 +66,9 @@ class FixedAssetViewController extends Controller
             'location_or_address' => $request->input('location_or_address'),
             'custodian_employee_id' => $request->input('custodian_employee_id') ?: null,
             'acquisition_date' => $request->input('acquisition_date'),
-            'acquisition_cost_cents' => (int) $request->input('acquisition_cost_cents', 0),
+            'acquisition_cost_cents' => $this->safeIntegerInput($request->input('acquisition_cost_cents')),
             'current_value_cents' => $request->input('current_value_cents') !== null && $request->input('current_value_cents') !== ''
-                ? (int) $request->input('current_value_cents') : null,
+                ? $this->safeIntegerInput($request->input('current_value_cents')) : null,
         ];
 
         try {
@@ -85,7 +85,7 @@ class FixedAssetViewController extends Controller
     public function valuation(Request $request, string $id): RedirectResponse
     {
         $this->authorize('permission', 'fixed-assets:manage');
-        $payload = ['schema_version' => '1.0.0', 'current_value_cents' => (int) $request->input('current_value_cents', 0)];
+        $payload = ['schema_version' => '1.0.0', 'current_value_cents' => $this->safeIntegerInput($request->input('current_value_cents'))];
 
         return $this->runTransition($request, fn () => $this->assets->recordValuation($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid()), 'Valuation recorded.');
     }
