@@ -7347,3 +7347,52 @@ Verified: 1 new permanent regression test
 (`InvoiceCertificationTest::test_a_self_dealing_invoice_where_supplier_and_customer_are_the_same_taxpayer_is_rejected`).
 Full suite: 628 tests, 0 regressions. Full findings and methodology:
 `docs/RED_TEAM_ASSESSMENT_2026-09-14-FRAUD-RESISTANCE.md`.
+
+## Red-team pass, a new phase: Authentication & Session Robustness (2026-09-14)
+
+Phase 7 of the user's original brief: how resilient is an existing
+session to the events that should end it early -- a password reset
+prompted by suspected compromise, and an administrative account
+suspension mid-session.
+
+**RT-019 (High, live-verified):** `ResetPasswordRequest::resetPassword()`
+changed the password hash and rotated `remember_token` but never touched
+the `sessions` table -- Laravel's session guard trusts an
+already-established cookie without re-checking the password hash, so a
+session created *before* the reset (an attacker's, in the exact
+suspected-compromise scenario this flow exists for) kept full access,
+completely unaffected. Confirmed live against a running instance with two
+independent real cookie jars: both remained at `200` on `/dashboard`
+after a genuine password reset. Fixed by deleting every `sessions` row
+for that user as part of the reset (`DB::table('sessions')->
+where('user_id', $user->id)->delete()`), forcing re-authentication
+everywhere -- re-verified live, both sessions now correctly redirect to
+`/login`, and a fresh login with the new password still works normally.
+
+**Methodology note:** a first attempt to test a superficially similar
+candidate (does an account suspension mid-session get enforced on the
+very next request?) using PHPUnit's `actingAs()` test client wrongly
+suggested it did not -- purely a test-harness artifact from reusing one
+booted container/cached `Auth` guard across "separate" calls in one test
+method. Re-tested with real, independent HTTP requests against
+`php artisan serve`: suspension is in fact already correctly enforced
+(`Gate::define('permission', ...)` checks `$user->isActive()` fresh from
+the database on every permission-gated action, and essentially every
+authenticated route is permission-gated) -- a `403` on the very next
+request, no fix needed. Recorded in detail as a caution for any future
+inter-request session-lifecycle testing on this codebase.
+
+**Positive controls confirmed:** login rate-limiting/generic-message
+hardening (RT-003) and the password-reset flow's own account-enumeration
+safety (RT-005) both re-confirmed still correct; session-fixation
+protection on login and full invalidation on logout, both already
+correct; `password.confirm` step-up re-authentication already covers
+every sensitive administrative action this pass checked.
+
+Verified: 1 new permanent regression test
+(`PasswordResetTest::test_a_password_reset_invalidates_every_existing_session_for_that_user`),
+asserting directly against the `sessions` table (the real `database`
+session driver's own semantics, since the test environment's
+`SESSION_DRIVER=array` can't otherwise exercise this). Full suite: 629
+tests, 0 regressions. Full findings and methodology: `docs/
+RED_TEAM_ASSESSMENT_2026-09-14-AUTHENTICATION-SESSION-ROBUSTNESS.md`.

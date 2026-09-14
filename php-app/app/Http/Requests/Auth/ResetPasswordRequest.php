@@ -5,6 +5,7 @@ namespace App\Http\Requests\Auth;
 use App\Models\User;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
@@ -47,6 +48,22 @@ class ResetPasswordRequest extends FormRequest
                     'password' => Hash::make($password),
                     'remember_token' => Str::random(60),
                 ])->save();
+
+                // Fraud/Authentication Resistance pass (2026-09-14): a
+                // password reset is very often a response to a suspected
+                // compromise -- but Laravel's session guard trusts an
+                // already-established session cookie without re-checking
+                // the password hash, so nothing here previously stopped an
+                // attacker's own already-authenticated session (or any
+                // other device's) from continuing to work with the new
+                // password never having invalidated it. Live-confirmed
+                // against a real running instance with two independent
+                // sessions of the same account: both remained fully valid
+                // (dashboard returned 200) after a genuine reset. Deleting
+                // every `sessions` row for this user forces every device --
+                // including the one this reset was submitted from -- to log
+                // in again with the new credential.
+                DB::table('sessions')->where('user_id', $user->id)->delete();
 
                 event(new PasswordReset($user));
             }
