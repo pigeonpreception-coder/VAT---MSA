@@ -7225,3 +7225,43 @@ the equally-rigorous real PHPUnit/MySQL suite (the more direct path given
 the demo report/role fixtures already in place from the same day's
 earlier work). Full findings, reproduction evidence, and engineering
 detail: `docs/RED_TEAM_ASSESSMENT_2026-09-14-REMAINING-GAPS.md`.
+
+## Red-team pass, a new phase: Authorization & Role Isolation (2026-09-14)
+
+With the duplicate-submission series closed, this pass moved to a
+different phase of the user's original brief: horizontal privilege
+escalation / IDOR -- whether a user scoped to one taxpayer/organisation
+can reach another's resources by ID despite holding the right permission
+but not the right scope. ~45 route-bound-ID controller methods were
+traced across every tenant-owned resource type in the app (invoices, VAT
+returns, refund claims, audit cases, disputes, documents, quotations,
+business parties, expenses, fixed assets, logistics, projects, workflows,
+and more).
+
+**Result: no confirmed finding.** Every method checked traced down to a
+service call that correctly scopes the lookup, either as a pre-scoped
+query (`Invoice::where('supplier_taxpayer_id', $actor->taxpayer_id)`) or
+an explicit `TenantScope::requireTaxpayer()`/`OrganisationResolver::
+resolve()`/`EntitlementGate::assert()` check before any tenant-owned data
+is read or written. A genuinely positive result from a real, thorough
+check, not a skipped one.
+
+**One defense-in-depth hardening applied regardless**:
+`UserRoleScopeGrantService::grant()`/`revoke()` and
+`AccessRightsViewController::index()` had no query- or service-level
+tenant-scope check of their own -- for a screen that can grant
+`SUPER_ADMIN` itself, resting entirely on `access-rights:manage` being
+held only by national-scope roles in the static permission map (verified:
+it currently is, so not exploitable today) is too large a blast radius to
+leave unasserted at the point of use. Both service methods now assert
+`TenantScope::isNational($actor)` directly; `index()` does the same
+inline. Verified via a new regression test that calls the service
+directly (bypassing the controller's own permission gate, simulating a
+hypothetical future permission-map drift) and confirms the guard fires
+independent of what the permission map says.
+
+Full suite: 624 tests, 0 regressions -- all 16 pre-existing
+`AccessRightsViewTest` cases pass unchanged, confirming the hardening
+adds no new restriction for any actor who could legitimately reach the
+screen before. Full findings and methodology: `docs/
+RED_TEAM_ASSESSMENT_2026-09-14-AUTHORIZATION-ISOLATION.md`.

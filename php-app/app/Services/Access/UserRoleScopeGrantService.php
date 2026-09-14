@@ -7,7 +7,9 @@ use App\Exceptions\RepositoryConflictException;
 use App\Models\AccessRole;
 use App\Models\User;
 use App\Models\UserRoleScopeGrant;
+use App\Support\Access\TenantScope;
 use App\Support\Business\CommandLedger;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -54,6 +56,20 @@ use Illuminate\Support\Facades\DB;
  * unreliable to answer from this table alone. Fixed with this codebase's
  * own established `CommandLedger` idempotency pattern (`docs/
  * MIGRATION_MATRIX.md`'s "Duplicate-submission hardening" section).
+ *
+ * Defense-in-depth (2026-09-14 authorization-isolation audit): `grant()`
+ * can assign any role, including `SUPER_ADMIN` itself, and `revoke()`
+ * accepts any `UserRoleScopeGrant` by id with no ownership check of its
+ * own -- both methods relied entirely on `access-rights:manage` being
+ * held only by national-scope roles (`Permissions::ROLE_PERMISSIONS`),
+ * with no query- or service-level check confirming that here. Not
+ * exploitable today (verified: only `NAMRA_SYSTEM_ADMIN`/`SUPER_ADMIN`
+ * hold the permission, both in `Permissions::NATIONAL_SCOPE_ROLES`), but
+ * a single future permission-map edit granting `access-rights:manage` to
+ * a tenant-scoped role would silently reopen this screen to that
+ * tenant -- for a screen that can grant `SUPER_ADMIN` itself, that is
+ * too large a blast radius to leave resting on the permission map alone.
+ * Both methods now assert `TenantScope::isNational()` directly.
  */
 class UserRoleScopeGrantService
 {
@@ -66,6 +82,9 @@ class UserRoleScopeGrantService
     /** @param array{user_id?: mixed, role_code?: mixed, scope_level?: mixed, scope_label?: mixed} $payload */
     public function grant(array $payload, User $grantedBy, string $idempotencyKey): UserRoleScopeGrant
     {
+        if (! TenantScope::isNational($grantedBy)) {
+            throw new AuthorizationException('Access rights may only be granted by a national-scope administrator.');
+        }
         CommandLedger::validateIdempotencyKey($idempotencyKey);
         $errors = [];
 
@@ -139,6 +158,9 @@ class UserRoleScopeGrantService
 
     public function revoke(UserRoleScopeGrant $grant, User $revokedBy): void
     {
+        if (! TenantScope::isNational($revokedBy)) {
+            throw new AuthorizationException('Access rights may only be revoked by a national-scope administrator.');
+        }
         if ($grant->status !== 'ACTIVE') {
             throw new RepositoryConflictException('This access grant has already been revoked.');
         }
