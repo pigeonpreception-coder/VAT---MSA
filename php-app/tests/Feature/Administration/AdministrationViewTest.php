@@ -14,6 +14,7 @@ use Database\Seeders\OrganisationAdministratorRoleSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -182,6 +183,35 @@ class AdministrationViewTest extends TestCase
         $this->assertDatabaseHas('organisation_roles', ['organisation_id' => $org['organisation']->id, 'name' => 'Branch VAT Reviewer']);
         $this->assertDatabaseHas('organisation_role_permissions', ['permission_code' => 'invoices:read']);
         $this->assertDatabaseHas('organisation_role_permissions', ['permission_code' => 'returns:read']);
+    }
+
+    /** RT-016: OrganisationAdminService::createOrganisationRole() originally had no idempotency-key support and no uniqueness guard (version increments intentionally on same-name resaves) -- a double-submit minted two indistinguishable ACTIVE versions of the same role. */
+    public function test_double_submitting_the_same_rendered_create_role_form_creates_only_one_role(): void
+    {
+        $org = $this->makeLicensedOrganisation('VAT-SELLER-0007');
+        $this->openReview($org['owner']);
+        $payload = ['idempotency_key' => (string) Str::uuid(), 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence', 'permissions' => 'invoices:read'];
+
+        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', $payload);
+        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', $payload);
+
+        $this->assertSame(1, DB::table('organisation_roles')->where('organisation_id', $org['organisation']->id)->where('name', 'Branch VAT Reviewer')->count());
+    }
+
+    public function test_a_genuinely_new_role_request_after_a_new_page_load_still_versions_normally(): void
+    {
+        $org = $this->makeLicensedOrganisation('VAT-SELLER-0008');
+        $this->openReview($org['owner']);
+
+        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+            'idempotency_key' => (string) Str::uuid(), 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence', 'permissions' => 'invoices:read',
+        ]);
+        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+            'idempotency_key' => (string) Str::uuid(), 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence, revised', 'permissions' => 'invoices:read,returns:read',
+        ]);
+
+        $this->assertSame(2, DB::table('organisation_roles')->where('organisation_id', $org['organisation']->id)->where('name', 'Branch VAT Reviewer')->count());
+        $this->assertDatabaseHas('organisation_roles', ['organisation_id' => $org['organisation']->id, 'name' => 'Branch VAT Reviewer', 'version' => 2]);
     }
 
     public function test_creating_a_role_with_a_protected_permission_fails_validation(): void

@@ -78,16 +78,36 @@ class ReportExportService
      * taxpayer scope; every other code uses the actor's own resolved
      * organisation/taxpayer.
      *
+     * RT-015: originally had no idempotency-key support at all -- a
+     * double-submit of "Run report" created two duplicate `COMPLETED_INLINE`
+     * `report_runs` rows. Lower severity than requestExport()/runModel()
+     * (a run is read-only analysis, not authoritative until publish(),
+     * which is already guarded), but guarded the same way regardless.
+     *
      * @return array<string, mixed>
      */
-    public function runInline(string $code, array $parametersInput, User $actor): array
+    public function runInline(string $code, array $parametersInput, User $actor, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $parameters = ReportValidator::parameters($parametersInput);
         $definition = DB::table('report_definitions')->where('code', mb_strtoupper($code))->where('status', 'ACTIVE')->first();
         if (! $definition) {
             throw new PlatformResourceException('Report definition was not found.', 404);
         }
         $guardrail = $this->requireAudienceAccess($definition, $actor);
+
+        $requestHash = CommandLedger::requestHash(['code' => $definition->code, 'parameters' => $parameters]);
+        $prior = CommandLedger::prior($actor->id, 'RUN_REPORT_INLINE', $idempotencyKey, $requestHash);
+        if ($prior) {
+            $run = DB::table('report_runs as r')->join('report_definitions as d', 'd.id', '=', 'r.report_definition_id')
+                ->where('r.id', $prior)->select('r.*', 'd.code', 'd.audience', 'd.freshness_tier', 'd.guardrail', 'd.query_version')->first();
+
+            return [
+                'id' => $run->id, 'report_code' => $run->code, 'status' => $run->status,
+                'envelope' => $this->buildEnvelope($run, json_decode($run->parameters, true) ?? [], \Illuminate\Support\Carbon::parse($run->requested_at)),
+                'result_summary' => json_decode($run->result_summary, true) ?? [], 'requested_at' => $run->requested_at,
+            ];
+        }
         $orgScope = TenantScope::isNational($actor) ? null : $this->organisations->resolve($actor, null);
         $taxpayerIdForRun = $orgScope?->taxpayer_id;
         $organisationIdForRun = $orgScope?->id;
@@ -134,6 +154,7 @@ class ReportExportService
             'requested_by' => $actor->id, 'requested_at' => $now, 'completed_at' => $now, 'expires_at' => $now->copy()->addDay(),
             'error_code' => null, 'scope_snapshot' => json_encode($scope), 'published_by' => null, 'published_at' => null,
         ]);
+        CommandLedger::record($actor->id, 'RUN_REPORT_INLINE', $idempotencyKey, $requestHash, 'REPORT_RUN', $id, $now);
 
         return [
             'id' => $id, 'report_code' => $definition->code, 'status' => 'COMPLETED_INLINE',
@@ -187,8 +208,11 @@ class ReportExportService
 
         $now = now();
         DB::transaction(function () use ($reportRunId, $actor, $now, $idempotencyKey, $requestHash, $run, $correlationId) {
-            DB::table('report_runs')->where('id', $reportRunId)->where('status', 'COMPLETED_INLINE')
+            $published = DB::table('report_runs')->where('id', $reportRunId)->where('status', 'COMPLETED_INLINE')
                 ->update(['status' => 'PUBLISHED', 'published_by' => $actor->id, 'published_at' => $now]);
+            if ($published === 0) {
+                throw new RepositoryConflictException('This report run has already been published.');
+            }
             CommandLedger::record($actor->id, 'PUBLISH_REPORT_RUN', $idempotencyKey, $requestHash, 'REPORT_RUN', $reportRunId, $now);
             CommandLedger::outbox('REPORT_RUN', $reportRunId, 'ReportRunPublished', $run->taxpayer_id ?? $reportRunId, ['report_run_id' => $reportRunId, 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'REPORT_RUN_PUBLISHED', 'REPORT_RUN', $reportRunId, ['code' => $run->code, 'correlationId' => $correlationId], $now);
@@ -323,8 +347,11 @@ class ReportExportService
 
         $now = now();
         DB::transaction(function () use ($exportId, $actor, $now, $row, $idempotencyKey, $requestHash, $correlationId) {
-            DB::table('report_exports')->where('id', $exportId)->where('status', 'PENDING_APPROVAL')
+            $approved = DB::table('report_exports')->where('id', $exportId)->where('status', 'PENDING_APPROVAL')
                 ->update(['status' => 'APPROVED', 'approved_by' => $actor->id, 'approved_at' => $now]);
+            if ($approved === 0) {
+                throw new RepositoryConflictException('Only a pending report export can be approved.');
+            }
             DB::table('document_metadata')->where('id', $row->document_id)->where('status', 'QUARANTINED')->update(['status' => 'ACTIVE']);
             CommandLedger::record($actor->id, 'APPROVE_REPORT_EXPORT', $idempotencyKey, $requestHash, 'REPORT_EXPORT', $exportId, $now);
             CommandLedger::outbox('REPORT_EXPORT', $exportId, 'ReportExportApproved', $exportId, ['export_id' => $exportId, 'correlation_id' => $correlationId], $now);
@@ -363,8 +390,11 @@ class ReportExportService
 
         $now = now();
         DB::transaction(function () use ($exportId, $actor, $now, $row, $input, $idempotencyKey, $requestHash, $correlationId) {
-            DB::table('report_exports')->where('id', $exportId)->where('status', 'PENDING_APPROVAL')
+            $cancelled = DB::table('report_exports')->where('id', $exportId)->where('status', 'PENDING_APPROVAL')
                 ->update(['status' => 'CANCELLED', 'cancelled_by' => $actor->id, 'cancelled_at' => $now, 'cancellation_reason' => $input['reason']]);
+            if ($cancelled === 0) {
+                throw new RepositoryConflictException('Only a pending report export can be cancelled.');
+            }
             DB::table('document_metadata')->where('id', $row->document_id)->where('status', 'QUARANTINED')->update(['status' => 'REJECTED']);
             CommandLedger::record($actor->id, 'CANCEL_REPORT_EXPORT', $idempotencyKey, $requestHash, 'REPORT_EXPORT', $exportId, $now);
             CommandLedger::outbox('REPORT_EXPORT', $exportId, 'ReportExportCancelled', $exportId, ['export_id' => $exportId, 'reason' => $input['reason'], 'correlation_id' => $correlationId], $now);

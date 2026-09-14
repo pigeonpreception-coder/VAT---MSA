@@ -84,7 +84,7 @@ class AdministrationViewController extends Controller
         ];
 
         try {
-            $this->admin->createOrganisationRole($payload, $request->user(), null);
+            $this->admin->createOrganisationRole($payload, $request->user(), null, $this->formIdempotencyKey($request));
         } catch (LicensingValidationException|RepositoryConflictException $e) {
             return redirect()->route('administration.index')->withErrors(['role' => $e->getMessage()])->withInput();
         }

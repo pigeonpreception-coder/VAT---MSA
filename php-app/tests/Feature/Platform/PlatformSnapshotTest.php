@@ -155,7 +155,7 @@ class PlatformSnapshotTest extends TestCase
         $documentId = $this->actingAs($this->taxpayerOwner($tp['taxpayer']->id, 'doc-owner@platformtest.test'))->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'expense-plat-0001', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-platform-upload-0001'])->json('document.id');
 
         $response = $this->actingAs($admin)->getJson('/api/v1/platform');
         $response->assertStatus(200);
@@ -217,15 +217,15 @@ class PlatformSnapshotTest extends TestCase
         $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'custody-0001', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-custody-upload-0001']);
         $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'custody-0002', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ]);
+        ], ['Idempotency-Key' => 'test-idem-custody-upload-0002']);
         $cleanId = $this->actingAs($owner)->post('/api/v1/documents', [
             'owner_domain' => 'EXPENSE', 'owner_resource_id' => 'custody-0003', 'classification' => 'INTERNAL',
             'file' => $this->fakeUpload($this->minimalPdfBytes(), 'application/pdf'),
-        ])->json('document.id');
+        ], ['Idempotency-Key' => 'test-idem-custody-upload-0003'])->json('document.id');
         $this->actingAs($admin)->postJson("/api/v1/documents/{$cleanId}/scan-result",
             ['schema_version' => '1.0.0', 'outcome' => 'CLEAN'], ['Idempotency-Key' => 'test-idem-custody-clean-0001'])->assertStatus(200);
 

@@ -54,6 +54,7 @@
                             <td>
                                 <form method="POST" action="{{ route('reports.run', $definition->code) }}" class="d-flex gap-2">
                                     @csrf
+                                    <x-idempotency-key/>
                                     @if ($definition->code === 'CASE_EVIDENCE_SUMMARY')
                                         <input type="text" name="case_id" class="form-control form-control-sm" placeholder="Audit case ID" required style="width: 12rem;">
                                     @endif

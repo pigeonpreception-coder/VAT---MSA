@@ -17,6 +17,7 @@ use App\Models\OutboxEvent;
 use App\Models\User;
 use App\Models\UserCapabilityAssignment;
 use App\Services\Audit\AuditService;
+use App\Support\Business\CommandLedger;
 use App\Support\Licensing\EntitlementGate;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -247,9 +248,21 @@ class OrganisationAdminService
         ];
     }
 
-    /** @return array<string, mixed> */
-    public function createOrganisationRole(array $payload, User $actor, ?string $requestedOrganisationId): array
+    /**
+     * RT-016: originally had no idempotency-key support and no uniqueness
+     * guard on `name` -- since `version` intentionally increments on every
+     * call with the same name (this codebase's own versioning design, not
+     * a bug), a double-submit could not be rejected by a uniqueness check
+     * without breaking genuine re-saves of a role. Guarded with
+     * CommandLedger instead: an exact replay (same actor, same key, same
+     * payload) returns the already-created role rather than minting a
+     * second, indistinguishable version.
+     *
+     * @return array<string, mixed>
+     */
+    public function createOrganisationRole(array $payload, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $role = OrganisationAdminValidator::organisationRole($payload);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADMINISTRATION', 'ADMIN_WRITE', 1, $requestedOrganisationId);
 
@@ -257,12 +270,19 @@ class OrganisationAdminService
         if ($catalogueCount !== count($role['permissions'])) {
             throw new LicensingValidationException('PERMISSION_UNKNOWN', 'One or more permissions are not in the approved catalogue.');
         }
+
+        $requestHash = CommandLedger::requestHash(['organisation_id' => $organisation->id, 'role' => $role]);
+        $prior = CommandLedger::prior($actor->id, 'CREATE_ORGANISATION_ROLE', $idempotencyKey, $requestHash);
+        if ($prior) {
+            return $this->presentOrganisationRole(OrganisationRole::findOrFail($prior));
+        }
+
         $priorVersion = (int) (OrganisationRole::where('organisation_id', $organisation->id)->where('name', $role['name'])->max('version') ?? 0);
         $version = $priorVersion + 1;
 
         $id = (string) Str::uuid();
         $now = now();
-        DB::transaction(function () use ($role, $organisation, $actor, $id, $version, $now) {
+        DB::transaction(function () use ($role, $organisation, $actor, $id, $version, $now, $idempotencyKey, $requestHash) {
             OrganisationRole::create([
                 'id' => $id, 'organisation_id' => $organisation->id, 'name' => $role['name'],
                 'description' => $role['description'] ?? 'Organisation-defined least-privilege role.', 'version' => $version,
@@ -275,6 +295,7 @@ class OrganisationAdminService
                     'record_scope' => 'ORGANISATION', 'effect' => 'ALLOW', 'created_at' => $now,
                 ]);
             }
+            CommandLedger::record($actor->id, 'CREATE_ORGANISATION_ROLE', $idempotencyKey, $requestHash, 'ORGANISATION_ROLE', $id, $now);
             AuditService::append($actor, 'ORGANISATION_ROLE_CREATED', 'ORGANISATION_ROLE', $id, [
                 'organisationId' => $organisation->id, 'name' => $role['name'], 'version' => $version, 'permissions' => $role['permissions'],
             ], $now);
@@ -284,6 +305,18 @@ class OrganisationAdminService
             'id' => $id, 'organisation_id' => $organisation->id, 'name' => $role['name'], 'description' => $role['description'],
             'permissions' => $role['permissions'], 'branch_scope' => $role['branchScope'], 'approval_limit_cents' => $role['approvalLimitCents'],
             'version' => $version, 'status' => 'ACTIVE',
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function presentOrganisationRole(OrganisationRole $role): array
+    {
+        $permissions = OrganisationRolePermission::where('organisation_role_id', $role->id)->pluck('permission_code')->all();
+
+        return [
+            'id' => $role->id, 'organisation_id' => $role->organisation_id, 'name' => $role->name, 'description' => $role->description,
+            'permissions' => $permissions, 'branch_scope' => json_decode($role->branch_scope, true) ?? [], 'approval_limit_cents' => $role->approval_limit_cents,
+            'version' => $role->version, 'status' => $role->status,
         ];
     }
 

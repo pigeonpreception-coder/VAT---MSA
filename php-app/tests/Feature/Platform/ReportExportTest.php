@@ -164,7 +164,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $denied = $this->sellerAdmin($tp['taxpayer']->id, 'noperm@reporttest.test');
 
-        $this->actingAs($denied)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->assertStatus(403);
+        $this->actingAs($denied)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(403);
     }
 
     public function test_an_unknown_report_code_returns_404(): void
@@ -172,7 +172,7 @@ class ReportExportTest extends TestCase
         $tp = $this->makeTaxpayer('VAT-RPT-0002');
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'unknown@reporttest.test');
 
-        $this->actingAs($owner)->postJson('/api/v1/reports/NO_SUCH_CODE/runs', [])->assertStatus(404);
+        $this->actingAs($owner)->postJson('/api/v1/reports/NO_SUCH_CODE/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(404);
     }
 
     public function test_a_report_definition_with_no_runnable_implementation_fails_closed(): void
@@ -181,7 +181,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('UNIMPLEMENTED_REPORT', 'TAXPAYER', 'CONFIDENTIAL');
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'unimplemented@reporttest.test');
 
-        $this->actingAs($owner)->postJson('/api/v1/reports/UNIMPLEMENTED_REPORT/runs', [])->assertStatus(501);
+        $this->actingAs($owner)->postJson('/api/v1/reports/UNIMPLEMENTED_REPORT/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(501);
     }
 
     public function test_sales_vat_summary_aggregates_the_actors_own_organisations_invoices(): void
@@ -194,7 +194,7 @@ class ReportExportTest extends TestCase
         $this->makeInvoice($other['taxpayer']->id, 999_000, 99_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'sales@reporttest.test');
 
-        $response = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', []);
+        $response = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()]);
 
         $response->assertStatus(201);
         $run = $response->json('report_run');
@@ -212,9 +212,9 @@ class ReportExportTest extends TestCase
         $officer = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $officer->id);
 
-        $this->actingAs($owner)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->assertStatus(403);
+        $this->actingAs($owner)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(403);
 
-        $response = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', []);
+        $response = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()]);
         $response->assertStatus(201);
         $this->assertSame(['cases' => 1, 'open_cases' => 1], $response->json('report_run.result_summary'));
     }
@@ -226,10 +226,10 @@ class ReportExportTest extends TestCase
         $admin = $this->pilotAdmin();
 
         // National but lacks reports:executive.
-        $this->actingAs($auditor)->postJson('/api/v1/reports/REVENUE_COMPLIANCE_TRENDS/runs', [])->assertStatus(403);
+        $this->actingAs($auditor)->postJson('/api/v1/reports/REVENUE_COMPLIANCE_TRENDS/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(403);
 
         // National and holds reports:executive.
-        $this->actingAs($admin)->postJson('/api/v1/reports/REVENUE_COMPLIANCE_TRENDS/runs', [])->assertStatus(201);
+        $this->actingAs($admin)->postJson('/api/v1/reports/REVENUE_COMPLIANCE_TRENDS/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(201);
     }
 
     public function test_case_evidence_summary_requires_a_case_id_and_audit_case_authority(): void
@@ -251,12 +251,12 @@ class ReportExportTest extends TestCase
         ]);
 
         // Lacks audit:read/cases:manage entirely.
-        $this->actingAs($owner)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => $case->id])->assertStatus(403);
+        $this->actingAs($owner)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => $case->id], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(403);
 
         // Missing case_id.
-        $this->actingAs($auditor)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', [])->assertStatus(422);
+        $this->actingAs($auditor)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(422);
 
-        $response = $this->actingAs($auditor)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => $case->id]);
+        $response = $this->actingAs($auditor)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => $case->id], ['Idempotency-Key' => (string) Str::uuid()]);
         $response->assertStatus(201);
         $this->assertSame(['evidence_items' => 1, 'preserved_items' => 1, 'custody_events' => 1], $response->json('report_run.result_summary'));
     }
@@ -279,8 +279,8 @@ class ReportExportTest extends TestCase
         $officer = $this->namraComplianceOfficer();
         $case = $this->makeAuditCase($caseTp['organisation']->id, $caseTp['taxpayer']->id, $officer->id);
 
-        $this->actingAs($officer)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => (string) Str::uuid()])->assertStatus(404);
-        $this->actingAs($officer)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => $case->id])->assertStatus(201);
+        $this->actingAs($officer)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => (string) Str::uuid()], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(404);
+        $this->actingAs($officer)->postJson('/api/v1/reports/CASE_EVIDENCE_SUMMARY/runs', ['case_id' => $case->id], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(201);
     }
 
     public function test_portfolio_exceptions_requires_an_active_delegation_and_scopes_to_delegated_taxpayers(): void
@@ -302,7 +302,7 @@ class ReportExportTest extends TestCase
         ]);
 
         // No active delegation yet.
-        $this->actingAs($practitioner)->postJson('/api/v1/reports/PORTFOLIO_EXCEPTIONS/runs', [])->assertStatus(403);
+        $this->actingAs($practitioner)->postJson('/api/v1/reports/PORTFOLIO_EXCEPTIONS/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->assertStatus(403);
 
         DB::table('delegations')->insert([
             'id' => (string) Str::uuid(), 'organisation_id' => $delegated['organisation']->id, 'taxpayer_id' => $delegated['taxpayer']->id,
@@ -310,7 +310,7 @@ class ReportExportTest extends TestCase
             'status' => 'ACTIVE', 'valid_from' => now(), 'created_at' => now(),
         ]);
 
-        $response = $this->actingAs($practitioner)->postJson('/api/v1/reports/PORTFOLIO_EXCEPTIONS/runs', []);
+        $response = $this->actingAs($practitioner)->postJson('/api/v1/reports/PORTFOLIO_EXCEPTIONS/runs', [], ['Idempotency-Key' => (string) Str::uuid()]);
         $response->assertStatus(201);
         $this->assertSame(['exceptions' => 1, 'open_exceptions' => 1], $response->json('report_run.result_summary'));
     }
@@ -324,14 +324,14 @@ class ReportExportTest extends TestCase
         }
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'suppressed@reporttest.test');
 
-        $suppressed = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', []);
+        $suppressed = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', [], ['Idempotency-Key' => (string) Str::uuid()]);
         $suppressed->assertStatus(201);
         $this->assertSame(['invoices' => 0, 'total_cents' => 0, 'suppressed' => true], $suppressed->json('report_run.result_summary'));
 
         for ($i = 0; $i < 10; $i++) {
             $this->makeInvoice($tp['taxpayer']->id, 10_000, 1_000);
         }
-        $notSuppressed = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', []);
+        $notSuppressed = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', [], ['Idempotency-Key' => (string) Str::uuid()]);
         $notSuppressed->assertStatus(201);
         $result = $notSuppressed->json('report_run.result_summary');
         $this->assertFalse($result['suppressed']);
@@ -345,7 +345,7 @@ class ReportExportTest extends TestCase
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'publish@reporttest.test');
 
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         $published = $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/reports/runs/{$runId}/publication", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-publish-0001']);
@@ -362,7 +362,7 @@ class ReportExportTest extends TestCase
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'conflict@reporttest.test');
 
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $this->makeInvoice($tp['taxpayer']->id, 50_000, 5_000);
 
         $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/publication", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-conflict-0001'])
@@ -377,7 +377,7 @@ class ReportExportTest extends TestCase
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'requester@reporttest.test');
         $outsider = $this->taxpayerOwner($this->makeTaxpayer('VAT-RPT-0016')['taxpayer']->id, 'outsider@reporttest.test');
 
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         $this->actingAs($outsider)->postJson("/api/v1/reports/runs/{$runId}/publication", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-outsider-0001'])
             ->assertStatus(403);
@@ -389,7 +389,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'replay@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         $first = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/publication", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-replay-0001']);
         $first->assertStatus(200);
@@ -404,7 +404,10 @@ class ReportExportTest extends TestCase
         // shaped responses' `published_at` field formatting.
         $this->assertSame($runId, $second->json('report_run.id'));
         $this->assertSame('PUBLISHED', DB::table('report_runs')->where('id', $runId)->value('status'));
-        $this->assertDatabaseCount('command_idempotency', 1);
+        // 2, not 1: the run step above now also records its own
+        // command_idempotency entry (RT-015), plus the one PUBLISH_REPORT_RUN
+        // entry from the two (replayed) publish calls above.
+        $this->assertDatabaseCount('command_idempotency', 2);
     }
 
     public function test_requesting_a_non_sensitive_export_is_auto_approved(): void
@@ -413,7 +416,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'autoapprove@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         // No step-up in session at all -- non-sensitive exports don't need one.
         $response = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-export-0001']);
@@ -429,7 +432,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('COMPLIANCE_CASELOAD', 'NAMRA_OPERATIONS', 'TAX_CONFIDENTIAL');
         $officer = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $officer->id);
-        $runId = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         $this->actingAs($officer)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-sensitive-noauth-0001'])
             ->assertStatus(403);
@@ -448,7 +451,7 @@ class ReportExportTest extends TestCase
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'export-owner@reporttest.test');
         $outsider = $this->taxpayerOwner($this->makeTaxpayer('VAT-RPT-0021')['taxpayer']->id, 'export-outsider@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         $this->actingAs($outsider)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-export-outsider-0001'])
             ->assertStatus(403);
@@ -460,7 +463,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('COMPLIANCE_CASELOAD', 'NAMRA_OPERATIONS', 'TAX_CONFIDENTIAL');
         $requester = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
-        $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-setup-0001'])
             ->json('report_export.id');
@@ -483,7 +486,7 @@ class ReportExportTest extends TestCase
         $requester = $this->namraComplianceOfficer();
         $approver = $this->namraSupervisor();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
-        $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-setup-0002'])
             ->json('report_export.id');
@@ -507,7 +510,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('COMPLIANCE_CASELOAD', 'NAMRA_OPERATIONS', 'TAX_CONFIDENTIAL');
         $requester = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
-        $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-cancel-setup-0001'])
             ->json('report_export.id');
@@ -530,7 +533,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'alreadyapproved@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-cancel-alreadyok-0001'])
             ->json('report_export.id');
 
@@ -547,7 +550,7 @@ class ReportExportTest extends TestCase
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'access-owner@reporttest.test');
         $outsider = $this->taxpayerOwner($this->makeTaxpayer('VAT-RPT-0027')['taxpayer']->id, 'access-outsider@reporttest.test');
         $noPerm = $this->sellerAdmin($tp['taxpayer']->id, 'access-noperm@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-access-0001'])
             ->json('report_export.id');
 
@@ -565,7 +568,7 @@ class ReportExportTest extends TestCase
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $requester = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
-        $pendingRunId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+        $pendingRunId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $pendingExportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
             ->postJson("/api/v1/reports/runs/{$pendingRunId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-download-pending-0001'])
             ->json('report_export.id');
@@ -573,7 +576,7 @@ class ReportExportTest extends TestCase
         $this->actingAs($requester)->getJson("/api/v1/reports/exports/{$pendingExportId}/download")->assertStatus(409);
 
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'download-expired@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-download-expired-0001'])
             ->json('report_export.id');
         DB::table('report_exports')->where('id', $exportId)->update(['expires_at' => now()->subDay()]);
@@ -594,7 +597,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'sizelimit@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         DB::table('platform_config')->insert([
             'id' => (string) Str::uuid(), 'key' => 'reports.export_size_limit_bytes', 'category' => 'REPORTS',
@@ -626,7 +629,7 @@ class ReportExportTest extends TestCase
             'value' => '20', 'description' => 'Test override.', 'status' => 'ACTIVE', 'updated_at' => now(),
         ]);
 
-        $response = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', []);
+        $response = $this->actingAs($owner)->postJson('/api/v1/reports/NATIONAL_VAT_AGGREGATE/runs', [], ['Idempotency-Key' => (string) Str::uuid()]);
         $response->assertStatus(201);
         $this->assertSame(['invoices' => 0, 'total_cents' => 0, 'suppressed' => true], $response->json('report_run.result_summary'));
     }
@@ -644,7 +647,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('COMPLIANCE_CASELOAD', 'NAMRA_OPERATIONS', 'TAX_CONFIDENTIAL');
         $officer = $this->namraComplianceOfficer('stepupwindow@reporttest.test');
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $officer->id);
-        $runId = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         DB::table('access_policies')->insert([
             'id' => (string) Str::uuid(), 'code' => 'STEP_UP_WINDOW', 'name' => 'Test step-up window',
@@ -664,7 +667,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'download-ok@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
         $exportId = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-download-ok-0001'])
             ->json('report_export.id');
 
@@ -696,7 +699,7 @@ class ReportExportTest extends TestCase
         $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'CONFIDENTIAL');
         $this->makeInvoice($tp['taxpayer']->id, 100_000, 15_000);
         $owner = $this->taxpayerOwner($tp['taxpayer']->id, 'disk-swap@reporttest.test');
-        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [])->json('report_run.id');
+        $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
         $exportId = $this->actingAs($owner)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-disk-swap-0001'])
             ->json('report_export.id');

@@ -322,17 +322,17 @@ class OrganisationAdminTest extends TestCase
 
         $protected = $this->actingAs($ctx['owner'])
             ->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['vat-rules:manage']]);
+            ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['vat-rules:manage']], ['Idempotency-Key' => 'test-idem-role-protected-0004']);
         $protected->assertStatus(422)->assertJsonPath('code', 'PROTECTED_PERMISSION');
 
         $v1 = $this->actingAs($ctx['owner'])
             ->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['commercial:read', 'parties:manage']]);
+            ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['commercial:read', 'parties:manage']], ['Idempotency-Key' => 'test-idem-role-v1-0004']);
         $v1->assertStatus(201)->assertJsonPath('role.version', 1)->assertJsonPath('role.status', 'ACTIVE');
 
         $v2 = $this->actingAs($ctx['owner'])
             ->withSession(['auth.password_confirmed_at' => time()])
-            ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['commercial:read']]);
+            ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['commercial:read']], ['Idempotency-Key' => 'test-idem-role-v2-0004']);
         $v2->assertStatus(201)->assertJsonPath('role.version', 2);
     }
 
