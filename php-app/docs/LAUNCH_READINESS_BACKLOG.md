@@ -323,6 +323,14 @@ dependency left on this list are**:
 - The handful of red-team reports above that named an explicit,
   not-yet-individually-verified follow-up in their own "what this pass
   did not cover" section (each report says exactly what it left open).
+  Now consolidated into a single punch list, cross-checked against the
+  current codebase and this document, at
+  `docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md` -- 10
+  buildable-now items (5 small, 5 medium), 2 already tracked here as
+  blocked on external access (#6/#7 above), and one (multi-invoice
+  circular self-dealing between colluding taxpayers) that needs a
+  beneficial-ownership data model this platform doesn't have, not a code
+  fix.
 
 One narrower item sits between "buildable now" and "needs
 infrastructure" rather than cleanly in either bucket: a real
