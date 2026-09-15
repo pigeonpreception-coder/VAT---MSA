@@ -1,6 +1,7 @@
 # VAT-MSA: Launch Readiness Backlog
 
-Compiled 2026-09-03, refreshed 2026-09-13. `docs/MIGRATION_MATRIX.md`
+Compiled 2026-09-03, refreshed 2026-09-13, refreshed again 2026-09-15.
+`docs/MIGRATION_MATRIX.md`
 remains the authoritative, continuously-updated record of what's been
 built; this document is a prioritized view specifically answering "what's
 left before a real launch," pulling from that record, `docs/DEPLOYMENT.md`'s
@@ -174,29 +175,83 @@ config now feeds three real consumers" section.
 in `App\Support\Access\StepUp` and `App\Services\Platform\ReportExportService`.
 
 ### 10. Broader security review of the modules beyond the original red-team scope
-**Status: NARROWED, not closed (2026-09-13).** See
-`docs/RED_TEAM_ASSESSMENT_2026-09-13.md` -- a systemic, cross-cutting
-pass (rate limiting, CSRF, mass assignment, IDOR/tenant scoping,
-self-approval/SoD, `password.confirm` coverage, file-upload validation,
-and the dynamic-permission/custom-role privilege boundary) plus a
-targeted adversarial attempt against this session's own newest,
-highest-privilege feature (the access-rights screen). Found and fixed
-one genuine gap (RT-006: no rate limiting on the password-confirmation
-step-up gate, the endpoint standing directly in front of every
-privileged action in the app) and fully reproduced-then-disproved one
-serious-looking privilege-escalation hypothesis (an ordinary tenant
-admin escalating to `access-rights:manage`/SUPER_ADMIN via a custom
-organisation role -- already blocked by a pre-existing allowlist,
-`Permissions::tenantGrantablePermissions()`), kept as permanent
-regression coverage. This was not an exhaustive per-module adversarial
-pass across all 56 views -- it targeted the failure modes most likely to
-matter (an unthrottled auth control, tenant-to-platform escalation) --
-so further module-by-module testing remains buildable-now, no external
-dependency, if deeper assurance is wanted.
+**Status: Substantially complete for the user's own stated scope
+(refreshed 2026-09-15).** The 2026-09-13 refresh above described one
+cross-cutting pass plus a single targeted hypothesis. In the two sessions
+since, the user's own 10-phase audit brief (business abuse, UI/high-
+interaction stress, concurrent-user simulation, authentication/session
+robustness, input validation, authorization/role isolation, performance
+under heavy use, resilience to user errors, fraud resistance, UX failure
+discovery) has been worked through **phase by phase**, each with its own
+dedicated report, its own live reproduction against a running instance
+with real MySQL (not just code reading), and its own permanent regression
+tests. 14 red-team reports now exist in `docs/` (up from the original
+single 2026-09-02 pass), collectively finding and fixing 16 further
+genuine issues (RT-006 through RT-021) beyond the original assessment's
+own 5:
 
-**Evidence**: `docs/RED_TEAM_ASSESSMENT_2026-09-13.md`; `tests/Feature/
-Auth/ConfirmPasswordTest.php`'s 2 new rate-limit tests; `tests/Feature/
-Security/TenantRoleEscalationTest.php`'s 8 tests.
+- **Duplicate-submission / business-abuse series** (RT-007 through
+  RT-016, four reports across 2026-09-13/14): every write action across
+  the whole application -- Invoice Management, Access Rights, Workflows,
+  Administration, Documents, Licensing, Organisations, Human Resources,
+  Platform, Reports -- was mechanically swept for missing idempotency
+  protection, then individually verified. 10 genuine double-submit/
+  replay gaps found and fixed, ranging from Critical (a POS credential
+  whose secret was permanently lost on a duplicate create) to Low.
+- **Input Validation & Robustness** (RT-017): non-numeric amounts
+  silently coerced to zero instead of rejected, across 7 call sites in
+  3 controllers -- fixed. Stored XSS, raw-SQL injection, and CSV formula
+  injection mechanically hunted for across the codebase and found absent.
+- **Fraud Resistance** (RT-018): self-dealing invoices (a taxpayer
+  certifying a government-backed invoice to themselves) were fully
+  undetected by both the explicit business rules and the risk-scoring
+  engine -- fixed at the point of certification.
+- **Authorization & Role Isolation** (Phase 6, IDOR/horizontal privilege
+  escalation): ~45 distinct read/action methods across every
+  tenant-owned resource type traced for correct taxpayer/organisation
+  scoping. No confirmed finding -- a genuine positive result, not a
+  skipped check. One defense-in-depth hardening applied anyway to the
+  highest-blast-radius screen in the app.
+- **Authentication & Session Robustness** (RT-019): password reset (the
+  flow offered specifically for a suspected-compromise scenario) did not
+  invalidate the attacker's own pre-existing session -- fixed. Account-
+  suspension enforcement and step-up re-auth coverage checked and already
+  correct.
+- **Resilience to User Errors** (RT-020): nine status-transition write
+  paths validated an in-memory read against a stale row with no guard
+  against a concurrent second transition silently overwriting the first
+  -- fixed with a guarded UPDATE + affected-row check across all nine.
+- **UX Failure Discovery** (RT-021) and a follow-up **sidebar audit**: a
+  real browser crawl across ten roles, plus a systematic link-vs-
+  permission cross-reference, found and fixed two sidebar groups
+  rendering dead-end links for seven roles, one fully-built page with no
+  navigation entry at all, and (the most structurally interesting find)
+  permission-light roles like `SUPER_ADMIN` seeing clickable accordion
+  headers that expanded to nothing.
+- **Concurrent User Simulation / High Interaction Stress / Performance
+  Under Heavy Use**: previously blocked on `artisan serve`'s single-
+  request-at-a-time dev server -- unblocked by discovering
+  `PHP_CLI_SERVER_WORKERS` gives PHP's built-in server genuine multi-
+  process concurrency. Used to re-validate RT-020 under **true**
+  concurrency (not simulation), and to confirm a plain-CREATE action's
+  duplicate-key race is already caught cleanly by an existing global
+  handler (RT-001). No new code fix needed here -- a genuine positive
+  result. One honest gap flagged, not glossed over: this dev
+  environment's seed data is too small to meaningfully test query
+  performance/N+1 behaviour at production scale.
+
+Every one of the user's original 10 phases now has at least one
+dedicated, live-reproduced pass behind it. This was not literally every
+one of the app's 58 views individually adversarial-tested -- passes
+targeted the failure modes and surfaces most likely to matter per phase,
+consistent with every report's own "what this pass did not cover"
+section -- so further narrow, module-by-module sweeps remain buildable-
+now if even deeper assurance is wanted. But the phase-by-phase gap this
+item was tracking as of 2026-09-13 is closed.
+
+**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (14 files);
+`docs/MIGRATION_MATRIX.md`'s own dated sections for each pass; full suite
+645 tests, 0 regressions as of the latest pass.
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made
@@ -232,22 +287,30 @@ cutover. No visibility into any of this from the codebase alone.
 
 ---
 
-## Recommended next step (refreshed 2026-09-13)
+## Recommended next step (refreshed 2026-09-15)
 
-The frontend UI build-out (#2) that was the previous recommendation is
-now closed. With ITAS (#1) still the one genuine launch-blocker and
-still blocked on external NamRA credentials/API access no amount of
-further engineering here can obtain, and #3/#4/#6/#7/#11 all similarly
-blocked on external credentials or production host access, **the two
-remaining buildable-now items with no external dependency are #8 (TOTP
-step-up parity) and #10 (a broader security review of the now much
-larger UI surface)**. Between the two, #10 is the more urgent: every
-module this migration has built since the original 3-module red-team
-pass has shipped with feature-test coverage but zero adversarial
-testing, and that gap has only grown as more UI shipped. #8 is a larger,
-more self-contained scope (real secret provisioning, QR enrollment,
-backup codes) that can be picked up independently whenever there's
-appetite for it.
+#10 (broader security review) was the previous recommendation and is now
+substantially complete -- see its own entry above for the full account of
+what the two sessions since 2026-09-13 covered. With ITAS (#1) still the
+one genuine launch-blocker and still blocked on external NamRA
+credentials/API access, and #3/#4/#6/#7/#11 all similarly blocked on
+external credentials or production host access, **#8 (TOTP step-up
+parity) is now the one clearly buildable-now item with no external
+dependency left on this list.** It is a larger, self-contained scope
+(real secret provisioning, QR enrollment, backup codes) that has sat
+untouched since the original 2026-09-03 compile.
+
+Two narrower, optional follow-ons if there's appetite before or instead
+of #8: (a) the handful of red-team reports above that named an explicit,
+not-yet-individually-verified follow-up in their own "what this pass did
+not cover" section (each report says exactly what it left open); (b) a
+real production-scale performance/N+1 check, flagged honestly by the
+Concurrent User Simulation pass as untestable against this dev
+environment's small seed data -- buildable now in the narrow sense of
+needing no external credentials, but does need either a much larger
+synthetic seed or a staging environment closer to production sizing to
+be meaningful, so it sits between "buildable now" and "needs
+infrastructure" rather than cleanly in either bucket.
 
 Everything else genuinely needs something only NamRA/the deploying
 organisation can supply -- real ITAS credentials, a mail provider, S3/R2
