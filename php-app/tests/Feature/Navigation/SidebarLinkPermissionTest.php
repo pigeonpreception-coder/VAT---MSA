@@ -165,7 +165,7 @@ class SidebarLinkPermissionTest extends TestCase
 
         $dashboard = $this->actingAs($ctx['owner'])->get('/dashboard');
         $dashboard->assertOk();
-        foreach (['operations.index', 'operations.human-resources', 'operations.immovable-assets', 'operations.movable-assets', 'operations.logistics', 'operations.erp'] as $routeName) {
+        foreach (['operations.index', 'operations.human-resources', 'operations.immovable-assets', 'operations.movable-assets', 'operations.logistics', 'operations.inventory', 'operations.erp'] as $routeName) {
             $dashboard->assertSee(route($routeName), false);
         }
 
@@ -173,5 +173,58 @@ class SidebarLinkPermissionTest extends TestCase
         $this->actingAs($ctx['owner'])->get('/operations/immovable-assets')->assertOk();
         $this->actingAs($ctx['owner'])->get('/operations/movable-assets')->assertOk();
         $this->actingAs($ctx['owner'])->get('/operations/logistics')->assertOk();
+        $this->actingAs($ctx['owner'])->get('/operations/inventory')->assertOk();
+    }
+
+    /**
+     * Sidebar audit (2026-09-14): PosViewController's Inventory Module
+     * (Operations > Inventory, App\Http\Controllers\Operations\
+     * PosViewController, gated on inventory:read) was a real, fully built
+     * page -- ported from the source's own app/operations/inventory/
+     * {page.tsx,PosTerminal.tsx} -- with no sidebar entry anywhere: unlike
+     * every other Operations page, it wasn't dead-linked by a mismatched
+     * permission, it simply had no link at all, reachable only by typing
+     * the URL directly. BUYER_ADMIN, which lacks inventory:read, is the
+     * negative control here; the positive control (a role that does hold
+     * it) is covered by the "every operations permission" test above.
+     */
+    public function test_a_role_without_inventory_read_does_not_see_the_new_inventory_module_link(): void
+    {
+        $ctx = $this->makeOrganisation('VAT-SIDEBAR-0004', 'BUYER_ADMIN', ['BUYER']);
+
+        $dashboard = $this->actingAs($ctx['owner'])->get('/dashboard');
+        $dashboard->assertOk()->assertDontSee(route('operations.inventory'), false);
+        $this->actingAs($ctx['owner'])->get('/operations/inventory')->assertForbidden();
+    }
+
+    /**
+     * Sidebar audit (2026-09-14): a group whose every item is gated on a
+     * permission the user lacks used to still render its own accordion
+     * header -- clicking it expanded to a visibly empty list, since every
+     * item's own @can already hid it, but nothing hid the now-pointless
+     * header itself. SUPER_ADMIN is the clearest live case: of the nine
+     * dropdown-style groups, it holds a permission for only "Dashboard"
+     * (ungated) and "Administration" was previously the only one with any
+     * content by coincidence of route testing -- SUPER_ADMIN actually
+     * holds none of administration:read/identity:read/workflows:read
+     * either, per Permissions::ROLE_PERMISSIONS, so that group should be
+     * hidden too, leaving only Platform and Access Rights (both single,
+     * non-accordion links) alongside Dashboard.
+     */
+    public function test_a_role_holding_none_of_a_groups_permissions_does_not_see_that_groups_header_at_all(): void
+    {
+        $superAdmin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Platform Super Admin', 'email' => 'super-admin-sidebar-ux@test.test',
+            'password' => bcrypt('password'), 'role' => 'SUPER_ADMIN', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $dashboard = $this->actingAs($superAdmin)->get('/dashboard');
+        $dashboard->assertOk();
+        foreach (['VAT Management', 'Invoice Management', 'Accounting &amp; Finance', 'Operations</span>', 'Quotation</span>', 'Project Management', 'Registered</span>', 'New Registration', 'Administration</span>'] as $emptyGroupHeading) {
+            $dashboard->assertDontSee($emptyGroupHeading, false);
+        }
+        // Still sees the two single-permission links it genuinely holds.
+        $dashboard->assertSee(route('platform.index'), false);
+        $dashboard->assertSee(route('access-rights.index'), false);
     }
 }

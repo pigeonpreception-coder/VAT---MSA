@@ -238,4 +238,79 @@ class FixedAssetViewTest extends TestCase
         $this->assertSame('DISPOSED', DB::table('fixed_assets')->where('id', $assetId)->value('status'), 'The concurrent winners status must survive untouched.');
         $this->assertDatabaseMissing('audit_events', ['action' => 'FIXED_ASSET_FLAG_MAINTENANCED', 'resource_id' => $assetId]);
     }
+
+    /**
+     * Concurrent User Simulation pass (2026-09-14): unlike the status-change
+     * race above, register() has no prior row to guard with a `where`
+     * clause -- it is a plain CREATE, so its only defence against a
+     * duplicate asset_code is the application-level pre-check on line
+     * FixedAssetService::register() ($existing = FixedAsset::where(...)
+     * ->first()). Two genuinely concurrent requests can both run that
+     * SELECT before either has committed its own INSERT, so both pass the
+     * pre-check and one of the two real INSERTs then hits the table's own
+     * `fixed_assets_organisation_id_asset_code_unique` constraint -- a
+     * class of race this app's DB::listen()-simulation technique
+     * (established by the test above) can reproduce exactly, and one a
+     * live true-concurrency reproduction (`PHP_CLI_SERVER_WORKERS=8` +
+     * two genuinely parallel curl POSTs against a real running instance,
+     * outside PHPUnit) confirmed actually happens: a real, logged
+     * Illuminate\Database\UniqueConstraintViolationException on the exact
+     * INSERT this test forces.
+     *
+     * This is NOT a gap needing a new fix -- bootstrap/app.php already
+     * carries a global QueryException render() callback from an earlier
+     * pass (red-team finding RT-001, 2026-09-09) that catches any SQLSTATE
+     * 23000 duplicate-entry violation anywhere in the app, including this
+     * one, and turns it into the same friendly conflict message the
+     * pre-check itself would have produced -- confirmed here at the HTTP
+     * layer (so the real exception-rendering pipeline is exercised, not
+     * just the service method) and confirmed live against the running
+     * instance: the loser's response was a clean 302 with a flashed
+     * "This action conflicts with an existing record" message, never a
+     * raw SQL error, and exactly one asset row and one command_idempotency
+     * row existed afterwards.
+     */
+    public function test_a_genuine_concurrent_registration_race_that_bypasses_the_pre_check_is_still_a_friendly_conflict(): void
+    {
+        $org = $this->makeOrganisation('VAT-FA-0008');
+        // bootstrap/app.php's handler renders via back(), which needs a
+        // real "previous URL" in session -- exactly what a real browser
+        // has after visiting the register page, and what this GET
+        // establishes here.
+        $this->actingAs($org['owner'])->get('/operations/movable-assets');
+
+        $racedIn = false;
+        DB::listen(function ($query) use (&$racedIn, $org) {
+            if ($racedIn || ! str_contains($query->sql, 'select * from `fixed_assets`')) {
+                return;
+            }
+            $racedIn = true;
+            // Simulates a second, concurrent request's INSERT landing
+            // between this request's own pre-check SELECT (which just ran
+            // and found nothing) and its own INSERT -- exactly the window
+            // a genuine parallel request occupies.
+            DB::table('fixed_assets')->insert([
+                'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'asset_class' => 'MOVABLE',
+                'asset_code' => 'VEH-RACE-002', 'category' => 'VEHICLE', 'description' => 'Concurrent winner',
+                'location_or_address' => 'Main depot', 'acquisition_date' => '2022-06-01', 'acquisition_cost_cents' => 250_000_00,
+                'status' => 'ACTIVE', 'created_by' => $org['owner']->id, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+
+        try {
+            $response = $this->actingAs($org['owner'])->post('/operations/fixed-assets', [
+                'asset_class' => 'MOVABLE', 'asset_code' => 'VEH-RACE-002', 'category' => 'VEHICLE', 'description' => 'Concurrent loser',
+                'location_or_address' => 'Main depot', 'acquisition_date' => '2022-06-01', 'acquisition_cost_cents' => 250_000_00,
+                'return_to' => 'operations.movable-assets',
+            ]);
+        } finally {
+            DB::flushQueryLog();
+        }
+
+        $this->assertTrue($racedIn, 'The DB::listen() hook must have actually fired to simulate the race.');
+        $response->assertRedirect(route('operations.movable-assets'));
+        $response->assertSessionHasErrors('form');
+        $this->assertStringContainsString('conflicts with an existing record', session('errors')->first('form'));
+        $this->assertSame(1, \App\Models\FixedAsset::where('organisation_id', $org['organisation']->id)->where('asset_code', 'VEH-RACE-002')->count());
+    }
 }

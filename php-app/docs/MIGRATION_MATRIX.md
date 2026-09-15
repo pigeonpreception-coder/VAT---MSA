@@ -7475,3 +7475,84 @@ holding everything still sees and can use everything). Full suite: 642
 tests, 0 regressions. Full findings and methodology (including a
 methodology self-correction on computing a role's true effective
 permission set): `docs/RED_TEAM_ASSESSMENT_2026-09-14-UX-FAILURE-DISCOVERY.md`.
+
+## Red-team pass: Concurrent User Simulation, High Interaction Stress, Performance Under Heavy Use (2026-09-14)
+
+Phases 5-7 of the user's original brief, previously treated as infeasible
+in every earlier pass because PHP's built-in `artisan serve` dev server
+handles one request at a time. This pass first unblocks that: PHP's
+built-in server supports genuine multi-process concurrency via
+`PHP_CLI_SERVER_WORKERS`, reachable by replicating `artisan serve`'s own
+underlying `php -S` invocation directly (`artisan serve` itself fails to
+pass the variable through to its child process -- a Symfony Process
+quirk, not an app issue). With a real 8-worker server running, genuinely
+simultaneous `curl` requests were fired at a live instance for all three
+phases.
+
+**Every scenario tested came back as a positive control -- no new code
+fix was needed.** RT-020's guarded-UPDATE pattern (from the prior
+Resilience pass) was re-confirmed under true concurrency, not just
+simulation, and its row lock was found to incidentally also close the
+`CommandLedger` idempotency-key race for every guarded call site. A
+plain-CREATE action with no prior guarded UPDATE
+(`FixedAssetService::register()`) was specifically targeted next, since
+the reasoning above predicts it should remain exposed -- confirmed live:
+a real `UniqueConstraintViolationException` occurs under a genuine
+duplicate-`asset_code` race. But the losing request's response was
+already a clean, friendly redirect, not a raw SQL leak or a 500 --
+`bootstrap/app.php` already carries a global `QueryException` handler
+from an earlier pass (RT-001, 2026-09-09) that catches any SQLSTATE
+23000 duplicate-entry violation *anywhere in the app* and converts it
+generically, which already covers this exact race (and every other
+plain-CREATE action with its own unique constraint, not only fixed
+assets). High Interaction Stress testing found the same result for the
+realistic "double-click submit" case: the existing `<x-idempotency-key/>`
+component bakes a fixed key into each rendered form, so a double-click
+always replays the identical key, landing in the same already-verified-
+safe path. A 20-request concurrent burst against the dashboard completed
+with zero errors. The one honest gap: this dev environment's seed data
+is too small to meaningfully test query performance/N+1 behavior at
+production scale -- flagged as a real limitation rather than glossed
+over.
+
+Verified: one new permanent regression test
+(`FixedAssetViewTest::test_a_genuine_concurrent_registration_race_that_bypasses_the_pre_check_is_still_a_friendly_conflict`)
+covering the plain-CREATE race via the established `DB::listen()`-
+simulation technique, exercised at the HTTP layer so `bootstrap/app.php`'s
+render() callback is the thing actually under test. Full suite: 643
+tests, 0 regressions. Full findings and methodology (including the
+`PHP_CLI_SERVER_WORKERS` true-concurrency technique, reusable by any
+future pass): `docs/RED_TEAM_ASSESSMENT_2026-09-14-CONCURRENT-USER-SIMULATION.md`.
+
+## Sidebar audit: missing link and empty-group findings (2026-09-14)
+
+User-directed pass: asked why a `SUPER_ADMIN`-type account's sidebar
+"worked properly" in an environment outside this session's reach, then
+asked to fix the sidebar for all users. Re-ran RT-021's own
+link-permission cross-reference method from scratch (rather than
+assuming it was exhaustive) and additionally checked the other
+direction -- every page route against the sidebar's own links -- to
+catch a route with *no* entry, not only a mismatched one.
+
+Two findings, both fixed. First: `PosViewController`'s Inventory Module
+(`/operations/inventory`, a real, fully built point-of-sale page gated on
+`inventory:read`) had no sidebar link at all -- reachable only by typing
+the URL directly. Added a link to the Operations group, gated on the
+exact permission the controller itself checks. Second, and the direct
+answer to the user's original question: `SUPER_ADMIN` holds only 10 of
+the app's permissions, none of them the ones gating most of the sidebar's
+nine accordion-style groups -- so while every individual link inside
+those groups correctly disappeared for it, the group's own clickable
+header did not, and expanded to a visibly empty dropdown on click. Fixed
+by making each group's header conditional on the user holding at least
+one of that group's underlying permissions, the same "don't show what
+you can't use" rule RT-021 already applied per link, now applied one
+level up. Live-verified via Playwright screenshots: `SUPER_ADMIN`'s
+sidebar now shows only Dashboard, Platform, and Access Rights (what it
+actually holds), while `TAXPAYER_OWNER` (which holds every group's
+permissions) is visually unchanged.
+
+Verified: 2 new permanent regression tests in
+`tests/Feature/Navigation/SidebarLinkPermissionTest.php`. Full suite: 645
+tests, 0 regressions. Full findings and methodology:
+`docs/RED_TEAM_ASSESSMENT_2026-09-14-SIDEBAR-AUDIT.md`.
