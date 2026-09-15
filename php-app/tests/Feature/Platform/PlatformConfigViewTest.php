@@ -8,6 +8,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -25,6 +26,7 @@ use Tests\TestCase;
 class PlatformConfigViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -268,7 +270,7 @@ class PlatformConfigViewTest extends TestCase
             'display_name' => 'New Staff Member', 'role' => 'SECURITY_ANALYST',
         ]);
 
-        $response->assertRedirect(route('password.confirm'));
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertDatabaseMissing('users', ['email' => 'newstaff@platformview.test']);
     }
 
@@ -276,7 +278,7 @@ class PlatformConfigViewTest extends TestCase
     {
         $admin = $this->superAdmin();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/platform/staff', [
                 'external_user_id' => 'ext-staff-0002', 'email' => 'newstaff2@platformview.test',
                 'display_name' => 'New Staff Member', 'role' => 'SECURITY_ANALYST',

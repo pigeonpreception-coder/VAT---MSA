@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureFreshStepUp;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,7 +16,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // TOTP step-up cutover (2026-09-15): replaces the ~44 routes'
+        // former use of Laravel's built-in 'password.confirm' alias
+        // (Illuminate\Auth\Middleware\RequirePassword) with a real,
+        // server-verified TOTP freshness check -- see
+        // App\Http\Middleware\EnsureFreshStepUp's own doc comment.
+        $middleware->alias(['step-up' => EnsureFreshStepUp::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Red team finding RT-002 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md):

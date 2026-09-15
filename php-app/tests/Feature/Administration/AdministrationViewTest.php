@@ -16,6 +16,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -34,6 +35,7 @@ use Tests\TestCase;
 class AdministrationViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -85,7 +87,7 @@ class AdministrationViewTest extends TestCase
     /** ADMIN_WRITE operations (invite/create-role) are blocked until a current quarterly access review is open -- see App\Support\Licensing\EntitlementGate::assert. */
     private function openReview(User $actor): void
     {
-        $this->actingAs($actor)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($actor)->withFreshStepUp()
             ->postJson('/api/v1/access-reviews')
             ->assertStatus(201);
     }
@@ -128,7 +130,7 @@ class AdministrationViewTest extends TestCase
         $org = $this->makeLicensedOrganisation('VAT-SELLER-0002');
         $this->openReview($org['owner']);
 
-        $response = $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($org['owner'])->withFreshStepUp()
             ->post('/administration/employees', [
                 'employee_number' => 'EMP-004', 'full_name' => 'Synthetic Test User', 'email' => 'synthetic.user@example.test',
             ]);
@@ -146,11 +148,11 @@ class AdministrationViewTest extends TestCase
             'employee_number' => 'EMP-005', 'full_name' => 'No Step Up', 'email' => 'no.stepup@example.test',
         ]);
 
-        // A plain form POST doesn't "expect JSON", so Laravel's own
-        // RequirePassword middleware redirects to the confirm-password
-        // screen here rather than the 423 this codebase's JSON API routes
-        // return for the same missing-step-up condition.
-        $response->assertRedirect(route('password.confirm'));
+        // A plain form POST doesn't "expect JSON", so
+        // App\Http\Middleware\EnsureFreshStepUp redirects to the TOTP
+        // step-up screen here rather than the 423 this codebase's JSON
+        // API routes return for the same missing-step-up condition.
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertDatabaseMissing('employees', ['employee_number' => 'EMP-005']);
     }
 
@@ -162,7 +164,7 @@ class AdministrationViewTest extends TestCase
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_ACCOUNTANT', 'taxpayer_id' => $org['taxpayer']->id, 'status' => 'ACTIVE',
         ]);
 
-        $this->actingAs($accountant)->withSession(['auth.password_confirmed_at' => time()])->post('/administration/employees', [
+        $this->actingAs($accountant)->withFreshStepUp()->post('/administration/employees', [
             'employee_number' => 'EMP-006', 'full_name' => 'Denied', 'email' => 'denied@example.test',
         ])->assertForbidden();
     }
@@ -172,7 +174,7 @@ class AdministrationViewTest extends TestCase
         $org = $this->makeLicensedOrganisation('VAT-SELLER-0005');
         $this->openReview($org['owner']);
 
-        $response = $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($org['owner'])->withFreshStepUp()
             ->post('/administration/roles', [
                 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence',
                 'permissions' => 'invoices:read, returns:read',
@@ -192,8 +194,8 @@ class AdministrationViewTest extends TestCase
         $this->openReview($org['owner']);
         $payload = ['idempotency_key' => (string) Str::uuid(), 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence', 'permissions' => 'invoices:read'];
 
-        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', $payload);
-        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', $payload);
+        $this->actingAs($org['owner'])->withFreshStepUp()->post('/administration/roles', $payload);
+        $this->actingAs($org['owner'])->withFreshStepUp()->post('/administration/roles', $payload);
 
         $this->assertSame(1, DB::table('organisation_roles')->where('organisation_id', $org['organisation']->id)->where('name', 'Branch VAT Reviewer')->count());
     }
@@ -203,10 +205,10 @@ class AdministrationViewTest extends TestCase
         $org = $this->makeLicensedOrganisation('VAT-SELLER-0008');
         $this->openReview($org['owner']);
 
-        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+        $this->actingAs($org['owner'])->withFreshStepUp()->post('/administration/roles', [
             'idempotency_key' => (string) Str::uuid(), 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence', 'permissions' => 'invoices:read',
         ]);
-        $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+        $this->actingAs($org['owner'])->withFreshStepUp()->post('/administration/roles', [
             'idempotency_key' => (string) Str::uuid(), 'name' => 'Branch VAT Reviewer', 'description' => 'Reviews branch VAT evidence, revised', 'permissions' => 'invoices:read,returns:read',
         ]);
 
@@ -218,7 +220,7 @@ class AdministrationViewTest extends TestCase
     {
         $org = $this->makeLicensedOrganisation('VAT-SELLER-0006');
 
-        $response = $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($org['owner'])->withFreshStepUp()
             ->post('/administration/roles', [
                 'name' => 'Bad Role', 'description' => 'Attempts a protected permission',
                 'permissions' => 'security:manage',

@@ -44,7 +44,7 @@ class InvoiceController extends Controller
         return response()->json($invoice);
     }
 
-    /** Module 2 Phase B CancelInvoice: { reason }. Officer-only (invoices:cancel) and step-up gated via the route's own 'password.confirm' middleware, matching the sensitivity of suspending a taxpayer outright. */
+    /** Module 2 Phase B CancelInvoice: { reason }. Officer-only (invoices:cancel) and step-up gated via the route's own 'step-up' middleware, matching the sensitivity of suspending a taxpayer outright. */
     public function cancel(Request $request, string $id): JsonResponse
     {
         $this->authorize('permission', 'invoices:cancel');

@@ -12,6 +12,7 @@ use Database\Seeders\LicensePlanSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,7 @@ use Tests\TestCase;
 class LicensingViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -136,7 +138,7 @@ class LicensingViewTest extends TestCase
         $fx = $this->makeLicensedOrganisation('VAT-VIEW-LIC-0005', 'ACTIVE');
 
         $response = $this->actingAs($fx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('licensing.state.store'), ['action' => 'SUSPEND', 'reason' => 'Non-payment flagged for review.']);
 
         $response->assertRedirect(route('licensing.index'));
@@ -154,7 +156,7 @@ class LicensingViewTest extends TestCase
             'action' => 'SUSPEND', 'reason' => 'Attempting without a confirmed session.',
         ]);
 
-        $response->assertRedirect(route('password.confirm'));
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertSame('ACTIVE', $fx['license']->fresh()->state);
     }
 
@@ -166,7 +168,7 @@ class LicensingViewTest extends TestCase
         // PENDING_RENEWAL/SUSPENDED) -- posted directly rather than via the
         // dropdown, which would never offer it from this state.
         $response = $this->actingAs($fx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('licensing.state.store'), ['action' => 'ACTIVATE', 'reason' => 'Invalid transition attempt.']);
 
         $response->assertRedirect(route('licensing.index'));
@@ -179,7 +181,7 @@ class LicensingViewTest extends TestCase
         $fx = $this->makeLicensedOrganisation('VAT-VIEW-LIC-0008', 'ACTIVE');
 
         $response = $this->actingAs($this->taxpayerAccountant($fx['taxpayer']->id))
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('licensing.state.store'), ['action' => 'SUSPEND', 'reason' => 'Should be denied.']);
 
         $response->assertForbidden();

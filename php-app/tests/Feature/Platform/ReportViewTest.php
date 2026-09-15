@@ -9,6 +9,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
 class ReportViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -270,7 +272,7 @@ class ReportViewTest extends TestCase
 
         $response = $this->actingAs($admin)->post("/reports/runs/{$runId}/export");
 
-        $response->assertRedirect(route('password.confirm'));
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => route('reports.index')]));
         $this->assertDatabaseMissing('report_exports', ['report_run_id' => $runId]);
     }
 
@@ -282,7 +284,7 @@ class ReportViewTest extends TestCase
         $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run');
         $runId = DB::table('report_runs')->where('requested_by', $admin->id)->value('id');
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post("/reports/runs/{$runId}/export");
 
         $response->assertRedirect('/reports');
@@ -296,7 +298,7 @@ class ReportViewTest extends TestCase
         $admin = $this->pilotAdmin();
         $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run');
         $runId = DB::table('report_runs')->where('requested_by', $admin->id)->value('id');
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post("/reports/runs/{$runId}/export");
+        $this->actingAs($admin)->withFreshStepUp()->post("/reports/runs/{$runId}/export");
         $exportId = DB::table('report_exports')->where('report_run_id', $runId)->value('id');
 
         $response = $this->actingAs($admin)->post("/reports/exports/{$exportId}/cancel", ['reason' => 'No longer needed for this review.']);
@@ -313,18 +315,18 @@ class ReportViewTest extends TestCase
         $approver = $this->namraSupervisor('approver@reportview.test');
         $this->actingAs($requester)->post('/reports/SALES_VAT_SUMMARY/run');
         $runId = DB::table('report_runs')->where('requested_by', $requester->id)->value('id');
-        $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])->post("/reports/runs/{$runId}/export");
+        $this->actingAs($requester)->withFreshStepUp()->post("/reports/runs/{$runId}/export");
         $exportId = DB::table('report_exports')->where('report_run_id', $runId)->value('id');
 
         // Self-approval refused, surfaced as a flashed error rather than a
         // state change -- matches every other maker-checker command in
         // this codebase's own Blade-controller error-handling shape.
-        $selfAttempt = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])->post("/reports/exports/{$exportId}/approve");
+        $selfAttempt = $this->actingAs($requester)->withFreshStepUp()->post("/reports/exports/{$exportId}/approve");
         $selfAttempt->assertRedirect('/reports');
         $selfAttempt->assertSessionHasErrors('approve');
         $this->assertDatabaseHas('report_exports', ['id' => $exportId, 'status' => 'PENDING_APPROVAL']);
 
-        $approved = $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])->post("/reports/exports/{$exportId}/approve");
+        $approved = $this->actingAs($approver)->withFreshStepUp()->post("/reports/exports/{$exportId}/approve");
         $approved->assertRedirect('/reports');
         $this->assertDatabaseHas('report_exports', ['id' => $exportId, 'status' => 'APPROVED']);
     }

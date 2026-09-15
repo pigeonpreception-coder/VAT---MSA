@@ -520,7 +520,7 @@ class DemoSeeder extends Seeder
             ['code' => 'STEP_UP_WINDOW'],
             [
                 'id' => $policyId, 'name' => 'Step-up freshness window', 'policy_type' => 'AUTHENTICATION',
-                'description' => 'How long a password confirmation stays fresh before App\Support\Access\StepUp::isFresh requires another one -- read live via its own window_seconds parameter (see docs/MIGRATION_MATRIX.md).',
+                'description' => 'Illustrative only since the 2026-09-15 TOTP cutover -- App\Support\Access\StepUp::isFresh now delegates to MfaService::hasFreshStepUp, whose freshness window is fixed at TOTP confirmation time, not read live from this row (see docs/MIGRATION_MATRIX.md).',
                 'parameters' => json_encode(['window_seconds' => 10800]), 'status' => 'ACTIVE', 'version' => 1, 'created_at' => now(),
             ],
         );

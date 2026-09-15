@@ -12,7 +12,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Ported from lib/api/platform.ts's Module 8 Phase A handlers -- kept 1:1
  * with the source's own app/api/v1/platform/** route shapes.
- * `provisionStaff`'s route wears the `password.confirm` middleware
+ * `provisionStaff`'s route wears the `step-up` middleware
  * (unconditional step-up, the same posture as invoice cancellation --
  * unlike the report-export commands' data-conditional step-up, see
  * App\Support\Access\StepUp's own doc comment).

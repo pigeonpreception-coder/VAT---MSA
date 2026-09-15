@@ -411,7 +411,7 @@ class InvoiceService
     /**
      * Ported from lib/data/repository.ts's cancelInvoice (Module 2 Phase B).
      * Deliberately narrow and officer-only (invoices:cancel, step-up
-     * gated -- see the route's own 'password.confirm' middleware): only a
+     * gated -- see the route's own 'step-up' middleware): only a
      * TAX_INVOICE/SIMPLIFIED_TAX_INVOICE/SELF_BILLED_INVOICE with no active
      * correction against it can be cancelled. Never deletes or mutates the
      * original row; reverses its ledger effect the same way a credit note

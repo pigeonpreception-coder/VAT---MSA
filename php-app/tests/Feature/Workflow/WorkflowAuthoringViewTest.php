@@ -18,6 +18,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -36,6 +37,7 @@ use Tests\TestCase;
 class WorkflowAuthoringViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -150,7 +152,7 @@ class WorkflowAuthoringViewTest extends TestCase
             'version' => 1, 'branch_scope' => '[]', 'approval_limit_cents' => null, 'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $this->actingAs($accountant)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($accountant)->withFreshStepUp()
             ->post('/workflows', $this->draftForm('Denied Draft', $role->id))
             ->assertForbidden();
     }
@@ -165,7 +167,7 @@ class WorkflowAuthoringViewTest extends TestCase
 
         $response = $this->actingAs($ctx['owner'])->post('/workflows', $this->draftForm('No Step Up Draft', $role->id));
 
-        $response->assertRedirect(route('password.confirm'));
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertDatabaseMissing('workflows', ['name' => 'No Step Up Draft']);
     }
 
@@ -177,7 +179,7 @@ class WorkflowAuthoringViewTest extends TestCase
             'version' => 1, 'branch_scope' => '[]', 'approval_limit_cents' => null, 'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $response = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post('/workflows', $this->draftForm('Expense Approval', $role->id));
 
         $response->assertRedirect('/workflows');
@@ -196,7 +198,7 @@ class WorkflowAuthoringViewTest extends TestCase
         ]);
         $approver = $this->makeUser($ctx['taxpayer'], "approver-{$vatNumber}@wfview.test");
         $this->grantRole($ctx['organisation'], $approverRole, $approver, $ctx['owner']);
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post('/workflows', $this->draftForm("Draft {$vatNumber}", $approverRole->id));
         $versionId = DB::table('workflow_versions as v')->join('workflows as w', 'w.id', '=', 'v.workflow_id')
             ->where('w.name', "Draft {$vatNumber}")->value('v.id');
@@ -208,7 +210,7 @@ class WorkflowAuthoringViewTest extends TestCase
     {
         $ctx = $this->createdDraft('VAT-WFV-0006');
 
-        $response = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post("/workflows/versions/{$ctx['versionId']}/publish");
 
         $response->assertRedirect('/workflows');
@@ -220,7 +222,7 @@ class WorkflowAuthoringViewTest extends TestCase
     {
         $ctx = $this->createdDraft('VAT-WFV-0007');
 
-        $response = $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($ctx['approver'])->withFreshStepUp()
             ->post("/workflows/versions/{$ctx['versionId']}/publish");
 
         $response->assertRedirect('/workflows');
@@ -250,13 +252,13 @@ class WorkflowAuthoringViewTest extends TestCase
     public function test_double_submitting_the_same_rendered_assign_form_creates_only_one_instance(): void
     {
         $ctx = $this->createdDraft('VAT-WFV-0009B');
-        $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['approver'])->withFreshStepUp()
             ->post("/workflows/versions/{$ctx['versionId']}/publish");
         $key = (string) Str::uuid();
         $payload = ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-double-0001', 'context' => '{}', 'idempotency_key' => $key];
 
-        $first = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/workflows/instances', $payload);
-        $second = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->post('/workflows/instances', $payload);
+        $first = $this->actingAs($ctx['owner'])->withFreshStepUp()->post('/workflows/instances', $payload);
+        $second = $this->actingAs($ctx['owner'])->withFreshStepUp()->post('/workflows/instances', $payload);
 
         $first->assertRedirect('/workflows');
         $second->assertRedirect('/workflows');
@@ -266,12 +268,12 @@ class WorkflowAuthoringViewTest extends TestCase
     public function test_a_genuinely_new_assign_request_after_a_new_page_load_is_not_treated_as_a_replay(): void
     {
         $ctx = $this->createdDraft('VAT-WFV-0009C');
-        $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['approver'])->withFreshStepUp()
             ->post("/workflows/versions/{$ctx['versionId']}/publish");
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post('/workflows/instances', ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-fresh-0001', 'context' => '{}']);
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post('/workflows/instances', ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-fresh-0002', 'context' => '{}']);
 
         $this->assertSame(1, DB::table('workflow_instances')->where('resource_id', 'exp-fresh-0001')->count());
@@ -281,10 +283,10 @@ class WorkflowAuthoringViewTest extends TestCase
     public function test_assigning_and_deciding_a_workflow_instance_end_to_end(): void
     {
         $ctx = $this->createdDraft('VAT-WFV-0009');
-        $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['approver'])->withFreshStepUp()
             ->post("/workflows/versions/{$ctx['versionId']}/publish");
 
-        $assignResponse = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $assignResponse = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post('/workflows/instances', ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-0001', 'context' => '{}']);
         $assignResponse->assertRedirect('/workflows');
         $this->assertDatabaseHas('workflow_instances', ['resource_id' => 'exp-0001', 'status' => 'IN_PROGRESS']);
@@ -292,13 +294,13 @@ class WorkflowAuthoringViewTest extends TestCase
             ->where('i.resource_id', 'exp-0001')->value('a.id');
 
         // The initiator cannot decide their own task.
-        $selfAttempt = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $selfAttempt = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post("/workflow-tasks/{$assignmentId}/decide", ['decision' => 'APPROVE', 'reason' => 'Approving my own expense.']);
         $selfAttempt->assertRedirect('/workflows');
         $selfAttempt->assertSessionHasErrors('decide');
         $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'status' => 'PENDING']);
 
-        $decided = $this->actingAs($ctx['approver'])->withSession(['auth.password_confirmed_at' => time()])
+        $decided = $this->actingAs($ctx['approver'])->withFreshStepUp()
             ->post("/workflow-tasks/{$assignmentId}/decide", ['decision' => 'APPROVE', 'reason' => 'Reviewed and approved.']);
         $decided->assertRedirect('/workflows');
         $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'status' => 'APPROVED']);
@@ -310,7 +312,7 @@ class WorkflowAuthoringViewTest extends TestCase
         $ctx = $this->makeLicensedOrganisation('VAT-WFV-0010');
         $delegate = $this->makeUser($ctx['taxpayer'], 'delegate@wfview.test');
 
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post('/workflows/delegations', [
                 'delegator_user_id' => $ctx['owner']->id, 'delegate_user_id' => $delegate->id,
                 'effective_from' => now()->format('Y-m-d\TH:i'), 'effective_to' => now()->addMonth()->format('Y-m-d\TH:i'),
@@ -320,7 +322,7 @@ class WorkflowAuthoringViewTest extends TestCase
         $this->assertDatabaseHas('workflow_delegations', ['delegator_user_id' => $ctx['owner']->id, 'delegate_user_id' => $delegate->id, 'status' => 'ACTIVE']);
         $delegationId = DB::table('workflow_delegations')->where('delegator_user_id', $ctx['owner']->id)->value('id');
 
-        $revoked = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $revoked = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->post("/workflows/delegations/{$delegationId}/revoke", ['reason' => 'Back from leave early.']);
         $revoked->assertRedirect('/workflows');
         $this->assertDatabaseHas('workflow_delegations', ['id' => $delegationId, 'status' => 'REVOKED']);

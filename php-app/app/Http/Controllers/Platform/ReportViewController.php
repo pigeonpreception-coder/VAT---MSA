@@ -29,18 +29,18 @@ use Illuminate\View\View;
  * posture Document/Inventory's own view controllers already established.
  *
  * **Data-conditional step-up, not route-wide**: unlike every other
- * password.confirm-gated Blade route in this migration,
- * requestExport/approveExport only need a fresh step-up when the report's
- * own classification/export flag is sensitive -- data the router cannot
- * see (see App\Support\Access\StepUp's own doc comment). Gating the whole
+ * 'step-up'-gated Blade route in this migration, requestExport/
+ * approveExport only need a fresh step-up when the report's own
+ * classification/export flag is sensitive -- data the router cannot see
+ * (see App\Support\Access\StepUp's own doc comment). Gating the whole
  * route would over-restrict the non-sensitive case the source itself
  * exempts. Instead: pass StepUp::isFresh($request) through, and if the
  * service still refuses for exactly that reason, redirect to the real
- * password.confirm screen with the reports page as the intended
- * destination, then ask the actor to retry the action -- this migration's
- * Blade forms are plain POSTs with no client-side replay, so a manual
- * retry (now with a satisfied freshness window) is the honest UX, not a
- * silently-swallowed failure.
+ * TOTP step-up screen (security.mfa) with the reports page as the
+ * redirect_to destination, then ask the actor to retry the action -- this
+ * migration's Blade forms are plain POSTs with no client-side replay, so a
+ * manual retry (now with a satisfied freshness window) is the honest UX,
+ * not a silently-swallowed failure.
  */
 class ReportViewController extends Controller
 {
@@ -235,9 +235,8 @@ class ReportViewController extends Controller
     private function stepUpOrError(Request $request, AuthorizationException $e, string $field): RedirectResponse
     {
         if (str_contains($e->getMessage(), 'step-up')) {
-            $request->session()->put('url.intended', route('reports.index'));
-
-            return redirect()->route('password.confirm')->with('status', 'This action requires a fresh password confirmation. Please confirm, then retry the action.');
+            return redirect()->route('security.mfa', ['redirect_to' => route('reports.index')])
+                ->with('status', 'This action requires a fresh step-up confirmation. Confirm a current code from your authenticator app, then retry the action.');
         }
 
         return redirect()->route('reports.index')->withErrors([$field => $e->getMessage()]);

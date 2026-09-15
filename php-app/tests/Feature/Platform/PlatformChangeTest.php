@@ -8,6 +8,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -20,6 +21,7 @@ use Tests\TestCase;
 class PlatformChangeTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -288,14 +290,14 @@ class PlatformChangeTest extends TestCase
         $readOnly = $this->pilotAdmin();
         $body = $this->staffBody('ext-staff-0001', 'staff-denied@platformchangetest.test');
 
-        $this->actingAs($readOnly)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($readOnly)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $body, ['Idempotency-Key' => 'test-idem-pc-staff-perm-0001'])
             ->assertStatus(403);
 
         // Explicitly stale rather than absent -- the test session store can
         // otherwise carry the earlier call's own fresh confirmation forward.
         $admin = $this->superAdmin();
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time() - 20_000])
+        $this->actingAs($admin)->withStaleStepUp()
             ->postJson('/api/v1/platform/staff', $body, ['Idempotency-Key' => 'test-idem-pc-staff-stepup-0001'])
             ->assertStatus(423);
     }
@@ -304,19 +306,19 @@ class PlatformChangeTest extends TestCase
     {
         $admin = $this->superAdmin();
 
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $this->staffBody('ext-dup-0001', 'dup@platformchangetest.test'), ['Idempotency-Key' => 'test-idem-pc-staff-first-0001'])
             ->assertStatus(201);
 
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $this->staffBody('ext-dup-0002', 'dup@platformchangetest.test'), ['Idempotency-Key' => 'test-idem-pc-staff-dupemail-0001'])
             ->assertStatus(409);
 
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $this->staffBody('ext-dup-0001', 'other@platformchangetest.test'), ['Idempotency-Key' => 'test-idem-pc-staff-dupid-0001'])
             ->assertStatus(409);
 
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $this->staffBody('ext-badrole-0001', 'badrole@platformchangetest.test', 'TAXPAYER_OWNER'), ['Idempotency-Key' => 'test-idem-pc-staff-badrole-0001'])
             ->assertStatus(422);
     }
@@ -326,7 +328,7 @@ class PlatformChangeTest extends TestCase
         $admin = $this->superAdmin();
         $body = $this->staffBody('ext-success-0001', 'success@platformchangetest.test');
 
-        $first = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $first = $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $body, ['Idempotency-Key' => 'test-idem-pc-staff-success-0001']);
         $first->assertStatus(201);
         $staffId = $first->json('staff.id');
@@ -340,7 +342,7 @@ class PlatformChangeTest extends TestCase
         $link = DB::table('identity_links')->where('user_id', $staffId)->first();
         $this->assertSame('PLATFORM_AUTHENTICATED', $link->assurance_level);
 
-        $second = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $second = $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/platform/staff', $body, ['Idempotency-Key' => 'test-idem-pc-staff-success-0001']);
         $second->assertStatus(201);
         $this->assertSame($staffId, $second->json('staff.id'));

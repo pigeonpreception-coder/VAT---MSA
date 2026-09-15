@@ -17,6 +17,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -28,6 +29,7 @@ use Tests\TestCase;
 class AccessGovernanceTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -96,7 +98,7 @@ class AccessGovernanceTest extends TestCase
     private function openReview(User $actor): void
     {
         $this->actingAs($actor)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/access-reviews')
             ->assertStatus(201);
     }
@@ -145,16 +147,16 @@ class AccessGovernanceTest extends TestCase
         $requestId = $requested->json('request.id');
 
         // The requester (owner) cannot decide their own request.
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => 'Self decision attempt.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_APPROVAL_DENIED');
 
         // Nor can the subject themselves.
-        $this->actingAs($staff)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($staff)->withFreshStepUp()
             ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => 'Subject decision attempt.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_APPROVAL_DENIED');
 
-        $decided = $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $decided = $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => 'Justified and verified.']);
         $decided->assertStatus(200)->assertJsonPath('decision.status', 'APPROVED');
         $this->assertDatabaseHas('user_role_assignments', [
@@ -162,7 +164,7 @@ class AccessGovernanceTest extends TestCase
         ]);
 
         // Already decided -- a second decision is a conflict.
-        $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'reject', 'reason' => 'Too late, already decided.'])
             ->assertStatus(409);
     }
@@ -177,29 +179,29 @@ class AccessGovernanceTest extends TestCase
             'capability' => 'BUYER', 'status' => 'ACTIVE', 'effective_from' => now(), 'effective_to' => null, 'assigned_by' => $ctx['owner']->id,
         ]);
 
-        $review = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->postJson('/api/v1/access-reviews');
+        $review = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/access-reviews');
         $review->assertStatus(201);
         $reviewId = $review->json('review.id');
 
         // Neither owner (not a member) nor the review's own non-member state blocks a genuine bad disposition.
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/access-reviews/{$reviewId}/certifications", ['subject_user_id' => $subjectA->id, 'disposition' => 'MAYBE'])
             ->assertStatus(422)->assertJsonPath('code', 'DISPOSITION_INVALID');
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/access-reviews/{$reviewId}/certifications", ['subject_user_id' => $ctx['owner']->id, 'disposition' => 'RETAIN'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_CERTIFICATION_DENIED');
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/access-reviews/{$reviewId}/certifications", ['subject_user_id' => (string) Str::uuid(), 'disposition' => 'RETAIN'])
             ->assertStatus(422)->assertJsonPath('code', 'SUBJECT_NOT_ACTIVE');
 
-        $first = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $first = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/access-reviews/{$reviewId}/certifications", ['subject_user_id' => $subjectA->id, 'disposition' => 'RETAIN']);
         $first->assertStatus(201)->assertJsonPath('certification.disposition', 'RETAIN');
         $this->assertDatabaseHas('access_reviews', ['id' => $reviewId, 'status' => 'OPEN']);
 
-        $second = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $second = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/access-reviews/{$reviewId}/certifications", ['subject_user_id' => $subjectB->id, 'disposition' => 'REVOKE']);
         $second->assertStatus(201)->assertJsonPath('certification.disposition', 'REVOKE');
         // Every active member now certified -- the review auto-completes.
@@ -209,7 +211,7 @@ class AccessGovernanceTest extends TestCase
         $this->assertDatabaseHas('user_capability_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $subjectB->id, 'status' => 'REVOKED']);
 
         // A review that is not open (bogus id here) is a conflict, not a validation error.
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/access-reviews/'.((string) Str::uuid()).'/certifications', ['subject_user_id' => $subjectA->id, 'disposition' => 'RETAIN'])
             ->assertStatus(409);
     }
@@ -226,7 +228,7 @@ class AccessGovernanceTest extends TestCase
             'effective_from' => now(), 'effective_to' => null, 'assigned_by' => $ctx['owner']->id, 'created_at' => now(),
         ]);
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/access-grants/revocation', ['grant_type' => 'ROLE', 'grant_id' => (string) Str::uuid(), 'reason' => 'Not found test.'])
             ->assertStatus(422)->assertJsonPath('code', 'GRANT_NOT_FOUND');
 
@@ -235,17 +237,17 @@ class AccessGovernanceTest extends TestCase
             'employee_id' => null, 'organisation_role_id' => $role->id, 'status' => 'ACTIVE',
             'effective_from' => now(), 'effective_to' => null, 'assigned_by' => $ctx['owner']->id, 'created_at' => now(),
         ]);
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/access-grants/revocation', ['grant_type' => 'ROLE', 'grant_id' => $ownGrant->id, 'reason' => 'Attempting self revocation.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_REVOCATION_DENIED');
 
-        $revoke = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $revoke = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/access-grants/revocation', ['grant_type' => 'ROLE', 'grant_id' => $assignment->id, 'reason' => 'No longer required for this role.']);
         $revoke->assertStatus(200)->assertJsonPath('revocation.status', 'REVOKED');
 
         // Idempotent -- revoking an already-revoked grant returns its
         // current state rather than erroring or double-writing.
-        $again = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $again = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/access-grants/revocation', ['grant_type' => 'ROLE', 'grant_id' => $assignment->id, 'reason' => 'Repeat revocation attempt.']);
         $again->assertStatus(200)->assertJsonPath('revocation.status', 'REVOKED');
         $this->assertDatabaseCount('user_role_assignments', 2); // the subject's + owner's own, no duplicates.
@@ -267,11 +269,11 @@ class AccessGovernanceTest extends TestCase
             'capability' => 'SELLER', 'status' => 'ACTIVE', 'effective_from' => now(), 'effective_to' => null, 'assigned_by' => $ctx['owner']->id,
         ]);
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/organisations/offboarding', ['user_id' => $ctx['owner']->id, 'reason' => 'Attempting to offboard myself.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_OFFBOARD_DENIED');
 
-        $offboarded = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $offboarded = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/organisations/offboarding', ['user_id' => $subject->id, 'reason' => 'Access-only exit, security incident.']);
         $offboarded->assertStatus(200)
             ->assertJsonPath('offboarding.membershipRevoked', true)
@@ -282,7 +284,7 @@ class AccessGovernanceTest extends TestCase
         $this->assertDatabaseHas('user_capability_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $subject->id, 'status' => 'REVOKED']);
 
         // Idempotent -- nothing left active to revoke, a genuine no-op.
-        $again = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $again = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/organisations/offboarding', ['user_id' => $subject->id, 'reason' => 'Repeat offboarding attempt.']);
         $again->assertStatus(200)
             ->assertJsonPath('offboarding.membershipRevoked', false)

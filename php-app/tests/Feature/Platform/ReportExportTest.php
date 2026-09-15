@@ -15,6 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -35,6 +36,7 @@ use Tests\TestCase;
 class ReportExportTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -347,7 +349,7 @@ class ReportExportTest extends TestCase
 
         $runId = $this->actingAs($owner)->postJson('/api/v1/reports/SALES_VAT_SUMMARY/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
-        $published = $this->actingAs($owner)->withSession(['auth.password_confirmed_at' => time()])
+        $published = $this->actingAs($owner)->withFreshStepUp()
             ->postJson("/api/v1/reports/runs/{$runId}/publication", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-publish-0001']);
         $published->assertStatus(200);
         $this->assertSame('PUBLISHED', $published->json('report_run.status'));
@@ -437,7 +439,7 @@ class ReportExportTest extends TestCase
         $this->actingAs($officer)->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-sensitive-noauth-0001'])
             ->assertStatus(403);
 
-        $response = $this->actingAs($officer)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($officer)->withFreshStepUp()
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-sensitive-0001']);
         $response->assertStatus(201);
         $this->assertSame('PENDING_APPROVAL', $response->json('report_export.status'));
@@ -464,17 +466,17 @@ class ReportExportTest extends TestCase
         $requester = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
         $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
-        $exportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
+        $exportId = $this->actingAs($requester)->withFreshStepUp()
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-setup-0001'])
             ->json('report_export.id');
 
         $nonNational = $this->taxpayerOwner($tp['taxpayer']->id, 'nonnational@reporttest.test');
-        $this->actingAs($nonNational)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($nonNational)->withFreshStepUp()
             ->postJson("/api/v1/reports/exports/{$exportId}/approval", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-nonnational-0001'])
             ->assertStatus(403);
 
         // The requester is themselves national (holds reports:run + is national-scope) but may not approve their own request.
-        $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($requester)->withFreshStepUp()
             ->postJson("/api/v1/reports/exports/{$exportId}/approval", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-self-0001'])
             ->assertStatus(403);
     }
@@ -487,17 +489,17 @@ class ReportExportTest extends TestCase
         $approver = $this->namraSupervisor();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
         $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
-        $exportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
+        $exportId = $this->actingAs($requester)->withFreshStepUp()
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-setup-0002'])
             ->json('report_export.id');
 
         // Explicitly stale rather than absent -- the test session store can
         // otherwise carry the setup call's own fresh confirmation forward.
-        $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time() - 20_000])
+        $this->actingAs($approver)->withStaleStepUp()
             ->postJson("/api/v1/reports/exports/{$exportId}/approval", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-nostepup-0001'])
             ->assertStatus(403);
 
-        $approved = $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $approved = $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/reports/exports/{$exportId}/approval", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-approve-0001']);
         $approved->assertStatus(200);
         $this->assertSame('APPROVED', $approved->json('report_export.status'));
@@ -511,7 +513,7 @@ class ReportExportTest extends TestCase
         $requester = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
         $runId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
-        $exportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
+        $exportId = $this->actingAs($requester)->withFreshStepUp()
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-cancel-setup-0001'])
             ->json('report_export.id');
 
@@ -569,7 +571,7 @@ class ReportExportTest extends TestCase
         $requester = $this->namraComplianceOfficer();
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $requester->id);
         $pendingRunId = $this->actingAs($requester)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
-        $pendingExportId = $this->actingAs($requester)->withSession(['auth.password_confirmed_at' => time()])
+        $pendingExportId = $this->actingAs($requester)->withFreshStepUp()
             ->postJson("/api/v1/reports/runs/{$pendingRunId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-download-pending-0001'])
             ->json('report_export.id');
 
@@ -635,13 +637,15 @@ class ReportExportTest extends TestCase
     }
 
     /**
-     * Proves the seeded `STEP_UP_WINDOW` access_policies row's
-     * `window_seconds` is actually read live by App\Support\Access\StepUp
-     * -- a confirmation that is fresh under the hardcoded default
-     * (10800s/3 hours) is stale once an ACTIVE row shrinks the window to
-     * a few seconds in the past.
+     * 2026-09-15 TOTP cutover: App\Support\Access\StepUp::isFresh now
+     * delegates entirely to MfaService::hasFreshStepUp (a real
+     * `step_up_events` row's own `expires_at`, fixed at TOTP confirmation
+     * time), not a live-configurable `STEP_UP_WINDOW` access_policies row
+     * -- so this proves an expired TOTP step-up is correctly treated as
+     * stale by the data-conditional gate on requestExport, the same as an
+     * absent one.
      */
-    public function test_a_seeded_step_up_window_is_enforced_over_the_hardcoded_default(): void
+    public function test_an_expired_totp_step_up_is_stale_for_the_data_conditional_export_gate(): void
     {
         $tp = $this->makeTaxpayer('VAT-RPT-0032');
         $this->seedDefinition('COMPLIANCE_CASELOAD', 'NAMRA_OPERATIONS', 'TAX_CONFIDENTIAL');
@@ -649,14 +653,7 @@ class ReportExportTest extends TestCase
         $this->makeAuditCase($tp['organisation']->id, $tp['taxpayer']->id, $officer->id);
         $runId = $this->actingAs($officer)->postJson('/api/v1/reports/COMPLIANCE_CASELOAD/runs', [], ['Idempotency-Key' => (string) Str::uuid()])->json('report_run.id');
 
-        DB::table('access_policies')->insert([
-            'id' => (string) Str::uuid(), 'code' => 'STEP_UP_WINDOW', 'name' => 'Test step-up window',
-            'policy_type' => 'AUTHENTICATION', 'description' => 'Test override.',
-            'parameters' => json_encode(['window_seconds' => 60]), 'status' => 'ACTIVE', 'updated_at' => now(),
-        ]);
-
-        // Confirmed 5 minutes ago -- fresh under the hardcoded 3-hour default, stale under the seeded 60s window.
-        $this->actingAs($officer)->withSession(['auth.password_confirmed_at' => time() - 300])
+        $this->actingAs($officer)->withStaleStepUp()
             ->postJson("/api/v1/reports/runs/{$runId}/exports", $this->exportCommandBody(), ['Idempotency-Key' => 'test-idem-stepupwindow-0001'])
             ->assertStatus(403);
     }

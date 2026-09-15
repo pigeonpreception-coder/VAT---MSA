@@ -43,7 +43,7 @@
                     @if (empty($availableActions))
                         <p class="text-muted small mb-0">No state change is valid from {{ ucfirst(strtolower($license['state'])) }}.</p>
                     @else
-                        {{-- Step-up gated: routes/web.php applies 'password.confirm'
+                        {{-- Step-up gated: routes/web.php applies 'step-up'
                              to this route, matching the JSON API's own
                              /licensing/state POST. --}}
                         <form method="POST" action="{{ route('licensing.state.store') }}">

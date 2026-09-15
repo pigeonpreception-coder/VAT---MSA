@@ -5,7 +5,6 @@ use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
 use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
 use App\Http\Controllers\Administration\AdministrationViewController;
-use App\Http\Controllers\Auth\ConfirmPasswordController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ResetPasswordController;
@@ -198,14 +197,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // the JSON API surface below -- see OrganisationViewController's own
     // doc comment for why these five small services were built as one
     // slice rather than split further. Membership assignment and taxpayer
-    // suspension carry the same 'password.confirm' step-up middleware as
-    // their JSON API siblings.
+    // suspension carry the same 'step-up' middleware as their JSON API
+    // siblings.
     Route::get('/organisations', [OrganisationViewController::class, 'index'])->name('organisations.index');
     Route::get('/organisations/{id}', [OrganisationViewController::class, 'show'])->name('organisations.show');
     Route::post('/organisations/{organisation}/branches', [OrganisationViewController::class, 'storeBranch'])->name('organisations.branches.store');
     Route::patch('/organisations/{organisation}/branches/{branch}', [OrganisationViewController::class, 'updateBranch'])->name('organisations.branches.update');
-    Route::post('/organisations/{organisation}/memberships', [OrganisationViewController::class, 'storeMembership'])->name('organisations.memberships.store')->middleware('password.confirm');
-    Route::post('/organisations/{organisation}/taxpayer-suspension', [OrganisationViewController::class, 'storeSuspension'])->name('organisations.taxpayer-suspension.store')->middleware('password.confirm');
+    Route::post('/organisations/{organisation}/memberships', [OrganisationViewController::class, 'storeMembership'])->name('organisations.memberships.store')->middleware('step-up');
+    Route::post('/organisations/{organisation}/taxpayer-suspension', [OrganisationViewController::class, 'storeSuspension'])->name('organisations.taxpayer-suspension.store')->middleware('step-up');
 
     // Real Blade UI bundling BusinessPartyService (customers/suppliers)
     // with SupplierVerificationService (verify + history), alongside the
@@ -227,9 +226,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // Real Blade UI for LicensingService (Phase 12 slice 1), alongside the
     // JSON API surface below -- see LicensingViewController's own doc
     // comment for why upgrade() has no UI action here. State changes carry
-    // the same 'password.confirm' step-up middleware as the JSON route.
+    // the same 'step-up' middleware as the JSON route.
     Route::get('/licensing', [LicensingViewController::class, 'index'])->name('licensing.index');
-    Route::post('/licensing/state', [LicensingViewController::class, 'storeState'])->name('licensing.state.store')->middleware('password.confirm');
+    Route::post('/licensing/state', [LicensingViewController::class, 'storeState'])->name('licensing.state.store')->middleware('step-up');
 
     // Real Blade UI for the quotation register/lifecycle/edit, alongside
     // the JSON API surface below -- see QuotationViewController's own doc
@@ -288,9 +287,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // needed no changes for these five links.
     Route::get('/operations/human-resources', [HumanResourcesViewController::class, 'index'])->name('operations.human-resources');
     Route::post('/operations/human-resources/employees', [HumanResourcesViewController::class, 'storeEmployee'])
-        ->name('operations.human-resources.employees.store')->middleware('password.confirm');
+        ->name('operations.human-resources.employees.store')->middleware('step-up');
     Route::post('/operations/human-resources/employees/{id}/termination', [HumanResourcesViewController::class, 'terminateEmployee'])
-        ->name('operations.human-resources.employees.termination')->middleware('password.confirm');
+        ->name('operations.human-resources.employees.termination')->middleware('step-up');
 
     Route::get('/operations/immovable-assets', [FixedAssetViewController::class, 'indexImmovable'])->name('operations.immovable-assets');
     Route::get('/operations/movable-assets', [FixedAssetViewController::class, 'indexMovable'])->name('operations.movable-assets');
@@ -315,20 +314,20 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // AdministrationActions.tsx -- the Administration command centre
     // (licensing/entitlements, employees, roles, workflows, access
     // governance). See AdministrationViewController's own doc comment for
-    // its one deliberate substitution: password.confirm step-up in place
-    // of the source's own client-side checkbox theatre.
+    // its one deliberate substitution: a real step-up confirmation in
+    // place of the source's own client-side checkbox theatre.
     Route::get('/administration', [AdministrationViewController::class, 'index'])->name('administration.index');
     Route::post('/administration/employees', [AdministrationViewController::class, 'storeEmployee'])
-        ->name('administration.employees.store')->middleware('password.confirm');
+        ->name('administration.employees.store')->middleware('step-up');
     Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
-        ->name('administration.roles.store')->middleware('password.confirm');
+        ->name('administration.roles.store')->middleware('step-up');
 
     // Ported from the source's own app/documents/page.tsx +
     // DocumentUploadForm.tsx -- see DocumentViewController's own doc
     // comment for why supersede/scan-decision/retention-hold/download
     // have no UI here either (the source's own page has none of them).
     // No step-up gate, matching the source's own /api/v1/documents
-    // upload route (no password.confirm there either).
+    // upload route (no step-up there either).
     Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
     Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
 
@@ -340,7 +339,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // runs, file vs download, run-model/publish vs model-runs/
     // publications) so the two route sets never collide on the same
     // method+path even though they share a path prefix. requestExport/
-    // approveExport carry no password.confirm middleware -- their
+    // approveExport carry no route-level 'step-up' middleware -- their
     // step-up is data-conditional, handled inline by the controller.
     Route::get('/reports', [ReportViewController::class, 'index'])->name('reports.index');
     Route::post('/reports/{code}/run', [ReportViewController::class, 'run'])->name('reports.run');
@@ -358,26 +357,26 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // segments from the JSON API routes under api/v1/platform below
     // (change-requests/{id}/decide vs .../decision, staff vs
     // api/v1/platform/staff) so the two route sets never collide.
-    // provisionStaff wears password.confirm (unconditional step-up,
-    // matching the JSON route's own posture) -- unlike the reports
+    // provisionStaff wears 'step-up' (unconditional, matching the JSON
+    // route's own posture) -- unlike the reports
     // console's data-conditional requestExport/approveExport, this one
     // is a plain route-level gate.
     Route::get('/platform', [PlatformConfigViewController::class, 'index'])->name('platform.index');
     Route::post('/platform/change-requests', [PlatformConfigViewController::class, 'requestChange'])->name('platform.change-requests.store');
     Route::post('/platform/change-requests/{id}/decide', [PlatformConfigViewController::class, 'decideChange'])->name('platform.change-requests.decide');
     Route::post('/platform/staff', [PlatformConfigViewController::class, 'provisionStaff'])->name('platform.staff.store')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
 
     // Super Admin "grant a user an access right" screen (user's own
     // explicit request) -- see App\Services\Access\UserRoleScopeGrantService's
-    // own doc comment. Both writes wear password.confirm: granting
+    // own doc comment. Both writes wear 'step-up': granting
     // directly overwrites the target user's users.role column, at least
     // as privileged as platform.staff.store's own provisioning step-up.
     Route::get('/access-rights', [AccessRightsViewController::class, 'index'])->name('access-rights.index');
     Route::post('/access-rights', [AccessRightsViewController::class, 'store'])->name('access-rights.store')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
     Route::post('/access-rights/{grant}/revoke', [AccessRightsViewController::class, 'revoke'])->name('access-rights.revoke')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
 
     // Frontend UI build-out: the workflow engine's own authoring console,
     // reusing WorkflowService directly (see App\Http\Controllers\Workflow\
@@ -387,23 +386,23 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // from the JSON API under api/v1/workflows[-tasks] below (decide vs
     // decision, revoke vs revocation) so the two route sets never
     // collide even without the prefix difference alone to rely on. Every
-    // write here wears password.confirm, matching the JSON route's own
+    // write here wears 'step-up', matching the JSON route's own
     // unconditional step-up posture exactly -- test is the one exception
     // in both (a dry-run has no side effects).
     Route::get('/workflows', [WorkflowAuthoringViewController::class, 'index'])->name('workflows.index');
     Route::post('/workflows', [WorkflowAuthoringViewController::class, 'store'])->name('workflows.store')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
     Route::post('/workflows/versions/{id}/publish', [WorkflowAuthoringViewController::class, 'publish'])->name('workflows.publish')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
     Route::post('/workflows/versions/{id}/test', [WorkflowAuthoringViewController::class, 'test'])->name('workflows.test');
     Route::post('/workflows/instances', [WorkflowAuthoringViewController::class, 'assign'])->name('workflows.assign')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
     Route::post('/workflow-tasks/{id}/decide', [WorkflowAuthoringViewController::class, 'decide'])->name('workflows.decide')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
     Route::post('/workflows/delegations', [WorkflowAuthoringViewController::class, 'storeDelegation'])->name('workflows.delegations.store')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
     Route::post('/workflows/delegations/{id}/revoke', [WorkflowAuthoringViewController::class, 'revokeDelegation'])->name('workflows.delegations.revoke')
-        ->middleware('password.confirm');
+        ->middleware('step-up');
 
     // Ported from the source's own app/portals/page.tsx -- see
     // PortalViewController's own doc comment.
@@ -501,14 +500,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         'A controlled form to issue a debit note against an original tax invoice.',
         'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the debit, and the additional lines/amounts. Awaiting approval before the UI is built.');
 
-    Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
-    Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
-
-    // TOTP step-up parity (2026-09-15, infrastructure only) -- self-
-    // service Blade UI alongside MfaController's JSON API. No
-    // password.confirm gate on any of these: enrolling/using your own
-    // second factor is the self-service action itself, not a privileged
-    // change to someone else's account.
+    // TOTP step-up parity (2026-09-15). No 'step-up' gate on any of these
+    // routes themselves: enrolling/using your own second factor is the
+    // self-service action itself, not a privileged change to someone
+    // else's account. The former /confirm-password route (Laravel's
+    // built-in password.confirm) and ConfirmPasswordController are gone
+    // -- every route that wore that middleware now wears 'step-up'
+    // instead (see App\Http\Middleware\EnsureFreshStepUp), which redirects
+    // here.
     Route::get('/security/mfa', [MfaViewController::class, 'index'])->name('security.mfa');
     Route::post('/security/mfa', [MfaViewController::class, 'enroll'])->name('security.mfa.enroll');
     Route::post('/security/mfa/verification', [MfaViewController::class, 'verify'])->name('security.mfa.verify');
@@ -522,7 +521,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/registration-applications', [RegistrationApplicationController::class, 'index']);
         Route::post('/registration-applications', [RegistrationApplicationController::class, 'store']);
         Route::post('/registration-applications/{id}/decision', [RegistrationApplicationController::class, 'decision'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // getIdentityFoundationSnapshot -- Module 1's own dashboard
         // aggregate (organisations + registrations + identity providers +
@@ -534,18 +533,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // Closes out Phase 8's own last deferred piece.
         Route::get('/identity', [IdentityFoundationController::class, 'show']);
 
-        // TOTP step-up parity (2026-09-15, infrastructure only -- see
-        // docs/LAUNCH_READINESS_BACKLOG.md item #8 and
-        // App\Http\Controllers\Auth\ConfirmPasswordController's own doc
-        // comment, which already named this exact follow-up): a real,
-        // server-verified RFC 6238 TOTP implementation, ported from
-        // app/api/v1/identity/mfa/totp/{route.ts,verification/route.ts},
-        // .../step-up/route.ts, and .../assurance/route.ts. Self-service
-        // enrolment/verification/step-up confirmation is now fully
-        // working and covered by its own regression tests -- but the
-        // existing ~40 password.confirm-gated routes below are
-        // deliberately NOT yet cut over to require it (a separate,
-        // larger, explicitly scoped follow-up per the user's own request).
+        // TOTP step-up parity (2026-09-15): a real, server-verified RFC
+        // 6238 TOTP implementation, ported from app/api/v1/identity/mfa/
+        // totp/{route.ts,verification/route.ts}, .../step-up/route.ts, and
+        // .../assurance/route.ts. Self-service enrolment/verification/
+        // step-up confirmation is fully working and covered by its own
+        // regression tests. Every route below that used to wear Laravel's
+        // built-in 'password.confirm' now wears 'step-up' instead (see
+        // App\Http\Middleware\EnsureFreshStepUp), so this is the real,
+        // unconditional step-up gate throughout the app now, not a
+        // password-reconfirmation stand-in.
         Route::post('/identity/mfa/totp', [MfaController::class, 'enroll']);
         Route::post('/identity/mfa/totp/verification', [MfaController::class, 'verifyEnrollment']);
         Route::post('/identity/step-up', [MfaController::class, 'confirmStepUp']);
@@ -570,10 +567,10 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::patch('/organisations/{organisation}/branches/{branch}', [BranchController::class, 'update']);
 
         Route::post('/organisations/{organisation}/memberships', [MembershipController::class, 'store'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // Phase 9: invoice certification and VAT. Kept 1:1 with the source's
         // app/api/v1/invoices/** shape -- see InvoiceController's own doc
@@ -583,7 +580,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/invoices', [InvoiceController::class, 'store']);
         Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
         Route::post('/invoices/{id}/cancellation', [InvoiceController::class, 'cancel'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::get('/invoices/{id}/vat-explanation', [InvoiceController::class, 'vatExplanation']);
         Route::get('/invoices/{id}/transaction-timeline', [InvoiceController::class, 'transactionTimeline']);
 
@@ -593,10 +590,10 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // are step-up gated exactly like invoice cancellation above.
         Route::get('/vat-rules', [VatRuleController::class, 'index']);
         Route::post('/vat-rules', [VatRuleController::class, 'store'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::get('/vat-rules/evaluate', [VatRuleController::class, 'evaluate']);
         Route::post('/vat-rules/{id}/approval', [VatRuleController::class, 'approve'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // Phase 10 (slice 1 of Accounting/commercial): business parties and
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
@@ -741,14 +738,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // (Phase 13, sixth and final slice) -- closes out
         // platform-repository.ts entirely. Kept 1:1 with the source's own
         // app/api/v1/platform/** route shapes. provisionStaff is
-        // unconditionally step-up gated (password.confirm), unlike the
+        // unconditionally step-up gated ('step-up'), unlike the
         // report-export commands' data-conditional step-up.
         Route::get('/platform/config', [PlatformConfigController::class, 'config']);
         Route::get('/platform/change-requests', [PlatformConfigController::class, 'changeRequests']);
         Route::post('/platform/change-requests', [PlatformConfigController::class, 'requestChange']);
         Route::post('/platform/change-requests/{id}/decision', [PlatformConfigController::class, 'decideChange']);
         Route::post('/platform/staff', [PlatformConfigController::class, 'provisionStaff'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         Route::get('/obligations', [ObligationController::class, 'index']);
         Route::post('/obligations', [ObligationController::class, 'store']);
@@ -814,9 +811,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // requireStepUp.
         Route::get('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'show']);
         Route::post('/tax-authority-onboarding-cases', [AuthorityGovernanceController::class, 'store'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/tax-authority-onboarding-cases/{id}/decisions', [AuthorityGovernanceController::class, 'decide'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // Phase 12 (portals/licensing/governance), slice 1: Licensing &
         // Entitlements (lib/data/control-plane-repository.ts's
@@ -827,9 +824,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/licensing/usage', [LicensingController::class, 'usage']);
         Route::get('/licensing/license', [LicensingController::class, 'license']);
         Route::post('/licensing/state', [LicensingController::class, 'state'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/licensing/upgrade', [LicensingController::class, 'upgrade'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // Phase 12 slice 2: organisation administration/employees (also
         // closing out "the rest of Phase 8" -- employees, organisation-
@@ -842,22 +839,22 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // rest of Access governance (certifyQuarterlyAccess and beyond)
         // remain deferred -- see docs/MIGRATION_MATRIX.md.
         Route::post('/organisations/employees', [OrganisationAdminController::class, 'storeEmployee'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/organisations/employees/{id}/activation', [OrganisationAdminController::class, 'activateEmployee'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/organisations/employees/{id}/termination', [OrganisationAdminController::class, 'terminateEmployee'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/organisations/administrators', [OrganisationAdminController::class, 'storeAdministrator'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/organisations/roles', [OrganisationAdminController::class, 'storeRole'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         // GET /organisations/capabilities is registered earlier, above the
         // /organisations/{id} wildcard -- see that route's comment.
         Route::post('/organisations/capabilities', [OrganisationAdminController::class, 'storeCapability'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::get('/access-reviews', [AccessGovernanceController::class, 'listAccessReviews']);
         Route::post('/access-reviews', [OrganisationAdminController::class, 'storeAccessReview'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // Phase 12 slice 3: portal navigation (getEffectiveNavigation/
         // getNavigationChildren/getNavigationItemActions/
@@ -886,13 +883,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/access-requests', [AccessGovernanceController::class, 'listAccessRequests']);
         Route::post('/access-requests', [AccessGovernanceController::class, 'storeAccessRequest']);
         Route::post('/access-requests/{id}/decision', [AccessGovernanceController::class, 'decideAccessRequest'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/access-reviews/{id}/certifications', [AccessGovernanceController::class, 'storeCertification'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/access-grants/revocation', [AccessGovernanceController::class, 'storeRevocation'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/organisations/offboarding', [AccessGovernanceController::class, 'storeOffboarding'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // Phase 12 slice 5: the workflow engine (Module 8 Phase C --
         // createWorkflowDraft/publishWorkflowVersion/assignWorkflow/
@@ -902,19 +899,19 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // dry-run has no side effects); every other write command is.
         Route::get('/workflows', [WorkflowController::class, 'listWorkflows']);
         Route::post('/workflows', [WorkflowController::class, 'storeWorkflow'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/workflows/versions/{id}/publication', [WorkflowController::class, 'publishVersion'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/workflows/versions/{id}/test', [WorkflowController::class, 'testVersion']);
         Route::post('/workflows/instances', [WorkflowController::class, 'storeInstance'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/workflow-tasks/{id}/decision', [WorkflowController::class, 'decideTask'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::get('/workflows/delegations', [WorkflowController::class, 'delegations']);
         Route::post('/workflows/delegations', [WorkflowController::class, 'storeDelegation'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
         Route::post('/workflows/delegations/{id}/revocation', [WorkflowController::class, 'revokeDelegation'])
-            ->middleware('password.confirm');
+            ->middleware('step-up');
 
         // getAdministrationSnapshot's own full, unsliced route -- the
         // fixed-list dashboard aggregate every other GET-list route

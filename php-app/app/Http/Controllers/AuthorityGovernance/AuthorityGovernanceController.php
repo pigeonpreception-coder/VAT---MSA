@@ -21,7 +21,7 @@ use Symfony\Component\HttpFoundation\Response;
  * `stepUpEvidenceReference` is computed server-side as
  * `"verified-step-up:{$correlationId}"`, matching the source's own
  * route (`` `verified-step-up:${context.correlationId}` ``) exactly --
- * never client-supplied. Step-up itself is the `password.confirm`
+ * never client-supplied. Step-up itself is the `step-up`
  * middleware on these routes (routes/web.php), this migration's own
  * established equivalent of the source's `requireStepUp`.
  */

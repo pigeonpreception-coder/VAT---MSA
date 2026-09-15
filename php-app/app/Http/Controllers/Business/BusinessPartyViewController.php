@@ -122,7 +122,8 @@ class BusinessPartyViewController extends Controller
             // verify button only ever lives there, and back() depends on
             // Laravel's session-tracked previous URL actually being set --
             // an assumption already proven fragile once in this build-out
-            // (see ConfirmPasswordController's own fix, same session).
+            // (see App\Http\Middleware\EnsureFreshStepUp's own
+            // redirect_to-over-intended() fix, same underlying bug).
             return redirect()->route('business-parties.show', $id)->withErrors(['form' => $e->getMessage()]);
         }
 

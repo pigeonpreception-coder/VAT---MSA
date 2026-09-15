@@ -12,7 +12,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Ported from app/api/v1/vat-rules/route.ts and its evaluate/[id]/approval
  * siblings (Module 2 Phase A, in full). ProposeVatRule/ApproveVatRule are
- * step-up gated via the same 'password.confirm' middleware every other
+ * step-up gated via the same 'step-up' middleware every other
  * sensitive command in this migration uses (see routes/web.php) --
  * matching the source's own requireStepUp call on both.
  */

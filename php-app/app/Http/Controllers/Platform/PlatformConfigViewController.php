@@ -22,7 +22,7 @@ use Illuminate\View\View;
  * (one per target type) and the decide/provision writes all go through
  * the service's own maker-checker gate, never a second write path.
  *
- * **provisionStaff wears `password.confirm` at the route level**, unlike
+ * **provisionStaff wears `step-up` at the route level**, unlike
  * ReportViewController's requestExport/approveExport: this command is
  * unconditionally step-up gated in the source (the same posture
  * Administration's employee/role invitations and Licensing's state

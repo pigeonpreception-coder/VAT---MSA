@@ -8,6 +8,7 @@ use Database\Seeders\RoleSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -21,6 +22,7 @@ use Tests\TestCase;
 class VatRuleTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -59,13 +61,13 @@ class VatRuleTest extends TestCase
         $approver = $this->pilotAdmin('-approver');
 
         $propose = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => 'propose-'.Str::random(20)]);
         $propose->assertStatus(201)->assertJsonPath('rule.status', 'DRAFT')->assertJsonPath('rule.version', 2);
         $ruleId = $propose->json('rule.id');
 
         $approve = $this->actingAs($approver)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'Verified against the gazette notice.'], ['Idempotency-Key' => 'approve-'.Str::random(20)]);
         $approve->assertStatus(200)->assertJsonPath('rule.status', 'APPROVED');
 
@@ -81,12 +83,12 @@ class VatRuleTest extends TestCase
     {
         $proposer = $this->pilotAdmin();
         $propose = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => 'propose-'.Str::random(20)]);
         $ruleId = $propose->json('rule.id');
 
         $selfApprove = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'Attempting to self-approve.'], ['Idempotency-Key' => 'approve-'.Str::random(20)]);
         $selfApprove->assertStatus(422)->assertJsonPath('errors.0.code', 'SELF_APPROVAL_DENIED');
     }
@@ -96,16 +98,16 @@ class VatRuleTest extends TestCase
         $proposer = $this->pilotAdmin('-proposer');
         $approver = $this->pilotAdmin('-approver');
         $propose = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => 'propose-'.Str::random(20)]);
         $ruleId = $propose->json('rule.id');
         $this->actingAs($approver)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'First approval.'], ['Idempotency-Key' => 'approve-'.Str::random(20)])
             ->assertStatus(200);
 
         $second = $this->actingAs($approver)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'Second attempt.'], ['Idempotency-Key' => 'approve-'.Str::random(20)]);
         $second->assertStatus(409);
     }
@@ -117,12 +119,12 @@ class VatRuleTest extends TestCase
         // The seeded standard rule is effective_from 2026-01-01; a proposal
         // effective on or before that date must be rejected at approval time.
         $propose = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(['effective_from' => '2026-01-01']), ['Idempotency-Key' => 'propose-'.Str::random(20)]);
         $ruleId = $propose->json('rule.id');
 
         $approve = $this->actingAs($approver)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'Attempting a backdated approval.'], ['Idempotency-Key' => 'approve-'.Str::random(20)]);
         $approve->assertStatus(422)->assertJsonPath('errors.0.code', 'EFFECTIVE_FROM_NOT_FORWARD');
     }
@@ -147,7 +149,7 @@ class VatRuleTest extends TestCase
 
         $this->actingAs($officer)->getJson('/api/v1/vat-rules')->assertStatus(200);
         $this->actingAs($officer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => 'propose-'.Str::random(20)])
             ->assertStatus(403);
     }
@@ -158,11 +160,11 @@ class VatRuleTest extends TestCase
         $key = 'propose-shared-'.Str::random(20);
 
         $first = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => $key]);
         $first->assertStatus(201);
         $replay = $this->actingAs($proposer)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => $key]);
         $replay->assertStatus(201)->assertJsonPath('rule.id', $first->json('rule.id'));
 

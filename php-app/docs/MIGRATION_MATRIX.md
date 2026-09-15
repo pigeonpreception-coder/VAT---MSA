@@ -5379,11 +5379,13 @@ cutover runbook (Phase 14, above), a storage section (why no
 to run the test suite safely (against a disposable database, never a
 real one -- `RefreshDatabase` truncates), and an honest "what is not
 done yet" section that does not let a real production rollout discover
-gaps by surprise: no full TOTP step-up parity, three platform-config/
-access-policy values wired to a real downstream consumer with every
-other seeded row still illustrative only, no real object-storage driver
-configured. (Self-service password reset -- previously listed here as a
-gap -- was closed 2026-09-02 per red team finding RT-005.)
+gaps by surprise: two platform-config/access-policy values wired to a
+real downstream consumer with every other seeded row still illustrative
+only, no real object-storage driver configured. (Self-service password
+reset -- previously listed here as a gap -- was closed 2026-09-02 per red
+team finding RT-005. TOTP step-up parity, including the full cutover of
+every step-up-gated route, was closed 2026-09-15 -- see "TOTP step-up
+parity" and "TOTP step-up cutover" below.)
 
 No test suite applies to a documentation-only phase; verification here
 is that every factual claim in the document (version numbers, config
@@ -6368,17 +6370,19 @@ away by a fully-green test suite:
   of, never a security gap in those models themselves. Closed,
   documented, not an open item.
 - **A handful of documented, non-blocking gaps** carried since early in
-  this migration and never silently dropped: TOTP step-up parity is
-  Laravel's `password.confirm` re-authentication rather than the
-  source's own server-verified TOTP (Phase 6; the
-  `step_up_events`/`mfa_totp_credentials` tables exist, schema-only),
-  three platform-config/access-policy values are now wired to a real
-  downstream consumer via `App\Support\Platform\PlatformConfigReader`
-  (Phase 13's "Platform config now feeds three real consumers" above);
-  every other seeded row remains illustrative only, wired only when a
-  real consumer needs it. (Self-service password reset -- once
-  listed here as a gap -- was closed 2026-09-02 per red team finding
-  RT-005; see `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`.)
+  this migration and never silently dropped: two platform-config/
+  access-policy values are wired to a real downstream consumer via
+  `App\Support\Platform\PlatformConfigReader` (Phase 13's "Platform
+  config now feeds three real consumers" above, now two -- see "TOTP
+  step-up cutover" below for why the third, `STEP_UP_WINDOW`, is
+  illustrative only again); every other seeded row remains illustrative
+  only, wired only when a real consumer needs it. (Self-service password
+  reset -- once listed here as a gap -- was closed 2026-09-02 per red
+  team finding RT-005; see `docs/RED_TEAM_ASSESSMENT_2026-09-02.md`. TOTP
+  step-up parity -- once Laravel's `password.confirm` re-authentication
+  rather than the source's own server-verified TOTP -- was closed
+  2026-09-15, infrastructure and full route cutover both; see "TOTP
+  step-up parity" and "TOTP step-up cutover" below.)
 - **A real S3/R2-compatible object-storage disk is now genuinely a
   config-only swap, not just documented as one.** `DocumentService`
   and `ReportExportService` previously wrote/read via a literal
@@ -7607,3 +7611,87 @@ re-enrol-while-active conflict, step-up confirmation, anti-replay) and
 `tests/Feature/Identity/MfaViewTest.php` (the Blade UI, plus sidebar-link
 visibility for a role with `identity:read` vs one without). Full suite:
 655 tests, 0 regressions.
+
+## TOTP step-up cutover (2026-09-15)
+
+Same day, explicit follow-up user request: "Cut over the password.confirm
+routes to require TOTP." The infrastructure-only decision above was
+deliberate but temporary -- once asked, every one of the 44
+`password.confirm`-gated routes in `routes/web.php` now requires a real,
+fresh TOTP step-up instead of a re-entered password.
+
+**What changed:**
+- `App\Http\Middleware\EnsureFreshStepUp` (aliased `step-up`) replaces
+  Laravel's built-in `password.confirm` (`RequirePassword`) at the route
+  level, checking `MfaService::hasFreshStepUp()` -- a real
+  `step_up_events` row, not a session timestamp. Mirrors
+  `RequirePassword`'s own behaviour exactly, including status code: a
+  JSON request that fails gets a 423 Locked (several existing JSON
+  routes' own tests already asserted this code); an HTML request
+  redirects to `security.mfa` with the blocked page preserved as
+  `redirect_to` (same-origin checked via the new `App\Support\Access\
+  SafeRedirect`, extracted from the old `ConfirmPasswordController` for
+  reuse by both the middleware and `MfaViewController`).
+- `App\Http\Controllers\Auth\ConfirmPasswordController` and
+  `resources/views/auth/confirm-password.blade.php` are deleted; the
+  `/confirm-password` routes and `password.confirm` route name are gone.
+- `App\Support\Access\StepUp::isFresh()` (the data-conditional gate
+  `ReportViewController`'s `requestExport`/`approveExport` use) now
+  delegates to `MfaService::hasFreshStepUp()` instead of its own
+  `auth.password_confirmed_at`-session reimplementation. The seeded
+  `STEP_UP_WINDOW` `access_policies` row this used to read live is now
+  illustrative only -- freshness is fixed at TOTP confirmation time
+  (`MfaService::STEP_UP_WINDOW_SECONDS`, 5 minutes), not a live-
+  configurable window.
+- `MfaViewController`'s index/enroll/verify/stepUp and the
+  `security/mfa/index.blade.php` view thread a `redirect_to` value
+  through the whole enrol -> verify -> confirm-step-up sequence (hidden
+  form fields), so a user who lands here mid-action -- not yet enrolled,
+  or without a fresh step-up -- returns to their original destination
+  once step-up is confirmed, not just to the MFA settings page.
+- ~200 call sites across 22 test files' former
+  `->withSession(['auth.password_confirmed_at' => time()])` shortcut are
+  replaced by `Tests\Concerns\InteractsWithStepUp::withFreshStepUp()`/
+  `withStaleStepUp()`, which insert a real `step_up_events` row for the
+  acting user instead of a session key nothing reads anymore.
+  `tests/Feature/Auth/ConfirmPasswordTest.php` (tested the now-deleted
+  controller) is removed.
+
+Live-verified with a real browser session over HTTP (not just the test
+suite): logged in as a non-enrolled admin, hit a `step-up`-gated route,
+confirmed the redirect to `/security/mfa?redirect_to=...`, enrolled,
+verified, confirmed step-up with a freshly generated code, landed back on
+the exact original page, and the retried action succeeded and persisted
+to the database.
+
+Full suite: 648 tests, 0 regressions.
+
+## Sidebar: full menu shown to every user (2026-09-15)
+
+User's own explicit request: every sidebar link and group header is now
+shown to every authenticated user unconditionally, regardless of the
+permission its destination requires. This deliberately reverts the
+per-permission menu gating from RT-021 (2026-09-14) and the follow-up
+sidebar audit the same day -- both of which hid a link/group from a role
+that could not use it, to avoid a dead-end click. The user's own
+preference is the opposite: show the whole application in the menu
+regardless of what a given role can use.
+
+**Not a security change.** Every destination controller's own
+`authorize('permission', ...)` call is completely untouched -- a role
+that clicks a link it cannot use still gets a clean 403, exactly as
+before. Only `resources/views/layouts/app.blade.php`'s menu-rendering
+logic changed: the `@can`/`@endcan` wrappers around individual links and
+the computed `$showX` booleans gating whole group headers were removed,
+so every `<li>` in the sidebar now renders unconditionally for any
+authenticated user.
+
+Verified: `tests/Feature/Navigation/SidebarLinkPermissionTest.php`,
+`tests/Feature/Business/ForeignInvoiceViewTest.php`, and
+`tests/Feature/Identity/MfaViewTest.php` updated to assert the new
+behaviour (link/group always visible; destination still correctly
+refuses a role without the right permission) rather than the reverted
+per-permission hiding. Live-verified with a real browser: `SUPER_ADMIN`
+(the permission-light role used throughout the prior sidebar audit) now
+sees every group and every standalone link. Full suite: 654 tests, 0
+regressions.

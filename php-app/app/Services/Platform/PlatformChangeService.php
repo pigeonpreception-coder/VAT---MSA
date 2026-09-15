@@ -34,17 +34,19 @@ use Illuminate\Support\Str;
  * row (capturing a snapshot of the previous value so the diff is always
  * reconstructable); `decideChange()` applies or rejects it, refusing
  * self-decision the same way every other maker-checker command in this
- * codebase does. Three seeded config values now feed back into a real
- * consumer via App\Support\Platform\PlatformConfigReader --
+ * codebase does. Two seeded config values feed back into a real consumer
+ * via App\Support\Platform\PlatformConfigReader --
  * `reports.export_size_limit_bytes`/`reports.min_cell_suppression_threshold`
- * (both read by `ReportExportService`) and the `STEP_UP_WINDOW` access
- * policy's own `window_seconds` (read by `App\Support\Access\StepUp`) --
- * so changing one of these three rows through `decideChange()` now has a
- * real, observable effect, not just a documentary one. Every other seeded
- * row (every `feature_flags` row, every other `platform_config`/
- * `access_policies` row) remains illustrative only; wiring each one to its
- * own consumer is left for whenever that consumer actually needs it,
- * exactly as before.
+ * (both read by `ReportExportService`) -- so changing either row through
+ * `decideChange()` has a real, observable effect, not just a documentary
+ * one. The seeded `STEP_UP_WINDOW` access policy row was a third such
+ * consumer until the 2026-09-15 TOTP cutover: `App\Support\Access\StepUp`
+ * now delegates entirely to `MfaService::hasFreshStepUp`, whose freshness
+ * window is fixed at TOTP confirmation time rather than read live from
+ * this table, so that row is illustrative only now, same as every other
+ * seeded `feature_flags`/`platform_config`/`access_policies` row; wiring
+ * each one to its own consumer is left for whenever that consumer
+ * actually needs it, exactly as before.
  *
  * No Eloquent model for any of the four tables this service touches
  * (`feature_flags`/`platform_config`/`access_policies`/

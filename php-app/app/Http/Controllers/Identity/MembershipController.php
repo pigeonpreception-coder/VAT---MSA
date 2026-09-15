@@ -16,7 +16,7 @@ class MembershipController extends Controller
     public function store(AssignMembershipRequest $request, string $organisation): JsonResponse
     {
         $this->authorize('permission', 'organisations:manage');
-        // Step-up: see routes/web.php's 'password.confirm' middleware on this route.
+        // Step-up: see routes/web.php's 'step-up' middleware on this route.
 
         $membership = $this->memberships->assign($request->user(), $organisation, $request->validated(), (string) Str::uuid());
 

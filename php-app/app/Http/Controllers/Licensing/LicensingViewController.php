@@ -43,7 +43,7 @@ use Illuminate\View\View;
  * LicensingTest already provisions per-test.
  *
  * `licensing:manage` (state changes) is step-up gated with the same
- * 'password.confirm' middleware the JSON API route already uses.
+ * 'step-up' middleware the JSON API route already uses.
  */
 class LicensingViewController extends Controller
 {
@@ -78,9 +78,9 @@ class LicensingViewController extends Controller
             $this->licensing->changeState($payload, $request->user(), $request->query('organisation_id'));
         } catch (LicensingValidationException|AuthorizationException $e) {
             // Explicit redirect to the index route rather than back(): the
-            // same class of bug ConfirmPasswordController's own fix
-            // addressed earlier in this build-out for a step-up-gated POST
-            // whose form lives on exactly one known page.
+            // same class of bug App\Http\Middleware\EnsureFreshStepUp's own
+            // redirect_to fix addresses elsewhere in this build-out for a
+            // step-up-gated POST whose form lives on exactly one known page.
             return redirect()->route('licensing.index')->withErrors(['form' => $e->getMessage()])->withInput();
         }
 
