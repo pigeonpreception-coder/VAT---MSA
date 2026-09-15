@@ -320,6 +320,13 @@
                     @can('permission', 'access-rights:read')
                         <li class="nav-item"><a class="nav-link" href="{{ route('access-rights.index') }}" @if (request()->routeIs('access-rights.*')) aria-current="page" @endif>Access Rights</a></li>
                     @endcan
+                    {{-- TOTP step-up parity (2026-09-15): gated on identity:read, the same
+                         permission MfaController's own JSON API requires -- not every role
+                         holds it (matching the source's own gate exactly), so this link only
+                         shows where the destination is actually reachable. --}}
+                    @can('permission', 'identity:read')
+                        <li class="nav-item"><a class="nav-link" href="{{ route('security.mfa') }}" @if (request()->routeIs('security.mfa')) aria-current="page" @endif>Security (MFA)</a></li>
+                    @endcan
                 </ul>
                 <div class="sidebar-user">
                     <div class="small text-white-50">Signed in as</div>

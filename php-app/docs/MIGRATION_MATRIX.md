@@ -7556,3 +7556,54 @@ Verified: 2 new permanent regression tests in
 `tests/Feature/Navigation/SidebarLinkPermissionTest.php`. Full suite: 645
 tests, 0 regressions. Full findings and methodology:
 `docs/RED_TEAM_ASSESSMENT_2026-09-14-SIDEBAR-AUDIT.md`.
+
+## TOTP step-up parity (2026-09-15, infrastructure only)
+
+Backlog item #8: the `mfa_totp_credentials`/`step_up_events` tables have
+existed schema-only since the original 2026-09-03 migration pass, with
+nothing reading or writing them -- every step-up-gated action instead
+used Laravel's `password.confirm` (re-enter your password) as an
+explicit, documented stand-in for the source's own real, server-verified
+RFC 6238 TOTP.
+
+This pass discovered the original TypeScript source is present in this
+repository (`lib/domain/mfa.ts`, `lib/data/mfa-repository.ts`,
+`lib/security/step-up.ts`, `app/api/v1/identity/{mfa/totp,step-up,
+assurance}/**`) -- not something every prior session had noticed -- making
+a genuine, verified port possible for the first time rather than a
+from-scratch reimplementation. Ported line-for-line: `App\Support\Access\
+Totp` (RFC 6238 HOTP/TOTP over PHP's own `hash_hmac`, base32 encode/
+decode, `±1`-step drift tolerance, `otpauth://` URI generation) and
+`App\Services\Identity\MfaService` (enrol, verify-enrolment, confirm-step-
+up with anti-replay via `last_used_counter`, freshness check, status
+read) -- with the exact same JSON contract the source's own test suite
+(`tests/routes/security-mfa-step-up.test.ts`) specifies, reverified here
+against a Python `pyotp` reference implementation for an independent,
+cross-language confirmation the port is genuinely RFC 6238-correct, not
+just internally self-consistent.
+
+**User's own explicit scope decision**: infrastructure only. The
+~40 existing `password.confirm`-gated routes (and the 24 test files
+using its session shortcut) are deliberately NOT cut over to require
+TOTP -- a separate, larger, and behavior-changing follow-up (every
+current account would need to enrol before it could do anything
+privileged), left for a future explicit decision rather than done
+silently as a side effect of this pass.
+
+What this pass adds, fully working end to end: a JSON API
+(`App\Http\Controllers\Identity\MfaController`, matching the source's own
+four routes) and a genuinely new self-service Blade UI (`Security (MFA)`
+in the sidebar, gated on `identity:read` like the API itself) -- no
+`page.tsx` exists in the source for this, so the UI is an addition, not a
+port. Live-verified with a real browser end to end: enrol -> secret/
+otpauth URI shown once -> verify with a real generated code -> activated
+-> confirm step-up -> fresh-step-up status shown, screenshots taken at
+every stage.
+
+Verified: 10 new permanent regression tests across
+`tests/Feature/Identity/MfaTest.php` (the JSON API, mirroring the
+source's own test contract: enrol, verify, wrong-code rejection,
+re-enrol-while-active conflict, step-up confirmation, anti-replay) and
+`tests/Feature/Identity/MfaViewTest.php` (the Blade UI, plus sidebar-link
+visibility for a role with `identity:read` vs one without). Full suite:
+655 tests, 0 regressions.
