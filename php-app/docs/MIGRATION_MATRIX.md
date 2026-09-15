@@ -8081,3 +8081,96 @@ an audit, not a fabricated recalibration:
   fabricates numbers to paper over.
 
 Verified: full suite 679 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #12, N+1/query-plan testing at real volume (2026-09-15)
+
+Item #12 was tracked as blocked on external access -- its own source
+report said testing query performance/N+1 patterns needed "either a
+production-scale seed or a staging environment closer to production
+sizing," and the dev seed was 0 invoices, 5 fixed assets, 12 users. A
+synthetic seed doesn't need external access, so this closes the
+query-plan/N+1 half of the item (the raw-throughput/concurrency half
+still does, and stays blocked -- see below).
+
+**`database/seeders/SyntheticLoadSeeder.php`** (new): bulk `DB::table()`
+inserts (chunked at 250-500 rows), not Eloquent or the real service/
+validator layer -- the goal is raw row volume to make N+1 patterns
+visible, not exercising business rules. Run on demand
+(`php artisan db:seed --class=SyntheticLoadSeeder`), not part of the
+default install (`DatabaseSeeder` doesn't call it). Generates: 20
+taxpayers/organisations (SELLER+BUYER capabilities), 110 users (100
+taxpayer-scoped across 5 roles + 10 national NamRA staff), 5,000
+invoices with lines, 2,000 expenses, 500 audit cases with 2,000 evidence
+rows, 1,000 documents, 200 fixed assets. Took 28s against a real local
+MySQL instance.
+
+A static-analysis pass across every `*ViewController`'s list/index
+method (research only, no live testing) first mapped the landscape: most
+of this codebase is already disciplined about N+1 -- `InvoiceService::
+list()`/`mapSummary()`, `AuditCaseViewController`, `WorkflowAuthoringView
+Controller`, `AdministrationSnapshotService`, `ComplianceSnapshotService`,
+`DashboardSnapshotService`, `ReportViewController`, `DocumentViewController`,
+and `AccessRightsViewController` all confirmed to already use denormalized
+summary columns or `->with()`/batched `whereIn()` reads, not per-row lazy
+loads. Four genuine N+1s were found and fixed, each one only made
+concretely visible by actually running the seeded volume through the
+real page (all four were invisible against the old near-empty dev seed):
+
+- **`OperationsViewController::index()`'s expense register** -- lazy
+  `$expense->category`/`$expense->supplier` plus a
+  `DocumentMetadata::find($expense->receipt_document_id)` per row (up
+  to 3 extra queries per row). Fixed: `->with(['category', 'supplier'])`
+  on the initial query, plus one batched `DocumentMetadata::whereIn('id',
+  $receiptIds)->get()->keyBy('id')` for receipts.
+- **The same controller's project panel** -- `ProjectBudget::where(...)
+  ->sum(...)` and `ProjectCost::where(...)->sum(...)` run per project
+  row (2 extra queries per row). Fixed: two batched `whereIn()` +
+  `groupBy('project_id')` + `selectRaw('... SUM(...) as total')`
+  queries, keyed by project_id for the map.
+- **`QuotationService::search()`** -- the worst of the four. Every row
+  in this register/list view was mapped through `present()` (built for
+  `find()`/`findOrFail()`'s single-record case), which lazy-loads
+  `customer` *and* runs a full `QuotationLine::where('quotation_id',
+  ...)->get()` per row -- a complete extra query per row for line items
+  that resources/views/quotations/index.blade.php never even renders on
+  this view. Fixed: a new `presentSummary()` (identical to `present()`
+  minus the `lines` key) plus `->with('customer')` on `search()`'s own
+  query builder; `present()` itself is untouched and still used by
+  `find()`/`findOrFail()`.
+- **`BusinessPartyService::search()`** -- `PartyRelationship::where(
+  'party_id', $party->id)->...` per row, reached both from the parties
+  register directly and from `OperationsViewController`'s own supplier
+  filter (`$this->parties->search(...)`) -- this one compounded with the
+  expense-register fix above, since the two pages share this code path.
+  Fixed: `present()` now optionally accepts pre-fetched relationships;
+  `search()` batches them in one `whereIn('party_id', $partyIds)` query
+  grouped by `party_id`, `findOrFail()`'s single-record path is
+  untouched (keeps running its own one-row query).
+
+All four use the same `->with()`/batched-`whereIn()` shape already
+established correctly elsewhere in this codebase -- no new pattern
+introduced. New regression tests (`OperationsViewTest`,
+`BusinessPartyAndQuotationTest`) seed 30 rows each (deliberately enough
+that an unfixed N+1 is unmistakable, not marginal) and assert the
+request's total query count stays small and doesn't scale with row
+count -- confirmed by temporarily reverting the fix during test
+authorship: the expense/project page went from 15 queries (fixed) to 44
+(unfixed) at 30 rows.
+
+Live-verified over real HTTP against the full synthetic dataset (not
+just the smaller in-test fixture): `/operations`, `/quotations`,
+`/invoices`, and `/audit-cases` all rendered correctly, as both a
+taxpayer-scoped user and a national-scope NamRA user (the more
+demanding cross-tenant case for `/invoices` and `/audit-cases`), in
+well under 200ms each -- with the dev database reset back to the
+normal `DemoSeeder` baseline afterward (the synthetic seed is
+on-demand tooling, not a permanent fixture).
+
+**What this does not close**: raw throughput/concurrency under genuine
+simultaneous load (backlog item #7's other half, `RED_TEAM_ASSESSMENT_
+2026-09-02.md`'s RT-004 environment-limitations note) needs real
+load-testing tooling (k6, Apache Bench, or similar) run against a
+non-local target -- neither exists in this sandbox, and large data
+volume alone doesn't substitute for it. That half stays blocked.
+
+Verified: full suite 681 tests, 0 regressions.

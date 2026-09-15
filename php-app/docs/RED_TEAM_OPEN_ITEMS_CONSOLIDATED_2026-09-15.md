@@ -48,11 +48,14 @@ and can't do.
 
 **All 10 buildable-now items (the small batch #1-#5 and the medium
 batch #6-#10) are now closed as of this update.** What remains on this
-document is the 2 items already tracked in `docs/LAUNCH_READINESS_
-BACKLOG.md` as blocked on external access (#11/#12) and the 1 item
-that's out of scope for a code-only fix (multi-invoice circular
+document is the 1 item still genuinely blocked on external access
+(#11, production OPcache verification -- fully audited/documented,
+just needs someone with host access to run two commands) and the 1
+item that's out of scope for a code-only fix (multi-invoice circular
 self-dealing -- needs a beneficial-ownership data model this platform
-doesn't have).
+doesn't have). Item #12 is now split: its query-plan/N+1 half is
+closed (see its own strikethrough entry), its raw-throughput half
+remains blocked on load-testing tooling this sandbox doesn't have.
 
 ## Buildable now, small
 
@@ -312,15 +315,73 @@ doesn't have).
 
 11. **Production OPcache config was never independently verified**
     (source: `RED_TEAM_ASSESSMENT_2026-09-02.md`, RT-004; tracked as
-    backlog item #6). If prod mirrors the dev config, every request
-    re-compiles the full stack (~500ms-23s per request observed in dev).
-    Small fix once host access exists; blocked until then.
-12. **Real query/N+1 performance at production-representative data
-    volumes was never tested** (source: `RED_TEAM_ASSESSMENT_2026-09-14-
-    CONCURRENT-USER-SIMULATION.md`; tracked as backlog item #7). Dev seed
-    data (0 invoices, 5 fixed assets, 12 users) is too small to be
-    meaningful. Needs a large synthetic seed or a staging environment
-    closer to production sizing.
+    backlog item #6). Re-audited (2026-09-15): every piece of this that
+    doesn't require an actual production host is already done and
+    verified consistent -- `docs/DEPLOYMENT.md`'s required directives,
+    `deploy/php-fpm/99-vat-msa.ini` (matches those directives exactly),
+    `deploy/provision.sh` (installs the extension, installs the ini),
+    and `deploy/deploy.sh` (reloads PHP-FPM every release, which is what
+    makes `validate_timestamps=0` safe). What's left is genuinely just
+    running `php -m | grep opcache` / `opcache_get_status()` against the
+    real `vat.safi-nuru.com` host after a deploy -- no code or config
+    left to write, still blocked on someone having that access.
+
+12. ~~**Real query/N+1 performance at production-representative data
+    volumes was never tested**~~ **CLOSED (2026-09-15) for query-plan/N+1
+    testing; still blocked for raw throughput.** Source:
+    `RED_TEAM_ASSESSMENT_2026-09-14-CONCURRENT-USER-SIMULATION.md`
+    (tracked as backlog item #7). That report's own honest finding was
+    it needed "either a production-scale seed or a staging environment"
+    to test this -- a synthetic seed is buildable without external
+    access, so built one:
+    `database/seeders/SyntheticLoadSeeder.php` (run on demand via
+    `php artisan db:seed --class=SyntheticLoadSeeder`, not part of the
+    default install) generates 20 taxpayers/organisations, 110 users,
+    5,000 invoices, 2,000 expenses, 500 audit cases (2,000 evidence
+    rows), 1,000 documents, and 200 fixed assets -- run against a real
+    local MySQL instance (28s to seed), not simulated.
+
+    A static-analysis pass across every `*ViewController`'s list/index
+    method found most of this codebase already disciplined about N+1
+    (denormalized summary columns or `->with()`/batched `whereIn()`
+    reads throughout -- Invoice, AuditCase, Workflow, Document, Report,
+    Compliance-overview list pages all confirmed clean). Four genuine
+    N+1s were found and fixed, each made concretely visible for the
+    first time by actually running the seeded volume through the real
+    page, not just reading the code:
+    - `OperationsViewController::index()`'s expense register -- lazy
+      `category`/`supplier` plus a `DocumentMetadata::find()` per row
+      (up to 3 extra queries/row).
+    - The same controller's project panel -- a `ProjectBudget`/
+      `ProjectCost` `SUM()` query pair per row (2 extra queries/row).
+    - `QuotationService::search()` -- every row ran through `present()`
+      (built for the single-record `find()` case), lazy-loading
+      `customer` and running a full `QuotationLine` query per row (the
+      worst of the four: 2 extra queries/row, one of them a full table
+      scan of line items never even rendered on the list view). A new
+      `presentSummary()` variant (no `lines`) plus `->with('customer')`
+      fixes it.
+    - `BusinessPartyService::search()` -- a `PartyRelationship` query
+      per row, reached from both the parties register and the
+      `OperationsViewController` supplier filter.
+
+    All four fixed with the established `->with()`/batched-`whereIn()`
+    pattern already used correctly elsewhere in this codebase. New
+    regression tests assert query counts stay small and row-count-
+    independent at a 30-row scale (an unfixed N+1 would be unmistakable
+    at that size: the expense/project page went from 15 to 44 queries
+    without the fix). Live-verified over real HTTP against the full
+    5,000-invoice/2,000-expense synthetic dataset: every page tested
+    (`/operations`, `/quotations`, `/invoices`, `/audit-cases`, as both
+    a taxpayer-scoped and a national-scope NamRA user) rendered
+    correctly in well under 200ms.
+
+    **Still genuinely blocked, not closed by this**: raw throughput/
+    concurrency under real simultaneous load (backlog item #7's other
+    half) needs actual load-testing tooling (k6, Apache Bench, or
+    similar) against a non-local target -- neither exists in this
+    sandbox. This pass closes the query-plan/N+1 half specifically,
+    which needed data volume, not load-testing tools, to test.
 
 ## Out of scope for a code-only fix
 
