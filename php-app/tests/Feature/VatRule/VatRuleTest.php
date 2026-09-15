@@ -7,6 +7,7 @@ use App\Models\VatRule;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
@@ -110,6 +111,39 @@ class VatRuleTest extends TestCase
             ->withFreshStepUp()
             ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'Second attempt.'], ['Idempotency-Key' => 'approve-'.Str::random(20)]);
         $second->assertStatus(409);
+    }
+
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): approve()'s DRAFT check ran before its transaction,
+     * unguarded -- a concurrent approval race could corrupt the effective/
+     * superseded chain of VAT rules feeding tax-rate calculation.
+     */
+    public function test_approving_a_vat_rule_that_races_a_concurrent_approval_is_rejected_not_silently_applied(): void
+    {
+        $proposer = $this->pilotAdmin('-proposer');
+        $approver = $this->pilotAdmin('-approver');
+        $propose = $this->actingAs($proposer)
+            ->withFreshStepUp()
+            ->postJson('/api/v1/vat-rules', $this->proposalPayload(), ['Idempotency-Key' => 'propose-'.Str::random(20)]);
+        $ruleId = $propose->json('rule.id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $ruleId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `vat_rules`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('vat_rules')->where('id', $ruleId)->update(['status' => 'APPROVED']);
+        });
+
+        $response = $this->actingAs($approver)
+            ->withFreshStepUp()
+            ->postJson("/api/v1/vat-rules/{$ruleId}/approval", ['reason' => 'Racing a concurrent approval.'], ['Idempotency-Key' => 'approve-'.Str::random(20)]);
+
+        $response->assertStatus(409);
+        // The loser of the race must never touch the previously approved rule it would have superseded.
+        $this->assertDatabaseMissing('vat_rules', ['id' => 'vrule-standard-na', 'superseded_by' => $ruleId]);
     }
 
     public function test_a_rule_that_would_not_take_effect_after_the_current_approved_rule_is_rejected_on_approval(): void

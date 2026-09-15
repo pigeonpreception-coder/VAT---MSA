@@ -189,7 +189,17 @@ class RegistrationService
 
         if ($decision === 'REJECT') {
             return DB::transaction(function () use ($registration, $reason, $actor, $now, $correlationId) {
-                $registration->update(['status' => 'REJECTED', 'reviewed_at' => $now, 'review_reason' => $reason]);
+                // Red-team punch list #8: the status check above ran
+                // before this transaction, unguarded -- a concurrent
+                // APPROVE/REJECT race could create a live Taxpayer/
+                // Organisation/Membership *and* mark this application
+                // REJECTED.
+                $updated = RegistrationApplication::where('id', $registration->id)
+                    ->whereIn('status', ['PENDING_VERIFICATION', 'UNDER_REVIEW', 'VERIFIED'])
+                    ->update(['status' => 'REJECTED', 'reviewed_at' => $now, 'review_reason' => $reason]);
+                if ($updated === 0) {
+                    throw new RepositoryConflictException("Registration application {$registration->id} was changed by another action; reload and try again.");
+                }
                 RegistrationVerification::create([
                     'id' => (string) Str::uuid(), 'registration_application_id' => $registration->id,
                     'provider' => 'MANUAL_REVIEW', 'request_reference' => "manual:{$registration->id}",
@@ -218,6 +228,17 @@ class RegistrationService
         }
 
         return DB::transaction(function () use ($registration, $reason, $actor, $now, $correlationId) {
+            // Red-team punch list #8: same guard as the REJECT branch
+            // above -- checked and written first, before any of this
+            // transaction's other creates, matching this codebase's own
+            // check-before-side-effects convention.
+            $updated = RegistrationApplication::where('id', $registration->id)
+                ->whereIn('status', ['PENDING_VERIFICATION', 'UNDER_REVIEW', 'VERIFIED'])
+                ->update(['status' => 'APPROVED', 'reviewed_at' => $now, 'review_reason' => $reason]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Registration application {$registration->id} was changed by another action; reload and try again.");
+            }
+
             $taxpayer = Taxpayer::create([
                 'id' => (string) Str::uuid(), 'vat_number' => $registration->vat_number, 'tin' => $registration->tin,
                 'legal_name' => $registration->legal_name, 'trading_name' => $registration->trading_name,
@@ -240,8 +261,6 @@ class RegistrationService
 
             // Matches the source's own guard: only promotes the submitter if they have no taxpayer yet.
             User::where('id', $registration->submitted_by)->whereNull('taxpayer_id')->update(['role' => 'TAXPAYER_OWNER', 'taxpayer_id' => $taxpayer->id]);
-
-            $registration->update(['status' => 'APPROVED', 'reviewed_at' => $now, 'review_reason' => $reason]);
 
             RegistrationVerification::create([
                 'id' => (string) Str::uuid(), 'registration_application_id' => $registration->id,

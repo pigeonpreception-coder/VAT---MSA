@@ -7871,3 +7871,82 @@ decision's approval row and role grant ever lands, the same technique
 `WorkflowTest`'s own race regression established.
 
 Verified: full suite 662 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #8, exhaustive stale-read sweep (2026-09-15)
+
+Item #8 asked for what RT-020's own recon sweep and the item-#7 pass
+above didn't do: check every `app/Services/*` subdirectory (23 in total)
+for the same unguarded-status-write shape, not just the
+`transition()`-named methods RT-020 already found. Already-safe (no
+action needed): `RefundService`, `RiskService`, `AuditCaseService::
+transition()`, `WorkflowService::decideWorkflowTask()`/
+`revokeDelegation()`, `AccessGovernanceService::decideAccessRequest()`/
+`offboardUser()`, `AuthorityGovernanceService::decide()`, `Compliance\
+CommunicationService`, `Compliance\NotificationService`, `Document\
+DocumentService`, `Operations\FixedAssetService`,
+`Operations\LogisticsService`, `Business\BusinessPartyService`,
+`Business\QuotationService`, `Platform\PlatformChangeService`,
+`Platform\ReportExportService`.
+
+Nine genuine gaps found and fixed, all with the same guarded-UPDATE-
+with-affected-row-check pattern used throughout this codebase (check the
+prior status back into the WHERE clause, check the affected-row count,
+throw `RepositoryConflictException` on 0), each with its own
+`DB::listen()`-simulated race regression test:
+
+- **`LicensingService::changeState()`** -- `state_version` exists
+  specifically for optimistic locking but was only ever bumped in the
+  UPDATE, never checked in its WHERE clause. A concurrent ACTIVATE/
+  SUSPEND/RENEW race could corrupt the `from_state`/`to_state` audit
+  trail, or double-extend a subscription period on RENEW.
+- **`OrganisationAdminService::activateEmployee()`** -- the INVITED
+  check and the `license_usage` +1 that follows weren't atomic with the
+  employee's own status write; a race could double-consume a paid seat.
+- **`OrganisationAdminService::terminateEmployee()`** -- the same shape
+  in reverse: a race could double-release a seat and duplicate the
+  membership/role/capability revocation and workflow-reassignment side
+  effects that follow.
+- **`AccountingService::reverseJournalEntry()`** -- both the POSTED
+  check and the separate `alreadyReversed` duplicate-citation check ran
+  unguarded before the transaction; guarding the original's status flip
+  (moved to run *before* creating the new reversing entry, matching this
+  codebase's own check-before-side-effects convention) closes both races
+  at once -- a losing request now finds the original already REVERSED
+  and never creates its own duplicate reversal.
+- **`ExpenseService::submit()`/`approve()`/`reject()`** -- this
+  maker-checker lifecycle's three transitions were all unguarded; a
+  concurrent approve+reject race on the same expense could otherwise
+  both succeed.
+- **`VatRuleService::approve()`** -- both the rule's own DRAFT->APPROVED
+  write and the previously-approved rule's `effective_to`/
+  `superseded_by` write were unguarded, risking corruption of the
+  effective/superseded chain this feeds directly into tax-rate
+  calculation.
+- **`ProjectService::approveBudget()`** -- a race with two different
+  approved amounts could lost-update the approved figure.
+- **`RegistrationService::decide()`** -- both the APPROVE and REJECT
+  branches called a plain `$registration->update(...)` with no status
+  guard; a race could materialise a live Taxpayer/Organisation/
+  Membership *and* mark the same application REJECTED. The APPROVE
+  branch's guarded write was also moved to run first in its transaction
+  (it previously ran last, after every other create), matching the same
+  convention.
+- **`AuditCaseService::addEvidence()`'s supersede path** -- the
+  PRESERVED check on the evidence being superseded was unguarded; a race
+  could let two new evidence rows both claim succession of the same
+  original, corrupting the chain-of-custody this model exists to
+  protect.
+
+Left as-is -- genuinely narrower same-request windows with no
+intervening I/O, or an idempotent write target where a race can only
+lose attribution metadata or duplicate a log/audit row, never cause a
+real double side-effect: `AccountingService::closePeriod()` (target
+status is always CLOSED either way), `ObligationService::
+markSatisfied()`, `PosApiClientService::revoke()`, `MfaService::
+verifyTotpEnrollment()`, `UserRoleScopeGrantService::revoke()`, and
+`AccessGovernanceService::certifyQuarterlyAccess()`'s review-completion
+write. None of these had an existing guarded-write to piggyback a fix
+onto, and forcing one on for a metadata-only race would be scope creep
+against this item's own actual risk.
+
+Verified: full suite 671 tests, 0 regressions.

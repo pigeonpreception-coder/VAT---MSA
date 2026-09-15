@@ -7,6 +7,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -139,6 +140,37 @@ class AccountingTest extends TestCase
 
         $secondReversal = $this->actingAs($seller['owner'])->postJson("/api/v1/accounting/journals/{$journalId}/reversal", ['schema_version' => '1.0.0', 'reason' => 'Trying to reverse the same entry again.'], ['Idempotency-Key' => 'test-idem-jrn-rev-0003']);
         $secondReversal->assertStatus(409);
+    }
+
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): reverseJournalEntry()'s POSTED/alreadyReversed
+     * checks ran before its transaction, unguarded -- a genuine double-
+     * reversal race could produce two reversing entries against one
+     * original.
+     */
+    public function test_reversing_a_journal_entry_that_races_a_concurrent_reversal_is_rejected_not_silently_applied(): void
+    {
+        $seller = $this->makeOrganisation('VAT-ACCT-RACE-0001');
+        $bank = $this->createAccount($seller['owner'], 'BANK', 'ASSET');
+        $revenue = $this->createAccount($seller['owner'], 'REV', 'REVENUE');
+        $post = $this->actingAs($seller['owner'])->postJson('/api/v1/accounting/journals', $this->journalPayload($bank, $revenue), ['Idempotency-Key' => 'test-idem-jrn-race-0001']);
+        $journalId = $post->json('resource.id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $journalId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `journal_entries`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('journal_entries')->where('id', $journalId)->update(['status' => 'REVERSED']);
+        });
+
+        $response = $this->actingAs($seller['owner'])
+            ->postJson("/api/v1/accounting/journals/{$journalId}/reversal", ['schema_version' => '1.0.0', 'reason' => 'Racing a concurrent reversal.'], ['Idempotency-Key' => 'test-idem-jrn-race-0002']);
+
+        $response->assertStatus(409);
+        $this->assertSame(0, DB::table('journal_entries')->where('reverses_journal_entry_id', $journalId)->count(), 'The loser of the race must never create its own duplicate reversing entry.');
     }
 
     public function test_closing_a_period_blocks_new_postings_into_it_and_is_idempotent(): void

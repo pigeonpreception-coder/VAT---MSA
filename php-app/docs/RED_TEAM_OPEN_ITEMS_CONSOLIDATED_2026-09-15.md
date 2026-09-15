@@ -32,6 +32,10 @@ from the medium batch is also closed -- see its own strikethrough entry.
 races) is also closed -- see its own strikethrough entry for what a
 focused audit actually found and fixed.
 
+**Update (2026-09-15, same day):** item #8 (exhaustive stale-read sweep)
+is also closed -- see its own strikethrough entry for the full ranked
+findings list and what was fixed vs. left as genuinely lower-risk.
+
 ## Buildable now, small
 
 1. ~~**`WorkflowService::createDelegation()`/`revokeDelegation()` have no
@@ -149,10 +153,53 @@ focused audit actually found and fixed.
      same-request sibling of the RT-020 stale-read race, not the TOCTOU
      pattern itself) -- new regression tests cover both the
      offboarded-subject refusal and the concurrent-decision race.
-8. **No exhaustive sweep of every `Model::update()` call for the RT-020
-   stale-read race pattern** (source: the same resilience report). RT-020
-   covered every `transition()`-shaped method a recon sweep surfaced plus
-   one found ad hoc; undiscovered sibling instances may exist.
+8. ~~**No exhaustive sweep of every `Model::update()` call for the RT-020
+   stale-read race pattern**~~ **CLOSED (2026-09-15).** Source: the same
+   resilience report. A systematic sweep of every `app/Services/*`
+   subdirectory (23 in total) found 9 genuine unguarded status-transition
+   writes beyond what RT-020's own recon and the item-#7 pass already
+   covered, plus several narrower same-request cases judged genuinely
+   lower-risk and left as-is. Full ranked list and per-fix detail in
+   `docs/MIGRATION_MATRIX.md`; summary here:
+   - **`LicensingService::changeState()`** -- `state_version` existed for
+     optimistic locking but was only ever bumped, never checked; a
+     concurrent ACTIVATE/SUSPEND/RENEW race could corrupt the license
+     audit trail or double-extend a subscription period on RENEW.
+   - **`OrganisationAdminService::activateEmployee()`/
+     `terminateEmployee()`** -- both could double-consume or double-
+     release a paid license seat under a concurrent race.
+   - **`AccountingService::reverseJournalEntry()`** -- a race could post
+     two reversing journal entries against one original; the guarded
+     write on the original now closes both this and the separate
+     `alreadyReversed` duplicate-citation race at once.
+   - **`ExpenseService::submit()`/`approve()`/`reject()`** -- a
+     concurrent approve/reject race on the same maker-checker expense
+     could otherwise both succeed.
+   - **`VatRuleService::approve()`** -- both the rule's own APPROVED
+     transition and the superseded rule's `effective_to`/`superseded_by`
+     write were unguarded, risking corruption of the VAT rate chain this
+     feeds directly.
+   - **`ProjectService::approveBudget()`** -- a race with two different
+     approved amounts could lost-update the approved figure.
+   - **`RegistrationService::decide()`** -- both the APPROVE and REJECT
+     branches were unguarded; a race could materialise a live Taxpayer/
+     Organisation/Membership *and* mark the application REJECTED.
+   - **`AuditCaseService::addEvidence()`'s supersede path** -- a race
+     could let two new evidence rows both claim succession of the same
+     original, corrupting the chain-of-custody this model exists to
+     protect.
+
+   All 9 got the same guarded-UPDATE-with-affected-row-check pattern used
+   throughout this codebase, plus a dedicated `DB::listen()`-simulated
+   race regression test each. Left as-is (narrower same-request windows
+   with no intervening I/O, or an idempotent write target where the only
+   loss is attribution metadata/duplicate log rows, not a genuine
+   double-side-effect): `AccountingService::closePeriod()`,
+   `ObligationService::markSatisfied()`, `PosApiClientService::revoke()`,
+   `MfaService::verifyTotpEnrollment()`,
+   `UserRoleScopeGrantService::revoke()`, and
+   `AccessGovernanceService::certifyQuarterlyAccess()`'s review-completion
+   write -- full detail in `docs/MIGRATION_MATRIX.md`.
 9. **Malformed/oversized JSON API payloads were never fuzzed** against the
    `*Controller` JSON API siblings of the fixed Blade forms (source: the
    input-validation report). Lower suspicion (same validators), genuinely

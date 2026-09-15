@@ -7,6 +7,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -131,6 +132,35 @@ class ExpenseTest extends TestCase
 
         $reject = $this->actingAs($org['accountant'])->postJson("/api/v1/expenses/{$expenseId}/rejection", ['schema_version' => '1.0.0', 'reason' => 'Missing a valid receipt.'], ['Idempotency-Key' => 'test-idem-exp-reject-0001']);
         $reject->assertStatus(200)->assertJsonPath('resource.status', 'REJECTED')->assertJsonPath('resource.rejection_reason', 'Missing a valid receipt.');
+    }
+
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): submit()/approve()/reject()'s own status checks all
+     * ran before their transactions, unguarded -- a concurrent approve and
+     * reject race on the same expense could otherwise both succeed.
+     */
+    public function test_approving_an_expense_that_races_a_concurrent_rejection_is_rejected_not_silently_applied(): void
+    {
+        $org = $this->makeOrganisation('VAT-EXP-RACE-0001');
+        $categoryId = $this->createCategory($org['owner']);
+        $expenseId = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId), ['Idempotency-Key' => 'test-idem-exp-race-create-0001'])->json('resource.id');
+        $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/submission", [], ['Idempotency-Key' => 'test-idem-exp-race-submit-0001'])->assertStatus(200);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $expenseId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `expenses`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('expenses')->where('id', $expenseId)->update(['status' => 'REJECTED', 'rejection_reason' => 'Concurrent winner rejected it first.']);
+        });
+
+        $response = $this->actingAs($org['accountant'])->postJson("/api/v1/expenses/{$expenseId}/approval", [], ['Idempotency-Key' => 'test-idem-exp-race-approve-0001']);
+
+        $response->assertStatus(409);
+        $this->assertSame('REJECTED', DB::table('expenses')->where('id', $expenseId)->value('status'), "The concurrent winner's status must survive untouched.");
+        $this->assertDatabaseMissing('audit_events', ['action' => 'EXPENSE_APPROVED', 'resource_id' => $expenseId]);
     }
 
     public function test_an_expense_report_totals_by_status_and_category(): void

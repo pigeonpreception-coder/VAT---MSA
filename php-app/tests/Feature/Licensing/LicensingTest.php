@@ -12,6 +12,7 @@ use App\Models\User;
 use Database\Seeders\LicensePlanSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
@@ -115,6 +116,35 @@ class LicensingTest extends TestCase
             ->withFreshStepUp()
             ->postJson('/api/v1/licensing/state', ['action' => 'ACTIVATE', 'reason' => 'Payment received.']);
         $activate->assertStatus(200)->assertJsonPath('license.state', 'ACTIVE');
+    }
+
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): changeState() bumped state_version but never
+     * checked it -- state_version exists precisely for this optimistic-
+     * locking purpose. Simulates a concurrent SUSPEND landing between
+     * this request's own read and its write.
+     */
+    public function test_a_license_state_change_that_races_a_concurrent_change_is_rejected_not_silently_applied(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-LIC-RACE-0001');
+        $license = OrganisationLicense::where('organisation_id', $ctx['organisation']->id)->firstOrFail();
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $license) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `organisation_licenses` as `l`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('organisation_licenses')->where('id', $license->id)->update(['state' => 'SUSPENDED', 'state_version' => DB::raw('state_version + 1')]);
+        });
+
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/licensing/state', ['action' => 'SUSPEND', 'reason' => 'Racing a concurrent suspension.']);
+
+        $response->assertStatus(409);
+        $this->assertSame('SUSPENDED', OrganisationLicense::find($license->id)->state, "The concurrent winner's state must survive untouched.");
+        $this->assertSame(0, DB::table('license_events')->where('organisation_license_id', $license->id)->count(), 'The loser of the race must never log a license event.');
     }
 
     public function test_renew_advances_the_subscriptions_current_period(): void

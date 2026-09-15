@@ -162,6 +162,75 @@ class OrganisationAdminTest extends TestCase
             ->assertStatus(422)->assertJsonPath('code', 'SELF_OFFBOARD_DENIED');
     }
 
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): activateEmployee()'s INVITED check and
+     * terminateEmployee()'s not-already-TERMINATED check both ran before
+     * their own transactions, unguarded -- a race on either could
+     * double-consume or double-release a paid license seat.
+     */
+    public function test_activating_an_employee_that_races_a_concurrent_activation_is_rejected_not_silently_applied(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-RACE-0001');
+        $this->openReview($ctx['owner']);
+        $license = OrganisationLicense::where('organisation_id', $ctx['organisation']->id)->firstOrFail();
+        $invite = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-RACE-0001', 'full_name' => 'Race Staff', 'email' => 'race-0001@test.test']);
+        $employeeId = $invite->json('employee.id');
+        $newUser = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Race Staff', 'email' => 'race-0001-login@test.test',
+            'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE',
+        ]);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $employeeId, $newUser) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `employees`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('employees')->where('id', $employeeId)->update(['status' => 'ACTIVE', 'user_id' => $newUser->id]);
+        });
+
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson("/api/v1/organisations/employees/{$employeeId}/activation", ['user_id' => $newUser->id]);
+
+        $response->assertStatus(409);
+        $this->assertSame(0, DB::table('license_usage')->where('organisation_license_id', $license->id)->where('metric_key', 'USER_SEATS')->value('used_value'), 'The loser of the race must never consume a seat.');
+    }
+
+    public function test_terminating_an_employee_that_races_a_concurrent_termination_is_rejected_not_silently_applied(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-RACE-0002');
+        $this->openReview($ctx['owner']);
+        $license = OrganisationLicense::where('organisation_id', $ctx['organisation']->id)->firstOrFail();
+        $invite = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-RACE-0002', 'full_name' => 'Race Staff Two', 'email' => 'race-0002@test.test']);
+        $employeeId = $invite->json('employee.id');
+        $newUser = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Race Staff Two', 'email' => 'race-0002-login@test.test',
+            'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE',
+        ]);
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson("/api/v1/organisations/employees/{$employeeId}/activation", ['user_id' => $newUser->id])
+            ->assertStatus(200);
+        $usedBeforeRace = DB::table('license_usage')->where('organisation_license_id', $license->id)->where('metric_key', 'USER_SEATS')->value('used_value');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $employeeId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `employees`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('employees')->where('id', $employeeId)->update(['status' => 'TERMINATED']);
+        });
+
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson("/api/v1/organisations/employees/{$employeeId}/termination", ['reason' => 'Racing a concurrent termination.']);
+
+        $response->assertStatus(409);
+        $this->assertSame($usedBeforeRace, DB::table('license_usage')->where('organisation_license_id', $license->id)->where('metric_key', 'USER_SEATS')->value('used_value'), 'The loser of the race must never release a seat the concurrent winner already released.');
+    }
+
     public function test_terminating_an_employee_reassigns_their_pending_workflow_tasks_to_the_primary_administrator(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-0007');
