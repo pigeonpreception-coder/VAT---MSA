@@ -127,7 +127,13 @@ class InvoiceCertificationTest extends TestCase
             ]);
 
         $response->assertStatus(201)->assertJsonPath('processing_status', 'CERTIFIED');
-        $this->assertDatabaseHas('reconciliation_exceptions', ['exception_type' => 'UNREGISTERED_BUYER']);
+        // 15 points (unregistered buyer alone) is below the MEDIUM threshold
+        // (20), so this stays LOW and MATCHED/CERTIFIED -- but the exception
+        // row it still creates (any non-empty reasons list gets one,
+        // regardless of level) is bumped from LOW to MEDIUM severity,
+        // per InvoiceCalculator::score()'s own not-otherwise-tested cutoffs.
+        $this->assertDatabaseHas('invoices', ['invoice_number' => 'INV-TEST-0001', 'risk_level' => 'LOW']);
+        $this->assertDatabaseHas('reconciliation_exceptions', ['exception_type' => 'UNREGISTERED_BUYER', 'severity' => 'MEDIUM']);
     }
 
     public function test_a_line_rate_that_does_not_match_the_approved_vat_rule_is_rejected(): void
@@ -241,6 +247,86 @@ class InvoiceCertificationTest extends TestCase
 
         // None of the malformed attempts above should have created a row.
         $this->assertDatabaseCount('invoices', 0);
+    }
+
+    /** A single line at the given tax-inclusive total, ZERO_RATED so net === total and rounding never enters the picture. */
+    private function zeroRatedLinePayload(int $totalCents, array $overrides = []): array
+    {
+        $amount = $this->centsToAmount($totalCents);
+
+        return $this->invoicePayload(array_replace_recursive([
+            'lines' => [
+                ['line_number' => 1, 'description' => 'Bulk zero-rated supply', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => $amount, 'net_amount' => $amount, 'tax' => ['category' => 'ZERO_RATED', 'rate' => '0.00', 'taxable_amount' => $amount, 'tax_amount' => '0.00']],
+            ],
+            'totals' => ['line_net_amount' => $amount, 'tax_exclusive_amount' => $amount, 'tax_amount' => '0.00', 'tax_inclusive_amount' => $amount, 'payable_amount' => $amount],
+        ], $overrides));
+    }
+
+    private function centsToAmount(int $cents): string
+    {
+        return number_format($cents / 100, 2, '.', '');
+    }
+
+    /**
+     * Red-team punch list #10 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): `InvoiceCalculator::score()` had zero test coverage
+     * of any kind before this -- not a single test in this file (or
+     * anywhere else) asserted on `risk_level` or a value-threshold
+     * boundary. This pins down the current thresholds explicitly, so any
+     * future change to them is a deliberate, reviewed diff against a
+     * named test rather than silent drift -- see this test class's own
+     * doc comment below for what an actual *recalibration* (as opposed
+     * to this correctness/coverage pass) would still need.
+     */
+    public function test_risk_scoring_value_thresholds_are_calibrated_as_documented(): void
+    {
+        $this->makeTradingParty('VAT-SUP-0001');
+        $this->makeTradingParty('VAT-CUS-0001');
+        $owner = fn () => User::where('email', 'vat-sup-0001-owner@test.test')->firstOrFail();
+
+        // Just under the N$250,000 tier -- no value-based points at all.
+        // This is the exact cliff a structured (split-into-smaller-invoices)
+        // transaction would sit just below; see the doc comment on
+        // docs/MIGRATION_MATRIX.md's own item #10 entry for why this is
+        // named as a real, open limitation rather than silently accepted.
+        $justBelowMedium = $this->actingAs($owner())->postJson('/api/v1/invoices', $this->zeroRatedLinePayload(24_999_999, ['invoice_number' => 'INV-RISK-0001', 'source' => ['document_id' => 'doc-risk-0001']]), ['Idempotency-Key' => 'test-idem-risk-0001']);
+        $justBelowMedium->assertStatus(201)->assertJsonPath('processing_status', 'MATCHED');
+        $this->assertDatabaseHas('invoices', ['invoice_number' => 'INV-RISK-0001', 'risk_level' => 'LOW']);
+        $this->assertDatabaseMissing('reconciliation_exceptions', ['invoice_id' => $justBelowMedium->json('invoice_id')]);
+
+        // Exactly N$250,000 -- the MEDIUM tier's own >= boundary (35 points).
+        $atMedium = $this->actingAs($owner())->postJson('/api/v1/invoices', $this->zeroRatedLinePayload(25_000_000, ['invoice_number' => 'INV-RISK-0002', 'source' => ['document_id' => 'doc-risk-0002']]), ['Idempotency-Key' => 'test-idem-risk-0002']);
+        $atMedium->assertStatus(201)->assertJsonPath('processing_status', 'MATCHED');
+        $this->assertDatabaseHas('invoices', ['invoice_number' => 'INV-RISK-0002', 'risk_level' => 'MEDIUM']);
+        $this->assertDatabaseHas('reconciliation_exceptions', ['exception_type' => 'RISK_REVIEW', 'severity' => 'MEDIUM']);
+
+        // Just under N$1,000,000 -- still only the MEDIUM tier's 35 points,
+        // not HIGH/CRITICAL; the two value tiers don't scale smoothly, they
+        // step at exactly these two named amounts.
+        $justBelowCritical = $this->actingAs($owner())->postJson('/api/v1/invoices', $this->zeroRatedLinePayload(99_999_999, ['invoice_number' => 'INV-RISK-0003', 'source' => ['document_id' => 'doc-risk-0003']]), ['Idempotency-Key' => 'test-idem-risk-0003']);
+        $justBelowCritical->assertStatus(201)->assertJsonPath('processing_status', 'MATCHED');
+        $this->assertDatabaseHas('invoices', ['invoice_number' => 'INV-RISK-0003', 'risk_level' => 'MEDIUM']);
+
+        // Exactly N$1,000,000 -- CRITICAL (80 points) on its own, no other
+        // risk factor needed; held for review (EXCEPTION), not auto-MATCHED.
+        $atCritical = $this->actingAs($owner())->postJson('/api/v1/invoices', $this->zeroRatedLinePayload(100_000_000, ['invoice_number' => 'INV-RISK-0004', 'source' => ['document_id' => 'doc-risk-0004']]), ['Idempotency-Key' => 'test-idem-risk-0004']);
+        $atCritical->assertStatus(201)->assertJsonPath('processing_status', 'EXCEPTION');
+        $this->assertDatabaseHas('invoices', ['invoice_number' => 'INV-RISK-0004', 'risk_level' => 'CRITICAL']);
+        $this->assertDatabaseHas('reconciliation_exceptions', ['exception_type' => 'RISK_REVIEW', 'severity' => 'CRITICAL']);
+
+        // Two smaller risk factors combine to cross the HIGH threshold (45)
+        // even though neither alone would: the N$250,000 MEDIUM tier (35)
+        // plus mixed VAT categories (10) = 45 = HIGH, held for review.
+        $mixedCategories = $this->zeroRatedLinePayload(25_000_000, [
+            'invoice_number' => 'INV-RISK-0005', 'source' => ['document_id' => 'doc-risk-0005'],
+            'lines' => [
+                ['line_number' => 1, 'description' => 'Zero-rated half', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => '125000.00', 'net_amount' => '125000.00', 'tax' => ['category' => 'ZERO_RATED', 'rate' => '0.00', 'taxable_amount' => '125000.00', 'tax_amount' => '0.00']],
+                ['line_number' => 2, 'description' => 'Exempt half', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => '125000.00', 'net_amount' => '125000.00', 'tax' => ['category' => 'EXEMPT', 'rate' => '0.00', 'taxable_amount' => '125000.00', 'tax_amount' => '0.00']],
+            ],
+        ]);
+        $combined = $this->actingAs($owner())->postJson('/api/v1/invoices', $mixedCategories, ['Idempotency-Key' => 'test-idem-risk-0005']);
+        $combined->assertStatus(201)->assertJsonPath('processing_status', 'EXCEPTION');
+        $this->assertDatabaseHas('invoices', ['invoice_number' => 'INV-RISK-0005', 'risk_level' => 'HIGH']);
     }
 
     public function test_a_credit_note_corrects_the_original_invoice_within_its_cumulative_cap(): void

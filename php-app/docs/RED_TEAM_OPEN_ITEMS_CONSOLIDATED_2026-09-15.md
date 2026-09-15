@@ -41,6 +41,19 @@ also closed -- see its own strikethrough entry. Found and fixed 6
 instances of a real, JSON-only-reachable coercion bug plus one genuine
 crash (500) on the highest money-value endpoint in the app.
 
+**Update (2026-09-15, same day):** item #10 (risk-scoring calibration
+review) is also closed, with an honest caveat -- see its own
+strikethrough entry for what an audit without real transaction data can
+and can't do.
+
+**All 10 buildable-now items (the small batch #1-#5 and the medium
+batch #6-#10) are now closed as of this update.** What remains on this
+document is the 2 items already tracked in `docs/LAUNCH_READINESS_
+BACKLOG.md` as blocked on external access (#11/#12) and the 1 item
+that's out of scope for a code-only fix (multi-invoice circular
+self-dealing -- needs a beneficial-ownership data model this platform
+doesn't have).
+
 ## Buildable now, small
 
 1. ~~**`WorkflowService::createDelegation()`/`revokeDelegation()` have no
@@ -253,10 +266,47 @@ crash (500) on the highest money-value endpoint in the app.
    digit string), and `InvoiceCalculator`'s handling of a scalar
    `customer`, a scalar line `tax`, and an overflowing `payable_amount`.
    New regression tests for every fix and every confirmed-clean case.
-10. **`InvoiceCalculator::score()`'s risk-threshold calibration overall
-    was never audited**, only its blind spot for self-dealing (source:
-    `RED_TEAM_ASSESSMENT_2026-09-14-FRAUD-RESISTANCE.md`). Needs a
-    calibration review, ideally against real transaction data.
+10. ~~**`InvoiceCalculator::score()`'s risk-threshold calibration overall
+    was never audited**, only its blind spot for self-dealing~~ **CLOSED
+    (2026-09-15), audited honestly -- not recalibrated, because this
+    sandbox has no real transaction data to recalibrate against.**
+    Source: `RED_TEAM_ASSESSMENT_2026-09-14-FRAUD-RESISTANCE.md`, which
+    itself named exactly this limitation ("whether its value/category
+    thresholds are otherwise well-calibrated is a separate question this
+    pass does not answer"). What an audit *can* do without real data,
+    and what it did:
+    - **Structural/logical correctness review.** No off-by-one, no
+      double-counting, no dead branch, no threshold gap between the two
+      value tiers -- confirmed sound. The `CREDIT_NOTE`-only (not
+      `DEBIT_NOTE`) scoring bump is deliberate, not a bug: a credit note
+      reduces output VAT liability (the fraud-prone direction -- VAT
+      carousel/refund fraud runs through credit notes, not debit notes).
+    - **Closed a genuine, total absence of test coverage.** Before this,
+      not one test anywhere in this codebase asserted on `risk_level` or
+      a value-threshold boundary -- the scoring function had never been
+      exercised by name. New tests pin down every threshold explicitly
+      (both value tiers' exact `>=` boundaries, the 45-point HIGH
+      crossing via two smaller factors combining, the LOW-but-still-
+      logged-as-MEDIUM-severity-exception behavior for a single small
+      risk factor) so any future change to these numbers is now a
+      deliberate, reviewed diff against a named, failing test -- not
+      silent, unnoticed drift.
+    - **Named one concrete, real limitation rather than inventing
+      numbers to fix it.** The two absolute-dollar value tiers
+      (N$250,000 / N$1,000,000) step rather than scale, and are
+      per-invoice with no supplier-level historical or aggregate
+      signal -- an invoice at N$249,999.99 (one cent under the first
+      tier) scores identically to one at N$10,000, and a taxpayer could
+      in principle structure one large transaction as several invoices
+      each just under a tier to avoid the extra scrutiny. This is real
+      and worth a follow-up, but *fixing* it responsibly needs either
+      real transaction-volume data (to know what an actual N$250,000+
+      taxpayer's invoice pattern looks like, so a new threshold isn't
+      just a different guess) or a genuinely different design
+      (supplier-level rolling aggregates, statistical/percentile-based
+      scoring instead of fixed dollar tiers) -- both bigger than a
+      calibration tweak and both out of scope without the data or a
+      product decision this pass can't make on its own.
 
 ## Blocked on external access (already tracked in the backlog)
 

@@ -325,13 +325,18 @@ dependency left on this list are**:
   did not cover" section (each report says exactly what it left open).
   Consolidated into a single punch list, cross-checked against the
   current codebase and this document, at
-  `docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md` -- the small
-  batch (5 items, one a genuine previously-unnoticed bug) closed the same
-  day it was pulled together; 5 medium items remain, plus 2 already
-  tracked here as blocked on external access (#6/#7 above) and one
-  (multi-invoice circular self-dealing between colluding taxpayers) that
-  needs a beneficial-ownership data model this platform doesn't have, not
-  a code fix.
+  `docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md` -- **every
+  buildable-now item on that list (the 5-item small batch and the
+  5-item medium batch, #1-#10) is now closed**, the same day it was
+  pulled together, across several genuine fixes (a workflow-delegation
+  authorization race, 9 unguarded status-transition races, 6 instances
+  of a JSON-array-to-"Array"-string coercion bug, an invoice-endpoint
+  crash on malformed `lines`) and several honestly-audited-clean
+  results. What's left on that list is 2 items already tracked here as
+  blocked on external access (#6/#7 above) and one (multi-invoice
+  circular self-dealing between colluding taxpayers) that needs a
+  beneficial-ownership data model this platform doesn't have, not a
+  code fix.
 
 One narrower item sits between "buildable now" and "needs
 infrastructure" rather than cleanly in either bucket: a real

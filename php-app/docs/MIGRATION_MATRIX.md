@@ -8032,3 +8032,52 @@ in `WorkflowTest`, `AccessGovernanceTest`, `LicensingTest`,
 `InvoiceCertificationTest`.
 
 Verified: full suite 678 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #10, risk-scoring calibration audit (2026-09-15)
+
+Item #10's own source report was explicit that it read `InvoiceCalculator
+::score()` and confirmed its self-dealing blind spot (fixed separately,
+RT-018) but never answered "are its value/category thresholds otherwise
+well-calibrated" -- and said doing so needed real transaction data. This
+sandbox's demo seed has zero real invoices, so an honest close here means
+an audit, not a fabricated recalibration:
+
+- **Structural review, no code bug found.** The two value tiers
+  (`totalCents >= 100_000_000` -> +80, `>= 25_000_000` -> +35) and three
+  flat factors (unregistered buyer +15, mixed VAT categories +10, credit
+  note +10) sum cleanly against the level cutoffs (CRITICAL >= 80, HIGH
+  >= 45, MEDIUM >= 20, else LOW) with no off-by-one, no double-counting,
+  no unreachable branch. The `CREDIT_NOTE`-only scoring bump (not
+  `DEBIT_NOTE`) is a deliberate asymmetry, not an oversight: a credit
+  note is the fraud-prone direction (it reduces a supplier's output VAT
+  liability -- the mechanism behind VAT carousel/refund fraud), a debit
+  note increases it.
+- **Total absence of test coverage, now closed.** Before this, no test
+  anywhere in the suite asserted on `risk_level` or exercised a single
+  value threshold by name -- `score()`'s own behavior was entirely
+  unpinned. New tests in `InvoiceCertificationTest` assert every
+  boundary explicitly: just-under and exactly-at both value tiers
+  (24,999,999 / 25,000,000 / 99,999,999 / 100,000,000 cents), the
+  `EXCEPTION`-vs-`MATCHED` status split those tiers cause, two smaller
+  factors (the MEDIUM tier + mixed categories) combining to cross HIGH
+  (35+10=45) even though neither alone would, and the non-obvious
+  LOW-level-but-still-MEDIUM-severity-exception behavior for a single
+  small risk factor (a reconciliation exception is created whenever
+  `reasons` is non-empty, regardless of level, but its own `severity`
+  gets bumped from LOW to MEDIUM). Any future change to these numbers is
+  now a deliberate, reviewed diff against a named test, not silent
+  drift.
+- **One concrete, real, *unfixed* limitation named rather than
+  guessed-at.** The two value tiers are absolute per-invoice dollar
+  cliffs with no supplier-level historical/aggregate signal -- an
+  invoice one cent under a tier scores identically to a tiny one, and a
+  taxpayer could in principle structure a large transaction as several
+  invoices each just under a tier to dodge the extra scrutiny. Real
+  transaction-volume data (to calibrate a new threshold against actual
+  patterns, not another guess) or a different design entirely
+  (supplier-level rolling aggregates, percentile-based scoring) would be
+  needed to responsibly close this -- both bigger than a calibration
+  tweak, both a genuine follow-up rather than something this pass
+  fabricates numbers to paper over.
+
+Verified: full suite 679 tests, 0 regressions.
