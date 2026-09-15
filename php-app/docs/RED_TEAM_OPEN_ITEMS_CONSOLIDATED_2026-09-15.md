@@ -36,6 +36,11 @@ focused audit actually found and fixed.
 is also closed -- see its own strikethrough entry for the full ranked
 findings list and what was fixed vs. left as genuinely lower-risk.
 
+**Update (2026-09-15, same day):** item #9 (JSON API payload fuzzing) is
+also closed -- see its own strikethrough entry. Found and fixed 6
+instances of a real, JSON-only-reachable coercion bug plus one genuine
+crash (500) on the highest money-value endpoint in the app.
+
 ## Buildable now, small
 
 1. ~~**`WorkflowService::createDelegation()`/`revokeDelegation()` have no
@@ -200,10 +205,54 @@ findings list and what was fixed vs. left as genuinely lower-risk.
    `UserRoleScopeGrantService::revoke()`, and
    `AccessGovernanceService::certifyQuarterlyAccess()`'s review-completion
    write -- full detail in `docs/MIGRATION_MATRIX.md`.
-9. **Malformed/oversized JSON API payloads were never fuzzed** against the
-   `*Controller` JSON API siblings of the fixed Blade forms (source: the
-   input-validation report). Lower suspicion (same validators), genuinely
-   untested.
+9. ~~**Malformed/oversized JSON API payloads were never fuzzed** against
+   the `*Controller` JSON API siblings of the fixed Blade forms~~ **CLOSED
+   (2026-09-15).** Source: `RED_TEAM_ASSESSMENT_2026-09-14-INPUT-
+   VALIDATION.md`. Every `*Controller`/`*ViewController` pair was mapped
+   for shared-validator risk, then a representative set of the highest
+   money/approval-value JSON-only or JSON-first endpoints was actually
+   fuzzed with real malformed HTTP payloads (arrays where scalars were
+   expected, oversized digit strings, non-list "lines", etc.), rather
+   than just re-reading validator code and assuming it was fine. Found
+   two distinct real bugs, both closed with regression tests:
+   - **A bare `(string) $x` cast on a JSON value silently converts any
+     array to the literal 5-character string `"Array"`**, which then
+     slides straight past a `< 5` minimum-length check as if it were
+     real text -- a different failure shape than RT-017's own
+     silent-zero-coercion bug (RT-017 was numeric fields cast with
+     `(int)`; this is free-text fields cast with `(string)`), so nothing
+     RT-017 tested would have caught it. Six instances found and fixed,
+     all approval/administrative-action audit-trail reason fields:
+     `WorkflowService::decideWorkflowTask()`'s `reason`,
+     `WorkflowService::revokeDelegation()`'s `reason`,
+     `WorkflowValidator::delegation()`'s `reason` (createDelegation),
+     `AccessGovernanceService::decideAccessRequest()`'s `reason`,
+     `LicensingValidator::stateChange()`'s `reason`, and
+     `OrganisationAdminValidator`'s `approval_reference`
+     (appointAdministrator). Each now guards with `is_string($x) ? $x :
+     ''` first, matching this codebase's own `textValue()`/`text()`
+     idiom used elsewhere -- a non-string value normalizes to `''`,
+     which correctly fails the same minimum-length check instead of
+     sliding past it.
+   - **A genuine crash (500), not just a coercion bug:** `POST
+     /api/v1/invoices` -- the highest money-value endpoint in the app --
+     threw an uncaught `TypeError` ("Unsupported operand types: string +
+     int") when `lines` was a JSON *object* (e.g. `{"foo":"bar"}`)
+     instead of an array. `InvoiceCalculator::calculateAndValidate()`'s
+     own `is_array($rawLines) && count($rawLines) > 0` check passed for
+     an associative array, so the following `foreach` iterated with a
+     string key and crashed computing `$index + 1`. Fixed with an
+     `array_is_list()` check. This is exactly the "genuinely untested,
+     never actually fuzzed" gap this item's own title named -- the code
+     had been read as "looks safe" (bcmath overflow guard, try/catch
+     around amount parsing) but this specific shape had never been
+     tried against a real request.
+
+   Also confirmed clean (422s, not crashes) without needing a fix:
+   `VatRuleService`'s `rate_bps`/`tax_category` fuzzing (array, oversized
+   digit string), and `InvoiceCalculator`'s handling of a scalar
+   `customer`, a scalar line `tax`, and an overflowing `payable_amount`.
+   New regression tests for every fix and every confirmed-clean case.
 10. **`InvoiceCalculator::score()`'s risk-threshold calibration overall
     was never audited**, only its blind spot for self-dealing (source:
     `RED_TEAM_ASSESSMENT_2026-09-14-FRAUD-RESISTANCE.md`). Needs a

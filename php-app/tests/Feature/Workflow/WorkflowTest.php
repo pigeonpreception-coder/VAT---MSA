@@ -341,6 +341,46 @@ class WorkflowTest extends TestCase
         $this->assertSame(0, DB::table('workflow_approvals')->where('workflow_assignment_id', $assignmentId)->count(), 'The loser of the race must never log an approval row.');
     }
 
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a malformed JSON `reason` (an array, not a string)
+     * must be cleanly rejected, not silently coerced to the literal
+     * string "Array" by a bare (string) cast -- which happens to be
+     * exactly 5 characters, the same as this field's own minimum length,
+     * so it would otherwise slide straight through unnoticed and get
+     * stored as this approval decision's audit-trail reason.
+     */
+    public function test_a_non_string_decision_reason_is_rejected_not_silently_coerced(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-WF-FUZZ-0001');
+        $this->openReview($ctx['owner']);
+        $role = OrganisationRole::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $ctx['organisation']->id, 'name' => 'Fuzz Approver',
+            'description' => 'Approves for the fuzz regression test.', 'version' => 1, 'branch_scope' => '[]', 'approval_limit_cents' => null,
+            'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $approver = $this->makeUser($ctx['taxpayer'], 'approver-fuzz-0001@test.test');
+        $this->grantRole($ctx['organisation'], $role, $approver, $ctx['owner']);
+        $definition = [
+            'name' => 'Fuzz Approval', 'domain_action' => 'journal',
+            'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'assignee_type' => 'role', 'assignee_ref' => $role->id, 'label' => 'Approval'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
+            'transitions' => [['from' => 'start', 'to' => 'approve'], ['from' => 'approve', 'to' => 'end']],
+        ];
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
+        $versionId = $created->json('workflow.versionId');
+        $this->actingAs($approver)->withFreshStepUp()->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
+        $instance = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-fuzz-1'], ['Idempotency-Key' => (string) Str::uuid()]);
+        $assignmentId = $instance->json('instance.assignmentId');
+
+        $response = $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => ['not', 'a', 'string']]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'REASON_REQUIRED');
+        $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'status' => 'PENDING']);
+        $this->assertDatabaseMissing('workflow_approvals', ['workflow_assignment_id' => $assignmentId]);
+    }
+
     public function test_self_approval_is_denied_and_recorded_as_a_segregation_of_duties_violation(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-WF-0005');
@@ -489,6 +529,43 @@ class WorkflowTest extends TestCase
         $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Repeat revocation attempt.'], ['Idempotency-Key' => 'test-idem-delegation-revoke-0002'])
             ->assertStatus(409);
+    }
+
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a malformed JSON `reason` (an array) must be
+     * rejected cleanly on both createDelegation() and revokeDelegation()
+     * -- see test_a_non_string_decision_reason_is_rejected_not_silently_
+     * coerced()'s own doc comment for why "Array" specifically slides
+     * past a naive `< 5` minimum-length check.
+     */
+    public function test_a_non_string_delegation_reason_is_rejected_not_silently_coerced_on_create_and_revoke(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-WF-FUZZ-0002');
+        $this->openReview($ctx['owner']);
+        $target = $this->makeUser($ctx['taxpayer'], 'target-fuzz-0002@test.test');
+        $delegate = $this->makeUser($ctx['taxpayer'], 'delegate-fuzz-0002@test.test');
+
+        $badCreate = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/delegations', [
+                'delegator_user_id' => $target->id, 'delegate_user_id' => $delegate->id,
+                'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDays(7)),
+                'reason' => ['not', 'a', 'string'],
+            ], ['Idempotency-Key' => 'test-idem-delegation-fuzz-create-0001']);
+        $badCreate->assertStatus(422)->assertJsonPath('code', 'REASON_REQUIRED');
+        $this->assertSame(0, DB::table('workflow_delegations')->where('delegator_user_id', $target->id)->count());
+
+        $delegation = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/delegations', [
+                'delegator_user_id' => $target->id, 'delegate_user_id' => $delegate->id,
+                'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDays(7)), 'reason' => 'Annual leave cover.',
+            ], ['Idempotency-Key' => 'test-idem-delegation-fuzz-create-0002']);
+        $delegationId = $delegation->json('delegation.id');
+
+        $badRevoke = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => ['not', 'a', 'string']], ['Idempotency-Key' => 'test-idem-delegation-fuzz-revoke-0001']);
+        $badRevoke->assertStatus(422)->assertJsonPath('code', 'REASON_REQUIRED');
+        $this->assertDatabaseHas('workflow_delegations', ['id' => $delegationId, 'status' => 'ACTIVE']);
     }
 
     /**

@@ -74,11 +74,17 @@ class AccessGovernanceService
     {
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
 
-        $decision = mb_strtoupper(trim((string) ($payload['decision'] ?? '')));
+        // Red-team punch list #9: a bare (string) cast on a JSON array
+        // silently produces the literal 5-character string "Array",
+        // sliding past the `< 5` minimum check below as if it were real
+        // reason text -- guard with is_string() first. See
+        // WorkflowService::decideWorkflowTask()'s own doc comment for the
+        // full explanation of this class of finding.
+        $decision = mb_strtoupper(trim(is_string($payload['decision'] ?? null) ? $payload['decision'] : ''));
         if (! in_array($decision, ['APPROVE', 'REJECT'], true)) {
             throw new LicensingValidationException('DECISION_INVALID', 'Access decisions must be APPROVE or REJECT.');
         }
-        $reason = trim((string) ($payload['reason'] ?? ''));
+        $reason = trim(is_string($payload['reason'] ?? null) ? $payload['reason'] : '');
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character decision reason.');
         }

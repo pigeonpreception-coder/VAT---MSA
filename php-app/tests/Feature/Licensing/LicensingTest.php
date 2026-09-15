@@ -147,6 +147,26 @@ class LicensingTest extends TestCase
         $this->assertSame(0, DB::table('license_events')->where('organisation_license_id', $license->id)->count(), 'The loser of the race must never log a license event.');
     }
 
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a malformed JSON `reason` (an array) must be
+     * rejected cleanly, not silently coerced to the literal 5-character
+     * string "Array" by a bare (string) cast -- which happens to equal
+     * this field's own minimum length, so it would otherwise slide
+     * through and get stored as this license state change's audit-trail
+     * reason.
+     */
+    public function test_a_non_string_state_change_reason_is_rejected_not_silently_coerced(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-LIC-FUZZ-0001');
+
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/licensing/state', ['action' => 'SUSPEND', 'reason' => ['not', 'a', 'string']]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'REASON_REQUIRED');
+        $this->assertDatabaseHas('organisation_licenses', ['organisation_id' => $ctx['organisation']->id, 'state' => 'ACTIVE']);
+    }
+
     public function test_renew_advances_the_subscriptions_current_period(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-LIC-0003');

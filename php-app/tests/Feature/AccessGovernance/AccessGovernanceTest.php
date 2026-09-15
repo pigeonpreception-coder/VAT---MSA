@@ -241,6 +241,35 @@ class AccessGovernanceTest extends TestCase
         $this->assertDatabaseMissing('user_role_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $staff->id, 'organisation_role_id' => $role->id]);
     }
 
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a malformed JSON `reason` (an array, not a string)
+     * must be rejected cleanly, not silently coerced to the literal
+     * 5-character string "Array" by a bare (string) cast -- which happens
+     * to equal this field's own minimum length, so it would otherwise
+     * slide straight through and get stored as this access-request
+     * decision's audit-trail reason.
+     */
+    public function test_deciding_an_access_request_with_a_non_string_reason_is_rejected_not_silently_coerced(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ACCGOV-0008');
+        $this->openReview($ctx['owner']);
+        $staff = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'staff-0008@test.test', $ctx['owner']);
+        $approver = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'approver-0008@test.test', $ctx['owner']);
+        $approver->update(['role' => 'TAXPAYER_ADMIN']);
+        $role = $this->makeOrganisationRole($ctx['organisation'], $ctx['owner']);
+        $requestId = $this->actingAs($ctx['owner'])->postJson('/api/v1/access-requests', [
+            'subject_user_id' => $staff->id, 'role_id' => $role->id, 'justification' => 'A genuinely valid justification string.',
+        ])->json('request.id');
+
+        $response = $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => ['not', 'a', 'string']]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'REASON_REQUIRED');
+        $this->assertDatabaseHas('access_requests', ['id' => $requestId, 'status' => 'PENDING_MANAGER']);
+        $this->assertDatabaseMissing('user_role_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $staff->id, 'organisation_role_id' => $role->id]);
+    }
+
     public function test_certifying_quarterly_access_retains_or_revokes_and_completes_the_review_once_every_member_is_certified(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-ACCGOV-0003');

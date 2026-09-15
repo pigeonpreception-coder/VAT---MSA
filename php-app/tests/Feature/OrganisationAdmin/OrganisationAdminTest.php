@@ -386,6 +386,33 @@ class OrganisationAdminTest extends TestCase
         $this->assertDatabaseHas('organisation_administrators', ['id' => $firstId, 'is_primary' => 0]);
     }
 
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a malformed JSON `approval_reference` (an array,
+     * not a string) must be rejected cleanly, not silently coerced to
+     * the literal 5-character string "Array" by a bare (string) cast --
+     * which happens to equal this field's own minimum length, so it
+     * would otherwise slide through and get stored as this
+     * administrator appointment's own audit-trail reference.
+     */
+    public function test_appointing_an_administrator_with_a_non_string_approval_reference_is_rejected_not_silently_coerced(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-FUZZ-0001');
+        $this->openReview($ctx['owner']);
+        $user = User::create(['id' => (string) Str::uuid(), 'name' => 'Fuzz Admin', 'email' => 'fuzz-admin@test.test', 'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE']);
+        $invite = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-FUZZ', 'full_name' => $user->name, 'email' => 'fuzz-emp@test.test']);
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/activation", ['user_id' => $user->id])
+            ->assertStatus(200);
+
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/organisations/administrators', ['user_id' => $user->id, 'administrator_role_code' => 'PRIMARY', 'is_primary' => true, 'approval_reference' => ['not', 'a', 'string']]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'APPROVAL_REFERENCE_REQUIRED');
+        $this->assertDatabaseMissing('organisation_administrators', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $user->id]);
+    }
+
     public function test_creating_an_organisation_role_rejects_protected_permissions_and_versions_correctly(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-0004');

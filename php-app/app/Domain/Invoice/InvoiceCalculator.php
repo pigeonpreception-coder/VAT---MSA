@@ -90,9 +90,17 @@ class InvoiceCalculator
             $errors[] = ['code' => 'CURRENCY_INVALID', 'path' => '/currency', 'message' => 'Currency must be a three-letter ISO code.'];
         }
 
+        // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): a JSON object for `lines` (e.g. `{"foo":"bar"}`)
+        // decodes to a PHP array that passes is_array()/count()>0 but has
+        // non-sequential-integer keys -- the foreach below then computes
+        // `$index + 1` on a string key and throws a TypeError (500), not a
+        // clean validation error. array_is_list() rejects that shape here
+        // instead, before the loop ever sees it.
         $rawLines = $payload['lines'] ?? [];
-        if (! is_array($rawLines) || count($rawLines) === 0) {
+        if (! is_array($rawLines) || ! array_is_list($rawLines) || count($rawLines) === 0) {
             $errors[] = ['code' => 'LINES_REQUIRED', 'path' => '/lines', 'message' => 'At least one invoice line is required.'];
+            $rawLines = [];
         } elseif (count($rawLines) > 10_000) {
             $errors[] = ['code' => 'TOO_MANY_LINES', 'path' => '/lines', 'message' => 'An invoice may contain at most 10,000 lines.'];
         }

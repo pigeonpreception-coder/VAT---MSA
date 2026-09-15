@@ -209,6 +209,40 @@ class InvoiceCertificationTest extends TestCase
         $response->assertStatus(409)->assertJsonPath('code', 'CONFLICT')->assertJsonFragment(['message' => 'The idempotency key was already used for a different invoice payload.']);
     }
 
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): this is the highest money-value endpoint in the
+     * app; its validation had never actually been fuzzed with malformed
+     * nested JSON before, only code-read as looking safe (a try/catch
+     * around every line-amount parse, plus a bcmath overflow guard).
+     * Confirms a handful of malformed shapes are cleanly rejected with
+     * 422s, not a 500 or (worse) silently certified nonsense.
+     */
+    public function test_malformed_nested_payload_shapes_are_rejected_cleanly_not_with_a_server_error(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-SUP-0001');
+        $this->makeTradingParty('VAT-CUS-0001');
+
+        // customer/supplier sent as a plain string instead of an object.
+        $scalarCustomer = $this->actingAs($supplier['owner'])->postJson('/api/v1/invoices', $this->invoicePayload(['customer' => 'not an object']), ['Idempotency-Key' => 'test-idem-key-fuzz-0001']);
+        $this->assertContains($scalarCustomer->status(), [422, 400], "A scalar 'customer' must be rejected cleanly, not crash: got {$scalarCustomer->status()}.");
+
+        // tax sent as a plain string instead of an object.
+        $scalarTax = $this->actingAs($supplier['owner'])->postJson('/api/v1/invoices', $this->invoicePayload(['lines' => [['line_number' => 1, 'description' => 'x', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => '1000.00', 'net_amount' => '1000.00', 'tax' => 'not an object']]]), ['Idempotency-Key' => 'test-idem-key-fuzz-0002']);
+        $this->assertContains($scalarTax->status(), [422, 400], "A scalar 'tax' must be rejected cleanly, not crash: got {$scalarTax->status()}.");
+
+        // A monetary amount as a wildly oversized digit string (overflow attempt).
+        $overflowAmount = $this->actingAs($supplier['owner'])->postJson('/api/v1/invoices', $this->invoicePayload(['totals' => ['line_net_amount' => '1000.00', 'tax_exclusive_amount' => '1000.00', 'tax_amount' => '150.00', 'tax_inclusive_amount' => '1150.00', 'payable_amount' => str_repeat('9', 40).'.00']]), ['Idempotency-Key' => 'test-idem-key-fuzz-0003']);
+        $this->assertContains($overflowAmount->status(), [422, 400], "An overflowing 'payable_amount' must be rejected cleanly, not crash: got {$overflowAmount->status()}.");
+
+        // lines sent as an object/map instead of a list.
+        $nonListLines = $this->actingAs($supplier['owner'])->postJson('/api/v1/invoices', $this->invoicePayload(['lines' => ['not' => 'a list']]), ['Idempotency-Key' => 'test-idem-key-fuzz-0004']);
+        $this->assertContains($nonListLines->status(), [422, 400], "Non-list 'lines' must be rejected cleanly, not crash: got {$nonListLines->status()}.");
+
+        // None of the malformed attempts above should have created a row.
+        $this->assertDatabaseCount('invoices', 0);
+    }
+
     public function test_a_credit_note_corrects_the_original_invoice_within_its_cumulative_cap(): void
     {
         $supplier = $this->makeTradingParty('VAT-SUP-0001');

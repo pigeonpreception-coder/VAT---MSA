@@ -383,8 +383,18 @@ class WorkflowService
     {
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'BUSINESS_WRITE', 0, $requestedOrganisationId);
 
-        $decision = mb_strtoupper(trim((string) ($payload['decision'] ?? '')));
-        $reason = trim((string) ($payload['reason'] ?? ''));
+        // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): a bare `(string) $x` cast on a JSON value doesn't
+        // reject a malformed array/object payload the way this codebase's
+        // own `is_string($x) ? ... : ''` idiom (BusinessValidator::
+        // textValue(), ComplianceValidator::text(), etc.) does -- PHP
+        // silently converts any array to the literal 5-character string
+        // "Array", which then slides straight past a `mb_strlen(...) < 5`
+        // minimum check as if it were real justification text. Guarding
+        // with is_string() first makes a non-string `reason` normalize to
+        // '' instead, correctly failing that same check.
+        $decision = mb_strtoupper(trim(is_string($payload['decision'] ?? null) ? $payload['decision'] : ''));
+        $reason = trim(is_string($payload['reason'] ?? null) ? $payload['reason'] : '');
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character decision reason.');
         }
@@ -644,7 +654,9 @@ class WorkflowService
         CommandLedger::validateIdempotencyKey($idempotencyKey);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
 
-        $reason = trim((string) preg_replace('/\s+/', ' ', (string) ($payload['reason'] ?? '')));
+        // Red-team punch list #9: same is_string() guard as
+        // decideWorkflowTask() above -- see its own doc comment.
+        $reason = trim((string) preg_replace('/\s+/', ' ', is_string($payload['reason'] ?? null) ? $payload['reason'] : ''));
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character revocation reason.');
         }

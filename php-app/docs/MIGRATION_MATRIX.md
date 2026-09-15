@@ -7950,3 +7950,85 @@ onto, and forcing one on for a metadata-only race would be scope creep
 against this item's own actual risk.
 
 Verified: full suite 671 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #9, JSON API payload fuzzing (2026-09-15)
+
+Item #9 asked for the thing its own title named: actually fuzz the JSON
+API endpoints with malformed payloads, rather than just re-reading
+validator code and reasoning "same validators as the already-fixed Blade
+forms, probably fine." A research pass first mapped every
+`*Controller`/`*ViewController` pair for shared-validator risk, then a
+representative set of the highest money/approval-value JSON-only or
+JSON-first endpoints (workflow decisions, access-request decisions,
+license state changes, administrator appointment, VAT rule proposals,
+invoice certification) was fuzzed with real HTTP requests carrying
+malformed shapes -- arrays where scalars were expected, oversized digit
+strings, non-list "lines", scalar objects. Two distinct real bugs
+surfaced, both closed with regression tests; several other endpoints
+were confirmed genuinely clean.
+
+**Bug #1 -- a bare `(string) $x` cast silently accepts a malformed array
+as valid-looking text.** PHP's array-to-string conversion always
+produces the literal string `"Array"` (5 characters, with only an
+`E_WARNING`, no exception) -- for a free-text field with a `< 5`
+minimum-length check, that's just long enough to slide straight through
+as if it were real content. This is a different failure shape than
+RT-017's own bug (numeric fields silently coerced to `0` by a raw
+`(int)` cast) -- RT-017's own fix and tests never touched free-text
+fields, so this gap went unnoticed until actually fuzzed. Six instances
+found, every one an approval or administrative-action audit-trail reason
+field, all fixed the same way (guard with `is_string($x) ? $x : ''`
+first, matching `BusinessValidator::textValue()`/`ComplianceValidator::
+text()`'s own established idiom, so a non-string value normalizes to
+`''` and correctly fails the same minimum-length check):
+
+- `WorkflowService::decideWorkflowTask()`'s `reason` (a workflow
+  approval decision)
+- `WorkflowService::revokeDelegation()`'s `reason`
+- `WorkflowValidator::delegation()`'s `reason` (createDelegation)
+- `AccessGovernanceService::decideAccessRequest()`'s `reason` (an access
+  approval decision, JSON-only -- no Blade sibling exists at all)
+- `LicensingValidator::stateChange()`'s `reason` (a license
+  ACTIVATE/SUSPEND/RENEW -- money/entitlement-critical)
+- `OrganisationAdminValidator`'s `approval_reference`
+  (appointAdministrator)
+
+A `justification` field with a `< 10` minimum (`AccessGovernanceService::
+requestRoleAccess()`) and a `finding` field with only a `> 400` maximum
+(`AccessGovernanceService::certifyQuarterlyAccess()`) were checked and
+are *not* exploitable this way -- `"Array"` is exactly 5 characters, so
+it only defeats a minimum bound at or below 5.
+
+**Bug #2 -- a genuine crash (500), not just silent coercion.** `POST
+/api/v1/invoices` (the highest money-value endpoint in the app) threw an
+uncaught `TypeError` ("Unsupported operand types: string + int") when
+`lines` was submitted as a JSON *object* (e.g. `{"foo":"bar"}`) instead
+of an array. `InvoiceCalculator::calculateAndValidate()`'s own
+`is_array($rawLines) && count($rawLines) > 0` check let an associative
+array through as if it were a normal list; the following `foreach` then
+iterated with a string key, and `$index + 1` (computing `line_number`)
+crashed on it. This validator had already been read as "looks safe" (a
+bcmath overflow guard and a try/catch around every line-amount parse
+back it up, and both were confirmed correct by fuzzing too) -- but this
+specific shape was never actually tried against a real request until
+now. Fixed with an `array_is_list($rawLines)` check alongside the
+existing `is_array()`/`count()` checks, falling back to an empty list so
+the `foreach` never sees the malformed data; the existing
+`LINES_REQUIRED` error code covers it (a non-list `lines` has, in
+effect, zero usable lines).
+
+**Confirmed clean, no fix needed** (fuzzed and found to already reject
+cleanly with a 422, not a crash or a silent accept): `VatRuleService`'s
+`rate_bps` as an array or a 34-digit oversized string, and
+`tax_category` as an array (`VatRuleValidator::proposal()`'s
+`is_numeric()`/enum checks hold); `InvoiceCalculator`'s handling of a
+scalar `customer`, a scalar line `tax`, and a 40-digit overflowing
+`payable_amount` (PHP's `??` operator and the existing bcmath overflow
+guard both hold).
+
+New regression tests for every fix above and every confirmed-clean case,
+in `WorkflowTest`, `AccessGovernanceTest`, `LicensingTest`,
+`OrganisationAdminTest`, `VatRuleTest`, and
+`InvoiceCertificationTest`.
+
+Verified: full suite 678 tests, 0 regressions.

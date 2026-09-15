@@ -177,6 +177,33 @@ class VatRuleTest extends TestCase
         $unbound->assertStatus(422)->assertJsonPath('errors.0.code', 'NO_APPROVED_VAT_RULE');
     }
 
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): this endpoint sets the tax rate applied to every
+     * invoice and has no Blade-form sibling at all (JSON-only), so it was
+     * never previously fuzzed with malformed payloads by any prior pass.
+     * Confirms `rate_bps` and `tax_category` are cleanly rejected as 422s
+     * for a malformed JSON array/object, not silently coerced or a 500.
+     */
+    public function test_proposing_a_vat_rule_rejects_malformed_rate_bps_and_tax_category_cleanly(): void
+    {
+        $proposer = $this->pilotAdmin();
+
+        $arrayRate = $this->actingAs($proposer)->withFreshStepUp()
+            ->postJson('/api/v1/vat-rules', $this->proposalPayload(['rate_bps' => ['not', 'a', 'number']]), ['Idempotency-Key' => 'propose-fuzz-'.Str::random(20)]);
+        $arrayRate->assertStatus(422)->assertJsonPath('errors.0.code', 'RATE_INVALID');
+
+        $oversizedRate = $this->actingAs($proposer)->withFreshStepUp()
+            ->postJson('/api/v1/vat-rules', $this->proposalPayload(['rate_bps' => '99999999999999999999999999999999']), ['Idempotency-Key' => 'propose-fuzz-'.Str::random(20)]);
+        $oversizedRate->assertStatus(422)->assertJsonPath('errors.0.code', 'RATE_INVALID');
+
+        $arrayCategory = $this->actingAs($proposer)->withFreshStepUp()
+            ->postJson('/api/v1/vat-rules', $this->proposalPayload(['tax_category' => ['STANDARD']]), ['Idempotency-Key' => 'propose-fuzz-'.Str::random(20)]);
+        $arrayCategory->assertStatus(422)->assertJsonPath('errors.0.code', 'TAX_CATEGORY_INVALID');
+
+        $this->assertDatabaseCount('vat_rules', 5); // just VatRuleSeeder's own seeded rows -- nothing malformed ever got created.
+    }
+
     public function test_listing_requires_read_permission_and_proposing_requires_manage_permission(): void
     {
         $officer = $this->complianceOfficer();
