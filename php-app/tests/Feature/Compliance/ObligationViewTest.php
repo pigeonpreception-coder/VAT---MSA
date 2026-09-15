@@ -134,6 +134,31 @@ class ObligationViewTest extends TestCase
         $this->assertSame(250000, $obligation->amount_cents);
     }
 
+    /**
+     * Red-team follow-up (2026-09-15): store() read the amount through a
+     * private `centsFromDecimal()` helper doing
+     * `(int) round(((float) $amount) * 100)` -- the exact same silent-
+     * zero coercion RT-017 (Input Validation & Robustness, 2026-09-14)
+     * fixed in OperationsViewController/FixedAssetViewController/
+     * QuotationViewController, just under a different name that RT-017's
+     * own grep sweep (which searched for a literal `(int) $request->
+     * input(...)` cast) never matched. Now rejected cleanly via the same
+     * shared Controller::safeDecimalCentsInput() helper.
+     */
+    public function test_a_non_numeric_amount_is_rejected_not_silently_zeroed(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-OBL-NAN-0001');
+
+        $response = $this->actingAs($this->namraAuditor())->post(route('obligations.store'), [
+            'vat_number' => 'VAT-VIEW-OBL-NAN-0001', 'obligation_type' => 'VAT_RETURN', 'period_code' => '2026-08',
+            'due_date' => '2026-09-25', 'amount' => 'not-a-number',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseMissing('tax_obligations', ['taxpayer_id' => $tp['taxpayer']->id]);
+    }
+
     public function test_creating_against_an_unknown_vat_number_shows_a_friendly_form_error(): void
     {
         $response = $this->actingAs($this->namraAuditor())->post(route('obligations.store'), [

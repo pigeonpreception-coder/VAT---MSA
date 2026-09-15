@@ -231,6 +231,32 @@ class AuditCaseViewTest extends TestCase
         $this->assertSame('CLOSED', AuditCase::findOrFail($caseId)->status);
     }
 
+    /**
+     * Red-team follow-up (2026-09-15): findings.store() read the amount
+     * through a private `centsFromDecimal()` helper doing
+     * `(int) round(((float) $amount) * 100)` -- the exact same silent-
+     * zero coercion RT-017 (Input Validation & Robustness, 2026-09-14)
+     * fixed elsewhere, just under a different name that RT-017's own grep
+     * sweep never matched. Now rejected cleanly via the shared
+     * Controller::safeDecimalCentsInput() helper.
+     */
+    public function test_a_non_numeric_finding_amount_is_rejected_not_silently_zeroed(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-CASE-NAN-0001');
+        $auditor = $this->namraAuditor();
+        $caseId = $this->openCaseViaUi($auditor, 'VAT-VIEW-CASE-NAN-0001');
+        $this->advanceCaseTo($auditor, $caseId, 'FINDINGS_REVIEW');
+        $supervisor = $this->namraSupervisor();
+
+        $response = $this->actingAs($supervisor)->post(route('audit-cases.findings.store', $caseId), [
+            'finding_code' => 'NAN-FINDING', 'title' => 'Fat-fingered amount',
+            'description' => 'Testing that a non-numeric amount is rejected, not silently zeroed.', 'amount' => 'not-a-number',
+        ]);
+
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseMissing('audit_findings', ['audit_case_id' => $caseId, 'finding_code' => 'NAN-FINDING']);
+    }
+
     public function test_citing_evidence_and_recording_a_custody_event(): void
     {
         $tp = $this->makeTaxpayer('VAT-VIEW-CASE-0007');

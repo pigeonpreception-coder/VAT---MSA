@@ -415,14 +415,27 @@ class WorkflowService
         $instanceStatus = null;
         $nextAssignmentId = null;
         DB::transaction(function () use ($task, $actor, $decision, $reason, $organisation, $now, &$instanceStatus, &$nextAssignmentId) {
+            // Concurrent User Simulation follow-up (2026-09-15): the
+            // assignment's own guarded UPDATE must run -- and its
+            // affected-row count be checked -- before any side effect is
+            // written, the same "check-then-write" order transition()'s
+            // own comment establishes elsewhere in this codebase. Writing
+            // the workflow_approvals row first meant a genuine concurrent
+            // double-decide (two requests both reading PENDING before
+            // either commits) could still log two approval rows even
+            // though only one assignment-status change ever won -- the
+            // final status stayed correct, but the audit trail didn't.
+            $updated = DB::table('workflow_assignments')->where('id', $task->id)->where('status', 'PENDING')
+                ->update(['status' => $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED']);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Workflow task {$task->id} was changed by another action; reload and try again.");
+            }
             DB::table('workflow_approvals')->insert([
                 'id' => (string) Str::uuid(), 'workflow_instance_id' => $task->instance_id, 'workflow_assignment_id' => $task->id,
                 'workflow_version_id' => $task->workflow_version_id, 'actor_id' => $actor->id, 'decision' => $decision, 'reason' => $reason,
                 'authority_snapshot' => AuditService::canonicalJson(['role' => $actor->role, 'permissions' => DynamicPermissions::forUser($actor)]),
                 'decided_at' => $now,
             ]);
-            DB::table('workflow_assignments')->where('id', $task->id)->where('status', 'PENDING')
-                ->update(['status' => $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED']);
 
             if ($decision === 'REJECT') {
                 $instanceStatus = 'REJECTED';
@@ -499,11 +512,27 @@ class WorkflowService
         return ['versionId' => $versionId, 'context' => $context, 'path' => $path, 'terminal' => $terminal];
     }
 
-    /** @return array<string, mixed> */
-    public function createDelegation(array $payload, User $actor, ?string $requestedOrganisationId): array
+    /**
+     * Duplicate-Submission Sweep follow-up (2026-09-15): unlike
+     * assignWorkflow (this file's own CommandLedger precedent) and every
+     * other create-shaped command in this codebase, this had no
+     * idempotency-key guard at all -- a double-submit (double-click, a
+     * retried request after a dropped response) created two identical
+     * delegation rows outright, with no replay detection to catch it.
+     *
+     * @return array<string, mixed>
+     */
+    public function createDelegation(array $payload, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $delegation = WorkflowValidator::delegation($payload);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
+
+        $requestHash = CommandLedger::requestHash($delegation);
+        $prior = CommandLedger::prior($actor->id, 'CREATE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash);
+        if ($prior !== null) {
+            return $this->presentDelegation($prior);
+        }
 
         foreach ([$delegation['delegatorUserId'], $delegation['delegateUserId']] as $userId) {
             $exists = User::where('id', $userId)->where('status', 'ACTIVE')->exists();
@@ -519,19 +548,30 @@ class WorkflowService
         }
 
         $id = (string) Str::uuid();
-        DB::transaction(function () use ($id, $organisation, $delegation, $actor) {
+        $now = now();
+        DB::transaction(function () use ($id, $organisation, $delegation, $actor, $now, $idempotencyKey, $requestHash) {
             DB::table('workflow_delegations')->insert([
                 'id' => $id, 'organisation_id' => $organisation->id, 'delegator_user_id' => $delegation['delegatorUserId'],
                 'delegate_user_id' => $delegation['delegateUserId'], 'workflow_id' => $delegation['workflowId'], 'scope' => $delegation['scope'],
                 'status' => 'ACTIVE', 'effective_from' => Carbon::parse($delegation['effectiveFrom']), 'effective_to' => Carbon::parse($delegation['effectiveTo']),
                 'approved_by' => $actor->id, 'reason' => $delegation['reason'], 'revoked_reason' => null,
             ]);
-            AuditService::append($actor, 'WORKFLOW_DELEGATION_CREATED', 'WORKFLOW_DELEGATION', $id, ['organisationId' => $organisation->id, 'delegatorUserId' => $delegation['delegatorUserId'], 'delegateUserId' => $delegation['delegateUserId'], 'reason' => $delegation['reason']], now());
+            AuditService::append($actor, 'WORKFLOW_DELEGATION_CREATED', 'WORKFLOW_DELEGATION', $id, ['organisationId' => $organisation->id, 'delegatorUserId' => $delegation['delegatorUserId'], 'delegateUserId' => $delegation['delegateUserId'], 'reason' => $delegation['reason']], $now);
+            CommandLedger::record($actor->id, 'CREATE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash, 'WORKFLOW_DELEGATION', $id, $now);
         });
 
+        return $this->presentDelegation($id);
+    }
+
+    /** Reconstructs createDelegation()'s own return shape from an already-created row, for a recognised replay. */
+    private function presentDelegation(string $id): array
+    {
+        $row = DB::table('workflow_delegations')->where('id', $id)->firstOrFail();
+
         return [
-            'id' => $id, 'status' => 'ACTIVE', 'delegatorUserId' => $delegation['delegatorUserId'], 'delegateUserId' => $delegation['delegateUserId'],
-            'workflowId' => $delegation['workflowId'], 'scope' => $delegation['scope'], 'effectiveFrom' => $delegation['effectiveFrom'], 'effectiveTo' => $delegation['effectiveTo'],
+            'id' => $row->id, 'status' => $row->status, 'delegatorUserId' => $row->delegator_user_id, 'delegateUserId' => $row->delegate_user_id,
+            'workflowId' => $row->workflow_id, 'scope' => $row->scope,
+            'effectiveFrom' => Carbon::parse($row->effective_from)->toISOString(), 'effectiveTo' => Carbon::parse($row->effective_to)->toISOString(),
         ];
     }
 
@@ -551,14 +591,32 @@ class WorkflowService
             ])->get()->map(fn ($row) => (array) $row)->all();
     }
 
-    /** @return array<string, mixed> */
-    public function revokeDelegation(string $delegationId, array $payload, User $actor, ?string $requestedOrganisationId): array
+    /**
+     * Duplicate-Submission Sweep follow-up (2026-09-15): now carries the
+     * same CommandLedger idempotency guard createDelegation() does, plus
+     * an affected-row check on the guarded UPDATE (the same
+     * decideWorkflowTask fix, above, applies here too) -- a genuine
+     * concurrent double-revoke (two requests both reading ACTIVE before
+     * either commits) could otherwise still write two
+     * WORKFLOW_DELEGATION_REVOKED audit rows even though only one status
+     * change ever won.
+     *
+     * @return array<string, mixed>
+     */
+    public function revokeDelegation(string $delegationId, array $payload, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
 
         $reason = trim((string) preg_replace('/\s+/', ' ', (string) ($payload['reason'] ?? '')));
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character revocation reason.');
+        }
+
+        $requestHash = CommandLedger::requestHash(['delegationId' => $delegationId, 'reason' => $reason]);
+        $prior = CommandLedger::prior($actor->id, 'REVOKE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash);
+        if ($prior !== null) {
+            return ['id' => $prior, 'status' => 'REVOKED'];
         }
 
         $row = DB::table('workflow_delegations')->where('id', $delegationId)->where('organisation_id', $organisation->id)->first(['id', 'status']);
@@ -569,10 +627,15 @@ class WorkflowService
             throw new RepositoryConflictException('Only an active delegation can be revoked.');
         }
 
-        DB::transaction(function () use ($delegationId, $organisation, $reason, $actor) {
-            DB::table('workflow_delegations')->where('id', $delegationId)->where('status', 'ACTIVE')
+        $now = now();
+        DB::transaction(function () use ($delegationId, $organisation, $reason, $actor, $now, $idempotencyKey, $requestHash) {
+            $updated = DB::table('workflow_delegations')->where('id', $delegationId)->where('status', 'ACTIVE')
                 ->update(['status' => 'REVOKED', 'revoked_reason' => $reason]);
-            AuditService::append($actor, 'WORKFLOW_DELEGATION_REVOKED', 'WORKFLOW_DELEGATION', $delegationId, ['organisationId' => $organisation->id, 'reason' => $reason], now());
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Delegation {$delegationId} was changed by another action; reload and try again.");
+            }
+            AuditService::append($actor, 'WORKFLOW_DELEGATION_REVOKED', 'WORKFLOW_DELEGATION', $delegationId, ['organisationId' => $organisation->id, 'reason' => $reason], $now);
+            CommandLedger::record($actor->id, 'REVOKE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash, 'WORKFLOW_DELEGATION', $delegationId, $now);
         });
 
         return ['id' => $delegationId, 'status' => 'REVOKED'];

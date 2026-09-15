@@ -510,4 +510,45 @@ class ComplianceCaseTest extends TestCase
         $response->assertStatus(409);
         $this->assertSame($secondOfficer->id, DB::table('risk_indicators')->where('id', $indicatorId)->value('assigned_officer_id'), 'The concurrent winners assignment must survive untouched.');
     }
+
+    /**
+     * Red-team follow-up (2026-09-15): `RiskService::approveAction()`
+     * carries the identical guarded-UPDATE-with-affected-row-check
+     * pattern the two race regressions above already prove for
+     * transition()/assignReview(), but until now only by code-review
+     * parity -- its own independent regression, same simulation
+     * technique, for the DISMISS branch (approveAction's other branch,
+     * ESCALATE_TO_CASE, shares the identical guard on the same row).
+     */
+    public function test_a_risk_action_decision_that_races_a_concurrent_decision_is_rejected_not_silently_applied(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-CASE-RACE-0003');
+        $auditor = $this->namraAuditor();
+        \App\Models\TaxObligation::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'obligation_type' => 'VAT_RETURN', 'period_code' => '2026-06', 'due_date' => '2026-07-25', 'amount_cents' => 100000,
+            'currency' => 'NAD', 'status' => 'PENDING', 'source_system' => 'VAT_MSA', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->actingAs($auditor)->postJson("/api/v1/taxpayers/{$tp['taxpayer']->id}/risk-evaluation", ['schema_version' => '1.0.0'], ['Idempotency-Key' => 'test-idem-race-decide-evaluate-0001'])->assertStatus(200);
+        $indicatorId = \App\Models\RiskIndicator::where('taxpayer_id', $tp['taxpayer']->id)->where('indicator_code', 'OBLIGATION_OVERDUE')->firstOrFail()->id;
+        $this->actingAs($auditor)->postJson("/api/v1/risk-indicators/{$indicatorId}/assignment", [
+            'schema_version' => '1.0.0', 'officer_id' => $auditor->id,
+        ], ['Idempotency-Key' => 'test-idem-race-decide-assign-0001'])->assertStatus(200);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $indicatorId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `risk_indicators`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('risk_indicators')->where('id', $indicatorId)->update(['status' => 'DISMISSED']);
+        });
+
+        $response = $this->actingAs($auditor)->postJson("/api/v1/risk-indicators/{$indicatorId}/decision", [
+            'schema_version' => '1.0.0', 'decision' => 'DISMISS', 'rationale' => 'Attempting to decide against a stale review state.',
+        ], ['Idempotency-Key' => 'test-idem-race-decide-0001']);
+
+        $response->assertStatus(409);
+        $this->assertDatabaseMissing('audit_events', ['action' => 'RISK_ACTION_DISMISSED', 'resource_id' => $indicatorId]);
+    }
 }

@@ -18,36 +18,78 @@ Not a new red-team pass -- no new reproduction was attempted beyond
 confirming each item is still true in the code as it stands today. Treat
 each line as a pointer back to its source report, not a restatement of it.
 
+**Update (2026-09-15, same day):** the small batch (#1-#5) is now closed
+-- four genuine fixes plus one audited-clean result, each with its own
+regression test or live verification. See each item's own strikethrough
+entry below for what changed. #4 also turned up a real, previously-
+unnoticed instance of RT-017's own bug in four controllers the original
+grep sweep never matched, not just a verification of the existing fix.
+
 ## Buildable now, small
 
-1. **`WorkflowService::createDelegation()`/`revokeDelegation()` have no
-   duplicate-name/pairing guard** (source: `RED_TEAM_ASSESSMENT_2026-09-13-
-   DUPLICATE-SUBMISSION-SWEEP.md`). No `CommandLedger` call or uniqueness
-   pre-check at `app/Services/Workflow/WorkflowService.php`
-   (`createDelegation`/`revokeDelegation`). A double-submit creates two
-   identical delegation rows -- a data-quality nuisance, not a security
-   bypass.
-2. **`WorkflowService::decideWorkflowTask()`'s audit-log write isn't
-   guarded by the assignment update's affected-row count** (source: same
-   report). The `workflow_approvals` insert runs before the guarded
-   `workflow_assignments` UPDATE and never checks its affected-row count,
-   so a genuine concurrent double-decide can still write two
-   `workflow_approvals` rows even though only one assignment-status change
-   wins. Final status stays correct; the approval audit trail doesn't.
-   Same one-line affected-row-check pattern already used elsewhere in this
-   codebase would close it.
-3. **`RefundService::dispute()`/`RiskService::approveAction()` got the
+1. ~~**`WorkflowService::createDelegation()`/`revokeDelegation()` have no
+   duplicate-name/pairing guard**~~ **CLOSED (2026-09-15).** Source:
+   `RED_TEAM_ASSESSMENT_2026-09-13-DUPLICATE-SUBMISSION-SWEEP.md`. Both
+   now take the same `CommandLedger` idempotency-key pattern
+   `assignWorkflow()` already used (validate key, hash+check for a prior
+   replay, record inside the transaction); `revokeDelegation()` also
+   picked up the affected-row guard from #2 below, since it had the
+   identical unguarded-audit-write race. Both controllers and the Blade
+   forms (`<x-idempotency-key/>`) updated; a new regression test proves a
+   replayed create returns the same delegation, not a second row.
+2. ~~**`WorkflowService::decideWorkflowTask()`'s audit-log write isn't
+   guarded by the assignment update's affected-row count**~~ **CLOSED
+   (2026-09-15).** Source: same report. The `workflow_assignments` UPDATE
+   now runs first with its affected-row count checked -- 0 rows throws
+   `RepositoryConflictException` before the `workflow_approvals` insert
+   ever runs. New regression test (`WorkflowTest`) simulates the race via
+   `DB::listen()`, the same technique `ComplianceCaseTest`'s own race
+   regressions established.
+3. ~~**`RefundService::dispute()`/`RiskService::approveAction()` got the
    RT-020 stale-read fix by pattern parity, never their own regression
-   test** (source: `RED_TEAM_ASSESSMENT_2026-09-14-RESILIENCE-TO-USER-
-   ERRORS.md`). Low risk, but unverified independently -- add 2-3 tests.
-4. **The other ~6 `*ViewController` classes were only grep-checked, not
-   live-reproduced, for the RT-017 int-cast silent-coercion bug** (source:
-   `RED_TEAM_ASSESSMENT_2026-09-14-INPUT-VALIDATION.md`). Believed
-   complete but not proven by reproduction.
-5. **"Remember me" cookie lifecycle was never independently audited**
-   beyond confirming the RT-019 session-wipe fix also covers it (source:
-   `RED_TEAM_ASSESSMENT_2026-09-14-AUTHENTICATION-SESSION-ROBUSTNESS.md`).
-   Audit only, no fix known to be needed yet.
+   test**~~ **CLOSED (2026-09-15).** Source:
+   `RED_TEAM_ASSESSMENT_2026-09-14-RESILIENCE-TO-USER-ERRORS.md`. Both now
+   have their own independent race regression (`RefundClaimTest`,
+   `ComplianceCaseTest`), same `DB::listen()` simulation technique as the
+   report's own precedent tests.
+4. ~~**The other ~6 `*ViewController` classes were only grep-checked, not
+   live-reproduced, for the RT-017 int-cast silent-coercion bug**~~
+   **CLOSED (2026-09-15) -- and a genuine, previously-unnoticed instance
+   found and fixed.** Source: `RED_TEAM_ASSESSMENT_2026-09-14-INPUT-
+   VALIDATION.md`. A fresh grep confirmed the original sweep's literal
+   `(int) $request->input(...)` pattern is gone everywhere -- but a
+   *different*-named private helper, `centsFromDecimal()` (`(int)
+   round(((float) $amount) * 100)`), carried the exact same coercion bug
+   in four controllers RT-017 never looked at:
+   `AuditCaseViewController`, `DisputeViewController`,
+   `ObligationViewController`, `VatLifecycleViewController`. Fixed with a
+   new shared `Controller::safeDecimalCentsInput()` helper (same contract
+   as `safeIntegerInput`/`safeMicrosInput`); each controller's own
+   `centsFromDecimal()` removed. Regression test added for each of the 4,
+   plus live-verified over real HTTP (`/obligations`, `/quotations`) that
+   a non-numeric amount now gets a clean field error, not a silent
+   zero-amount row.
+5. ~~**"Remember me" cookie lifecycle was never independently audited**~~
+   **CLOSED (2026-09-15), audited, no gap found.** Source:
+   `RED_TEAM_ASSESSMENT_2026-09-14-AUTHENTICATION-SESSION-ROBUSTNESS.md`.
+   Checked whether any other account-locking event (employee termination,
+   `OrganisationAdminService`'s own `User::status = SUSPENDED`) has the
+   same gap RT-019 fixed for password reset -- an already-authenticated
+   session or remember-me cookie surviving the lock. It doesn't:
+   `Gate::define('permission', ...)` in `AppServiceProvider` calls
+   `$user->isActive()` fresh on *every* privileged request (not just at
+   login), and per that Gate's own doc comment every one of this app's
+   165 route files is permission-gated. Live-verified over real HTTP: an
+   already-logged-in session got `200` on `/dashboard`, then `403` on the
+   very next request with the *same* session cookie, no logout or
+   session-table wipe involved, immediately after flipping that user's
+   `status` to `SUSPENDED` directly in the database. This reasoning
+   covers a remember-me-only "session" identically, since Laravel
+   resolves both through the same fresh per-request `User` model the Gate
+   checks. Password reset's own explicit `remember_token` rotation +
+   `sessions` table wipe (RT-019) remains real defense-in-depth for its
+   own narrower threat model (a compromised password, not an account
+   lock), just not something every lock-type event turns out to need.
 
 ## Buildable now, medium
 

@@ -7695,3 +7695,60 @@ per-permission hiding. Live-verified with a real browser: `SUPER_ADMIN`
 (the permission-light role used throughout the prior sidebar audit) now
 sees every group and every standalone link. Full suite: 654 tests, 0
 regressions.
+
+## Consolidated red-team punch list: small batch closed (2026-09-15)
+
+`docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md` pulled together
+every genuinely-still-open item named across all 14 dated
+`docs/RED_TEAM_ASSESSMENT_*.md` reports; its 5-item "buildable now,
+small" batch is closed the same day:
+
+- **`WorkflowService::createDelegation()`/`revokeDelegation()`** now
+  carry the same `CommandLedger` idempotency-key pattern `assignWorkflow()`
+  already used in this file, closing the one write pair in this codebase
+  with no duplicate-submission guard at all (a plain double-click created
+  two identical delegation rows). Both controllers and the Blade forms
+  updated; a new test proves a replayed create returns the same
+  delegation, not a second row.
+- **`WorkflowService::decideWorkflowTask()`** now checks the
+  `workflow_assignments` UPDATE's affected-row count *before* writing the
+  `workflow_approvals` audit row (previously the other way round), closing
+  a race where a concurrent double-decide could log two approval rows for
+  one real status change. New regression test simulates the race via
+  `DB::listen()`, the same technique `ComplianceCaseTest`'s own race
+  regressions established -- `revokeDelegation()` got the identical fix,
+  since it had the same unguarded-write shape.
+- **`RefundService::dispute()`/`RiskService::approveAction()`** -- both
+  already carried the RT-020 stale-read guard by pattern parity with their
+  sibling `transition()`/`assignReview()` methods, but neither had its own
+  independent regression test proving it. Both now do (`RefundClaimTest`,
+  `ComplianceCaseTest`).
+- **A genuine, previously-unnoticed instance of RT-017's own bug**
+  (Input Validation & Robustness, 2026-09-14): RT-017's grep swept for a
+  literal `(int) $request->input(...)` cast and found/fixed 3 controllers;
+  a differently-named private helper, `centsFromDecimal()`
+  (`(int) round(((float) $amount) * 100)`), carried the identical
+  silent-zero coercion in four more -- `AuditCaseViewController`,
+  `DisputeViewController`, `ObligationViewController`,
+  `VatLifecycleViewController` -- that RT-017 never looked at. Fixed with
+  a new shared `Controller::safeDecimalCentsInput()` helper matching
+  `safeIntegerInput`/`safeMicrosInput`'s own contract (`false`, not a
+  bogus zero, for anything non-numeric); each controller's private
+  `centsFromDecimal()` removed. A regression test added for all four, plus
+  live-verified over real HTTP (`/obligations`, `/quotations`) that a
+  non-numeric amount now gets a clean field error and creates no row.
+- **"Remember me"/session lifecycle audit** -- checked whether any other
+  account-locking event (employee termination,
+  `OrganisationAdminService`'s own `User::status = SUSPENDED`) has the
+  same already-authenticated-session-survives-the-lock gap RT-019 fixed
+  for password reset. It doesn't: `Gate::define('permission', ...)` in
+  `AppServiceProvider` calls `$user->isActive()` fresh on every privileged
+  request (not just at login), and every one of this app's 165 route
+  files is permission-gated. Live-verified over real HTTP: an
+  already-logged-in session got `200` on `/dashboard`, then `403` on the
+  very next request with the *same* session cookie, immediately after
+  flipping that user's `status` to `SUSPENDED` directly in the database
+  -- no logout or session-table wipe needed. No fix required; audited
+  clean.
+
+Verified: full suite 655 tests, 0 regressions.

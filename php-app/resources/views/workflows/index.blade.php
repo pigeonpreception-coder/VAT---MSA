@@ -262,6 +262,7 @@
                                 @if ($delegation['status'] === 'ACTIVE')
                                     <form method="POST" action="{{ route('workflows.delegations.revoke', $delegation['id']) }}" class="d-flex gap-2">
                                         @csrf
+                                        <x-idempotency-key/>
                                         <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason (5-240 chars)" required minlength="5" maxlength="240" style="width: 10rem;">
                                         <button type="submit" class="btn btn-sm btn-outline-danger text-nowrap">Revoke</button>
                                     </form>
@@ -279,6 +280,7 @@
         <div class="card-body border-top">
             <form method="POST" action="{{ route('workflows.delegations.store') }}">
                 @csrf
+                <x-idempotency-key/>
                 <div class="row">
                     <div class="col-md-3 mb-3">
                         <label for="delegator_user_id" class="form-label">Delegator</label>

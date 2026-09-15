@@ -348,4 +348,46 @@ class RefundClaimTest extends TestCase
         $this->assertSame('REJECTED', DB::table('refund_claims')->where('id', $claimId)->value('status'), 'The concurrent winners status must survive untouched.');
         $this->assertDatabaseMissing('refund_claim_transitions', ['refund_claim_id' => $claimId, 'action' => 'APPROVE']);
     }
+
+    /**
+     * Red-team follow-up (2026-09-15): `RefundService::dispute()` carries
+     * the identical guarded-UPDATE-with-affected-row-check pattern as
+     * `transition()` above (see that test's own doc comment for the full
+     * rationale), but until now only by code-review parity -- this is its
+     * own independent regression proving the guard actually engages here
+     * too, simulating a genuine concurrent race the same way.
+     */
+    public function test_a_dispute_that_races_a_concurrent_status_change_is_rejected_not_silently_applied(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-SUP-2006');
+        $customer = $this->makeTradingParty('VAT-CUS-2006');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        VatReturnVersion::where('id', $version->id)->update(['status' => 'FILED']);
+
+        $claimId = $this->actingAs($customer['owner'])->postJson('/api/v1/refunds', [
+            'schema_version' => '1.0.0', 'vat_return_version_id' => $version->id,
+        ], ['Idempotency-Key' => 'race-dispute-'.Str::random(20)])->json('resource.id');
+
+        $officer = $this->makeRefundOfficer();
+        $this->actingAs($officer)->postJson("/api/v1/refunds/{$claimId}/transition", [
+            'schema_version' => '1.0.0', 'action' => 'REJECT', 'findings' => 'Insufficient supporting evidence on file.',
+        ], ['Idempotency-Key' => 'race-reject-'.Str::random(20)])->assertStatus(200)->assertJsonPath('resource.status', 'REJECTED');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $claimId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `refund_claims`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('refund_claims')->where('id', $claimId)->update(['status' => 'CLOSED']);
+        });
+
+        $response = $this->actingAs($customer['owner'])->postJson("/api/v1/refunds/{$claimId}/disputes", [
+            'schema_version' => '1.0.0', 'action' => 'DISPUTE', 'findings' => 'The rejection did not consider the resubmitted evidence.',
+        ], ['Idempotency-Key' => 'race-dispute-attempt-'.Str::random(20)]);
+
+        $response->assertStatus(409);
+        $this->assertSame('CLOSED', DB::table('refund_claims')->where('id', $claimId)->value('status'), 'The concurrent winners status must survive untouched.');
+        $this->assertDatabaseMissing('refund_claim_transitions', ['refund_claim_id' => $claimId, 'action' => 'DISPUTE']);
+    }
 }

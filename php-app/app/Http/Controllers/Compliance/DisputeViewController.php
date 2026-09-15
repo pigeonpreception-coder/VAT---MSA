@@ -101,7 +101,7 @@ class DisputeViewController extends Controller
         $payload = [
             'schema_version' => '1.0.0', 'taxpayer_id' => $taxpayerId, 'audit_case_id' => $request->input('audit_case_id') ?: null,
             'disputed_resource_type' => (string) $request->input('disputed_resource_type'), 'disputed_resource_id' => (string) $request->input('disputed_resource_id'),
-            'grounds' => (string) $request->input('grounds'), 'disputed_amount_cents' => $this->centsFromDecimal($request->input('disputed_amount')),
+            'grounds' => (string) $request->input('grounds'), 'disputed_amount_cents' => $this->safeDecimalCentsInput($request->input('disputed_amount')),
             'currency' => (string) ($request->input('currency') ?: 'NAD'),
         ];
 
@@ -114,11 +114,6 @@ class DisputeViewController extends Controller
         }
 
         return redirect()->route('disputes.show', $dispute['id'])->with('status', 'Dispute filed.');
-    }
-
-    private function centsFromDecimal(mixed $amount): int
-    {
-        return (int) round(((float) $amount) * 100);
     }
 
     /** @return array<string, string> */

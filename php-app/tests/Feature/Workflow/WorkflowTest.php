@@ -16,6 +16,7 @@ use Database\Seeders\OrganisationAdministratorRoleSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
@@ -288,6 +289,58 @@ class WorkflowTest extends TestCase
             ->assertStatus(409);
     }
 
+    /**
+     * Red-team follow-up (Duplicate-Submission Sweep, 2026-09-13): the
+     * `workflow_approvals` audit row used to be inserted before the
+     * `workflow_assignments` UPDATE's own affected-row count was checked,
+     * so a genuine concurrent double-decide (two requests both reading
+     * PENDING before either commits) could still log two approval rows
+     * even though only one assignment-status change ever won. Simulated
+     * the same way `ComplianceCaseTest`'s own race regressions do: a
+     * `DB::listen` hook injects the concurrent decision between this
+     * request's own read of the task and its guarded UPDATE.
+     */
+    public function test_a_workflow_task_decision_that_races_a_concurrent_decision_is_rejected_not_silently_applied(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-WF-RACE-0001');
+        $this->openReview($ctx['owner']);
+        $role = OrganisationRole::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $ctx['organisation']->id, 'name' => 'Race Approver',
+            'description' => 'Approves for the race regression test.', 'version' => 1, 'branch_scope' => '[]', 'approval_limit_cents' => null,
+            'status' => 'ACTIVE', 'created_by' => $ctx['owner']->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $approver = $this->makeUser($ctx['taxpayer'], 'approver-race-0001@test.test');
+        $this->grantRole($ctx['organisation'], $role, $approver, $ctx['owner']);
+        $definition = [
+            'name' => 'Race Approval', 'domain_action' => 'journal',
+            'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'assignee_type' => 'role', 'assignee_ref' => $role->id, 'label' => 'Approval'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
+            'transitions' => [['from' => 'start', 'to' => 'approve'], ['from' => 'approve', 'to' => 'end']],
+        ];
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
+        $versionId = $created->json('workflow.versionId');
+        $this->actingAs($approver)->withFreshStepUp()->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
+        $instance = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-race-1'], ['Idempotency-Key' => (string) Str::uuid()]);
+        $assignmentId = $instance->json('instance.assignmentId');
+        $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'status' => 'PENDING']);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $assignmentId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `workflow_assignments` as `a`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('workflow_assignments')->where('id', $assignmentId)->update(['status' => 'REJECTED']);
+        });
+
+        $response = $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Verified against budget.']);
+
+        $response->assertStatus(409);
+        $this->assertSame('REJECTED', DB::table('workflow_assignments')->where('id', $assignmentId)->value('status'), "The concurrent winner's status must survive untouched.");
+        $this->assertSame(0, DB::table('workflow_approvals')->where('workflow_assignment_id', $assignmentId)->count(), 'The loser of the race must never log an approval row.');
+    }
+
     public function test_self_approval_is_denied_and_recorded_as_a_segregation_of_duties_violation(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-WF-0005');
@@ -386,15 +439,24 @@ class WorkflowTest extends TestCase
             ->postJson('/api/v1/workflows/delegations', [
                 'delegator_user_id' => $target->id, 'delegate_user_id' => $target->id,
                 'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDay()), 'reason' => 'Self delegation attempt.',
-            ])->assertStatus(422)->assertJsonPath('code', 'DELEGATION_SELF');
+            ], ['Idempotency-Key' => 'test-idem-delegation-self-0001'])->assertStatus(422)->assertJsonPath('code', 'DELEGATION_SELF');
 
+        $createKey = 'test-idem-delegation-create-0001';
+        $createPayload = [
+            'delegator_user_id' => $target->id, 'delegate_user_id' => $delegate->id,
+            'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDays(7)), 'reason' => 'Annual leave cover.',
+        ];
         $delegation = $this->actingAs($ctx['owner'])->withFreshStepUp()
-            ->postJson('/api/v1/workflows/delegations', [
-                'delegator_user_id' => $target->id, 'delegate_user_id' => $delegate->id,
-                'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDays(7)), 'reason' => 'Annual leave cover.',
-            ]);
+            ->postJson('/api/v1/workflows/delegations', $createPayload, ['Idempotency-Key' => $createKey]);
         $delegation->assertStatus(201)->assertJsonPath('delegation.status', 'ACTIVE');
         $delegationId = $delegation->json('delegation.id');
+
+        // Duplicate-Submission Sweep follow-up (2026-09-15): a double-click
+        // (the same key) replays the same delegation, not a second row.
+        $replay = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/delegations', $createPayload, ['Idempotency-Key' => $createKey]);
+        $replay->assertStatus(201)->assertJsonPath('delegation.id', $delegationId);
+        $this->assertSame(1, DB::table('workflow_delegations')->where('delegator_user_id', $target->id)->where('delegate_user_id', $delegate->id)->count());
 
         $listed = $this->actingAs($ctx['owner'])->getJson('/api/v1/workflows/delegations');
         $listed->assertStatus(200)->assertJsonCount(1, 'delegations');
@@ -414,7 +476,7 @@ class WorkflowTest extends TestCase
         $this->assertDatabaseHas('workflow_assignments', ['id' => $instance->json('instance.assignmentId'), 'assigned_user_id' => $delegate->id]);
 
         $revoked = $this->actingAs($ctx['owner'])->withFreshStepUp()
-            ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Cover period ended early.']);
+            ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Cover period ended early.'], ['Idempotency-Key' => 'test-idem-delegation-revoke-0001']);
         $revoked->assertStatus(200)->assertJsonPath('delegation.status', 'REVOKED');
 
         // A second delegation assigned after the revocation goes to the
@@ -423,9 +485,9 @@ class WorkflowTest extends TestCase
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-2'], ['Idempotency-Key' => (string) Str::uuid()]);
         $this->assertDatabaseHas('workflow_assignments', ['id' => $secondInstance->json('instance.assignmentId'), 'assigned_user_id' => $target->id]);
 
-        // Already revoked -- revoking it again is a conflict.
+        // Already revoked -- a genuinely new attempt (a different key) is a conflict.
         $this->actingAs($ctx['owner'])->withFreshStepUp()
-            ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Repeat revocation attempt.'])
+            ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Repeat revocation attempt.'], ['Idempotency-Key' => 'test-idem-delegation-revoke-0002'])
             ->assertStatus(409);
     }
 }
