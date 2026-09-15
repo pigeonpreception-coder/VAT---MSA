@@ -129,7 +129,13 @@ class ExpenseService
         }
         $now = now();
         DB::transaction(function () use ($expenseId, $organisation, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
-            Expense::where('id', $expenseId)->update(['status' => 'SUBMITTED']);
+            // Red-team punch list #8: the DRAFT check above ran before this
+            // transaction, unguarded against a concurrent submit/approve/
+            // reject on the same expense.
+            $updated = Expense::where('id', $expenseId)->where('status', 'DRAFT')->update(['status' => 'SUBMITTED']);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Expense {$expenseId} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'SUBMIT_EXPENSE', $idempotencyKey, $requestHash, 'EXPENSE', $expenseId, $now);
             CommandLedger::outbox('EXPENSE', $expenseId, 'ExpenseSubmitted', $organisation->id, ['expense_id' => $expenseId, 'organisation_id' => $organisation->id, 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'EXPENSE_SUBMITTED', 'EXPENSE', $expenseId, ['organisationId' => $organisation->id, 'correlationId' => $correlationId], $now);
@@ -155,7 +161,13 @@ class ExpenseService
         $this->assertNotSelfReview($actor, $expense->created_by, 'approving');
         $now = now();
         DB::transaction(function () use ($expense, $expenseId, $organisation, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
-            Expense::where('id', $expenseId)->update(['status' => 'APPROVED', 'approved_by' => $actor->id, 'approved_at' => $now]);
+            // Red-team punch list #8: the SUBMITTED check above ran before
+            // this transaction, unguarded against a concurrent approve/
+            // reject race on the same expense.
+            $updated = Expense::where('id', $expenseId)->where('status', 'SUBMITTED')->update(['status' => 'APPROVED', 'approved_by' => $actor->id, 'approved_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Expense {$expenseId} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'APPROVE_EXPENSE', $idempotencyKey, $requestHash, 'EXPENSE', $expenseId, $now);
             CommandLedger::outbox('EXPENSE', $expenseId, 'ExpenseApproved', $organisation->id, ['expense_id' => $expenseId, 'organisation_id' => $organisation->id, 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'EXPENSE_APPROVED', 'EXPENSE', $expenseId, ['organisationId' => $organisation->id, 'totalCents' => (int) $expense->total_cents, 'correlationId' => $correlationId], $now);
@@ -182,7 +194,13 @@ class ExpenseService
         $this->assertNotSelfReview($actor, $expense->created_by, 'rejecting');
         $now = now();
         DB::transaction(function () use ($expenseId, $organisation, $actor, $now, $idempotencyKey, $requestHash, $correlationId, $input) {
-            Expense::where('id', $expenseId)->update(['status' => 'REJECTED', 'approved_by' => $actor->id, 'approved_at' => $now, 'rejection_reason' => $input['reason']]);
+            // Red-team punch list #8: same guard as approve() above -- the
+            // SUBMITTED check ran before this transaction, unguarded.
+            $updated = Expense::where('id', $expenseId)->where('status', 'SUBMITTED')
+                ->update(['status' => 'REJECTED', 'approved_by' => $actor->id, 'approved_at' => $now, 'rejection_reason' => $input['reason']]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Expense {$expenseId} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'REJECT_EXPENSE', $idempotencyKey, $requestHash, 'EXPENSE', $expenseId, $now);
             CommandLedger::outbox('EXPENSE', $expenseId, 'ExpenseRejected', $organisation->id, ['expense_id' => $expenseId, 'organisation_id' => $organisation->id, 'reason' => $input['reason'], 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'EXPENSE_REJECTED', 'EXPENSE', $expenseId, ['organisationId' => $organisation->id, 'reason' => $input['reason'], 'correlationId' => $correlationId], $now);

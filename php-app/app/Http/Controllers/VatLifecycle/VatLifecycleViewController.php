@@ -100,7 +100,7 @@ class VatLifecycleViewController extends Controller
             'schema_version' => '1.0.0',
             'adjustment_type' => (string) $request->input('adjustment_type'),
             'direction' => (string) $request->input('direction'),
-            'amount_cents' => $this->centsFromDecimal($request->input('amount')),
+            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')),
             'reason_code' => (string) $request->input('reason_code'),
             'explanation' => (string) $request->input('explanation'),
         ];
@@ -178,11 +178,6 @@ class VatLifecycleViewController extends Controller
         };
 
         return $redirectTarget->with('status', 'Decision recorded.');
-    }
-
-    private function centsFromDecimal(mixed $amount): int
-    {
-        return (int) round(((float) $amount) * 100);
     }
 
     /** @return array<string, string> */

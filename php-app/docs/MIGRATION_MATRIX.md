@@ -7695,3 +7695,482 @@ per-permission hiding. Live-verified with a real browser: `SUPER_ADMIN`
 (the permission-light role used throughout the prior sidebar audit) now
 sees every group and every standalone link. Full suite: 654 tests, 0
 regressions.
+
+## Consolidated red-team punch list: small batch closed (2026-09-15)
+
+`docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md` pulled together
+every genuinely-still-open item named across all 14 dated
+`docs/RED_TEAM_ASSESSMENT_*.md` reports; its 5-item "buildable now,
+small" batch is closed the same day:
+
+- **`WorkflowService::createDelegation()`/`revokeDelegation()`** now
+  carry the same `CommandLedger` idempotency-key pattern `assignWorkflow()`
+  already used in this file, closing the one write pair in this codebase
+  with no duplicate-submission guard at all (a plain double-click created
+  two identical delegation rows). Both controllers and the Blade forms
+  updated; a new test proves a replayed create returns the same
+  delegation, not a second row.
+- **`WorkflowService::decideWorkflowTask()`** now checks the
+  `workflow_assignments` UPDATE's affected-row count *before* writing the
+  `workflow_approvals` audit row (previously the other way round), closing
+  a race where a concurrent double-decide could log two approval rows for
+  one real status change. New regression test simulates the race via
+  `DB::listen()`, the same technique `ComplianceCaseTest`'s own race
+  regressions established -- `revokeDelegation()` got the identical fix,
+  since it had the same unguarded-write shape.
+- **`RefundService::dispute()`/`RiskService::approveAction()`** -- both
+  already carried the RT-020 stale-read guard by pattern parity with their
+  sibling `transition()`/`assignReview()` methods, but neither had its own
+  independent regression test proving it. Both now do (`RefundClaimTest`,
+  `ComplianceCaseTest`).
+- **A genuine, previously-unnoticed instance of RT-017's own bug**
+  (Input Validation & Robustness, 2026-09-14): RT-017's grep swept for a
+  literal `(int) $request->input(...)` cast and found/fixed 3 controllers;
+  a differently-named private helper, `centsFromDecimal()`
+  (`(int) round(((float) $amount) * 100)`), carried the identical
+  silent-zero coercion in four more -- `AuditCaseViewController`,
+  `DisputeViewController`, `ObligationViewController`,
+  `VatLifecycleViewController` -- that RT-017 never looked at. Fixed with
+  a new shared `Controller::safeDecimalCentsInput()` helper matching
+  `safeIntegerInput`/`safeMicrosInput`'s own contract (`false`, not a
+  bogus zero, for anything non-numeric); each controller's private
+  `centsFromDecimal()` removed. A regression test added for all four, plus
+  live-verified over real HTTP (`/obligations`, `/quotations`) that a
+  non-numeric amount now gets a clean field error and creates no row.
+- **"Remember me"/session lifecycle audit** -- checked whether any other
+  account-locking event (employee termination,
+  `OrganisationAdminService`'s own `User::status = SUSPENDED`) has the
+  same already-authenticated-session-survives-the-lock gap RT-019 fixed
+  for password reset. It doesn't: `Gate::define('permission', ...)` in
+  `AppServiceProvider` calls `$user->isActive()` fresh on every privileged
+  request (not just at login), and every one of this app's 165 route
+  files is permission-gated. Live-verified over real HTTP: an
+  already-logged-in session got `200` on `/dashboard`, then `403` on the
+  very next request with the *same* session cookie, immediately after
+  flipping that user's `status` to `SUSPENDED` directly in the database
+  -- no logout or session-table wipe needed. No fix required; audited
+  clean.
+
+Verified: full suite 655 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #6, self-service session logout (2026-09-15)
+
+First item of the "buildable now, medium" batch from
+`docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md`. No self-service way
+existed to see or end another active session for your own account short of
+a full password reset (which wipes every session, including the one you're
+using). The Security page (`security/mfa/index.blade.php`, already the
+one page a "Security" nav link points to) now also lists every row in the
+`sessions` table for the current user -- the same table/query shape
+RT-019's password-reset fix (`ResetPasswordRequest::resetPassword()`)
+already reads and writes -- with device/browser, IP address, and last
+active time, and marks the row matching the current request's own session
+ID as "This device".
+
+Two new actions on `MfaViewController`, both self-service like
+enroll()/verify() above (no `step-up` gate -- ending your own session is
+protective of your own account, the same category password reset's own
+blanket wipe already falls into):
+
+- `revokeSession()` (`POST /security/sessions/{sessionId}/revoke`) --
+  deletes one `sessions` row scoped to `where('user_id', $actor->id)`, so
+  one user can never revoke another's row even by guessing/copying its ID.
+  Revoking the session you're currently making the request with is
+  refused with a form error rather than silently applied (there's no
+  sensible outcome for a request that deletes its own session mid-flight).
+- `revokeOtherSessions()` (`POST /security/sessions/revoke-others`) --
+  deletes every `sessions` row for the user except the current request's
+  own ID in one query.
+
+Tested end-to-end, including the two "current session" cases, which need
+the real generated session ID round-tripped through an explicit request
+cookie (`withCookie(config('session.cookie'), $id)`) rather than read
+directly from the container -- the test session driver hands out a fresh
+random ID to any request that carries no cookie, same as a real browser
+with no cookie set yet would get.
+
+Verified: full suite 659 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #7, authorization TOCTOU races (2026-09-15)
+
+Item #7's own description named the gap ("a scope check racing the write
+it gates") but no prior pass had actually gone looking for concrete
+instances. A focused audit surveyed every authorization/scope check in
+`app/Services/**` and `app/Http/Controllers/**` that isn't the simple
+`$this->authorize('permission', ...)` Gate check (that one is inherently
+race-free -- `Gate::define('permission', ...)` in `AppServiceProvider`
+re-reads `$user->isActive()` fresh on every call, see the small-batch
+item #5 entry above), looking specifically for "read a
+membership/delegation/entitlement fact, then later perform a write that
+trusts it was still true." Ranked findings, widest window first:
+
+1. **`WorkflowService`: delegation redirect resolved once at Assign,
+   never re-checked at Decide.** Fixed -- see below.
+2. **`AccessGovernanceService::decideAccessRequest()`: identical shape**
+   (subject-membership checked at request time, role granted at decide
+   time, no recheck). Fixed alongside #1 as a structural sibling.
+3. `WorkflowService::decideWorkflowTask()`'s role-assignment check
+   (`holdsRole`) runs before the guarded transaction, not inside it --
+   same-request, no I/O between check and write, real but narrow.
+4. `OrganisationAdminService::grantCapability()` checks org-capability
+   and membership, then one more query, then writes -- same-request,
+   narrow.
+5. `OrganisationAdminService::appointAdministrator()` checks the
+   employee is ACTIVE, then writes without re-checking inside the
+   transaction -- same-request, narrow, lower impact (an appointment,
+   not a financial/approval decision).
+6. `OrganisationAdminService::activateEmployee()` checks the target
+   user's status, then writes without re-checking -- same-request,
+   narrow, lowest impact (worst case links to a since-suspended user).
+7. **Systemic, not a single call site:** `EntitlementGate::assert()`
+   (via `LicenseResolver`) runs once at the top of nearly every write
+   method in this codebase, with the actual write often 50-100+ lines
+   and several queries later in the same request. Architecture-wide --
+   flagged, not treated as a 1-3-item fix; an org/license being
+   deactivated mid-request is a rare, low-blast-radius scenario next to
+   #1/#2.
+
+\#3-6 are all same-request windows with no intervening I/O (no external
+call, no user-visible delay) -- genuinely narrower than #1/#2, and none
+had an existing guarded-UPDATE to piggyback a fix onto (a real fix would
+mean adding a live recheck query inside each transaction, a bigger
+change per site than #1/#2's shape allowed). Left as-is rather than
+forcing a fix onto every candidate found.
+
+**#1 fix -- `WorkflowService`:** `resolveAssignee()` /
+`redirectThroughDelegation()` now return (and `assignWorkflow()`'s and
+`decideWorkflowTask()`'s own `workflow_assignments` inserts now persist)
+a new `delegated_from_user_id` column alongside `assigned_user_id` --
+null for a direct assignment, the original delegator's id when
+`redirectThroughDelegation()` redirected. `decideWorkflowTask()` now
+re-verifies, on every decision where that column is set, that an ACTIVE
+delegation still covers `(organisation, delegator, delegate, effective
+window)` before allowing the decision to proceed at all -- throwing the
+same `TASK_NOT_ASSIGNED` code `WorkflowValidator::assertDecision()`
+already used for the direct-assignment case. New regression test:
+assigns a task through an active delegation, revokes the delegation,
+then proves neither the delegate (no longer covered) nor the original
+delegator (their id was overwritten at assign time, pre-existing
+behaviour, unchanged) can decide it.
+
+**#2 fix -- `AccessGovernanceService::decideAccessRequest()`:** re-checks
+`organisation_memberships` for the subject on every APPROVE (skipped for
+REJECT, which grants nothing) before proceeding, throwing the same
+`ACCESS_REFERENCE_INVALID` code `requestRoleAccess()`'s own check uses.
+While already in this method, `access_requests.status` also picked up
+the guarded-UPDATE-with-affected-row-check pattern established elsewhere
+in this codebase (`decideWorkflowTask()`'s own comment explains the
+check-before-side-effects ordering) -- it was a plain unguarded Eloquent
+`$access->update(...)`, a same-request sibling of the RT-020 stale-read
+race pattern rather than the TOCTOU pattern itself, but trivial to close
+while already touching this exact method. New regression tests: approve
+refused after `offboardUser()` ends the subject's membership mid-flight
+(REJECT still works -- it isn't gated by membership); and a
+`DB::listen()`-simulated concurrent double-decide proves only one
+decision's approval row and role grant ever lands, the same technique
+`WorkflowTest`'s own race regression established.
+
+Verified: full suite 662 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #8, exhaustive stale-read sweep (2026-09-15)
+
+Item #8 asked for what RT-020's own recon sweep and the item-#7 pass
+above didn't do: check every `app/Services/*` subdirectory (23 in total)
+for the same unguarded-status-write shape, not just the
+`transition()`-named methods RT-020 already found. Already-safe (no
+action needed): `RefundService`, `RiskService`, `AuditCaseService::
+transition()`, `WorkflowService::decideWorkflowTask()`/
+`revokeDelegation()`, `AccessGovernanceService::decideAccessRequest()`/
+`offboardUser()`, `AuthorityGovernanceService::decide()`, `Compliance\
+CommunicationService`, `Compliance\NotificationService`, `Document\
+DocumentService`, `Operations\FixedAssetService`,
+`Operations\LogisticsService`, `Business\BusinessPartyService`,
+`Business\QuotationService`, `Platform\PlatformChangeService`,
+`Platform\ReportExportService`.
+
+Nine genuine gaps found and fixed, all with the same guarded-UPDATE-
+with-affected-row-check pattern used throughout this codebase (check the
+prior status back into the WHERE clause, check the affected-row count,
+throw `RepositoryConflictException` on 0), each with its own
+`DB::listen()`-simulated race regression test:
+
+- **`LicensingService::changeState()`** -- `state_version` exists
+  specifically for optimistic locking but was only ever bumped in the
+  UPDATE, never checked in its WHERE clause. A concurrent ACTIVATE/
+  SUSPEND/RENEW race could corrupt the `from_state`/`to_state` audit
+  trail, or double-extend a subscription period on RENEW.
+- **`OrganisationAdminService::activateEmployee()`** -- the INVITED
+  check and the `license_usage` +1 that follows weren't atomic with the
+  employee's own status write; a race could double-consume a paid seat.
+- **`OrganisationAdminService::terminateEmployee()`** -- the same shape
+  in reverse: a race could double-release a seat and duplicate the
+  membership/role/capability revocation and workflow-reassignment side
+  effects that follow.
+- **`AccountingService::reverseJournalEntry()`** -- both the POSTED
+  check and the separate `alreadyReversed` duplicate-citation check ran
+  unguarded before the transaction; guarding the original's status flip
+  (moved to run *before* creating the new reversing entry, matching this
+  codebase's own check-before-side-effects convention) closes both races
+  at once -- a losing request now finds the original already REVERSED
+  and never creates its own duplicate reversal.
+- **`ExpenseService::submit()`/`approve()`/`reject()`** -- this
+  maker-checker lifecycle's three transitions were all unguarded; a
+  concurrent approve+reject race on the same expense could otherwise
+  both succeed.
+- **`VatRuleService::approve()`** -- both the rule's own DRAFT->APPROVED
+  write and the previously-approved rule's `effective_to`/
+  `superseded_by` write were unguarded, risking corruption of the
+  effective/superseded chain this feeds directly into tax-rate
+  calculation.
+- **`ProjectService::approveBudget()`** -- a race with two different
+  approved amounts could lost-update the approved figure.
+- **`RegistrationService::decide()`** -- both the APPROVE and REJECT
+  branches called a plain `$registration->update(...)` with no status
+  guard; a race could materialise a live Taxpayer/Organisation/
+  Membership *and* mark the same application REJECTED. The APPROVE
+  branch's guarded write was also moved to run first in its transaction
+  (it previously ran last, after every other create), matching the same
+  convention.
+- **`AuditCaseService::addEvidence()`'s supersede path** -- the
+  PRESERVED check on the evidence being superseded was unguarded; a race
+  could let two new evidence rows both claim succession of the same
+  original, corrupting the chain-of-custody this model exists to
+  protect.
+
+Left as-is -- genuinely narrower same-request windows with no
+intervening I/O, or an idempotent write target where a race can only
+lose attribution metadata or duplicate a log/audit row, never cause a
+real double side-effect: `AccountingService::closePeriod()` (target
+status is always CLOSED either way), `ObligationService::
+markSatisfied()`, `PosApiClientService::revoke()`, `MfaService::
+verifyTotpEnrollment()`, `UserRoleScopeGrantService::revoke()`, and
+`AccessGovernanceService::certifyQuarterlyAccess()`'s review-completion
+write. None of these had an existing guarded-write to piggyback a fix
+onto, and forcing one on for a metadata-only race would be scope creep
+against this item's own actual risk.
+
+Verified: full suite 671 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #9, JSON API payload fuzzing (2026-09-15)
+
+Item #9 asked for the thing its own title named: actually fuzz the JSON
+API endpoints with malformed payloads, rather than just re-reading
+validator code and reasoning "same validators as the already-fixed Blade
+forms, probably fine." A research pass first mapped every
+`*Controller`/`*ViewController` pair for shared-validator risk, then a
+representative set of the highest money/approval-value JSON-only or
+JSON-first endpoints (workflow decisions, access-request decisions,
+license state changes, administrator appointment, VAT rule proposals,
+invoice certification) was fuzzed with real HTTP requests carrying
+malformed shapes -- arrays where scalars were expected, oversized digit
+strings, non-list "lines", scalar objects. Two distinct real bugs
+surfaced, both closed with regression tests; several other endpoints
+were confirmed genuinely clean.
+
+**Bug #1 -- a bare `(string) $x` cast silently accepts a malformed array
+as valid-looking text.** PHP's array-to-string conversion always
+produces the literal string `"Array"` (5 characters, with only an
+`E_WARNING`, no exception) -- for a free-text field with a `< 5`
+minimum-length check, that's just long enough to slide straight through
+as if it were real content. This is a different failure shape than
+RT-017's own bug (numeric fields silently coerced to `0` by a raw
+`(int)` cast) -- RT-017's own fix and tests never touched free-text
+fields, so this gap went unnoticed until actually fuzzed. Six instances
+found, every one an approval or administrative-action audit-trail reason
+field, all fixed the same way (guard with `is_string($x) ? $x : ''`
+first, matching `BusinessValidator::textValue()`/`ComplianceValidator::
+text()`'s own established idiom, so a non-string value normalizes to
+`''` and correctly fails the same minimum-length check):
+
+- `WorkflowService::decideWorkflowTask()`'s `reason` (a workflow
+  approval decision)
+- `WorkflowService::revokeDelegation()`'s `reason`
+- `WorkflowValidator::delegation()`'s `reason` (createDelegation)
+- `AccessGovernanceService::decideAccessRequest()`'s `reason` (an access
+  approval decision, JSON-only -- no Blade sibling exists at all)
+- `LicensingValidator::stateChange()`'s `reason` (a license
+  ACTIVATE/SUSPEND/RENEW -- money/entitlement-critical)
+- `OrganisationAdminValidator`'s `approval_reference`
+  (appointAdministrator)
+
+A `justification` field with a `< 10` minimum (`AccessGovernanceService::
+requestRoleAccess()`) and a `finding` field with only a `> 400` maximum
+(`AccessGovernanceService::certifyQuarterlyAccess()`) were checked and
+are *not* exploitable this way -- `"Array"` is exactly 5 characters, so
+it only defeats a minimum bound at or below 5.
+
+**Bug #2 -- a genuine crash (500), not just silent coercion.** `POST
+/api/v1/invoices` (the highest money-value endpoint in the app) threw an
+uncaught `TypeError` ("Unsupported operand types: string + int") when
+`lines` was submitted as a JSON *object* (e.g. `{"foo":"bar"}`) instead
+of an array. `InvoiceCalculator::calculateAndValidate()`'s own
+`is_array($rawLines) && count($rawLines) > 0` check let an associative
+array through as if it were a normal list; the following `foreach` then
+iterated with a string key, and `$index + 1` (computing `line_number`)
+crashed on it. This validator had already been read as "looks safe" (a
+bcmath overflow guard and a try/catch around every line-amount parse
+back it up, and both were confirmed correct by fuzzing too) -- but this
+specific shape was never actually tried against a real request until
+now. Fixed with an `array_is_list($rawLines)` check alongside the
+existing `is_array()`/`count()` checks, falling back to an empty list so
+the `foreach` never sees the malformed data; the existing
+`LINES_REQUIRED` error code covers it (a non-list `lines` has, in
+effect, zero usable lines).
+
+**Confirmed clean, no fix needed** (fuzzed and found to already reject
+cleanly with a 422, not a crash or a silent accept): `VatRuleService`'s
+`rate_bps` as an array or a 34-digit oversized string, and
+`tax_category` as an array (`VatRuleValidator::proposal()`'s
+`is_numeric()`/enum checks hold); `InvoiceCalculator`'s handling of a
+scalar `customer`, a scalar line `tax`, and a 40-digit overflowing
+`payable_amount` (PHP's `??` operator and the existing bcmath overflow
+guard both hold).
+
+New regression tests for every fix above and every confirmed-clean case,
+in `WorkflowTest`, `AccessGovernanceTest`, `LicensingTest`,
+`OrganisationAdminTest`, `VatRuleTest`, and
+`InvoiceCertificationTest`.
+
+Verified: full suite 678 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #10, risk-scoring calibration audit (2026-09-15)
+
+Item #10's own source report was explicit that it read `InvoiceCalculator
+::score()` and confirmed its self-dealing blind spot (fixed separately,
+RT-018) but never answered "are its value/category thresholds otherwise
+well-calibrated" -- and said doing so needed real transaction data. This
+sandbox's demo seed has zero real invoices, so an honest close here means
+an audit, not a fabricated recalibration:
+
+- **Structural review, no code bug found.** The two value tiers
+  (`totalCents >= 100_000_000` -> +80, `>= 25_000_000` -> +35) and three
+  flat factors (unregistered buyer +15, mixed VAT categories +10, credit
+  note +10) sum cleanly against the level cutoffs (CRITICAL >= 80, HIGH
+  >= 45, MEDIUM >= 20, else LOW) with no off-by-one, no double-counting,
+  no unreachable branch. The `CREDIT_NOTE`-only scoring bump (not
+  `DEBIT_NOTE`) is a deliberate asymmetry, not an oversight: a credit
+  note is the fraud-prone direction (it reduces a supplier's output VAT
+  liability -- the mechanism behind VAT carousel/refund fraud), a debit
+  note increases it.
+- **Total absence of test coverage, now closed.** Before this, no test
+  anywhere in the suite asserted on `risk_level` or exercised a single
+  value threshold by name -- `score()`'s own behavior was entirely
+  unpinned. New tests in `InvoiceCertificationTest` assert every
+  boundary explicitly: just-under and exactly-at both value tiers
+  (24,999,999 / 25,000,000 / 99,999,999 / 100,000,000 cents), the
+  `EXCEPTION`-vs-`MATCHED` status split those tiers cause, two smaller
+  factors (the MEDIUM tier + mixed categories) combining to cross HIGH
+  (35+10=45) even though neither alone would, and the non-obvious
+  LOW-level-but-still-MEDIUM-severity-exception behavior for a single
+  small risk factor (a reconciliation exception is created whenever
+  `reasons` is non-empty, regardless of level, but its own `severity`
+  gets bumped from LOW to MEDIUM). Any future change to these numbers is
+  now a deliberate, reviewed diff against a named test, not silent
+  drift.
+- **One concrete, real, *unfixed* limitation named rather than
+  guessed-at.** The two value tiers are absolute per-invoice dollar
+  cliffs with no supplier-level historical/aggregate signal -- an
+  invoice one cent under a tier scores identically to a tiny one, and a
+  taxpayer could in principle structure a large transaction as several
+  invoices each just under a tier to dodge the extra scrutiny. Real
+  transaction-volume data (to calibrate a new threshold against actual
+  patterns, not another guess) or a different design entirely
+  (supplier-level rolling aggregates, percentile-based scoring) would be
+  needed to responsibly close this -- both bigger than a calibration
+  tweak, both a genuine follow-up rather than something this pass
+  fabricates numbers to paper over.
+
+Verified: full suite 679 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #12, N+1/query-plan testing at real volume (2026-09-15)
+
+Item #12 was tracked as blocked on external access -- its own source
+report said testing query performance/N+1 patterns needed "either a
+production-scale seed or a staging environment closer to production
+sizing," and the dev seed was 0 invoices, 5 fixed assets, 12 users. A
+synthetic seed doesn't need external access, so this closes the
+query-plan/N+1 half of the item (the raw-throughput/concurrency half
+still does, and stays blocked -- see below).
+
+**`database/seeders/SyntheticLoadSeeder.php`** (new): bulk `DB::table()`
+inserts (chunked at 250-500 rows), not Eloquent or the real service/
+validator layer -- the goal is raw row volume to make N+1 patterns
+visible, not exercising business rules. Run on demand
+(`php artisan db:seed --class=SyntheticLoadSeeder`), not part of the
+default install (`DatabaseSeeder` doesn't call it). Generates: 20
+taxpayers/organisations (SELLER+BUYER capabilities), 110 users (100
+taxpayer-scoped across 5 roles + 10 national NamRA staff), 5,000
+invoices with lines, 2,000 expenses, 500 audit cases with 2,000 evidence
+rows, 1,000 documents, 200 fixed assets. Took 28s against a real local
+MySQL instance.
+
+A static-analysis pass across every `*ViewController`'s list/index
+method (research only, no live testing) first mapped the landscape: most
+of this codebase is already disciplined about N+1 -- `InvoiceService::
+list()`/`mapSummary()`, `AuditCaseViewController`, `WorkflowAuthoringView
+Controller`, `AdministrationSnapshotService`, `ComplianceSnapshotService`,
+`DashboardSnapshotService`, `ReportViewController`, `DocumentViewController`,
+and `AccessRightsViewController` all confirmed to already use denormalized
+summary columns or `->with()`/batched `whereIn()` reads, not per-row lazy
+loads. Four genuine N+1s were found and fixed, each one only made
+concretely visible by actually running the seeded volume through the
+real page (all four were invisible against the old near-empty dev seed):
+
+- **`OperationsViewController::index()`'s expense register** -- lazy
+  `$expense->category`/`$expense->supplier` plus a
+  `DocumentMetadata::find($expense->receipt_document_id)` per row (up
+  to 3 extra queries per row). Fixed: `->with(['category', 'supplier'])`
+  on the initial query, plus one batched `DocumentMetadata::whereIn('id',
+  $receiptIds)->get()->keyBy('id')` for receipts.
+- **The same controller's project panel** -- `ProjectBudget::where(...)
+  ->sum(...)` and `ProjectCost::where(...)->sum(...)` run per project
+  row (2 extra queries per row). Fixed: two batched `whereIn()` +
+  `groupBy('project_id')` + `selectRaw('... SUM(...) as total')`
+  queries, keyed by project_id for the map.
+- **`QuotationService::search()`** -- the worst of the four. Every row
+  in this register/list view was mapped through `present()` (built for
+  `find()`/`findOrFail()`'s single-record case), which lazy-loads
+  `customer` *and* runs a full `QuotationLine::where('quotation_id',
+  ...)->get()` per row -- a complete extra query per row for line items
+  that resources/views/quotations/index.blade.php never even renders on
+  this view. Fixed: a new `presentSummary()` (identical to `present()`
+  minus the `lines` key) plus `->with('customer')` on `search()`'s own
+  query builder; `present()` itself is untouched and still used by
+  `find()`/`findOrFail()`.
+- **`BusinessPartyService::search()`** -- `PartyRelationship::where(
+  'party_id', $party->id)->...` per row, reached both from the parties
+  register directly and from `OperationsViewController`'s own supplier
+  filter (`$this->parties->search(...)`) -- this one compounded with the
+  expense-register fix above, since the two pages share this code path.
+  Fixed: `present()` now optionally accepts pre-fetched relationships;
+  `search()` batches them in one `whereIn('party_id', $partyIds)` query
+  grouped by `party_id`, `findOrFail()`'s single-record path is
+  untouched (keeps running its own one-row query).
+
+All four use the same `->with()`/batched-`whereIn()` shape already
+established correctly elsewhere in this codebase -- no new pattern
+introduced. New regression tests (`OperationsViewTest`,
+`BusinessPartyAndQuotationTest`) seed 30 rows each (deliberately enough
+that an unfixed N+1 is unmistakable, not marginal) and assert the
+request's total query count stays small and doesn't scale with row
+count -- confirmed by temporarily reverting the fix during test
+authorship: the expense/project page went from 15 queries (fixed) to 44
+(unfixed) at 30 rows.
+
+Live-verified over real HTTP against the full synthetic dataset (not
+just the smaller in-test fixture): `/operations`, `/quotations`,
+`/invoices`, and `/audit-cases` all rendered correctly, as both a
+taxpayer-scoped user and a national-scope NamRA user (the more
+demanding cross-tenant case for `/invoices` and `/audit-cases`), in
+well under 200ms each -- with the dev database reset back to the
+normal `DemoSeeder` baseline afterward (the synthetic seed is
+on-demand tooling, not a permanent fixture).
+
+**What this does not close**: raw throughput/concurrency under genuine
+simultaneous load (backlog item #7's other half, `RED_TEAM_ASSESSMENT_
+2026-09-02.md`'s RT-004 environment-limitations note) needs real
+load-testing tooling (k6, Apache Bench, or similar) run against a
+non-local target -- neither exists in this sandbox, and large data
+volume alone doesn't substitute for it. That half stays blocked.
+
+Verified: full suite 681 tests, 0 regressions.

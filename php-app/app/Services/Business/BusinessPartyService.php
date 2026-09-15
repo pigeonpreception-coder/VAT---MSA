@@ -190,10 +190,25 @@ class BusinessPartyService
         }
 
         $totalCount = (clone $builder)->count();
-        $parties = $builder->orderBy('display_name')->limit($query['limit'])->offset($query['offset'])->get()
-            ->map(fn (BusinessParty $party) => $this->present($party))->values()->all();
+        $parties = $builder->orderBy('display_name')->limit($query['limit'])->offset($query['offset'])->get();
+        // Red-team punch list #12 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): present() below used to run its own
+        // PartyRelationship query every time it was called -- fine for
+        // findOrFail()'s single-record case, but this loop called it once
+        // per row, N+1, on every page of this list (and on every page
+        // that embeds it, e.g. OperationsViewController's supplier
+        // filter). A synthetic load seed (2026-09-15) made this
+        // concretely visible for the first time. Batching into one
+        // whereIn() query, grouped by party_id, collapses it back to a
+        // fixed, small number of queries regardless of row count.
+        $partyIds = $parties->pluck('id');
+        $relationshipsByParty = $partyIds->isEmpty() ? collect() : PartyRelationship::whereIn('party_id', $partyIds)
+            ->where('status', 'ACTIVE')->orderBy('relationship')->get()->groupBy('party_id');
+        $presented = $parties
+            ->map(fn (BusinessParty $party) => $this->present($party, ($relationshipsByParty->get($party->id) ?? collect())->pluck('relationship')->values()->all()))
+            ->values()->all();
 
-        return ['organisation_id' => $organisation->id, 'parties' => $parties, 'total_count' => $totalCount, 'limit' => $query['limit'], 'offset' => $query['offset']];
+        return ['organisation_id' => $organisation->id, 'parties' => $presented, 'total_count' => $totalCount, 'limit' => $query['limit'], 'offset' => $query['offset']];
     }
 
     /** @return array<string, mixed> */
@@ -207,8 +222,16 @@ class BusinessPartyService
         return $this->present($party);
     }
 
-    /** @return array<string, mixed> */
-    private function present(BusinessParty $party): array
+    /**
+     * `$relationships`, when given, must already be ACTIVE-only and
+     * ordered by relationship name (search()'s own batched query does
+     * this) -- omitted (the findOrFail() single-record case), this runs
+     * that same query itself, scoped to just this one party.
+     *
+     * @param ?list<string> $relationships
+     * @return array<string, mixed>
+     */
+    private function present(BusinessParty $party, ?array $relationships = null): array
     {
         return [
             'id' => $party->id, 'organisation_id' => $party->organisation_id, 'display_name' => $party->display_name,
@@ -222,7 +245,7 @@ class BusinessPartyService
             // differently-shaped query plans -- alphabetical is stable and
             // matches this file's own present() ordering conventions
             // elsewhere.
-            'relationships' => PartyRelationship::where('party_id', $party->id)->where('status', 'ACTIVE')->orderBy('relationship')->pluck('relationship')->values()->all(),
+            'relationships' => $relationships ?? PartyRelationship::where('party_id', $party->id)->where('status', 'ACTIVE')->orderBy('relationship')->pluck('relationship')->values()->all(),
             'created_at' => optional($party->created_at)->toISOString(), 'updated_at' => optional($party->updated_at)->toISOString(),
         ];
     }

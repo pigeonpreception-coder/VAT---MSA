@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\BusinessParty;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\ImportRecord;
@@ -10,11 +11,14 @@ use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\Product;
 use App\Models\Project;
+use App\Models\ProjectBudget;
+use App\Models\ProjectCost;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Models\Warehouse;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -324,5 +328,70 @@ class OperationsViewTest extends TestCase
             ->assertSessionHas('status', 'Expense recorded.');
 
         $this->assertSame(1, Expense::where('expense_number', 'EXP-REPLAY-0001')->count());
+    }
+
+    /**
+     * Red-team punch list #12 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): "Real query/N+1 performance at production-
+     * representative data volumes was never tested" -- true against the
+     * dev seed's near-empty tables, but a synthetic load seed
+     * (database/seeders/SyntheticLoadSeeder.php, added the same day)
+     * made two genuine N+1s in this exact page concretely visible for
+     * the first time: the expense register lazy-loading category/
+     * supplier plus a per-row DocumentMetadata::find() for receipts, and
+     * the project panel running two extra SUM queries per project row.
+     * Both are now batched. This asserts the fix holds at a size where
+     * an unfixed N+1 would be unmistakable in the query count (30 rows,
+     * each with its own category+supplier+receipt / budget+cost) --
+     * without the fix this page was issuing 100+ queries at this volume;
+     * fixed, it stays under a small, row-count-independent ceiling.
+     */
+    public function test_the_expense_register_and_project_panel_do_not_n_plus_one_at_scale(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-NPLUS1');
+        $rows = 30;
+
+        for ($i = 0; $i < $rows; $i++) {
+            $category = $this->makeCategory($org['organisation'], "CAT{$i}");
+            $supplier = BusinessParty::create([
+                'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'display_name' => "Supplier {$i}",
+                'source_system' => 'test', 'source_party_id' => "supplier-{$i}", 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $receiptId = (string) Str::uuid();
+            DB::table('document_metadata')->insert([
+                'id' => $receiptId, 'organisation_id' => $org['organisation']->id, 'owner_domain' => 'EXPENSE',
+                'owner_resource_id' => (string) Str::uuid(), 'object_key' => "nplus1-test/{$i}.pdf", 'file_name' => "receipt-{$i}.pdf",
+                'content_type' => 'application/pdf', 'size_bytes' => 1024, 'checksum_sha256' => hash('sha256', "receipt-{$i}"),
+                'classification' => 'INTERNAL', 'scan_status' => 'CLEAN', 'status' => 'ACTIVE', 'uploaded_by' => $org['owner']->id,
+                'uploaded_at' => now(), 'scanned_by' => $org['owner']->id, 'scanned_at' => now(),
+            ]);
+            Expense::create([
+                'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'category_id' => $category->id,
+                'supplier_party_id' => $supplier->id, 'expense_number' => "EXP-NPLUS1-{$i}", 'expense_date' => now()->toDateString(),
+                'description' => "N+1 regression row {$i}", 'currency' => 'NAD', 'net_cents' => 10000, 'tax_cents' => 1500, 'total_cents' => 11500,
+                'status' => 'DRAFT', 'receipt_document_id' => $receiptId, 'created_by' => $org['owner']->id, 'created_at' => now(),
+            ]);
+
+            $project = Project::create([
+                'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'code' => "PROJ-{$i}", 'name' => "Project {$i}",
+                'currency' => 'NAD', 'start_date' => now()->toDateString(), 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            ProjectBudget::create([
+                'id' => (string) Str::uuid(), 'project_id' => $project->id, 'category' => 'TOTAL',
+                'amount_cents' => 500000, 'approved_amount_cents' => 450000, 'status' => 'APPROVED', 'created_at' => now(),
+            ]);
+            ProjectCost::create([
+                'id' => (string) Str::uuid(), 'project_id' => $project->id, 'cost_type' => 'MANUAL', 'source_id' => "cost-{$i}",
+                'amount_cents' => 20000, 'currency' => 'NAD', 'occurred_at' => now()->toDateString(), 'created_at' => now(),
+            ]);
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($org['owner'])->get('/operations');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk();
+        $this->assertLessThan(30, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for {$rows} expense/project rows -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

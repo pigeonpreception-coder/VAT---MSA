@@ -82,10 +82,22 @@ class OperationsViewController extends Controller
         $user = $request->user();
         $organisation = $this->organisations->resolve($user, $request->query('organisation_id'));
 
-        $expenseModels = Expense::where('organisation_id', $organisation->id)->orderByDesc('expense_date')->orderByDesc('created_at')->limit(100)->get();
+        // Red-team punch list #12 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): this used to lazy-load `category`/`supplier`
+        // and run a `DocumentMetadata::find()` per expense row -- up to 3
+        // extra queries per row, invisible against the dev seed's near-
+        // empty tables but a genuine N+1 at real register volume. A
+        // synthetic load seed (2026-09-15) made this concretely visible
+        // for the first time. `->with()` plus one batched `whereIn()`
+        // lookup for receipts collapses it to a fixed, small number of
+        // queries regardless of row count.
+        $expenseModels = Expense::where('organisation_id', $organisation->id)->with(['category', 'supplier'])
+            ->orderByDesc('expense_date')->orderByDesc('created_at')->limit(100)->get();
         $categories = ExpenseCategory::where('organisation_id', $organisation->id)->where('status', 'ACTIVE')->orderBy('name')->get();
-        $expenses = $expenseModels->map(function (Expense $expense) {
-            $receipt = $expense->receipt_document_id ? DocumentMetadata::find($expense->receipt_document_id) : null;
+        $receiptIds = $expenseModels->pluck('receipt_document_id')->filter()->values();
+        $receiptsById = $receiptIds->isEmpty() ? collect() : DocumentMetadata::whereIn('id', $receiptIds)->get()->keyBy('id');
+        $expenses = $expenseModels->map(function (Expense $expense) use ($receiptsById) {
+            $receipt = $expense->receipt_document_id ? $receiptsById->get($expense->receipt_document_id) : null;
 
             return [
                 'id' => $expense->id, 'expense_number' => $expense->expense_number, 'expense_date' => $expense->expense_date->toDateString(),
@@ -99,14 +111,23 @@ class OperationsViewController extends Controller
 
         $balances = InventoryBalance::where('organisation_id', $organisation->id)->with(['warehouse', 'product'])->orderByDesc('updated_at')->limit(200)->get();
 
+        // Same fix shape as the expense register above: budget/cost sums
+        // were one extra query each per project row (2 extra per row at
+        // 100 projects). Batched via whereIn()+groupBy() into 2 queries
+        // total, keyed by project_id for the map below.
         $projectModels = Project::where('organisation_id', $organisation->id)->with('customer')->orderByDesc('start_date')->limit(100)->get();
+        $projectIds = $projectModels->pluck('id');
+        $budgetsByProject = $projectIds->isEmpty() ? collect() : ProjectBudget::whereIn('project_id', $projectIds)
+            ->selectRaw('project_id, SUM(approved_amount_cents) as total')->groupBy('project_id')->get()->keyBy('project_id');
+        $costsByProject = $projectIds->isEmpty() ? collect() : ProjectCost::whereIn('project_id', $projectIds)
+            ->selectRaw('project_id, SUM(amount_cents) as total')->groupBy('project_id')->get()->keyBy('project_id');
         $projects = $projectModels->map(fn (Project $project) => [
             'id' => $project->id, 'code' => $project->code, 'name' => $project->name,
             'customer_name' => optional($project->customer)->display_name, 'currency' => $project->currency,
             'start_date' => $project->start_date->toDateString(), 'end_date' => optional($project->end_date)->toDateString(),
             'status' => $project->status,
-            'budget_cents' => (int) ProjectBudget::where('project_id', $project->id)->sum('approved_amount_cents'),
-            'cost_cents' => (int) ProjectCost::where('project_id', $project->id)->sum('amount_cents'),
+            'budget_cents' => (int) optional($budgetsByProject->get($project->id))->total,
+            'cost_cents' => (int) optional($costsByProject->get($project->id))->total,
         ]);
 
         $partiesSnapshot = $this->parties->search($user, $organisation->id, []);

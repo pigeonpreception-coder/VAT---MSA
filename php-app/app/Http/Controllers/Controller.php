@@ -78,4 +78,30 @@ abstract class Controller
 
         return $float === false ? false : (int) round($float * 1_000_000);
     }
+
+    /**
+     * RT-017 follow-up (2026-09-15): the same silent-zero coercion RT-017
+     * fixed in OperationsViewController/FixedAssetViewController/
+     * QuotationViewController turned up again, unnoticed by that pass's
+     * own grep sweep (which searched for a literal `(int) $request->
+     * input(...)` cast) because four other controllers -- AuditCaseView-
+     * Controller, DisputeViewController, ObligationViewController,
+     * VatLifecycleViewController -- each carried their own identically-
+     * named private `centsFromDecimal()` helper doing
+     * `(int) round(((float) $amount) * 100)`, the exact same PHP cast
+     * behaviour under a different name. Same fix, same contract as
+     * safeIntegerInput/safeMicrosInput: `false` for anything that isn't a
+     * genuine number, so the existing `is_int()`/`is_numeric()` checks in
+     * ComplianceValidator::safeInt() and VatLifecycleValidator's own
+     * amount_cents check reject it cleanly instead of silently zeroing it.
+     */
+    protected function safeDecimalCentsInput(mixed $raw, int $default = 0): int|false
+    {
+        if ($raw === null || $raw === '') {
+            return $default;
+        }
+        $float = filter_var($raw, FILTER_VALIDATE_FLOAT);
+
+        return $float === false ? false : (int) round($float * 100);
+    }
 }

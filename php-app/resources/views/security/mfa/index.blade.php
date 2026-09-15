@@ -100,4 +100,50 @@
         </div>
     @endif
 </div>
+
+<div class="card mt-3">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h6 text-uppercase text-muted mb-0">Active sessions</h2>
+            @if ($sessions->count() > 1)
+                <form method="POST" action="{{ route('security.sessions.revoke-others') }}">
+                    @csrf
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Log out other sessions</button>
+                </form>
+            @endif
+        </div>
+        <p class="small text-muted">Every device currently signed in to your account. If you don't recognise one, revoke it -- it will need to sign in again with your password{{ $enrolled ? ' and a fresh MFA code' : '' }}.</p>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr><th>Device / browser</th><th>IP address</th><th>Last active</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @forelse ($sessions as $session)
+                        <tr>
+                            <td class="text-break">
+                                {{ $session['user_agent'] ?: 'Unknown device' }}
+                                @if ($session['is_current'])
+                                    <span class="badge bg-primary ms-1">This device</span>
+                                @endif
+                            </td>
+                            <td>{{ $session['ip_address'] ?: '-' }}</td>
+                            <td>{{ $session['last_activity']->diffForHumans() }}</td>
+                            <td class="text-end">
+                                @unless ($session['is_current'])
+                                    <form method="POST" action="{{ route('security.sessions.revoke', $session['id']) }}">
+                                        @csrf
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">Revoke</button>
+                                    </form>
+                                @endunless
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="4" class="text-muted small">No active sessions found.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 @endsection

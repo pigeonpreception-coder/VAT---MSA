@@ -166,7 +166,7 @@ class WorkflowAuthoringViewController extends Controller
         ];
 
         try {
-            $this->workflows->createDelegation($payload, $request->user(), $request->query('organisation_id'));
+            $this->workflows->createDelegation($payload, $request->user(), $request->query('organisation_id'), $this->formIdempotencyKey($request));
         } catch (LicensingValidationException|RepositoryConflictException|AuthorizationException $e) {
             return redirect()->route('workflows.index')->withErrors(['delegation' => $e->getMessage()])->withInput();
         }
@@ -180,7 +180,7 @@ class WorkflowAuthoringViewController extends Controller
         $payload = ['reason' => (string) $request->input('reason')];
 
         try {
-            $this->workflows->revokeDelegation($delegationId, $payload, $request->user(), $request->query('organisation_id'));
+            $this->workflows->revokeDelegation($delegationId, $payload, $request->user(), $request->query('organisation_id'), $this->formIdempotencyKey($request));
         } catch (LicensingValidationException|RepositoryConflictException|AuthorizationException $e) {
             return redirect()->route('workflows.index')->withErrors(['revoke' => $e->getMessage()]);
         }

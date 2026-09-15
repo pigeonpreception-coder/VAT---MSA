@@ -122,8 +122,15 @@ class OrganisationAdminService
 
         $now = now();
         DB::transaction(function () use ($employee, $input, $organisation, $license, $actor, $now) {
-            Employee::where('id', $employee->id)->where('organisation_id', $organisation->id)
+            // Red-team punch list #8: the INVITED check above and this
+            // write weren't atomic -- a concurrent activation could double-
+            // consume one paid seat (both requests would otherwise run the
+            // license_usage +1 below).
+            $updated = Employee::where('id', $employee->id)->where('organisation_id', $organisation->id)->where('status', 'INVITED')
                 ->update(['user_id' => $input['userId'], 'status' => 'ACTIVE', 'activated_at' => $now, 'updated_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Employee {$employee->id} was changed by another action; reload and try again.");
+            }
             DB::table('license_usage')->where('organisation_license_id', $license['id'])->where('metric_key', 'USER_SEATS')
                 ->update(['used_value' => DB::raw('used_value + 1'), 'reserved_value' => DB::raw('GREATEST(0, reserved_value - 1)'), 'version' => DB::raw('version + 1'), 'updated_at' => $now]);
             AuditService::append($actor, 'EMPLOYEE_ACTIVATED', 'EMPLOYEE', $employee->id, ['organisationId' => $organisation->id, 'userId' => $input['userId']], $now);
@@ -171,8 +178,16 @@ class OrganisationAdminService
             ->value('user_id');
 
         DB::transaction(function () use ($employee, $organisation, $license, $actor, $reason, $now, $primaryUserId) {
-            Employee::where('id', $employee->id)->where('organisation_id', $organisation->id)
+            // Red-team punch list #8: the "already TERMINATED" early return
+            // above and this write weren't atomic -- a concurrent
+            // termination could double-decrement the license seat count
+            // below and duplicate the membership/role/capability revocation
+            // and workflow-reassignment side effects that follow.
+            $updated = Employee::where('id', $employee->id)->where('organisation_id', $organisation->id)->where('status', '!=', 'TERMINATED')
                 ->update(['status' => 'TERMINATED', 'terminated_at' => $now, 'updated_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Employee {$employee->id} was changed by another action; reload and try again.");
+            }
             DB::table('license_usage')->where('organisation_license_id', $license['id'])->where('metric_key', 'USER_SEATS')
                 ->update(['used_value' => DB::raw('GREATEST(0, used_value - 1)'), 'version' => DB::raw('version + 1'), 'updated_at' => $now]);
             AuditService::append($actor, 'EMPLOYEE_TERMINATED', 'EMPLOYEE', $employee->id, ['organisationId' => $organisation->id, 'reason' => $reason, 'historicalRecordsPreserved' => true], $now);

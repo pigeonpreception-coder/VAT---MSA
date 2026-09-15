@@ -203,7 +203,13 @@ class WorkflowValidator
         if (strtotime($effectiveTo) <= strtotime($effectiveFrom)) {
             throw new LicensingValidationException('EFFECTIVE_RANGE_INVALID', 'effective_to must be after effective_from.');
         }
-        $reason = trim((string) preg_replace('/\s+/', ' ', (string) ($input['reason'] ?? '')));
+        // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): a bare (string) cast on a JSON array silently
+        // produces the literal 5-character string "Array", which then
+        // slides past a `< 5` minimum check as if it were real reason
+        // text -- guard with is_string() first, matching this codebase's
+        // own textValue()/text() idiom elsewhere.
+        $reason = trim((string) preg_replace('/\s+/', ' ', is_string($input['reason'] ?? null) ? $input['reason'] : ''));
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character delegation reason.');
         }

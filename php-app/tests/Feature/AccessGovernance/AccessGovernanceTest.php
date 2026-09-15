@@ -16,6 +16,7 @@ use Database\Seeders\OrganisationAdministratorRoleSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
@@ -167,6 +168,106 @@ class AccessGovernanceTest extends TestCase
         $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'reject', 'reason' => 'Too late, already decided.'])
             ->assertStatus(409);
+    }
+
+    /**
+     * Red-team punch list #7 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): requestRoleAccess()'s subjectIsMember check only ran
+     * at request time -- a request can sit PENDING_MANAGER for days, and
+     * offboardUser() ending the subject's membership in between must stop
+     * a later APPROVE from still granting the role to someone no longer
+     * in the organisation at all.
+     */
+    public function test_deciding_an_access_request_refuses_to_approve_after_the_subject_has_been_offboarded(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ACCGOV-0006');
+        $this->openReview($ctx['owner']);
+        $staff = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'staff-0006@test.test', $ctx['owner']);
+        $approver = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'approver-0006@test.test', $ctx['owner']);
+        $approver->update(['role' => 'TAXPAYER_ADMIN']);
+        $role = $this->makeOrganisationRole($ctx['organisation'], $ctx['owner']);
+
+        $requested = $this->actingAs($ctx['owner'])->postJson('/api/v1/access-requests', [
+            'subject_user_id' => $staff->id, 'role_id' => $role->id, 'justification' => 'A genuinely valid justification string.',
+        ]);
+        $requestId = $requested->json('request.id');
+
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/organisations/offboarding', ['user_id' => $staff->id, 'reason' => 'Left the company before this request was decided.'])
+            ->assertStatus(200)->assertJsonPath('offboarding.membershipRevoked', true);
+
+        $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => 'Approving without noticing the offboarding.'])
+            ->assertStatus(422)->assertJsonPath('code', 'ACCESS_REFERENCE_INVALID');
+        $this->assertDatabaseMissing('user_role_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $staff->id, 'organisation_role_id' => $role->id]);
+        // A refused decision must not consume the request -- it stays decidable (e.g. REJECT) afterwards.
+        $this->assertDatabaseHas('access_requests', ['id' => $requestId, 'status' => 'PENDING_MANAGER']);
+
+        // REJECT is unaffected by the membership check -- it grants nothing.
+        $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'reject', 'reason' => 'Subject was offboarded before this could be approved.'])
+            ->assertStatus(200)->assertJsonPath('decision.status', 'REJECTED');
+    }
+
+    public function test_an_access_request_decision_that_races_a_concurrent_decision_is_rejected_not_silently_applied(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ACCGOV-0007');
+        $this->openReview($ctx['owner']);
+        $staff = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'staff-0007@test.test', $ctx['owner']);
+        $approver = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'approver-0007@test.test', $ctx['owner']);
+        $approver->update(['role' => 'TAXPAYER_ADMIN']);
+        $role = $this->makeOrganisationRole($ctx['organisation'], $ctx['owner']);
+
+        $requested = $this->actingAs($ctx['owner'])->postJson('/api/v1/access-requests', [
+            'subject_user_id' => $staff->id, 'role_id' => $role->id, 'justification' => 'A genuinely valid justification string.',
+        ]);
+        $requestId = $requested->json('request.id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $requestId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `access_requests`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('access_requests')->where('id', $requestId)->update(['status' => 'REJECTED', 'completed_at' => now()]);
+        });
+
+        $response = $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => 'Racing a concurrent decision.']);
+
+        $response->assertStatus(409);
+        $this->assertSame('REJECTED', DB::table('access_requests')->where('id', $requestId)->value('status'), "The concurrent winner's status must survive untouched.");
+        $this->assertSame(0, DB::table('access_approvals')->where('access_request_id', $requestId)->count(), 'The loser of the race must never log an approval row.');
+        $this->assertDatabaseMissing('user_role_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $staff->id, 'organisation_role_id' => $role->id]);
+    }
+
+    /**
+     * Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a malformed JSON `reason` (an array, not a string)
+     * must be rejected cleanly, not silently coerced to the literal
+     * 5-character string "Array" by a bare (string) cast -- which happens
+     * to equal this field's own minimum length, so it would otherwise
+     * slide straight through and get stored as this access-request
+     * decision's audit-trail reason.
+     */
+    public function test_deciding_an_access_request_with_a_non_string_reason_is_rejected_not_silently_coerced(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-ACCGOV-0008');
+        $this->openReview($ctx['owner']);
+        $staff = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'staff-0008@test.test', $ctx['owner']);
+        $approver = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'approver-0008@test.test', $ctx['owner']);
+        $approver->update(['role' => 'TAXPAYER_ADMIN']);
+        $role = $this->makeOrganisationRole($ctx['organisation'], $ctx['owner']);
+        $requestId = $this->actingAs($ctx['owner'])->postJson('/api/v1/access-requests', [
+            'subject_user_id' => $staff->id, 'role_id' => $role->id, 'justification' => 'A genuinely valid justification string.',
+        ])->json('request.id');
+
+        $response = $this->actingAs($approver)->withFreshStepUp()
+            ->postJson("/api/v1/access-requests/{$requestId}/decision", ['decision' => 'approve', 'reason' => ['not', 'a', 'string']]);
+
+        $response->assertStatus(422)->assertJsonPath('code', 'REASON_REQUIRED');
+        $this->assertDatabaseHas('access_requests', ['id' => $requestId, 'status' => 'PENDING_MANAGER']);
+        $this->assertDatabaseMissing('user_role_assignments', ['organisation_id' => $ctx['organisation']->id, 'user_id' => $staff->id, 'organisation_role_id' => $role->id]);
     }
 
     public function test_certifying_quarterly_access_retains_or_revokes_and_completes_the_review_once_every_member_is_certified(): void

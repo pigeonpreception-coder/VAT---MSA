@@ -332,7 +332,15 @@ class AuditCaseService
         $now = now();
         DB::transaction(function () use ($input, $caseId, $auditCase, $checksum, $evidenceType, $documentId, $actor, $id, $now, $idempotencyKey, $requestHash, $correlationId) {
             if ($input['supersedesEvidenceId']) {
-                AuditEvidence::where('id', $input['supersedesEvidenceId'])->update(['status' => 'SUPERSEDED']);
+                // Red-team punch list #8: the PRESERVED check above ran
+                // before this transaction, unguarded -- a race could let
+                // two new evidence rows both claim succession of the same
+                // original, corrupting the chain-of-custody this evidence
+                // model exists to protect.
+                $superseded = AuditEvidence::where('id', $input['supersedesEvidenceId'])->where('status', 'PRESERVED')->update(['status' => 'SUPERSEDED']);
+                if ($superseded === 0) {
+                    throw new RepositoryConflictException("Evidence {$input['supersedesEvidenceId']} was changed by another action; reload and try again.");
+                }
                 AuditEvidenceCustodyEvent::create([
                     'id' => (string) Str::uuid(), 'audit_evidence_id' => $input['supersedesEvidenceId'], 'action' => 'SUPERSEDED',
                     'actor_id' => $actor->id, 'notes' => "Superseded by evidence {$id}.", 'integrity_verified' => null, 'occurred_at' => $now,

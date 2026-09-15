@@ -513,6 +513,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/security/mfa/verification', [MfaViewController::class, 'verify'])->name('security.mfa.verify');
     Route::post('/security/step-up', [MfaViewController::class, 'stepUp'])->name('security.step-up');
 
+    // Red-team punch list #6 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md):
+    // self-service "log out my other sessions", shown on the same Security
+    // page above. No 'step-up' gate -- see MfaViewController::revokeSession()'s
+    // own doc comment for why.
+    Route::post('/security/sessions/revoke-others', [MfaViewController::class, 'revokeOtherSessions'])->name('security.sessions.revoke-others');
+    Route::post('/security/sessions/{sessionId}/revoke', [MfaViewController::class, 'revokeSession'])->name('security.sessions.revoke');
+
     // Phase 8: organisations, taxpayers, registration applications, branches,
     // memberships -- URL shapes kept 1:1 with the source's app/api/v1/**
     // routes for traceability, even though this is Blade/session-driven

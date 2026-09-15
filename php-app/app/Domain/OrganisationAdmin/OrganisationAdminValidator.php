@@ -131,7 +131,12 @@ class OrganisationAdminValidator
         if (! preg_match('/^[A-Z][A-Z0-9_]{1,39}$/', $administratorRoleCode)) {
             throw new LicensingValidationException('ADMINISTRATOR_ROLE_INVALID', 'administrator_role_code must contain 2 to 40 uppercase letters, numbers or underscores.');
         }
-        $approvalReference = trim((string) preg_replace('/\s+/', ' ', (string) ($input['approval_reference'] ?? '')));
+        // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): a bare (string) cast on a JSON array silently
+        // produces the literal 5-character string "Array", sliding past
+        // the `< 5` minimum check below as if it were a real
+        // approval_reference -- guard with is_string() first.
+        $approvalReference = trim((string) preg_replace('/\s+/', ' ', is_string($input['approval_reference'] ?? null) ? $input['approval_reference'] : ''));
         if (mb_strlen($approvalReference) < 5 || mb_strlen($approvalReference) > 240) {
             throw new LicensingValidationException('APPROVAL_REFERENCE_REQUIRED', 'Provide a 5 to 240 character approval_reference.');
         }

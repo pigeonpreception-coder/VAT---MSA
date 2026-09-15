@@ -78,7 +78,7 @@ class ObligationViewController extends Controller
             'schema_version' => '1.0.0', 'taxpayer_id' => $taxpayer->id,
             'obligation_type' => mb_strtoupper((string) $request->input('obligation_type')),
             'period_code' => (string) $request->input('period_code'), 'due_date' => (string) $request->input('due_date'),
-            'amount_cents' => $this->centsFromDecimal($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: 'NAD'),
+            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: 'NAD'),
         ];
 
         try {
@@ -107,11 +107,6 @@ class ObligationViewController extends Controller
         }
 
         return redirect()->route('obligations.index')->with('status', 'Obligation marked satisfied.');
-    }
-
-    private function centsFromDecimal(mixed $amount): int
-    {
-        return (int) round(((float) $amount) * 100);
     }
 
     /** @return array<string, string> */

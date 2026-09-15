@@ -95,7 +95,15 @@ class ProjectService
 
         $now = now();
         DB::transaction(function () use ($budget, $organisation, $actor, $projectId, $now, $idempotencyKey, $requestHash, $correlationId, $input) {
-            ProjectBudget::where('id', $budget->id)->update(['status' => 'APPROVED', 'approved_amount_cents' => $input['approved_amount_cents'], 'approved_by' => $actor->id, 'approved_at' => $now]);
+            // Red-team punch list #8: the PROPOSED check above ran before
+            // this transaction, unguarded -- a concurrent approval race
+            // with two different approved amounts could lost-update the
+            // approved figure.
+            $updated = ProjectBudget::where('id', $budget->id)->where('status', 'PROPOSED')
+                ->update(['status' => 'APPROVED', 'approved_amount_cents' => $input['approved_amount_cents'], 'approved_by' => $actor->id, 'approved_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Project budget {$budget->id} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'APPROVE_PROJECT_BUDGET', $idempotencyKey, $requestHash, 'PROJECT_BUDGET', $budget->id, $now);
             CommandLedger::outbox('PROJECT_BUDGET', $budget->id, 'ProjectBudgetApproved', $organisation->id, ['project_budget_id' => $budget->id, 'project_id' => $projectId, 'organisation_id' => $organisation->id, 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'PROJECT_BUDGET_APPROVED', 'PROJECT_BUDGET', $budget->id, ['organisationId' => $organisation->id, 'projectId' => $projectId, 'approvedAmountCents' => $input['approved_amount_cents'], 'correlationId' => $correlationId], $now);
