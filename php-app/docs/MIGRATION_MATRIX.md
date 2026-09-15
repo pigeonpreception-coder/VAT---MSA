@@ -7752,3 +7752,41 @@ small" batch is closed the same day:
   clean.
 
 Verified: full suite 655 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #6, self-service session logout (2026-09-15)
+
+First item of the "buildable now, medium" batch from
+`docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md`. No self-service way
+existed to see or end another active session for your own account short of
+a full password reset (which wipes every session, including the one you're
+using). The Security page (`security/mfa/index.blade.php`, already the
+one page a "Security" nav link points to) now also lists every row in the
+`sessions` table for the current user -- the same table/query shape
+RT-019's password-reset fix (`ResetPasswordRequest::resetPassword()`)
+already reads and writes -- with device/browser, IP address, and last
+active time, and marks the row matching the current request's own session
+ID as "This device".
+
+Two new actions on `MfaViewController`, both self-service like
+enroll()/verify() above (no `step-up` gate -- ending your own session is
+protective of your own account, the same category password reset's own
+blanket wipe already falls into):
+
+- `revokeSession()` (`POST /security/sessions/{sessionId}/revoke`) --
+  deletes one `sessions` row scoped to `where('user_id', $actor->id)`, so
+  one user can never revoke another's row even by guessing/copying its ID.
+  Revoking the session you're currently making the request with is
+  refused with a form error rather than silently applied (there's no
+  sensible outcome for a request that deletes its own session mid-flight).
+- `revokeOtherSessions()` (`POST /security/sessions/revoke-others`) --
+  deletes every `sessions` row for the user except the current request's
+  own ID in one query.
+
+Tested end-to-end, including the two "current session" cases, which need
+the real generated session ID round-tripped through an explicit request
+cookie (`withCookie(config('session.cookie'), $id)`) rather than read
+directly from the container -- the test session driver hands out a fresh
+random ID to any request that carries no cookie, same as a real browser
+with no cookie set yet would get.
+
+Verified: full suite 659 tests, 0 regressions.

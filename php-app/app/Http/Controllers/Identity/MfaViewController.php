@@ -10,6 +10,8 @@ use App\Services\Identity\MfaService;
 use App\Support\Access\SafeRedirect;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
@@ -53,6 +55,24 @@ class MfaViewController extends Controller
         $actor = $request->user();
         $credential = MfaTotpCredential::find($actor->id);
         $status = $this->mfa->getMfaStatus($actor->id);
+        $currentSessionId = $request->session()->getId();
+
+        // Red-team punch list #6 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): no self-service way to see or end another active
+        // session existed before this -- the query pattern is the same
+        // `sessions` table RT-019's password-reset fix
+        // (ResetPasswordRequest::resetPassword()) already reads/writes.
+        $sessions = DB::table('sessions')
+            ->where('user_id', $actor->id)
+            ->orderByDesc('last_activity')
+            ->get()
+            ->map(fn ($row) => [
+                'id' => $row->id,
+                'ip_address' => $row->ip_address,
+                'user_agent' => $row->user_agent,
+                'last_activity' => Carbon::createFromTimestamp($row->last_activity),
+                'is_current' => $row->id === $currentSessionId,
+            ]);
 
         return view('security.mfa.index', [
             'credentialStatus' => $credential?->status,
@@ -61,6 +81,7 @@ class MfaViewController extends Controller
             'freshSecret' => session('mfa_fresh_secret'),
             'freshOtpauthUri' => session('mfa_fresh_otpauth_uri'),
             'redirectTo' => $request->query('redirect_to'),
+            'sessions' => $sessions,
         ]);
     }
 
@@ -114,5 +135,40 @@ class MfaViewController extends Controller
         }
 
         return redirect()->route('security.mfa')->with('status', 'Step-up confirmed. It stays fresh for the next few minutes.');
+    }
+
+    /**
+     * Ends one other device's session. Deliberately self-service (no
+     * 'step-up' gate) -- same reasoning as enroll()/verify() above: ending
+     * your own session is protective of your own account, not a privileged
+     * change to someone else's, the same category password reset's own
+     * blanket session wipe (ResetPasswordRequest::resetPassword()) already
+     * falls into without a step-up gate.
+     */
+    public function revokeSession(Request $request, string $sessionId): RedirectResponse
+    {
+        $this->authorize('permission', 'identity:read');
+        $actor = $request->user();
+
+        if ($sessionId === $request->session()->getId()) {
+            return redirect()->route('security.mfa')
+                ->withErrors(['session' => 'You cannot revoke the session you are currently using -- log out instead.']);
+        }
+
+        $deleted = DB::table('sessions')->where('id', $sessionId)->where('user_id', $actor->id)->delete();
+
+        return redirect()->route('security.mfa')
+            ->with('status', $deleted > 0 ? 'That session has been logged out.' : 'That session was already gone.');
+    }
+
+    public function revokeOtherSessions(Request $request): RedirectResponse
+    {
+        $this->authorize('permission', 'identity:read');
+        $actor = $request->user();
+        $currentSessionId = $request->session()->getId();
+
+        DB::table('sessions')->where('user_id', $actor->id)->where('id', '!=', $currentSessionId)->delete();
+
+        return redirect()->route('security.mfa')->with('status', 'Every other session has been logged out.');
     }
 }

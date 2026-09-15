@@ -25,6 +25,9 @@ entry below for what changed. #4 also turned up a real, previously-
 unnoticed instance of RT-017's own bug in four controllers the original
 grep sweep never matched, not just a verification of the existing fix.
 
+**Update (2026-09-15, same day):** item #6 (self-service session logout)
+from the medium batch is also closed -- see its own strikethrough entry.
+
 ## Buildable now, small
 
 1. ~~**`WorkflowService::createDelegation()`/`revokeDelegation()` have no
@@ -93,12 +96,18 @@ grep sweep never matched, not just a verification of the existing fix.
 
 ## Buildable now, medium
 
-6. **No self-service "log out my other sessions"** (source: same
-   authentication/session report). No active-sessions list or
-   terminate-session action exists; a user who suspects a stale session
-   elsewhere has no way to check or kill it short of a full password
-   reset. Needs new UI plus a backend query against the `sessions` table
-   -- the query pattern already exists from RT-019's own fix.
+6. ~~**No self-service "log out my other sessions"**~~ **CLOSED
+   (2026-09-15).** Source: same authentication/session report. The
+   Security page now lists every `sessions` row for the current user
+   (device/browser, IP, last active, "This device" badge) with a
+   per-session revoke action plus a "log out other sessions" bulk action,
+   both on `MfaViewController` (same self-service, no-step-up-needed
+   reasoning as MFA enroll/verify). Revoking is scoped to the actor's own
+   `user_id` so one user can never end another's session by guessing its
+   ID; revoking your own current session is refused with a form error
+   rather than silently applied. New regression tests cover listing
+   (own-only, not another user's), scoped revoke, the current-session
+   refusal, and "log out others" leaving the current session intact.
 7. **Authorization-check TOCTOU races (a scope check racing the write it
    gates) were named as a gap but never actually probed under true
    concurrency** (source: `RED_TEAM_ASSESSMENT_2026-09-14-AUTHORIZATION-
