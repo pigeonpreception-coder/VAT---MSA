@@ -32,7 +32,7 @@ use Illuminate\View\View;
  * client-side checkbox ("I completed the local/staging privileged-change
  * step-up check") and a custom `x-vat-msa-local-step-up` header the
  * server trusts blindly -- theatre, not a real check. Both write routes
- * here use the `password.confirm` middleware instead, the same genuine,
+ * here use the `step-up` middleware instead, the same genuine,
  * server-enforced step-up every other sensitive command in this migration
  * already uses (registration decisions, taxpayer suspension, invoice
  * cancellation, VAT-rule approval) -- continuing Phase 6's own precedent

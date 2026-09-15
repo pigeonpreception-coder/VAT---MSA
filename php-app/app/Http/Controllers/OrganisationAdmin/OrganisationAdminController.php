@@ -18,7 +18,7 @@ use Symfony\Component\HttpFoundation\Response;
  * `getAdministrationSnapshot` (Phase 12's own closing slice -- see
  * docs/MIGRATION_MATRIX.md) down to its own fields, exactly matching the
  * source's own route shape. Every write command is step-up gated via the
- * same 'password.confirm' middleware every other sensitive command in
+ * same 'step-up' middleware every other sensitive command in
  * this migration uses.
  */
 class OrganisationAdminController extends Controller

@@ -145,34 +145,38 @@ ceiling under real traffic.
 environment limitations.
 
 ### 8. TOTP step-up parity
-**Status: Infrastructure CLOSED (2026-09-15); cutover of the existing
-`password.confirm`-gated routes is a deliberate, separate follow-up, not
-done.** A real, server-verified RFC 6238 TOTP implementation now exists
-and works end to end -- enrolment, verification, step-up confirmation
-with anti-replay, and a status read, all with the identical JSON contract
-the original TypeScript source's own test suite specifies (ported from
-`lib/domain/mfa.ts`/`lib/data/mfa-repository.ts`/`lib/security/
-step-up.ts`, which turned out to be present in this repository -- not
-something every prior session had noticed). Reverified independently
-against Python's `pyotp` reference implementation, not just self-
-consistency. A genuinely new self-service Blade UI (`Security (MFA)` in
-the sidebar) sits alongside the JSON API, since no `page.tsx` for this
+**Status: CLOSED (2026-09-15) -- infrastructure and full route cutover
+both.** ~~Buildable now.~~ A real, server-verified RFC 6238 TOTP
+implementation exists and works end to end -- enrolment, verification,
+step-up confirmation with anti-replay, and a status read, all with the
+identical JSON contract the original TypeScript source's own test suite
+specifies (ported from `lib/domain/mfa.ts`/`lib/data/mfa-repository.ts`/
+`lib/security/step-up.ts`, which turned out to be present in this
+repository -- not something every prior session had noticed). Reverified
+independently against Python's `pyotp` reference implementation, not just
+self-consistency. A genuinely new self-service Blade UI (`Security (MFA)`
+in the sidebar) sits alongside the JSON API, since no `page.tsx` for this
 exists in the source either.
 
-**What's deliberately NOT done, per the user's own explicit scope
-decision**: the ~40 existing sensitive routes (taxpayer suspension,
-invoice cancellation, registration decisions, platform staff
-provisioning, etc.) still use `password.confirm`, not this new TOTP
-mechanism. Cutting them over is a larger, behavior-changing follow-up --
-every current account would need to enrol MFA before it could do
-anything privileged, and the 24 test files using the `password.confirm`
-session shortcut would all need updating -- left as an explicit future
-decision rather than done silently as a side effect of this pass.
+**The cutover, same day per explicit follow-up request**: every one of
+the 44 routes that used to wear Laravel's `password.confirm` now wears
+`App\Http\Middleware\EnsureFreshStepUp` instead, gated on a real
+`step_up_events` row via `MfaService::hasFreshStepUp()` -- not a
+re-entered password. `ConfirmPasswordController` and the
+`/confirm-password` routes are deleted. `App\Support\Access\StepUp`
+(the data-conditional gate on report exports) now delegates to the same
+mechanism. Live-verified with a real browser session over HTTP: a
+non-enrolled user hitting a step-up-gated route is redirected through
+enrol -> verify -> confirm-step-up and lands back on the exact original
+page, with the retried action succeeding and persisting.
 
 **Evidence**: `docs/MIGRATION_MATRIX.md`'s "TOTP step-up parity
-(2026-09-15, infrastructure only)" section; `app/Support/Access/Totp.php`;
-`app/Services/Identity/MfaService.php`; `tests/Feature/Identity/
-{MfaTest,MfaViewTest}.php`'s 10 tests.
+(2026-09-15, infrastructure only)" and "TOTP step-up cutover (2026-09-15)"
+sections; `app/Support/Access/Totp.php`; `app/Services/Identity/
+MfaService.php`; `app/Http/Middleware/EnsureFreshStepUp.php`;
+`tests/Feature/Identity/{MfaTest,MfaViewTest}.php`'s 10 tests plus the
+~200 call sites across 22 test files now exercising the real mechanism
+via `Tests\Concerns\InteractsWithStepUp`.
 
 ---
 
@@ -306,26 +310,16 @@ cutover. No visibility into any of this from the codebase alone.
 
 ---
 
-## Recommended next step (refreshed 2026-09-15, again)
+## Recommended next step (refreshed 2026-09-15, after the TOTP cutover)
 
-#8's own infrastructure (real TOTP enrolment, verification, step-up
-confirmation) closed the same day it was picked up -- see its own entry
-above. #10 (broader security review) closed the same refresh, just
-before it. With ITAS (#1) still the one genuine launch-blocker and still
-blocked on external NamRA credentials/API access, and #3/#4/#6/#7/#11 all
-similarly blocked on external credentials or production host access,
-**the buildable-now items with no external dependency left on this list
-are now both explicitly named follow-ups from work already done, not
-fresh top-level items:**
+#8 is now fully closed, infrastructure and the full route cutover both --
+see its own entry above. #10 (broader security review) closed the same
+refresh, just before it. With ITAS (#1) still the one genuine
+launch-blocker and still blocked on external NamRA credentials/API
+access, and #3/#4/#6/#7/#11 all similarly blocked on external credentials
+or production host access, **the buildable-now items with no external
+dependency left on this list are**:
 
-- **Cut over the ~40 existing `password.confirm`-gated routes to require
-  the new real TOTP step-up instead** -- #8's own infrastructure is
-  complete and tested, but deliberately not wired into any consuming
-  route yet (the user's own explicit scope decision when this was
-  picked up). This is real, self-contained, well-understood work, but
-  behavior-changing: every current account needs to enrol before it can
-  do anything privileged, and 24 existing test files need updating off
-  their `password.confirm` session shortcut.
 - The handful of red-team reports above that named an explicit,
   not-yet-individually-verified follow-up in their own "what this pass
   did not cover" section (each report says exactly what it left open).

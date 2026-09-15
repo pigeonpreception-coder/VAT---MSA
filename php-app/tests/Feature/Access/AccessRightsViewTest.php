@@ -7,6 +7,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,7 @@ use Tests\TestCase;
 class AccessRightsViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -93,7 +95,7 @@ class AccessRightsViewTest extends TestCase
             'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL',
         ]);
 
-        $response->assertRedirect(route('password.confirm'));
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertDatabaseHas('users', ['id' => $target->id, 'role' => 'TAXPAYER_VIEWER']);
     }
 
@@ -102,7 +104,7 @@ class AccessRightsViewTest extends TestCase
         $admin = $this->superAdmin();
         $target = $this->taxpayerViewer();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL',
             ]);
@@ -133,8 +135,8 @@ class AccessRightsViewTest extends TestCase
         $key = (string) Str::uuid();
         $payload = ['user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL', 'idempotency_key' => $key];
 
-        $first = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post('/access-rights', $payload);
-        $second = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post('/access-rights', $payload);
+        $first = $this->actingAs($admin)->withFreshStepUp()->post('/access-rights', $payload);
+        $second = $this->actingAs($admin)->withFreshStepUp()->post('/access-rights', $payload);
 
         $first->assertRedirect('/access-rights');
         $second->assertRedirect('/access-rights');
@@ -147,9 +149,9 @@ class AccessRightsViewTest extends TestCase
         $targetA = $this->taxpayerViewer('viewer-a@accessrights.test');
         $targetB = $this->taxpayerViewer('viewer-b@accessrights.test');
 
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', ['user_id' => $targetA->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL']);
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', ['user_id' => $targetB->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL']);
 
         $this->assertSame(2, DB::table('user_role_scope_grants')->where('role_code', 'TAXPAYER_ADMIN')->count());
@@ -160,7 +162,7 @@ class AccessRightsViewTest extends TestCase
         $admin = $this->superAdmin();
         $target = $this->taxpayerViewer();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'LOCAL_OFFICE',
             ]);
@@ -175,7 +177,7 @@ class AccessRightsViewTest extends TestCase
         $admin = $this->superAdmin();
         $target = $this->taxpayerViewer();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'LOCAL_OFFICE',
                 'scope_label' => 'Windhoek',
@@ -193,7 +195,7 @@ class AccessRightsViewTest extends TestCase
         $admin = $this->superAdmin();
         $target = $this->taxpayerViewer();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL',
                 'scope_label' => 'Should be ignored',
@@ -210,7 +212,7 @@ class AccessRightsViewTest extends TestCase
         $admin = $this->namraSystemAdmin();
         $target = $this->taxpayerViewer();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'NAMRA_COMPLIANCE_OFFICER', 'scope_level' => 'NATIONAL',
             ]);
@@ -224,7 +226,7 @@ class AccessRightsViewTest extends TestCase
     {
         $admin = $this->superAdmin();
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $admin->id, 'role_code' => 'SECURITY_ANALYST', 'scope_level' => 'GLOBAL',
             ]);
@@ -241,7 +243,7 @@ class AccessRightsViewTest extends TestCase
         $developer = $this->developerPartner();
         $target = $this->taxpayerViewer();
 
-        $this->actingAs($developer)->withSession(['auth.password_confirmed_at' => time()])->post('/access-rights', [
+        $this->actingAs($developer)->withFreshStepUp()->post('/access-rights', [
             'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL',
         ])->assertForbidden();
     }
@@ -250,13 +252,13 @@ class AccessRightsViewTest extends TestCase
     {
         $admin = $this->superAdmin();
         $target = $this->taxpayerViewer();
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL',
             ]);
         $grantId = DB::table('user_role_scope_grants')->where('user_id', $target->id)->value('id');
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post("/access-rights/{$grantId}/revoke");
 
         $response->assertRedirect('/access-rights');
@@ -269,14 +271,14 @@ class AccessRightsViewTest extends TestCase
     {
         $admin = $this->superAdmin();
         $target = $this->taxpayerViewer();
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->post('/access-rights', [
                 'user_id' => $target->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL',
             ]);
         $grantId = DB::table('user_role_scope_grants')->where('user_id', $target->id)->value('id');
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post("/access-rights/{$grantId}/revoke");
+        $this->actingAs($admin)->withFreshStepUp()->post("/access-rights/{$grantId}/revoke");
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->post("/access-rights/{$grantId}/revoke");
 
         $response->assertRedirect('/access-rights');

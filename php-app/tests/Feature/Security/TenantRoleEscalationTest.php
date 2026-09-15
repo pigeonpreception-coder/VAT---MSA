@@ -16,6 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -43,6 +44,7 @@ use Tests\TestCase;
 class TenantRoleEscalationTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -99,7 +101,7 @@ class TenantRoleEscalationTest extends TestCase
         ['taxpayer' => $taxpayer, 'organisation' => $organisation] = $this->makeLicensedOrganisation('ESC0001');
         $admin = $this->makeAdmin($taxpayer, $organisation, 'admin-esc1@poc.test');
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+        $response = $this->actingAs($admin)->withFreshStepUp()->post('/administration/roles', [
             'name' => 'Totally Normal Ops Role', 'description' => 'Definitely not a backdoor.',
             'permissions' => 'access-rights:manage',
         ]);
@@ -115,7 +117,7 @@ class TenantRoleEscalationTest extends TestCase
         ['taxpayer' => $taxpayer, 'organisation' => $organisation] = $this->makeLicensedOrganisation('ESC0002');
         $admin = $this->makeAdmin($taxpayer, $organisation, 'admin-esc2-'.Str::random(6).'@poc.test');
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+        $response = $this->actingAs($admin)->withFreshStepUp()->post('/administration/roles', [
             'name' => 'Role for '.$permission, 'description' => 'Test.', 'permissions' => $permission,
         ]);
 
@@ -141,7 +143,7 @@ class TenantRoleEscalationTest extends TestCase
         // The custom role itself is never created -- the escalation chain
         // is severed at the very first step, before any request/approval
         // could even reference it.
-        $this->actingAs($adminA)->withSession(['auth.password_confirmed_at' => time()])->post('/administration/roles', [
+        $this->actingAs($adminA)->withFreshStepUp()->post('/administration/roles', [
             'name' => 'Backdoor Role', 'description' => 'Test.', 'permissions' => 'access-rights:manage',
         ]);
         $this->assertDatabaseMissing('organisation_roles', ['organisation_id' => $organisation->id]);

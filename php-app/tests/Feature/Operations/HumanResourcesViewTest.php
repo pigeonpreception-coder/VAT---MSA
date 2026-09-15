@@ -15,6 +15,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -33,6 +34,7 @@ use Tests\TestCase;
 class HumanResourcesViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -83,7 +85,7 @@ class HumanResourcesViewTest extends TestCase
 
     private function openReview(User $actor): void
     {
-        $this->actingAs($actor)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($actor)->withFreshStepUp()
             ->postJson('/api/v1/access-reviews')->assertStatus(201);
     }
 
@@ -119,7 +121,7 @@ class HumanResourcesViewTest extends TestCase
         $org = $this->makeLicensedOrganisation('VAT-HR-0003');
         $this->openReview($org['owner']);
 
-        $invite = $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $invite = $this->actingAs($org['owner'])->withFreshStepUp()
             ->post('/operations/human-resources/employees', [
                 'employee_number' => 'EMP-HR-001', 'full_name' => 'Operations Hire', 'email' => 'ops.hire@hrview.test',
             ]);
@@ -127,7 +129,7 @@ class HumanResourcesViewTest extends TestCase
         $this->assertDatabaseHas('employees', ['employee_number' => 'EMP-HR-001', 'status' => 'INVITED']);
         $employeeId = \App\Models\Employee::where('employee_number', 'EMP-HR-001')->firstOrFail()->id;
 
-        $terminate = $this->actingAs($org['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $terminate = $this->actingAs($org['owner'])->withFreshStepUp()
             ->post("/operations/human-resources/employees/{$employeeId}/termination", ['reason' => 'Role no longer required.']);
         $terminate->assertRedirect(route('operations.human-resources'));
         $this->assertDatabaseHas('employees', ['id' => $employeeId, 'status' => 'TERMINATED']);
@@ -141,7 +143,7 @@ class HumanResourcesViewTest extends TestCase
             'employee_number' => 'EMP-HR-002', 'full_name' => 'No Step Up', 'email' => 'no.stepup@hrview.test',
         ]);
 
-        $response->assertRedirect(route('password.confirm'));
+        $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertDatabaseMissing('employees', ['employee_number' => 'EMP-HR-002']);
     }
 
@@ -153,7 +155,7 @@ class HumanResourcesViewTest extends TestCase
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_ACCOUNTANT', 'taxpayer_id' => $org['taxpayer']->id, 'status' => 'ACTIVE',
         ]);
 
-        $this->actingAs($accountant)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($accountant)->withFreshStepUp()
             ->post('/operations/human-resources/employees', ['employee_number' => 'EMP-HR-003', 'full_name' => 'Denied', 'email' => 'denied@hrview.test'])
             ->assertForbidden();
     }

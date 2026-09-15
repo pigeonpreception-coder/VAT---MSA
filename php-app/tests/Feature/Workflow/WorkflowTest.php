@@ -17,6 +17,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,7 @@ use Tests\TestCase;
 class WorkflowTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -84,7 +86,7 @@ class WorkflowTest extends TestCase
     private function openReview(User $actor): void
     {
         $this->actingAs($actor)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/access-reviews')
             ->assertStatus(201);
     }
@@ -137,25 +139,25 @@ class WorkflowTest extends TestCase
             ],
         ];
 
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows', array_merge($definition, ['name' => 'Purchase Approval']));
         $created->assertStatus(201)->assertJsonPath('workflow.status', 'DRAFT')->assertJsonPath('workflow.version', 1);
         $this->assertDatabaseHas('license_usage', ['organisation_license_id' => $ctx['license']->id, 'metric_key' => 'WORKFLOWS', 'reserved_value' => 1]);
 
         // A duplicate name is a real conflict.
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows', array_merge($definition, ['name' => 'Purchase Approval']))
             ->assertStatus(409);
 
         $versionId = $created->json('workflow.versionId');
-        $published = $this->actingAs($publisher)->withSession(['auth.password_confirmed_at' => time()])
+        $published = $this->actingAs($publisher)->withFreshStepUp()
             ->postJson("/api/v1/workflows/versions/{$versionId}/publication");
         $published->assertStatus(200)->assertJsonPath('workflowVersion.status', 'PUBLISHED');
         $this->assertDatabaseHas('workflows', ['name' => 'Purchase Approval', 'status' => 'ACTIVE']);
         $this->assertDatabaseHas('license_usage', ['organisation_license_id' => $ctx['license']->id, 'metric_key' => 'WORKFLOWS', 'used_value' => 1, 'reserved_value' => 0]);
 
         // Already published -- a second publish attempt is a conflict.
-        $this->actingAs($publisher)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($publisher)->withFreshStepUp()
             ->postJson("/api/v1/workflows/versions/{$versionId}/publication")
             ->assertStatus(409);
     }
@@ -165,11 +167,11 @@ class WorkflowTest extends TestCase
         $ctx = $this->makeLicensedOrganisation('VAT-WF-0002');
         $this->openReview($ctx['owner']);
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows', ['name' => 'Bad Domain', 'domain_action' => 'NOT_A_REAL_ACTION', 'nodes' => [], 'transitions' => []])
             ->assertStatus(422)->assertJsonPath('code', 'WORKFLOW_DOMAIN_UNSUPPORTED');
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows', [
                 'name' => 'No Terminals', 'domain_action' => 'expense',
                 'nodes' => [['id' => 'a', 'type' => 'START', 'label' => 'Node A'], ['id' => 'b', 'type' => 'START', 'label' => 'Node B']],
@@ -177,7 +179,7 @@ class WorkflowTest extends TestCase
             ])
             ->assertStatus(422)->assertJsonPath('code', 'WORKFLOW_TERMINALS_INVALID');
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows', [
                 'name' => 'Unassigned Approval', 'domain_action' => 'expense',
                 'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'label' => 'Approve'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
@@ -214,21 +216,21 @@ class WorkflowTest extends TestCase
                 ['from' => 'approve', 'to' => 'end'],
             ],
         ];
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->postJson('/api/v1/workflows', $definition);
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
         $created->assertStatus(201);
         $versionId = $created->json('workflow.versionId');
         // A different user (the approver) publishes -- publishWorkflowVersion's
         // own maker-checker refuses the draft's own creator as publisher.
-        $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
 
         // Below the threshold: completes immediately, no assignment.
-        $small = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $small = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'expense', 'resource_type' => 'EXPENSE', 'resource_id' => 'exp-0001', 'context' => ['amount_cents' => 500]], ['Idempotency-Key' => (string) Str::uuid()]);
         $small->assertStatus(201)->assertJsonPath('instance.status', 'COMPLETED')->assertJsonPath('instance.assignmentId', null);
 
         // Above the threshold: an approval task is created and assigned to the role.
-        $large = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $large = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'expense', 'resource_type' => 'EXPENSE', 'resource_id' => 'exp-0002', 'context' => ['amount_cents' => 50000]], ['Idempotency-Key' => (string) Str::uuid()]);
         $large->assertStatus(201)->assertJsonPath('instance.status', 'IN_PROGRESS');
         $assignmentId = $large->json('instance.assignmentId');
@@ -237,17 +239,17 @@ class WorkflowTest extends TestCase
 
         // A user who does not hold the role cannot decide the task.
         $outsider = $this->makeUser($ctx['taxpayer'], 'outsider-0003@test.test');
-        $this->actingAs($outsider)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($outsider)->withFreshStepUp()
             ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Attempting without the role.'])
             ->assertStatus(422)->assertJsonPath('code', 'TASK_NOT_ASSIGNED');
 
         // The role holder approves -- the graph advances to END and the instance completes.
-        $decided = $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $decided = $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Verified against budget.']);
         $decided->assertStatus(200)->assertJsonPath('decision.instanceStatus', 'COMPLETED')->assertJsonPath('decision.nextAssignmentId', null);
 
         // No active workflow at all for a domain action is a clean error, not a crash.
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-1'], ['Idempotency-Key' => (string) Str::uuid()])
             ->assertStatus(422)->assertJsonPath('code', 'WORKFLOW_NOT_CONFIGURED');
     }
@@ -268,20 +270,20 @@ class WorkflowTest extends TestCase
             'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'assignee_type' => 'role', 'assignee_ref' => $role->id, 'label' => 'Approval'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
             'transitions' => [['from' => 'start', 'to' => 'approve'], ['from' => 'approve', 'to' => 'end']],
         ];
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->postJson('/api/v1/workflows', $definition);
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
         $versionId = $created->json('workflow.versionId');
-        $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
-        $instance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($approver)->withFreshStepUp()->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
+        $instance = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'journal', 'resource_type' => 'JOURNAL', 'resource_id' => 'j-100'], ['Idempotency-Key' => (string) Str::uuid()]);
         $assignmentId = $instance->json('instance.assignmentId');
 
-        $rejected = $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $rejected = $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'reject', 'reason' => 'Budget exceeded, journal rejected.']);
         $rejected->assertStatus(200)->assertJsonPath('decision.instanceStatus', 'REJECTED');
         $this->assertDatabaseHas('workflow_instances', ['id' => $instance->json('instance.id'), 'status' => 'REJECTED']);
 
         // Already decided -- a second decision is a conflict.
-        $this->actingAs($approver)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($approver)->withFreshStepUp()
             ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Too late, already decided.'])
             ->assertStatus(409);
     }
@@ -309,14 +311,14 @@ class WorkflowTest extends TestCase
             'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'assignee_type' => 'role', 'assignee_ref' => $role->id, 'label' => 'Approval'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
             'transitions' => [['from' => 'start', 'to' => 'approve'], ['from' => 'approve', 'to' => 'end']],
         ];
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->postJson('/api/v1/workflows', $definition);
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
         $versionId = $created->json('workflow.versionId');
-        $this->actingAs($publisher)->withSession(['auth.password_confirmed_at' => time()])->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
-        $instance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($publisher)->withFreshStepUp()->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
+        $instance = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'role_change', 'resource_type' => 'ROLE_CHANGE', 'resource_id' => 'rc-1'], ['Idempotency-Key' => (string) Str::uuid()]);
         $assignmentId = $instance->json('instance.assignmentId');
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Approving my own initiated workflow.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_APPROVAL_DENIED');
 
@@ -353,7 +355,7 @@ class WorkflowTest extends TestCase
             ],
         ];
         // Deliberately left in DRAFT -- Test must work before publish.
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->postJson('/api/v1/workflows', $definition);
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
         $versionId = $created->json('workflow.versionId');
 
         // ['context' => null], not [] -- Laravel's postJson serializes an
@@ -380,13 +382,13 @@ class WorkflowTest extends TestCase
         $target = $this->makeUser($ctx['taxpayer'], 'target-0007@test.test');
         $delegate = $this->makeUser($ctx['taxpayer'], 'delegate-0007@test.test');
 
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/delegations', [
                 'delegator_user_id' => $target->id, 'delegate_user_id' => $target->id,
                 'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDay()), 'reason' => 'Self delegation attempt.',
             ])->assertStatus(422)->assertJsonPath('code', 'DELEGATION_SELF');
 
-        $delegation = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $delegation = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/delegations', [
                 'delegator_user_id' => $target->id, 'delegate_user_id' => $delegate->id,
                 'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDays(7)), 'reason' => 'Annual leave cover.',
@@ -402,27 +404,27 @@ class WorkflowTest extends TestCase
             'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'assignee_type' => 'user', 'assignee_ref' => $target->id, 'label' => 'Approval'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
             'transitions' => [['from' => 'start', 'to' => 'approve'], ['from' => 'approve', 'to' => 'end']],
         ];
-        $created = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])->postJson('/api/v1/workflows', $definition);
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
         $versionId = $created->json('workflow.versionId');
         // A different user publishes -- the creator can't be its own approver.
-        $this->actingAs($delegate)->withSession(['auth.password_confirmed_at' => time()])->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
-        $instance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($delegate)->withFreshStepUp()->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
+        $instance = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-1'], ['Idempotency-Key' => (string) Str::uuid()]);
         $instance->assertStatus(201);
         $this->assertDatabaseHas('workflow_assignments', ['id' => $instance->json('instance.assignmentId'), 'assigned_user_id' => $delegate->id]);
 
-        $revoked = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $revoked = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Cover period ended early.']);
         $revoked->assertStatus(200)->assertJsonPath('delegation.status', 'REVOKED');
 
         // A second delegation assigned after the revocation goes to the
         // real target, not the now-revoked delegate.
-        $secondInstance = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $secondInstance = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-2'], ['Idempotency-Key' => (string) Str::uuid()]);
         $this->assertDatabaseHas('workflow_assignments', ['id' => $secondInstance->json('instance.assignmentId'), 'assigned_user_id' => $target->id]);
 
         // Already revoked -- revoking it again is a conflict.
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Repeat revocation attempt.'])
             ->assertStatus(409);
     }

@@ -9,12 +9,14 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /** Ported from lib/data/identity-repository.ts's listBranches/createBranch/updateBranch and assignMembership. */
 class BranchManagementTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -95,7 +97,7 @@ class BranchManagementTest extends TestCase
         ]);
 
         $response = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/organisations/{$organisation->id}/memberships", [
                 'user_id' => $newMember->id, 'role_code' => 'TAXPAYER_STAFF',
             ]);
@@ -115,7 +117,7 @@ class BranchManagementTest extends TestCase
 
         // NAMRA_SYSTEM_SUPPORT is not in AssignMembershipRequest::ASSIGNABLE_ROLES -- privilege-escalation ceiling.
         $response = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/organisations/{$organisation->id}/memberships", [
                 'user_id' => $newMember->id, 'role_code' => 'NAMRA_SYSTEM_SUPPORT',
             ]);

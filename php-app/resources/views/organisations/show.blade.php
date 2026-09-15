@@ -132,7 +132,7 @@
             </div>
             @if ($canManage)
                 <div class="card-footer">
-                    {{-- Step-up gated: routes/web.php applies 'password.confirm'
+                    {{-- Step-up gated: routes/web.php applies 'step-up'
                          to this route, matching the JSON API's own
                          /organisations/{id}/memberships POST. --}}
                     <form method="POST" action="{{ route('organisations.memberships.store', $organisation->id) }}" class="row g-2">

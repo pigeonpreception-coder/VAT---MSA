@@ -26,6 +26,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -38,6 +39,7 @@ use Tests\TestCase;
 class AdministrationSnapshotTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -81,7 +83,7 @@ class AdministrationSnapshotTest extends TestCase
     private function openReview(User $actor): void
     {
         $this->actingAs($actor)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/access-reviews')
             ->assertStatus(201);
     }

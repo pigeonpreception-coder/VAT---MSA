@@ -8,6 +8,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -21,6 +22,7 @@ use Tests\TestCase;
 class RegistrationApplicationTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -85,7 +87,7 @@ class RegistrationApplicationTest extends TestCase
         $registrationId = $submit->json('registration_id');
 
         $decision = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/registration-applications/{$registrationId}/decision", [
                 'decision' => 'APPROVE', 'reason' => 'Verified documents on file.',
             ]);
@@ -114,7 +116,7 @@ class RegistrationApplicationTest extends TestCase
         $registrationId = $submit->json('registration_id');
 
         $decision = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/registration-applications/{$registrationId}/decision", [
                 'decision' => 'REJECT', 'reason' => 'VAT number could not be independently confirmed.',
             ]);
@@ -136,7 +138,7 @@ class RegistrationApplicationTest extends TestCase
         $registrationId = $submit->json('registration_id');
 
         $decision = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/registration-applications/{$registrationId}/decision", [
                 'decision' => 'APPROVE', 'reason' => 'Self-approving my own application.',
             ]);
@@ -169,7 +171,7 @@ class RegistrationApplicationTest extends TestCase
         ]);
         $registrationId = $submit->json('registration_id');
 
-        // No withSession(['auth.password_confirmed_at' => ...]) this time.
+        // No withFreshStepUp() this time.
         $decision = $this->actingAs($admin)->postJson("/api/v1/registration-applications/{$registrationId}/decision", [
             'decision' => 'APPROVE', 'reason' => 'Attempting without step-up.',
         ]);

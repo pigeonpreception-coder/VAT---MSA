@@ -43,12 +43,12 @@ use Illuminate\View\View;
  * administration, not officer-only, confirmed against the permission map
  * before writing any UI. `taxpayers:suspend` is rarer still (NAMRA_SYSTEM_SUPPORT/
  * NAMRA_SYSTEM_ADMIN only) and already carries its own step-up
- * requirement -- the `password.confirm` middleware already registered on
+ * requirement -- the `step-up` middleware already registered on
  * this app's JSON `/taxpayers/{id}/suspension` and
- * `/organisations/{id}/memberships` routes (RT-002/RT-005's own
- * ConfirmPasswordController) is applied identically here, so no new re-auth
- * plumbing was needed, just the same middleware on the same two write
- * routes.
+ * `/organisations/{id}/memberships` routes (RT-002/RT-005's own, now the
+ * real TOTP-backed App\Http\Middleware\EnsureFreshStepUp) is applied
+ * identically here, so no new re-auth plumbing was needed, just the same
+ * middleware on the same two write routes.
  *
  * `AssignMembershipRequest::ASSIGNABLE_ROLES` intentionally excludes NamRA/
  * platform/portal roles (its own doc comment: granting those here would be

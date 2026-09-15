@@ -30,12 +30,14 @@ use Illuminate\Support\Str;
  * fail exactly as it should -- a genuine retry requires a fresh code, and
  * an idempotency key would work against that, not with it.
  *
- * This is infrastructure only (2026-09-15, user's own explicit scope
- * decision) -- a complete, working, self-service TOTP feature, but the
- * existing ~40 password.confirm-gated routes are NOT yet cut over to
- * require it. See docs/LAUNCH_READINESS_BACKLOG.md item #8 and
- * App\Http\Controllers\Auth\ConfirmPasswordController's own doc comment,
- * which already named this exact follow-up.
+ * Built in two deliberate stages (2026-09-15, user's own explicit scope
+ * decisions): first as infrastructure only -- a complete, working,
+ * self-service TOTP feature with the existing ~44 step-up-gated routes
+ * still on Laravel's own `password.confirm` -- then cut over the same day
+ * once explicitly requested: every one of those routes now wears
+ * App\Http\Middleware\EnsureFreshStepUp, which reads hasFreshStepUp()
+ * below, and the old ConfirmPasswordController is gone. See
+ * docs/LAUNCH_READINESS_BACKLOG.md item #8.
  */
 class MfaService
 {

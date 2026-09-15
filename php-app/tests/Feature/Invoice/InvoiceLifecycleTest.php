@@ -12,6 +12,7 @@ use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -25,6 +26,7 @@ use Tests\TestCase;
 class InvoiceLifecycleTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -133,7 +135,7 @@ class InvoiceLifecycleTest extends TestCase
         $admin = $this->pilotAdmin();
 
         $cancel = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Duplicate submission from the source ERP system.']);
         $cancel->assertStatus(200)->assertJsonPath('cancellation.status', 'CANCELLED');
 
@@ -147,7 +149,7 @@ class InvoiceLifecycleTest extends TestCase
 
         // Idempotent: cancelling an already-cancelled invoice is a clean no-op, not a second reversal.
         $again = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Retried after a network timeout.']);
         $again->assertStatus(200)->assertJsonPath('cancellation.status', 'CANCELLED');
         $this->assertDatabaseCount('vat_transactions', 2);
@@ -189,7 +191,7 @@ class InvoiceLifecycleTest extends TestCase
         });
 
         $response = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Concurrent cancellation attempt.']);
 
         $response->assertStatus(409);
@@ -206,13 +208,13 @@ class InvoiceLifecycleTest extends TestCase
 
         // No invoices:cancel permission on the supplier's own owner role.
         $this->actingAs($ctx['supplier']['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Attempting self-cancellation.'])
             ->assertStatus(403);
 
         // A reason under 10 characters is rejected.
         $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Too short'])
             ->assertStatus(422);
 
@@ -246,13 +248,13 @@ class InvoiceLifecycleTest extends TestCase
 
         // The original now carries an active correction, so cancelling it is refused.
         $this->actingAs($this->pilotAdmin())
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$ctx['invoiceId']}/cancellation", ['reason' => 'Attempting to cancel a corrected invoice.'])
             ->assertStatus(409);
 
         // The credit note itself is not an original tax invoice and cannot be cancelled either.
         $this->actingAs($this->pilotAdmin())
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/invoices/{$creditNoteId}/cancellation", ['reason' => 'Attempting to cancel a credit note directly.'])
             ->assertStatus(422);
     }

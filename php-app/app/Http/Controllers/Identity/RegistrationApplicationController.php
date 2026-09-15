@@ -45,9 +45,9 @@ class RegistrationApplicationController extends Controller
     public function decision(DecideRegistrationRequest $request, string $id): JsonResponse
     {
         $this->authorize('permission', 'registrations:approve');
-        // Step-up (source: requireStepUp, MFA) -- see routes/web.php's 'password.confirm'
-        // middleware on this route: same fresh-reauthentication property via Laravel's own
-        // built-in mechanism, not yet the source's TOTP step_up_events (a dedicated MFA phase).
+        // Step-up (source: requireStepUp, MFA) -- see routes/web.php's 'step-up'
+        // middleware on this route: the real TOTP step_up_events mechanism
+        // (App\Services\Identity\MfaService), matching the source exactly.
 
         $decision = $this->registrations->decide(
             $request->user(),

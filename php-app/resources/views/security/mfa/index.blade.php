@@ -19,6 +19,12 @@
     </div>
 @endif
 
+@if ($redirectTo)
+    <div class="alert alert-info" role="alert">
+        This action needs a fresh step-up confirmation. {{ $enrolled ? 'Confirm a current code below to continue.' : 'Finish enrolling below, then confirm a code, to continue.' }}
+    </div>
+@endif
+
 <div class="row g-3">
     <div class="col-lg-6">
         <div class="card mb-3">
@@ -50,6 +56,7 @@
                         <p class="small text-muted">This secret is shown only once -- if you navigate away before finishing, use "Start over" below to get a fresh one.</p>
                         <form method="POST" action="{{ route('security.mfa.verify') }}" class="row g-2 align-items-end">
                             @csrf
+                            <input type="hidden" name="redirect_to" value="{{ $redirectTo }}">
                             <div class="col-auto">
                                 <label for="verify-code" class="form-label small mb-0">6-digit code</label>
                                 <input type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" class="form-control" id="verify-code" name="code" required autocomplete="one-time-code">
@@ -63,6 +70,7 @@
             @endif
             <form method="POST" action="{{ route('security.mfa.enroll') }}">
                 @csrf
+                <input type="hidden" name="redirect_to" value="{{ $redirectTo }}">
                 <button type="submit" class="btn {{ $freshSecret ? 'btn-outline-secondary' : 'btn-primary' }} btn-sm">
                     {{ $freshSecret ? 'Start over with a new secret' : 'Enable multi-factor authentication' }}
                 </button>
@@ -75,15 +83,16 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h2 class="h6 text-uppercase text-muted">Confirm step-up</h2>
-                    <p class="small text-muted">Enter a current code from your authenticator app to confirm a fresh step-up -- the real replacement for the client-asserted headers this application used to trust. Note: no existing privileged action in this application requires this yet (infrastructure only, per the current backlog item); this confirms the mechanism works end to end.</p>
+                    <p class="small text-muted">Enter a current code from your authenticator app to confirm a fresh step-up -- the real replacement for the client-asserted headers this application used to trust. Every sensitive action across the app (taxpayer suspension, registration decisions, access-rights grants, and more) now requires this to be fresh.</p>
                     <form method="POST" action="{{ route('security.step-up') }}" class="row g-2 align-items-end">
                         @csrf
+                        <input type="hidden" name="redirect_to" value="{{ $redirectTo }}">
                         <div class="col-auto">
                             <label for="step-up-code" class="form-label small mb-0">6-digit code</label>
                             <input type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" class="form-control" id="step-up-code" name="code" required autocomplete="one-time-code">
                         </div>
                         <div class="col-auto">
-                            <button type="submit" class="btn btn-outline-primary">Confirm step-up</button>
+                            <button type="submit" class="btn btn-outline-primary">{{ $redirectTo ? 'Confirm & continue' : 'Confirm step-up' }}</button>
                         </div>
                     </form>
                 </div>

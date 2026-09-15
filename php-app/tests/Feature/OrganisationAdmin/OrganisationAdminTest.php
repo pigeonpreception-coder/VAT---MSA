@@ -17,6 +17,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ use Tests\TestCase;
 class OrganisationAdminTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -83,7 +85,7 @@ class OrganisationAdminTest extends TestCase
     private function openReview(User $actor): void
     {
         $this->actingAs($actor)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/access-reviews')
             ->assertStatus(201);
     }
@@ -93,7 +95,7 @@ class OrganisationAdminTest extends TestCase
         $ctx = $this->makeLicensedOrganisation('VAT-ORGADMIN-0001');
 
         $blocked = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/employees', [
                 'employee_number' => 'EMP-0001', 'full_name' => 'Jane Employee', 'email' => 'jane@test.test',
             ]);
@@ -102,7 +104,7 @@ class OrganisationAdminTest extends TestCase
         $this->openReview($ctx['owner']);
 
         $allowed = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/employees', [
                 'employee_number' => 'EMP-0001', 'full_name' => 'Jane Employee', 'email' => 'jane@test.test',
             ]);
@@ -116,7 +118,7 @@ class OrganisationAdminTest extends TestCase
         $license = OrganisationLicense::where('organisation_id', $ctx['organisation']->id)->firstOrFail();
 
         $invite = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-0002', 'full_name' => 'Sam Staff', 'email' => 'sam@test.test']);
         $invite->assertStatus(201);
         $employeeId = $invite->json('employee.id');
@@ -124,7 +126,7 @@ class OrganisationAdminTest extends TestCase
 
         // Duplicate employee number/email is a conflict.
         $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-0002', 'full_name' => 'Different Name', 'email' => 'other@test.test'])
             ->assertStatus(409);
 
@@ -133,13 +135,13 @@ class OrganisationAdminTest extends TestCase
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE',
         ]);
         $activate = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$employeeId}/activation", ['user_id' => $newUser->id]);
         $activate->assertStatus(200)->assertJsonPath('employee.status', 'ACTIVE');
         $this->assertDatabaseHas('license_usage', ['organisation_license_id' => $license->id, 'metric_key' => 'USER_SEATS', 'used_value' => 1, 'reserved_value' => 0]);
 
         $terminate = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$employeeId}/termination", ['reason' => 'Resigned from the organisation.']);
         $terminate->assertStatus(200)->assertJsonPath('employee.status', 'TERMINATED');
         $this->assertDatabaseHas('license_usage', ['organisation_license_id' => $license->id, 'metric_key' => 'USER_SEATS', 'used_value' => 0]);
@@ -147,15 +149,15 @@ class OrganisationAdminTest extends TestCase
 
         // Terminating the employee record linked to the acting administrator's own identity is denied.
         $selfInvite = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-SELF', 'full_name' => 'Self Owner', 'email' => 'self-owner@test.test']);
         $selfEmployeeId = $selfInvite->json('employee.id');
         $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$selfEmployeeId}/activation", ['user_id' => $ctx['owner']->id])
             ->assertStatus(200);
         $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$selfEmployeeId}/termination", ['reason' => 'Attempting to self-offboard.'])
             ->assertStatus(422)->assertJsonPath('code', 'SELF_OFFBOARD_DENIED');
     }
@@ -171,14 +173,14 @@ class OrganisationAdminTest extends TestCase
 
         $employeeIds = [];
         foreach ([['EMP-PRIMARY-0007', $primaryUser], ['EMP-OUTGOING-0007', $terminatedUser]] as [$number, $user]) {
-            $invite = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            $invite = $this->actingAs($ctx['owner'])->withFreshStepUp()
                 ->postJson('/api/v1/organisations/employees', ['employee_number' => $number, 'full_name' => $user->name, 'email' => strtolower($number).'@test.test']);
-            $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            $this->actingAs($ctx['owner'])->withFreshStepUp()
                 ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/activation", ['user_id' => $user->id])
                 ->assertStatus(200);
             $employeeIds[$user->id] = $invite->json('employee.id');
         }
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/organisations/administrators', ['user_id' => $primaryUser->id, 'administrator_role_code' => 'PRIMARY', 'is_primary' => true, 'approval_reference' => 'Board resolution 2026-09-01.'])
             ->assertStatus(201);
 
@@ -225,7 +227,7 @@ class OrganisationAdminTest extends TestCase
             'assigned_role_id' => null, 'status' => 'PENDING', 'due_at' => null, 'assigned_at' => now(),
         ]);
 
-        $terminate = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $terminate = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$employeeIds[$terminatedUser->id]}/termination", ['reason' => 'Resigned, tasks must move to the primary administrator.']);
         $terminate->assertStatus(200)->assertJsonPath('employee.status', 'TERMINATED')->assertJsonPath('employee.tasks_reassigned_to', $primaryUser->id);
 
@@ -243,9 +245,9 @@ class OrganisationAdminTest extends TestCase
         $this->openReview($ctx['owner']);
 
         $terminatedUser = User::create(['id' => (string) Str::uuid(), 'name' => 'Sole Employee', 'email' => 'sole-0008@test.test', 'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => $ctx['taxpayer']->id, 'status' => 'ACTIVE']);
-        $invite = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $invite = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson('/api/v1/organisations/employees', ['employee_number' => 'EMP-SOLE-0008', 'full_name' => $terminatedUser->name, 'email' => 'sole-emp-0008@test.test']);
-        $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/activation", ['user_id' => $terminatedUser->id])
             ->assertStatus(200);
 
@@ -273,7 +275,7 @@ class OrganisationAdminTest extends TestCase
         ]);
 
         // No organisation_administrators row exists at all -- no primary to reassign to.
-        $terminate = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+        $terminate = $this->actingAs($ctx['owner'])->withFreshStepUp()
             ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/termination", ['reason' => 'Last employee standing, no primary admin exists.']);
         $terminate->assertStatus(200)->assertJsonPath('employee.tasks_reassigned_to', null);
         $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'assigned_user_id' => $terminatedUser->id, 'status' => 'PENDING']);
@@ -289,26 +291,26 @@ class OrganisationAdminTest extends TestCase
 
         // Appointing a user with no active employee record is refused.
         $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/administrators', ['user_id' => $userA->id, 'administrator_role_code' => 'PRIMARY', 'is_primary' => true, 'approval_reference' => 'Board resolution 2026-09-01.'])
             ->assertStatus(422);
 
         foreach ([['EMP-A', $userA], ['EMP-B', $userB]] as [$number, $user]) {
-            $invite = $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            $invite = $this->actingAs($ctx['owner'])->withFreshStepUp()
                 ->postJson('/api/v1/organisations/employees', ['employee_number' => $number, 'full_name' => $user->name, 'email' => strtolower($number).'@test.test']);
-            $this->actingAs($ctx['owner'])->withSession(['auth.password_confirmed_at' => time()])
+            $this->actingAs($ctx['owner'])->withFreshStepUp()
                 ->postJson("/api/v1/organisations/employees/{$invite->json('employee.id')}/activation", ['user_id' => $user->id])
                 ->assertStatus(200);
         }
 
         $first = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/administrators', ['user_id' => $userA->id, 'administrator_role_code' => 'PRIMARY', 'is_primary' => true, 'approval_reference' => 'Board resolution 2026-09-01.']);
         $first->assertStatus(201)->assertJsonPath('administrator.is_primary', true);
         $firstId = $first->json('administrator.id');
 
         $second = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/administrators', ['user_id' => $userB->id, 'administrator_role_code' => 'PRIMARY', 'is_primary' => true, 'approval_reference' => 'Board resolution 2026-09-02.']);
         $second->assertStatus(201)->assertJsonPath('administrator.is_primary', true);
 
@@ -321,17 +323,17 @@ class OrganisationAdminTest extends TestCase
         $this->openReview($ctx['owner']);
 
         $protected = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['vat-rules:manage']], ['Idempotency-Key' => 'test-idem-role-protected-0004']);
         $protected->assertStatus(422)->assertJsonPath('code', 'PROTECTED_PERMISSION');
 
         $v1 = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['commercial:read', 'parties:manage']], ['Idempotency-Key' => 'test-idem-role-v1-0004']);
         $v1->assertStatus(201)->assertJsonPath('role.version', 1)->assertJsonPath('role.status', 'ACTIVE');
 
         $v2 = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/roles', ['name' => 'Sales Lead', 'permissions' => ['commercial:read']], ['Idempotency-Key' => 'test-idem-role-v2-0004']);
         $v2->assertStatus(201)->assertJsonPath('role.version', 2);
     }
@@ -345,13 +347,13 @@ class OrganisationAdminTest extends TestCase
 
         // The organisation doesn't hold SELLER -- refused before membership is even checked.
         $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/capabilities', ['user_id' => $member->id, 'capability' => 'SELLER'])
             ->assertStatus(422);
 
         // BUYER is held by the organisation, but the target user isn't yet an active member.
         $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/capabilities', ['user_id' => $member->id, 'capability' => 'BUYER'])
             ->assertStatus(422);
 
@@ -362,7 +364,7 @@ class OrganisationAdminTest extends TestCase
         ]);
 
         $grant = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/organisations/capabilities', ['user_id' => $member->id, 'capability' => 'BUYER']);
         $grant->assertStatus(201)->assertJsonPath('capability.status', 'ACTIVE');
 

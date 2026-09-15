@@ -3,14 +3,18 @@
 namespace Tests\Feature\Identity;
 
 use App\Models\Branch;
+use App\Models\MfaTotpCredential;
 use App\Models\Organisation;
 use App\Models\OrganisationMembership;
 use App\Models\Taxpayer;
 use App\Models\User;
+use App\Support\Access\Totp;
 use Database\Seeders\IdentityProviderSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -25,6 +29,7 @@ use Tests\TestCase;
 class OrganisationViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -187,7 +192,7 @@ class OrganisationViewTest extends TestCase
         ]);
 
         $response = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('organisations.memberships.store', $fx['organisation']->id), [
                 'email' => 'staff@view-org-0007.test', 'role_code' => 'TAXPAYER_STAFF',
             ]);
@@ -196,7 +201,17 @@ class OrganisationViewTest extends TestCase
         $this->assertDatabaseHas('organisation_memberships', ['organisation_id' => $fx['organisation']->id, 'user_id' => $newMember->id, 'role_code' => 'TAXPAYER_STAFF']);
     }
 
-    public function test_assigning_a_membership_without_a_confirmed_password_redirects_to_step_up_and_back_to_the_organisation_page(): void
+    /**
+     * 2026-09-15 TOTP cutover: walks the real enrol -> verify -> confirm
+     * step-up sequence App\Http\Middleware\EnsureFreshStepUp now sends a
+     * not-yet-enrolled user through, proving `redirect_to` survives every
+     * hop and the user lands back on the real organisation page at the
+     * end -- not a 404/405 from redirect()->intended() replaying the
+     * originally blocked POST's own URL as a GET (the exact bug this test
+     * originally existed to catch, back when the gate was
+     * ConfirmPasswordController).
+     */
+    public function test_assigning_a_membership_without_a_fresh_step_up_redirects_through_totp_setup_and_back_to_the_organisation_page(): void
     {
         $fx = $this->ownerWithOrganisation('VAT-VIEW-ORG-0008');
         $owner = $this->taxpayerOwner($fx['taxpayer']->id, 'owner-0008@test.test');
@@ -204,23 +219,36 @@ class OrganisationViewTest extends TestCase
             'id' => (string) Str::uuid(), 'name' => 'Staff Member', 'email' => 'staff@view-org-0008.test',
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_STAFF', 'taxpayer_id' => null, 'status' => 'ACTIVE',
         ]);
+        $organisationPage = route('organisations.show', $fx['organisation']->id);
 
-        $this->actingAs($owner)->get(route('organisations.show', $fx['organisation']->id));
+        $this->actingAs($owner)->get($organisationPage);
 
         $blocked = $this->actingAs($owner)->post(route('organisations.memberships.store', $fx['organisation']->id), [
             'email' => 'staff@view-org-0008.test', 'role_code' => 'TAXPAYER_STAFF',
         ]);
-        $blocked->assertRedirect(route('password.confirm'));
+        $blocked->assertRedirect(route('security.mfa', ['redirect_to' => $organisationPage]));
 
-        $confirmPage = $this->actingAs($owner)->get('/confirm-password');
-        $confirmPage->assertSee(route('organisations.show', $fx['organisation']->id), false);
+        $mfaPage = $this->actingAs($owner)->get(route('security.mfa', ['redirect_to' => $organisationPage]));
+        $mfaPage->assertSee($organisationPage, false);
 
-        $confirm = $this->actingAs($owner)->post('/confirm-password', [
-            'password' => 'password', 'redirect_to' => route('organisations.show', $fx['organisation']->id),
+        $this->actingAs($owner)->post(route('security.mfa.enroll'), ['redirect_to' => $organisationPage]);
+        $secret = MfaTotpCredential::find($owner->id)->secret_base32;
+        $this->actingAs($owner)->post(route('security.mfa.verify'), ['code' => Totp::generateCode($secret), 'redirect_to' => $organisationPage]);
+
+        // Advance past the verification code's own 30-second step so the
+        // step-up confirmation below is a genuinely fresh, unused code --
+        // same anti-replay concern MfaViewTest's own flow test handles.
+        Carbon::setTestNow(Carbon::now()->addSeconds(90));
+        $confirm = $this->actingAs($owner)->post(route('security.step-up'), ['code' => Totp::generateCode($secret), 'redirect_to' => $organisationPage]);
+        $confirm->assertRedirect($organisationPage);
+        Carbon::setTestNow();
+
+        // With a fresh step-up now confirmed, retrying the original action succeeds.
+        $retry = $this->actingAs($owner)->post(route('organisations.memberships.store', $fx['organisation']->id), [
+            'email' => 'staff@view-org-0008.test', 'role_code' => 'TAXPAYER_STAFF',
         ]);
-        // Lands back on the real organisation page, not a 404/405 from
-        // redirect()->intended() replaying the blocked POST URL as a GET.
-        $confirm->assertRedirect(route('organisations.show', $fx['organisation']->id));
+        $retry->assertRedirect($organisationPage);
+        $this->assertDatabaseHas('organisation_memberships', ['organisation_id' => $fx['organisation']->id, 'role_code' => 'TAXPAYER_STAFF']);
     }
 
     public function test_assigning_a_national_role_via_membership_is_a_friendly_form_error(): void
@@ -233,7 +261,7 @@ class OrganisationViewTest extends TestCase
         ]);
 
         $response = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('organisations.memberships.store', $fx['organisation']->id), [
                 'email' => 'staff@view-org-0009.test', 'role_code' => 'NAMRA_SYSTEM_SUPPORT',
             ]);
@@ -249,7 +277,7 @@ class OrganisationViewTest extends TestCase
         $owner = $this->taxpayerOwner($fx['taxpayer']->id);
 
         $response = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('organisations.memberships.store', $fx['organisation']->id), [
                 'email' => 'nobody@view-org-0010.test', 'role_code' => 'TAXPAYER_STAFF',
             ]);
@@ -268,7 +296,7 @@ class OrganisationViewTest extends TestCase
         $showBefore->assertSee('Suspend taxpayer');
 
         $response = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->post(route('organisations.taxpayer-suspension.store', $fx['organisation']->id), [
                 'taxpayer_id' => $fx['taxpayer']->id, 'reason' => 'Flagged for compliance review.',
             ]);

@@ -12,7 +12,7 @@ use Illuminate\Http\Request;
  * Ported from app/api/v1/licensing/{entitlements,usage,license,state,
  * upgrade}/route.ts -- the Licensing & Entitlements slice of Phase 12
  * (portals/licensing/governance). state/upgrade are step-up gated via the
- * same 'password.confirm' middleware every other sensitive command in
+ * same 'step-up' middleware every other sensitive command in
  * this migration uses, matching the source's own requireStepUp calls on
  * both. `license` slices `getAdministrationSnapshot` (Phase 12's own
  * closing slice) down to its own fields, exactly matching the source.

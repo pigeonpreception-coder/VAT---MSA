@@ -13,6 +13,7 @@ use Database\Seeders\LicensePlanSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
 class LicensingTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -97,7 +99,7 @@ class LicensingTest extends TestCase
         $ctx = $this->makeLicensedOrganisation('VAT-LIC-0002');
 
         $suspend = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/licensing/state', ['action' => 'SUSPEND', 'reason' => 'Non-payment of the current invoice.']);
         $suspend->assertStatus(200)->assertJsonPath('license.state', 'SUSPENDED')->assertJsonPath('license.previous_state', 'ACTIVE');
         $this->assertDatabaseHas('license_events', ['event_type' => 'LICENSE_SUSPENDED', 'from_state' => 'ACTIVE', 'to_state' => 'SUSPENDED']);
@@ -105,12 +107,12 @@ class LicensingTest extends TestCase
 
         // SUSPEND is not a legal action from an already-SUSPENDED state.
         $illegal = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/licensing/state', ['action' => 'SUSPEND', 'reason' => 'Attempting a second suspension.']);
         $illegal->assertStatus(422)->assertJsonPath('code', 'LICENSE_TRANSITION_INVALID');
 
         $activate = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/licensing/state', ['action' => 'ACTIVATE', 'reason' => 'Payment received.']);
         $activate->assertStatus(200)->assertJsonPath('license.state', 'ACTIVE');
     }
@@ -120,7 +122,7 @@ class LicensingTest extends TestCase
         $ctx = $this->makeLicensedOrganisation('VAT-LIC-0003');
 
         $renew = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/licensing/state', ['action' => 'RENEW', 'reason' => 'Annual renewal confirmed by finance.']);
         $renew->assertStatus(200)->assertJsonPath('license.state', 'ACTIVE');
 
@@ -139,7 +141,7 @@ class LicensingTest extends TestCase
         $originalLicense = OrganisationLicense::where('organisation_id', $ctx['organisation']->id)->firstOrFail();
 
         $upgrade = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/licensing/upgrade', ['license_plan_code' => 'ENTERPRISE']);
         $upgrade->assertStatus(200)->assertJsonPath('license.plan_code', 'ENTERPRISE')->assertJsonPath('license.state', 'ACTIVE');
         $newLicenseId = $upgrade->json('license.license_id');
@@ -155,7 +157,7 @@ class LicensingTest extends TestCase
         $this->assertDatabaseHas('license_events', ['event_type' => 'LICENSE_PLAN_UPGRADED']);
 
         $unchanged = $this->actingAs($ctx['owner'])
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson('/api/v1/licensing/upgrade', ['license_plan_code' => 'ENTERPRISE']);
         $unchanged->assertStatus(422)->assertJsonPath('code', 'LICENSE_PLAN_UNCHANGED');
     }

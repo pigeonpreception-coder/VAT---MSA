@@ -6,12 +6,14 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /** Ported from lib/data/identity-repository.ts's suspendTaxpayer. */
 class TaxpayerSuspensionTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     private function pilotAdmin(): User
     {
@@ -36,7 +38,7 @@ class TaxpayerSuspensionTest extends TestCase
         $taxpayer = $this->activeTaxpayer();
 
         $response = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/taxpayers/{$taxpayer->id}/suspension", ['reason' => 'Flagged for compliance review.']);
 
         $response->assertStatus(200)->assertJsonPath('suspension.vatStatus', 'SUSPENDED');
@@ -51,7 +53,7 @@ class TaxpayerSuspensionTest extends TestCase
         $taxpayer->update(['vat_status' => 'SUSPENDED']);
 
         $response = $this->actingAs($admin)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/taxpayers/{$taxpayer->id}/suspension", ['reason' => 'Repeat check, should be a no-op.']);
 
         $response->assertStatus(200)->assertJsonPath('suspension.vatStatus', 'SUSPENDED');
@@ -68,7 +70,7 @@ class TaxpayerSuspensionTest extends TestCase
         $taxpayer = $this->activeTaxpayer();
 
         $response = $this->actingAs($owner)
-            ->withSession(['auth.password_confirmed_at' => time()])
+            ->withFreshStepUp()
             ->postJson("/api/v1/taxpayers/{$taxpayer->id}/suspension", ['reason' => 'Should be denied.']);
 
         $response->assertStatus(403);

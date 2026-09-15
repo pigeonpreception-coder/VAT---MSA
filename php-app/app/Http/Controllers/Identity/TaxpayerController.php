@@ -16,7 +16,7 @@ class TaxpayerController extends Controller
     public function suspend(SuspendTaxpayerRequest $request, string $id): JsonResponse
     {
         $this->authorize('permission', 'taxpayers:suspend');
-        // Step-up: see routes/web.php's 'password.confirm' middleware on this route.
+        // Step-up: see routes/web.php's 'step-up' middleware on this route.
 
         $suspension = $this->taxpayers->suspend($request->user(), $id, $request->validated('reason'), (string) Str::uuid());
 

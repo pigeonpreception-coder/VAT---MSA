@@ -8,6 +8,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,7 @@ use Tests\TestCase;
 class AuthorityGovernanceTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
@@ -118,7 +120,7 @@ class AuthorityGovernanceTest extends TestCase
         $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-create-0001']);
 
         $response->assertStatus(201)->assertJsonPath('onboarding_case.status', 'SUBMITTED')->assertJsonPath('production_activation_effect', false);
@@ -130,7 +132,7 @@ class AuthorityGovernanceTest extends TestCase
         $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(['target_environment' => 'PRODUCTION']), ['Idempotency-Key' => 'test-idem-agov-create-0002']);
 
         $response->assertStatus(201)->assertJsonPath('onboarding_case.status', 'BLOCKED_EXTERNAL');
@@ -140,7 +142,7 @@ class AuthorityGovernanceTest extends TestCase
     {
         $admin = $this->authorityAdmin(); // not registered as an administrator
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-create-0003']);
 
         $response->assertStatus(403);
@@ -150,11 +152,11 @@ class AuthorityGovernanceTest extends TestCase
     {
         $admin = $this->authorityAdmin();
         $this->makeAdministrator($admin);
-        $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-dup-0001'])
             ->assertStatus(201);
 
-        $response = $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($admin)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-dup-0002']);
 
         $response->assertStatus(409);
@@ -176,11 +178,11 @@ class AuthorityGovernanceTest extends TestCase
         $maker = $this->namraSystemAdmin();
         $this->makeAdministrator($maker);
         $this->makeCurrentAccessReview();
-        $caseId = $this->actingAs($maker)->withSession(['auth.password_confirmed_at' => time()])
+        $caseId = $this->actingAs($maker)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-self-0001'])
             ->assertStatus(201)->json('onboarding_case.id');
 
-        $response = $this->actingAs($maker)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($maker)->withFreshStepUp()
             ->postJson("/api/v1/tax-authority-onboarding-cases/{$caseId}/decisions", [
                 'schema_version' => '1.0.0', 'decision' => 'APPROVE_LOCAL_STAGING', 'reason' => 'Reviewed the submitted evidence bundle.',
             ], ['Idempotency-Key' => 'test-idem-agov-self-0002']);
@@ -195,11 +197,11 @@ class AuthorityGovernanceTest extends TestCase
         $this->makeAdministrator($maker);
         $this->makeAdministrator($reviewer);
         $this->makeCurrentAccessReview();
-        $caseId = $this->actingAs($maker)->withSession(['auth.password_confirmed_at' => time()])
+        $caseId = $this->actingAs($maker)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-approve-0001'])
             ->assertStatus(201)->json('onboarding_case.id');
 
-        $response = $this->actingAs($reviewer)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($reviewer)->withFreshStepUp()
             ->postJson("/api/v1/tax-authority-onboarding-cases/{$caseId}/decisions", [
                 'schema_version' => '1.0.0', 'decision' => 'APPROVE_LOCAL_STAGING', 'reason' => 'Reviewed the submitted evidence bundle.',
             ], ['Idempotency-Key' => 'test-idem-agov-approve-0002']);
@@ -215,12 +217,12 @@ class AuthorityGovernanceTest extends TestCase
         $this->makeAdministrator($maker);
         $this->makeAdministrator($reviewer);
         $this->makeCurrentAccessReview();
-        $caseId = $this->actingAs($maker)->withSession(['auth.password_confirmed_at' => time()])
+        $caseId = $this->actingAs($maker)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-noreview-0001'])
             ->assertStatus(201)->json('onboarding_case.id');
         DB::table('tax_authority_access_reviews')->where('tax_authority_id', 'tax-authority-na-namra')->delete();
 
-        $response = $this->actingAs($reviewer)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($reviewer)->withFreshStepUp()
             ->postJson("/api/v1/tax-authority-onboarding-cases/{$caseId}/decisions", [
                 'schema_version' => '1.0.0', 'decision' => 'APPROVE_LOCAL_STAGING', 'reason' => 'Reviewed the submitted evidence bundle.',
             ], ['Idempotency-Key' => 'test-idem-agov-noreview-0002']);
@@ -251,7 +253,7 @@ class AuthorityGovernanceTest extends TestCase
         $this->makeAdministrator($maker);
         $this->makeAdministrator($reviewer);
         $this->makeCurrentAccessReview();
-        $caseId = $this->actingAs($maker)->withSession(['auth.password_confirmed_at' => time()])
+        $caseId = $this->actingAs($maker)->withFreshStepUp()
             ->postJson('/api/v1/tax-authority-onboarding-cases', $this->onboardingPayload(), ['Idempotency-Key' => 'test-idem-agov-race-0001'])
             ->assertStatus(201)->json('onboarding_case.id');
 
@@ -264,7 +266,7 @@ class AuthorityGovernanceTest extends TestCase
             DB::table('tax_authority_onboarding_cases')->where('id', $caseId)->update(['status' => 'REJECTED']);
         });
 
-        $response = $this->actingAs($reviewer)->withSession(['auth.password_confirmed_at' => time()])
+        $response = $this->actingAs($reviewer)->withFreshStepUp()
             ->postJson("/api/v1/tax-authority-onboarding-cases/{$caseId}/decisions", [
                 'schema_version' => '1.0.0', 'decision' => 'APPROVE_LOCAL_STAGING', 'reason' => 'Reviewed the submitted evidence bundle.',
             ], ['Idempotency-Key' => 'test-idem-agov-race-0002']);
