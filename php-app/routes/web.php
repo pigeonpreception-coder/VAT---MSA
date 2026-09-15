@@ -12,6 +12,8 @@ use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
+use App\Http\Controllers\Identity\MfaController;
+use App\Http\Controllers\Identity\MfaViewController;
 use App\Http\Controllers\Identity\MembershipController;
 use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\OrganisationViewController;
@@ -502,6 +504,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/confirm-password', [ConfirmPasswordController::class, 'show'])->name('password.confirm');
     Route::post('/confirm-password', [ConfirmPasswordController::class, 'store']);
 
+    // TOTP step-up parity (2026-09-15, infrastructure only) -- self-
+    // service Blade UI alongside MfaController's JSON API. No
+    // password.confirm gate on any of these: enrolling/using your own
+    // second factor is the self-service action itself, not a privileged
+    // change to someone else's account.
+    Route::get('/security/mfa', [MfaViewController::class, 'index'])->name('security.mfa');
+    Route::post('/security/mfa', [MfaViewController::class, 'enroll'])->name('security.mfa.enroll');
+    Route::post('/security/mfa/verification', [MfaViewController::class, 'verify'])->name('security.mfa.verify');
+    Route::post('/security/step-up', [MfaViewController::class, 'stepUp'])->name('security.step-up');
+
     // Phase 8: organisations, taxpayers, registration applications, branches,
     // memberships -- URL shapes kept 1:1 with the source's app/api/v1/**
     // routes for traceability, even though this is Blade/session-driven
@@ -521,6 +533,23 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // one here anyway, matching every other snapshot in this migration.
         // Closes out Phase 8's own last deferred piece.
         Route::get('/identity', [IdentityFoundationController::class, 'show']);
+
+        // TOTP step-up parity (2026-09-15, infrastructure only -- see
+        // docs/LAUNCH_READINESS_BACKLOG.md item #8 and
+        // App\Http\Controllers\Auth\ConfirmPasswordController's own doc
+        // comment, which already named this exact follow-up): a real,
+        // server-verified RFC 6238 TOTP implementation, ported from
+        // app/api/v1/identity/mfa/totp/{route.ts,verification/route.ts},
+        // .../step-up/route.ts, and .../assurance/route.ts. Self-service
+        // enrolment/verification/step-up confirmation is now fully
+        // working and covered by its own regression tests -- but the
+        // existing ~40 password.confirm-gated routes below are
+        // deliberately NOT yet cut over to require it (a separate,
+        // larger, explicitly scoped follow-up per the user's own request).
+        Route::post('/identity/mfa/totp', [MfaController::class, 'enroll']);
+        Route::post('/identity/mfa/totp/verification', [MfaController::class, 'verifyEnrollment']);
+        Route::post('/identity/step-up', [MfaController::class, 'confirmStepUp']);
+        Route::get('/identity/assurance', [MfaController::class, 'assurance']);
 
         Route::get('/organisations', [OrganisationController::class, 'index']);
         // Registered before the /organisations/{id} wildcard below --

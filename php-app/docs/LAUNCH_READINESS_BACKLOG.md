@@ -145,15 +145,34 @@ ceiling under real traffic.
 environment limitations.
 
 ### 8. TOTP step-up parity
-**Status: Buildable now, substantial scope (real secret provisioning, QR enrollment, backup codes).**
+**Status: Infrastructure CLOSED (2026-09-15); cutover of the existing
+`password.confirm`-gated routes is a deliberate, separate follow-up, not
+done.** A real, server-verified RFC 6238 TOTP implementation now exists
+and works end to end -- enrolment, verification, step-up confirmation
+with anti-replay, and a status read, all with the identical JSON contract
+the original TypeScript source's own test suite specifies (ported from
+`lib/domain/mfa.ts`/`lib/data/mfa-repository.ts`/`lib/security/
+step-up.ts`, which turned out to be present in this repository -- not
+something every prior session had noticed). Reverified independently
+against Python's `pyotp` reference implementation, not just self-
+consistency. A genuinely new self-service Blade UI (`Security (MFA)` in
+the sidebar) sits alongside the JSON API, since no `page.tsx` for this
+exists in the source either.
 
-Sensitive actions currently use Laravel's `password.confirm`
-re-authentication as a stand-in for the original's real server-verified
-TOTP. The `step_up_events`/`mfa_totp_credentials` tables exist,
-schema-only -- nothing reads or writes them yet.
+**What's deliberately NOT done, per the user's own explicit scope
+decision**: the ~40 existing sensitive routes (taxpayer suspension,
+invoice cancellation, registration decisions, platform staff
+provisioning, etc.) still use `password.confirm`, not this new TOTP
+mechanism. Cutting them over is a larger, behavior-changing follow-up --
+every current account would need to enrol MFA before it could do
+anything privileged, and the 24 test files using the `password.confirm`
+session shortcut would all need updating -- left as an explicit future
+decision rather than done silently as a side effect of this pass.
 
-**Evidence**: `docs/MIGRATION_MATRIX.md`'s Phase 6 note;
-`App\Support\Access\StepUp`'s own doc comment.
+**Evidence**: `docs/MIGRATION_MATRIX.md`'s "TOTP step-up parity
+(2026-09-15, infrastructure only)" section; `app/Support/Access/Totp.php`;
+`app/Services/Identity/MfaService.php`; `tests/Feature/Identity/
+{MfaTest,MfaViewTest}.php`'s 10 tests.
 
 ---
 
@@ -287,30 +306,37 @@ cutover. No visibility into any of this from the codebase alone.
 
 ---
 
-## Recommended next step (refreshed 2026-09-15)
+## Recommended next step (refreshed 2026-09-15, again)
 
-#10 (broader security review) was the previous recommendation and is now
-substantially complete -- see its own entry above for the full account of
-what the two sessions since 2026-09-13 covered. With ITAS (#1) still the
-one genuine launch-blocker and still blocked on external NamRA
-credentials/API access, and #3/#4/#6/#7/#11 all similarly blocked on
-external credentials or production host access, **#8 (TOTP step-up
-parity) is now the one clearly buildable-now item with no external
-dependency left on this list.** It is a larger, self-contained scope
-(real secret provisioning, QR enrollment, backup codes) that has sat
-untouched since the original 2026-09-03 compile.
+#8's own infrastructure (real TOTP enrolment, verification, step-up
+confirmation) closed the same day it was picked up -- see its own entry
+above. #10 (broader security review) closed the same refresh, just
+before it. With ITAS (#1) still the one genuine launch-blocker and still
+blocked on external NamRA credentials/API access, and #3/#4/#6/#7/#11 all
+similarly blocked on external credentials or production host access,
+**the buildable-now items with no external dependency left on this list
+are now both explicitly named follow-ups from work already done, not
+fresh top-level items:**
 
-Two narrower, optional follow-ons if there's appetite before or instead
-of #8: (a) the handful of red-team reports above that named an explicit,
-not-yet-individually-verified follow-up in their own "what this pass did
-not cover" section (each report says exactly what it left open); (b) a
-real production-scale performance/N+1 check, flagged honestly by the
+- **Cut over the ~40 existing `password.confirm`-gated routes to require
+  the new real TOTP step-up instead** -- #8's own infrastructure is
+  complete and tested, but deliberately not wired into any consuming
+  route yet (the user's own explicit scope decision when this was
+  picked up). This is real, self-contained, well-understood work, but
+  behavior-changing: every current account needs to enrol before it can
+  do anything privileged, and 24 existing test files need updating off
+  their `password.confirm` session shortcut.
+- The handful of red-team reports above that named an explicit,
+  not-yet-individually-verified follow-up in their own "what this pass
+  did not cover" section (each report says exactly what it left open).
+
+One narrower item sits between "buildable now" and "needs
+infrastructure" rather than cleanly in either bucket: a real
+production-scale performance/N+1 check, flagged honestly by the
 Concurrent User Simulation pass as untestable against this dev
-environment's small seed data -- buildable now in the narrow sense of
-needing no external credentials, but does need either a much larger
-synthetic seed or a staging environment closer to production sizing to
-be meaningful, so it sits between "buildable now" and "needs
-infrastructure" rather than cleanly in either bucket.
+environment's small seed data -- needs no external credentials, but does
+need either a much larger synthetic seed or a staging environment closer
+to production sizing to be meaningful.
 
 Everything else genuinely needs something only NamRA/the deploying
 organisation can supply -- real ITAS credentials, a mail provider, S3/R2
