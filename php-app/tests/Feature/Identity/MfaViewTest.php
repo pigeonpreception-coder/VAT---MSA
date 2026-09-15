@@ -92,12 +92,19 @@ class MfaViewTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function test_a_role_without_identity_read_does_not_see_the_security_link_or_reach_the_page(): void
+    /**
+     * User's own explicit request (2026-09-15): the sidebar shows every
+     * link to every authenticated user regardless of permission, so
+     * SUPER_ADMIN (which lacks identity:read) still sees the Security
+     * (MFA) link -- but MfaViewController's own authorize() gate is
+     * untouched, so it still correctly 403s on direct access.
+     */
+    public function test_the_security_link_is_shown_even_without_identity_read_but_the_page_still_refuses_it(): void
     {
         $superAdmin = $this->makeUser('mfa-view-super-admin@test.test', 'SUPER_ADMIN');
 
         $dashboard = $this->actingAs($superAdmin)->get('/dashboard');
-        $dashboard->assertOk()->assertDontSee(route('security.mfa'), false);
+        $dashboard->assertOk()->assertSee(route('security.mfa'), false);
 
         $this->actingAs($superAdmin)->get('/security/mfa')->assertForbidden();
     }

@@ -197,19 +197,17 @@ class ForeignInvoiceViewTest extends TestCase
     }
 
     /**
-     * UX Failure Discovery pass (2026-09-14): the sidebar's "Invoice
-     * Management" group gated all three of its links (Local Invoices,
-     * Foreign Invoices, All Invoices) behind a single `invoices:read`
-     * check, but ForeignInvoiceViewController::index() actually requires
-     * `imports:read` -- a different permission. Several roles hold
-     * `invoices:read` without `imports:read` (NAMRA_VAT_AUDITOR,
-     * NAMRA_VAT_SUPERVISOR, NAMRA_COMPLIANCE_OFFICER, TAXPAYER_STAFF,
-     * SELLER_*), so those users saw a "Foreign Invoices" link in their
-     * sidebar that 403'd the instant they clicked it -- live-confirmed via
-     * a full-sidebar Playwright crawl. The link is now gated on its own
-     * `imports:read` check, independent of its siblings.
+     * User's own explicit request (2026-09-15): the sidebar now shows
+     * every link to every authenticated user regardless of permission --
+     * this reverts the RT-021 (2026-09-14) per-link gating at the menu
+     * level. ForeignInvoiceViewController::index() still requires
+     * `imports:read`, unchanged, so a role holding `invoices:read`
+     * without it (NAMRA_VAT_AUDITOR here) sees the "Foreign Invoices"
+     * link but still correctly gets a 403 on clicking it -- the
+     * destination's own authorize() gate is the real, untouched security
+     * boundary; only the menu no longer hides what a role can't use.
      */
-    public function test_a_role_with_invoices_read_but_not_imports_read_does_not_see_a_dead_foreign_invoices_link(): void
+    public function test_the_foreign_invoices_link_is_shown_even_without_imports_read_but_the_page_still_refuses_it(): void
     {
         $auditor = User::create([
             'id' => (string) Str::uuid(), 'name' => 'NamRA Auditor', 'email' => 'auditor-fi-ux@test.test',
@@ -217,11 +215,8 @@ class ForeignInvoiceViewTest extends TestCase
         ]);
 
         $dashboard = $this->actingAs($auditor)->get('/dashboard');
-        $dashboard->assertOk()->assertDontSee(route('invoice-management.foreign'), false);
+        $dashboard->assertOk()->assertSee(route('invoice-management.foreign'), false);
 
-        // Direct navigation is still correctly refused -- the sidebar fix
-        // removes the dead-end click, the controller's own gate is the
-        // real backstop this test also confirms is unchanged.
         $this->actingAs($auditor)->get('/invoice-management/foreign')->assertForbidden();
     }
 

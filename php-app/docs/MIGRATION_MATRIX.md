@@ -7607,3 +7607,33 @@ re-enrol-while-active conflict, step-up confirmation, anti-replay) and
 `tests/Feature/Identity/MfaViewTest.php` (the Blade UI, plus sidebar-link
 visibility for a role with `identity:read` vs one without). Full suite:
 655 tests, 0 regressions.
+
+## Sidebar: full menu shown to every user (2026-09-15)
+
+User's own explicit request: every sidebar link and group header is now
+shown to every authenticated user unconditionally, regardless of the
+permission its destination requires. This deliberately reverts the
+per-permission menu gating from RT-021 (2026-09-14) and the follow-up
+sidebar audit the same day -- both of which hid a link/group from a role
+that could not use it, to avoid a dead-end click. The user's own
+preference is the opposite: show the whole application in the menu
+regardless of what a given role can use.
+
+**Not a security change.** Every destination controller's own
+`authorize('permission', ...)` call is completely untouched -- a role
+that clicks a link it cannot use still gets a clean 403, exactly as
+before. Only `resources/views/layouts/app.blade.php`'s menu-rendering
+logic changed: the `@can`/`@endcan` wrappers around individual links and
+the computed `$showX` booleans gating whole group headers were removed,
+so every `<li>` in the sidebar now renders unconditionally for any
+authenticated user.
+
+Verified: `tests/Feature/Navigation/SidebarLinkPermissionTest.php`,
+`tests/Feature/Business/ForeignInvoiceViewTest.php`, and
+`tests/Feature/Identity/MfaViewTest.php` updated to assert the new
+behaviour (link/group always visible; destination still correctly
+refuses a role without the right permission) rather than the reverted
+per-permission hiding. Live-verified with a real browser: `SUPER_ADMIN`
+(the permission-light role used throughout the prior sidebar audit) now
+sees every group and every standalone link. Full suite: 654 tests, 0
+regressions.
