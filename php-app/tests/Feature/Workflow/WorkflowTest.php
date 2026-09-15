@@ -490,4 +490,66 @@ class WorkflowTest extends TestCase
             ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Repeat revocation attempt.'], ['Idempotency-Key' => 'test-idem-delegation-revoke-0002'])
             ->assertStatus(409);
     }
+
+    /**
+     * Red-team punch list #7 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): a task already assigned through an ACTIVE delegation
+     * must not stay decidable once that delegation is revoked --
+     * `resolveAssignee()` resolves and freezes the redirect into
+     * `assigned_user_id` at assign time, so without a live recheck the
+     * delegate could still decide it, and the original delegator never
+     * could (their id was overwritten, not preserved). Distinct from the
+     * concurrent-decision race test above: this gap was open for the
+     * task's whole pending lifetime, not a narrow simultaneous-request
+     * window.
+     */
+    public function test_a_task_assigned_through_a_delegation_can_no_longer_be_decided_once_that_delegation_is_revoked(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-WF-0008');
+        $this->openReview($ctx['owner']);
+        $target = $this->makeUser($ctx['taxpayer'], 'target-0008@test.test');
+        $delegate = $this->makeUser($ctx['taxpayer'], 'delegate-0008@test.test');
+
+        $delegation = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/delegations', [
+                'delegator_user_id' => $target->id, 'delegate_user_id' => $delegate->id,
+                'effective_from' => $this->isoMillis(now()->subDay()), 'effective_to' => $this->isoMillis(now()->addDays(7)), 'reason' => 'Annual leave cover.',
+            ], ['Idempotency-Key' => 'test-idem-delegation-toctou-create-0001']);
+        $delegationId = $delegation->json('delegation.id');
+
+        $definition = [
+            'name' => 'TOCTOU Delegation Approval', 'domain_action' => 'primary_admin_change',
+            'nodes' => [['id' => 'start', 'type' => 'START', 'label' => 'Start'], ['id' => 'approve', 'type' => 'APPROVAL', 'assignee_type' => 'user', 'assignee_ref' => $target->id, 'label' => 'Approval'], ['id' => 'end', 'type' => 'END', 'label' => 'End']],
+            'transitions' => [['from' => 'start', 'to' => 'approve'], ['from' => 'approve', 'to' => 'end']],
+        ];
+        $created = $this->actingAs($ctx['owner'])->withFreshStepUp()->postJson('/api/v1/workflows', $definition);
+        $versionId = $created->json('workflow.versionId');
+        $this->actingAs($delegate)->withFreshStepUp()->postJson("/api/v1/workflows/versions/{$versionId}/publication")->assertStatus(200);
+        $instance = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson('/api/v1/workflows/instances', ['domain_action' => 'primary_admin_change', 'resource_type' => 'ADMINISTRATOR', 'resource_id' => 'admin-toctou-1'], ['Idempotency-Key' => (string) Str::uuid()]);
+        $assignmentId = $instance->json('instance.assignmentId');
+        $this->assertDatabaseHas('workflow_assignments', ['id' => $assignmentId, 'assigned_user_id' => $delegate->id, 'delegated_from_user_id' => $target->id]);
+
+        // Revoke the delegation *after* the task was already routed
+        // through it -- the delegate must lose the ability to decide it,
+        // even though `assigned_user_id` still literally points at them.
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->postJson("/api/v1/workflows/delegations/{$delegationId}/revocation", ['reason' => 'Compromised device suspected.'], ['Idempotency-Key' => 'test-idem-delegation-toctou-revoke-0001'])
+            ->assertStatus(200)->assertJsonPath('delegation.status', 'REVOKED');
+
+        $this->actingAs($delegate)->withFreshStepUp()
+            ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Attempting after revocation.'])
+            ->assertStatus(422)->assertJsonPath('code', 'TASK_NOT_ASSIGNED');
+        $this->assertSame('PENDING', DB::table('workflow_assignments')->where('id', $assignmentId)->value('status'), 'The task must remain undecided.');
+
+        // The original delegator can't step in and decide it either --
+        // resolveAssignee() overwrote assigned_user_id with the delegate's
+        // id at assign time, so this is pre-existing behaviour, not a
+        // consequence of this fix: once routed through a delegation, only
+        // the delegate (while it's active), never the delegator, can
+        // decide that specific task.
+        $this->actingAs($target)->withFreshStepUp()
+            ->postJson("/api/v1/workflow-tasks/{$assignmentId}/decision", ['decision' => 'approve', 'reason' => 'Delegator attempting directly.'])
+            ->assertStatus(422)->assertJsonPath('code', 'TASK_NOT_ASSIGNED');
+    }
 }

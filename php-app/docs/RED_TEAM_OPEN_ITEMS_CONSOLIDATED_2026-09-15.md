@@ -28,6 +28,10 @@ grep sweep never matched, not just a verification of the existing fix.
 **Update (2026-09-15, same day):** item #6 (self-service session logout)
 from the medium batch is also closed -- see its own strikethrough entry.
 
+**Update (2026-09-15, same day):** item #7 (authorization-check TOCTOU
+races) is also closed -- see its own strikethrough entry for what a
+focused audit actually found and fixed.
+
 ## Buildable now, small
 
 1. ~~**`WorkflowService::createDelegation()`/`revokeDelegation()` have no
@@ -108,12 +112,43 @@ from the medium batch is also closed -- see its own strikethrough entry.
    rather than silently applied. New regression tests cover listing
    (own-only, not another user's), scoped revoke, the current-session
    refusal, and "log out others" leaving the current session intact.
-7. **Authorization-check TOCTOU races (a scope check racing the write it
+7. ~~**Authorization-check TOCTOU races (a scope check racing the write it
    gates) were named as a gap but never actually probed under true
-   concurrency** (source: `RED_TEAM_ASSESSMENT_2026-09-14-AUTHORIZATION-
-   ISOLATION.md`). The later Concurrent-User-Simulation pass did unlock
-   true concurrency in this environment but tested status-transition/
-   idempotency races, not this specific pattern -- genuinely untested.
+   concurrency**~~ **CLOSED (2026-09-15).** Source:
+   `RED_TEAM_ASSESSMENT_2026-09-14-AUTHORIZATION-ISOLATION.md`. A focused
+   audit (not a general sweep -- see `docs/MIGRATION_MATRIX.md`'s own
+   entry for the full ranked candidate list) found one real, wide-open
+   gap and one structurally identical sibling, both fixed; several
+   narrower same-request candidates were found genuinely safer (small
+   window, no I/O between check and write) and left as-is rather than
+   forcing a fix onto every one:
+   - **`WorkflowService`: a delegation redirect resolved once at Assign
+     was never re-verified at Decide.** `resolveAssignee()` overwrites
+     `assigned_user_id` with the delegate's own id at assign time, so
+     `decideWorkflowTask()`'s only identity check (a plain
+     `actor->id === assigned_user_id` comparison) could no longer tell a
+     direct assignment from a delegated one -- `revokeDelegation()` never
+     stopped an already-redirected task from still being decided by the
+     former delegate. Not a narrow race: the gap was open for the task's
+     entire pending lifetime (hours to days). Fixed by carrying the
+     delegator's id into a new `workflow_assignments.delegated_from_user_id`
+     column and re-verifying, every decision, that a covering ACTIVE
+     delegation still exists. New regression test proves a task routed
+     through a delegation can no longer be decided once that delegation
+     is revoked (and that the original delegator can't step in either --
+     pre-existing behaviour, unchanged).
+   - **`AccessGovernanceService::decideAccessRequest()`: the same
+     shape.** `requestRoleAccess()`'s subject-membership check only ran
+     at request time; a request can sit `PENDING_MANAGER` for days, and
+     `offboardUser()`/`certifyQuarterlyAccess(REVOKE)` ending the
+     subject's membership in between never stopped a later APPROVE from
+     still granting the role. Now re-checked on every APPROVE. While in
+     this method, also gave `access_requests.status` the same guarded-
+     UPDATE-with-affected-row-check pattern this codebase already uses
+     elsewhere (it was a plain unguarded Eloquent `->update()`, a
+     same-request sibling of the RT-020 stale-read race, not the TOCTOU
+     pattern itself) -- new regression tests cover both the
+     offboarded-subject refusal and the concurrent-decision race.
 8. **No exhaustive sweep of every `Model::update()` call for the RT-020
    stale-read race pattern** (source: the same resilience report). RT-020
    covered every `transition()`-shaped method a recon sweep surfaced plus

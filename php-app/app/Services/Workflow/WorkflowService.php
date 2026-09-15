@@ -197,8 +197,10 @@ class WorkflowService
      * covers this workflow (or ALL workflows) and is currently in its
      * effective window. A workflow-specific delegation takes precedence
      * over a general ALL delegation when both exist.
+     *
+     * @return array{userId: string, delegatedFromUserId: ?string}
      */
-    private function redirectThroughDelegation(string $organisationId, string $userId, string $workflowId): string
+    private function redirectThroughDelegation(string $organisationId, string $userId, string $workflowId): array
     {
         $now = now();
         $delegateUserId = DB::table('workflow_delegations')
@@ -208,14 +210,22 @@ class WorkflowService
             ->orderByRaw('workflow_id IS NULL')
             ->limit(1)->value('delegate_user_id');
 
-        return $delegateUserId ?? $userId;
+        return $delegateUserId
+            ? ['userId' => $delegateUserId, 'delegatedFromUserId' => $userId]
+            : ['userId' => $userId, 'delegatedFromUserId' => null];
     }
 
     /**
      * Resolves a workflow node's ROLE/USER/MANAGER assignee into a
      * concrete user or role to assign the next task to.
      *
-     * @return array{assignedUserId: ?string, assignedRoleId: ?string}
+     * `delegatedFromUserId` is carried all the way into the
+     * `workflow_assignments` row (see assignWorkflow()/decideWorkflowTask())
+     * so a decision can re-verify, at decide time, that the delegation
+     * which redirected this task is still active -- see
+     * decideWorkflowTask()'s own doc comment for why that recheck exists.
+     *
+     * @return array{assignedUserId: ?string, assignedRoleId: ?string, delegatedFromUserId: ?string}
      */
     private function resolveAssignee(Organisation $organisation, string $initiatedBy, string $workflowId, ?string $assigneeType, ?string $assigneeReference): array
     {
@@ -228,7 +238,9 @@ class WorkflowService
                 throw new LicensingValidationException('ASSIGNEE_NOT_FOUND', "The workflow node's assigned user could not be found.");
             }
 
-            return ['assignedUserId' => $this->redirectThroughDelegation($organisation->id, $assigneeReference, $workflowId), 'assignedRoleId' => null];
+            $redirect = $this->redirectThroughDelegation($organisation->id, $assigneeReference, $workflowId);
+
+            return ['assignedUserId' => $redirect['userId'], 'assignedRoleId' => null, 'delegatedFromUserId' => $redirect['delegatedFromUserId']];
         }
         if ($assigneeType === 'ROLE') {
             if (! $assigneeReference) {
@@ -239,7 +251,7 @@ class WorkflowService
                 throw new LicensingValidationException('ASSIGNEE_NOT_FOUND', "The workflow node's assigned role could not be found.");
             }
 
-            return ['assignedUserId' => null, 'assignedRoleId' => $role->id];
+            return ['assignedUserId' => null, 'assignedRoleId' => $role->id, 'delegatedFromUserId' => null];
         }
         $employee = DB::table('employees')->where('user_id', $initiatedBy)->where('organisation_id', $organisation->id)->first(['manager_employee_id']);
         if (! $employee || ! $employee->manager_employee_id) {
@@ -250,7 +262,9 @@ class WorkflowService
             throw new RepositoryConflictException("The initiator's manager has no linked user account.");
         }
 
-        return ['assignedUserId' => $this->redirectThroughDelegation($organisation->id, $manager->user_id, $workflowId), 'assignedRoleId' => null];
+        $redirect = $this->redirectThroughDelegation($organisation->id, $manager->user_id, $workflowId);
+
+        return ['assignedUserId' => $redirect['userId'], 'assignedRoleId' => null, 'delegatedFromUserId' => $redirect['delegatedFromUserId']];
     }
 
     private function outboxInsert(string $aggregateId, string $eventType, string $partitionKey, array $payload, $now): void
@@ -335,7 +349,7 @@ class WorkflowService
             ]);
             DB::table('workflow_assignments')->insert([
                 'id' => $assignmentId, 'workflow_instance_id' => $instanceId, 'node_key' => $next['nodeKey'],
-                'assigned_user_id' => $assignee['assignedUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
+                'assigned_user_id' => $assignee['assignedUserId'], 'delegated_from_user_id' => $assignee['delegatedFromUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
                 'status' => 'PENDING', 'due_at' => null, 'assigned_at' => $now,
             ]);
             $this->outboxInsert($instanceId, 'WorkflowInstanceAssigned', $organisation->id, ['instance_id' => $instanceId, 'assignment_id' => $assignmentId, 'domain_action' => $assignment['domainAction'], 'resource_type' => $assignment['resourceType'], 'resource_id' => $assignment['resourceId'], 'node_key' => $next['nodeKey']], $now);
@@ -377,7 +391,7 @@ class WorkflowService
 
         $task = DB::table('workflow_assignments as a')->join('workflow_instances as i', 'i.id', '=', 'a.workflow_instance_id')
             ->where('a.id', $assignmentId)->where('i.organisation_id', $organisation->id)
-            ->select('a.id', 'a.status', 'a.assigned_user_id', 'a.assigned_role_id', 'a.node_key', 'i.id as instance_id', 'i.initiated_by', 'i.workflow_version_id', 'i.context_snapshot')
+            ->select('a.id', 'a.status', 'a.assigned_user_id', 'a.delegated_from_user_id', 'a.assigned_role_id', 'a.node_key', 'i.id as instance_id', 'i.initiated_by', 'i.workflow_version_id', 'i.context_snapshot')
             ->first();
         if (! $task) {
             throw new LicensingValidationException('WORKFLOW_TASK_NOT_FOUND', 'The workflow task is outside the active organisation scope.');
@@ -392,8 +406,30 @@ class WorkflowService
                 throw new LicensingValidationException('TASK_NOT_ASSIGNED', 'You do not hold the role assigned to this workflow task.');
             }
         }
-
+        // Red-team punch list #7 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): resolveAssignee() resolves a delegation redirect
+        // once, at assign time, overwriting assigned_user_id with the
+        // delegate's own id -- so the plain actor-id === assigned_user_id
+        // check below (WorkflowValidator::assertDecision) can no longer
+        // tell a direct assignment from a delegated one, and previously
+        // never re-checked whether the delegation was still ACTIVE. A task
+        // is typically pending for hours to days, so this was a real,
+        // wide-open gap, not a narrow concurrent race: revoking a
+        // delegation (revokeDelegation()) never stopped an
+        // already-redirected task from still being decided by the former
+        // delegate. Re-verify here, every time, right before the decision
+        // is allowed to proceed.
         $now = now();
+        if ($task->delegated_from_user_id && $task->delegated_from_user_id !== $actor->id) {
+            $stillDelegated = DB::table('workflow_delegations')
+                ->where('organisation_id', $organisation->id)
+                ->where('delegator_user_id', $task->delegated_from_user_id)->where('delegate_user_id', $actor->id)
+                ->where('status', 'ACTIVE')->where('effective_from', '<=', $now)->where('effective_to', '>=', $now)
+                ->exists();
+            if (! $stillDelegated) {
+                throw new LicensingValidationException('TASK_NOT_ASSIGNED', 'The delegation that assigned this task to you has been revoked or has expired; it can no longer be decided.');
+            }
+        }
         try {
             WorkflowValidator::assertDecision($actor->id, $task->initiated_by, $task->assigned_user_id, $decision, ($payload['emergency_override'] ?? null) === true);
         } catch (LicensingValidationException $e) {
@@ -454,7 +490,7 @@ class WorkflowService
                     $nextAssignmentId = (string) Str::uuid();
                     DB::table('workflow_assignments')->insert([
                         'id' => $nextAssignmentId, 'workflow_instance_id' => $task->instance_id, 'node_key' => $next['nodeKey'],
-                        'assigned_user_id' => $assignee['assignedUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
+                        'assigned_user_id' => $assignee['assignedUserId'], 'delegated_from_user_id' => $assignee['delegatedFromUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
                         'status' => 'PENDING', 'due_at' => null, 'assigned_at' => $now,
                     ]);
                     DB::table('workflow_instances')->where('id', $task->instance_id)->update(['current_node_key' => $next['nodeKey']]);

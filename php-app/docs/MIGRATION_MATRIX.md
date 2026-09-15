@@ -7790,3 +7790,84 @@ random ID to any request that carries no cookie, same as a real browser
 with no cookie set yet would get.
 
 Verified: full suite 659 tests, 0 regressions.
+
+## Consolidated red-team punch list: item #7, authorization TOCTOU races (2026-09-15)
+
+Item #7's own description named the gap ("a scope check racing the write
+it gates") but no prior pass had actually gone looking for concrete
+instances. A focused audit surveyed every authorization/scope check in
+`app/Services/**` and `app/Http/Controllers/**` that isn't the simple
+`$this->authorize('permission', ...)` Gate check (that one is inherently
+race-free -- `Gate::define('permission', ...)` in `AppServiceProvider`
+re-reads `$user->isActive()` fresh on every call, see the small-batch
+item #5 entry above), looking specifically for "read a
+membership/delegation/entitlement fact, then later perform a write that
+trusts it was still true." Ranked findings, widest window first:
+
+1. **`WorkflowService`: delegation redirect resolved once at Assign,
+   never re-checked at Decide.** Fixed -- see below.
+2. **`AccessGovernanceService::decideAccessRequest()`: identical shape**
+   (subject-membership checked at request time, role granted at decide
+   time, no recheck). Fixed alongside #1 as a structural sibling.
+3. `WorkflowService::decideWorkflowTask()`'s role-assignment check
+   (`holdsRole`) runs before the guarded transaction, not inside it --
+   same-request, no I/O between check and write, real but narrow.
+4. `OrganisationAdminService::grantCapability()` checks org-capability
+   and membership, then one more query, then writes -- same-request,
+   narrow.
+5. `OrganisationAdminService::appointAdministrator()` checks the
+   employee is ACTIVE, then writes without re-checking inside the
+   transaction -- same-request, narrow, lower impact (an appointment,
+   not a financial/approval decision).
+6. `OrganisationAdminService::activateEmployee()` checks the target
+   user's status, then writes without re-checking -- same-request,
+   narrow, lowest impact (worst case links to a since-suspended user).
+7. **Systemic, not a single call site:** `EntitlementGate::assert()`
+   (via `LicenseResolver`) runs once at the top of nearly every write
+   method in this codebase, with the actual write often 50-100+ lines
+   and several queries later in the same request. Architecture-wide --
+   flagged, not treated as a 1-3-item fix; an org/license being
+   deactivated mid-request is a rare, low-blast-radius scenario next to
+   #1/#2.
+
+\#3-6 are all same-request windows with no intervening I/O (no external
+call, no user-visible delay) -- genuinely narrower than #1/#2, and none
+had an existing guarded-UPDATE to piggyback a fix onto (a real fix would
+mean adding a live recheck query inside each transaction, a bigger
+change per site than #1/#2's shape allowed). Left as-is rather than
+forcing a fix onto every candidate found.
+
+**#1 fix -- `WorkflowService`:** `resolveAssignee()` /
+`redirectThroughDelegation()` now return (and `assignWorkflow()`'s and
+`decideWorkflowTask()`'s own `workflow_assignments` inserts now persist)
+a new `delegated_from_user_id` column alongside `assigned_user_id` --
+null for a direct assignment, the original delegator's id when
+`redirectThroughDelegation()` redirected. `decideWorkflowTask()` now
+re-verifies, on every decision where that column is set, that an ACTIVE
+delegation still covers `(organisation, delegator, delegate, effective
+window)` before allowing the decision to proceed at all -- throwing the
+same `TASK_NOT_ASSIGNED` code `WorkflowValidator::assertDecision()`
+already used for the direct-assignment case. New regression test:
+assigns a task through an active delegation, revokes the delegation,
+then proves neither the delegate (no longer covered) nor the original
+delegator (their id was overwritten at assign time, pre-existing
+behaviour, unchanged) can decide it.
+
+**#2 fix -- `AccessGovernanceService::decideAccessRequest()`:** re-checks
+`organisation_memberships` for the subject on every APPROVE (skipped for
+REJECT, which grants nothing) before proceeding, throwing the same
+`ACCESS_REFERENCE_INVALID` code `requestRoleAccess()`'s own check uses.
+While already in this method, `access_requests.status` also picked up
+the guarded-UPDATE-with-affected-row-check pattern established elsewhere
+in this codebase (`decideWorkflowTask()`'s own comment explains the
+check-before-side-effects ordering) -- it was a plain unguarded Eloquent
+`$access->update(...)`, a same-request sibling of the RT-020 stale-read
+race pattern rather than the TOCTOU pattern itself, but trivial to close
+while already touching this exact method. New regression tests: approve
+refused after `offboardUser()` ends the subject's membership mid-flight
+(REJECT still works -- it isn't gated by membership); and a
+`DB::listen()`-simulated concurrent double-decide proves only one
+decision's approval row and role grant ever lands, the same technique
+`WorkflowTest`'s own race regression established.
+
+Verified: full suite 662 tests, 0 regressions.
