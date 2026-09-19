@@ -8546,3 +8546,75 @@ Critical, one each).
 Verified: full suite 707 tests, 0 regressions (this is demo data, not a
 code-path change -- no new tests were added; the existing suite's own
 pass confirms nothing was disturbed).
+
+## New feature: Supplier Ledger (2026-09-19)
+
+Closes the `accounting.supplier-ledger` `$plannedRoute` placeholder under
+"Accounting & Finance". The placeholder's own copy promised balances
+"derived from the general ledger", but reading `ExpenseService::approve`
+and the `journal_lines` migration directly confirmed neither is true
+today: nothing in this codebase ever posts a `JournalEntry` when an
+expense is approved, and `journal_lines` carries no supplier attribution
+column at all regardless -- the only real per-supplier posted-amount data
+anywhere in the platform is `Expense.supplier_party_id` (the same
+`BusinessParty`/`PartyRelationship` register Business Parties and
+Operations already use). Rather than guess, this was put to the user
+directly as a clarifying question with two designs: derive the ledger
+from `Expense` rows as-is, or first wire real double-entry GL postings
+into `ExpenseService::approve()` (a behavioural change to an already-
+shipped, already-tested service) and derive from those. The user chose
+the former.
+
+**`app/Services/Business/SupplierLedgerService.php`** (new) --
+`supplierOptions()` (every active-SUPPLIER-relationship `BusinessParty`
+in scope, for the picker), `summary()` (per-supplier posted/pending
+totals and counts, ranked by posted balance, plus a separate "unassigned"
+bucket for expenses with no `supplier_party_id`), `statement()` (one
+supplier's full expense history, oldest first, with a running posted
+balance). An expense's own maker-checker lifecycle has no separate
+"posted"/"paid" status, so `APPROVED` is treated as "posted" (the same
+meaning "posted" carries everywhere else in this platform, e.g. a
+`JournalEntry`'s own `POSTED` status); `SUBMITTED` is shown as a distinct
+pending figure that never moves the posted balance, and a `REJECTED` line
+is shown on a supplier's statement for transparency but likewise never
+moves it -- an unapproved or rejected expense is not a recognised
+liability. Scoped via the same `OrganisationResolver` every other
+Business-domain service already uses.
+
+**`app/Http/Controllers/Business/SupplierLedgerViewController.php`**
+(new) -- serves `accounting.supplier-ledger`
+(`/accounting/supplier-ledger`), a route that was a `$plannedRoute` stub
+in `routes/web.php` until now (removed; route name and `accounting:read`
+permission kept identical so the sidebar's Accounting & Finance >
+Supplier Ledger link needed no change). An optional `?supplier_id=` query
+param drills into that one supplier's own statement; an id outside the
+actor's organisation surfaces `BusinessResourceException`'s own JSON 404,
+matching the same uncaught-propagation precedent already established by
+`OperationsViewController`/`QuotationViewController` for this exception.
+
+**View**: `resources/views/accounting/supplier-ledger.blade.php` (new) --
+summary cards (suppliers with activity, total posted balance, total
+pending), a supplier-balance table with a per-row "View statement" link,
+an unassigned-expenses row when applicable, and a supplier picker whose
+selection renders that supplier's full line-item statement with a
+running-balance column.
+
+**Tests**: `tests/Feature/Business/SupplierLedgerViewTest.php` (new, 9
+tests) -- auth/permission gates, graceful empty state, posted/pending
+totals correctly computed and ranked (with a `DRAFT` expense confirmed to
+never appear at all), the unassigned-expenses bucket, cross-organisation
+scoping, a real running-balance statement (confirming a `REJECTED` line
+is shown but never moves the balance), a foreign supplier id 404ing, and
+the picker only ever listing active-SUPPLIER parties (not a
+customer-only party).
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+created a real supplier (`BusinessParty` + active `SUPPLIER`
+`PartyRelationship`) and a real `APPROVED` expense against it via
+`php artisan tinker`, confirmed both the summary table (N$2,300.00 posted
+balance) and the drill-down statement (`EXP-VERIFY-1`, N$2,300.00 running
+balance) rendered correctly over `GET /accounting/supplier-ledger` and
+`GET /accounting/supplier-ledger?supplier_id=...`, then removed the
+verification rows to restore the normal `DemoSeeder` baseline.
+
+Verified: full suite 716 tests, 0 regressions.

@@ -33,6 +33,7 @@ use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
+use App\Http\Controllers\Business\SupplierLedgerViewController;
 use App\Http\Controllers\Compliance\AuditCaseController;
 use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceOverviewViewController;
@@ -273,6 +274,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // journal authoring is a future scope, not a gap this port silently
     // introduced). See AccountingViewController's own doc comment.
     Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
+    Route::get('/accounting/supplier-ledger', [SupplierLedgerViewController::class, 'index'])->name('accounting.supplier-ledger');
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
@@ -474,9 +476,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // real routes registered alongside /operations above.
     // Foreign Invoices is no longer a planned-module placeholder -- see
     // the real routes registered alongside /operations above.
-    $plannedRoute('/accounting/supplier-ledger', 'accounting.supplier-ledger', 'accounting:read', 'Accounting & Finance', 'Supplier Ledger',
-        'Per-supplier posted balances derived from the general ledger.',
-        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    // Supplier Ledger is no longer a planned-module placeholder -- see
+    // the real route registered alongside the other Accounting routes
+    // below (SupplierLedgerViewController). Route name and permission
+    // kept identical to the placeholder this replaces so the sidebar's
+    // Accounting & Finance > Supplier Ledger link needed no change.
     $plannedRoute('/accounting/customer-ledger', 'accounting.customer-ledger', 'accounting:read', 'Accounting & Finance', 'Customer Ledger',
         'Per-customer posted balances derived from the general ledger.',
         'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
