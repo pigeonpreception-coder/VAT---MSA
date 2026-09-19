@@ -58,6 +58,14 @@ class RiskViewController extends Controller
         ]);
     }
 
+    /** An aggregate summary report -- reachable from the register above, not a replacement for it. */
+    public function report(Request $request): View
+    {
+        $this->authorize('permission', 'risk:read');
+
+        return view('risk-indicators.report', ['summary' => $this->risk->summary($request->user())]);
+    }
+
     public function show(Request $request, string $id): View
     {
         $this->authorize('permission', 'risk:read');
