@@ -8680,3 +8680,65 @@ balance) rendered correctly, then removed the verification rows to
 restore the normal `DemoSeeder` baseline.
 
 Verified: full suite 724 tests, 0 regressions.
+
+## New feature: Budgets (2026-09-19)
+
+Closes the `accounting.budgets` `$plannedRoute` placeholder. Its own
+scope note claimed "No budget domain model exists in the platform
+today" -- true when originally written, but confirmed stale by reading
+`App\Services\Business\ProjectService` directly:
+`App\Models\ProjectBudget`/`ProjectCost` and
+`ProjectService::approveBudget()` already exist and are already
+exercised end to end by `tests/Feature/Business/ProjectTest.php`. A
+full-repo grep before writing a line of this page confirmed the actual
+gap: `ProjectController::approveBudget` (the JSON API) had no Blade UI
+action anywhere reaching it at all, and `operations/index.blade.php`'s
+own "Project control" panel only ever shows each project's *already-
+approved* budget vs cost, read-only, with no organisation-wide totals
+and no way to see or act on a still-`PROPOSED` budget.
+
+**`app/Http/Controllers/Business/BudgetsViewController.php`** (new) --
+serves `accounting.budgets` (`/accounting/budgets`, batched
+Project/ProjectBudget/ProjectCost reads, the same N+1-avoidance shape
+`OperationsViewController`'s own project panel already established) and
+`accounting.budgets.approval` (`POST /accounting/budgets/{id}/approval`).
+The index route keeps the placeholder's own `accounting:read` gate (no
+sidebar change needed); the approval action is separately gated
+`projects:manage`, matching `ProjectController::approveBudget`'s own
+permission exactly -- reused directly, never a second write path, so its
+maker-checker self-review guard (the project's own manager can never
+approve its own budget), idempotency and audit trail all apply exactly
+as they already do via the JSON API. A self-review attempt's
+`AuthorizationException` is left uncaught, the same clean-403 precedent
+`ExpenseService`'s own self-review guard already established for
+Operations.
+
+**View**: `resources/views/accounting/budgets.blade.php` (new) --
+organisation-wide summary cards (total proposed, total approved, total
+actual cost, total variance), and a per-project table (budget status
+badge, proposed/approved/cost/variance) with an inline approve form
+(pre-filled with the proposed amount) on every still-`PROPOSED` row, shown
+only to an actor holding `projects:manage`.
+
+**Tests**: `tests/Feature/Business/BudgetsViewTest.php` (new, 10 tests)
+-- auth/permission gates, graceful empty state, a project with no budget
+proposed at all rendering "No budget proposed" rather than a false zero,
+proposed/approved/cost/variance figures and organisation-wide totals
+computed correctly, cross-organisation scoping, a real approval by an
+independent approver updating the database, the project's own manager
+denied with a 403, a role without `projects:manage` denied, and a
+non-numeric approved amount rejected cleanly rather than silently
+coerced to zero (the same input-hardening class of fix this codebase's
+own red-team punch list already applied elsewhere).
+
+Live-verified over real HTTP: created a real `PROPOSED` `ProjectBudget`
+(N$5,000.00) with a real `ProjectCost` (N$1,000.00) against the demo
+organisation, confirmed the page rendered the correct proposed/cost
+figures and a pre-filled approve form; posted a real approval as an
+independent approver (N$4,500.00) and confirmed the page then showed
+`APPROVED` and the correct variance (N$3,500.00); separately confirmed
+the project's own manager attempting to approve the same budget gets a
+real `403`. Verification rows removed afterward to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 734 tests, 0 regressions.

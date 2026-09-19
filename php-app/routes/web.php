@@ -30,6 +30,7 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ForeignInvoiceViewController;
 use App\Http\Controllers\Business\LocalInvoiceViewController;
 use App\Http\Controllers\Business\OperationsViewController;
+use App\Http\Controllers\Business\BudgetsViewController;
 use App\Http\Controllers\Business\CustomerLedgerViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
@@ -277,6 +278,8 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
     Route::get('/accounting/supplier-ledger', [SupplierLedgerViewController::class, 'index'])->name('accounting.supplier-ledger');
     Route::get('/accounting/customer-ledger', [CustomerLedgerViewController::class, 'index'])->name('accounting.customer-ledger');
+    Route::get('/accounting/budgets', [BudgetsViewController::class, 'index'])->name('accounting.budgets');
+    Route::post('/accounting/budgets/{id}/approval', [BudgetsViewController::class, 'approve'])->name('accounting.budgets.approval');
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
@@ -498,9 +501,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
 
         return view('accounting.fixed-assets');
     })->name('accounting.fixed-assets');
-    $plannedRoute('/accounting/budgets', 'accounting.budgets', 'accounting:read', 'Accounting & Finance', 'Budgets',
-        'Budget planning and budget-versus-actual tracking.',
-        'Not yet built. No budget domain model exists in the platform today.');
+    // Budgets is no longer a planned-module placeholder -- see the real
+    // routes registered alongside the other Accounting routes above
+    // (BudgetsViewController). Route name and permission kept identical
+    // to the placeholder this replaces so the sidebar's Accounting &
+    // Finance > Budgets link needed no change. The placeholder's own
+    // scope note ("No budget domain model exists") was stale --
+    // App\Models\ProjectBudget/ProjectCost already existed.
     $plannedRoute('/accounting/purchase-orders', 'accounting.purchase-orders', 'accounting:read', 'Accounting & Finance', 'Purchase Orders',
         'Purchase order issuance, approval and conversion to supplier invoices.',
         'Not yet built. No purchase-order domain model exists in the platform today.');
