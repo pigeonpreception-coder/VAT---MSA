@@ -8465,3 +8465,84 @@ indicators exist there), and the register page's new link points at the
 real report route.
 
 Verified: full suite 707 tests, 0 regressions.
+
+## New demo data: NEMA Property Developers seed, from the sample documents (2026-09-19)
+
+The Invoice Reconciliation Report and NamRA VAT Summary Report above were
+built against the user's two sample documents but the demo database never
+actually contained the data those samples describe -- both reports only
+ever showed real content for the throwaway taxpayers each feature test
+creates for itself. Requested directly: "pull the data from the attached
+sample I attached earlier on to fill in those built reports."
+
+**`database/seeders/data/nema_property_developers_invoices.json`** (new)
+-- a literal transcription of the xlsx's Exempt/Zero-rated/Rated output
+sections and its two input-purchase batches (55 real line items in
+total: dates, counterparties, descriptions, net amounts), re-extracted
+from the source workbook with `openpyxl` rather than retyped by hand.
+Per-line VAT is recomputed at 15% in integer cents (matching
+`InvoiceCalculator`'s own half-up rounding) rather than trusting the
+source spreadsheet's floating-point roundings, since every line must
+pass `calculateAndValidate` exactly.
+
+**`database/seeders/NemaPropertyDevelopersDemoSeeder.php`** (new, called
+from `DatabaseSeeder`) -- registers the real taxpayer (NEMA PROPERTY
+DEVELOPERS CC, VAT/TIN 12384786-01-5) plus the nine distinct input-side
+suppliers named in the sample (BUCO Winhoek, BUCO Ondangwa, MegaBuild,
+Mr Price Home, Game, High Link Hardware, Swachem Namibia, Bargain
+Building Suppliers, Timber Winhoek) as their own registered taxpayers
+with SELLER capability -- required for their invoices to NEMA to reach
+`MATCHED` status, since `VatReconciliationReportService`'s own
+`INPUT_STATUSES` filter only ever counts `MATCHED` input invoices.
+Output-side counterparties (the banks, NamRA itself, the rated-output
+"clients") are deliberately left unregistered, matching the source data
+as given -- several of those trip the real risk scorer's unregistered-
+buyer/high-value points into a genuine `EXCEPTION` status and a real
+`ReconciliationException` row, which is realistic, not a bug (`EXCEPTION`
+is still counted in `OUTPUT_STATUSES`).
+
+Every one of the 55 invoices is submitted through the real
+`InvoiceService::submit` pipeline (never inserted directly) acting as a
+national-scope NamRA officer (bypasses `TenantScope::requireTaxpayer`,
+which otherwise requires the acting user to belong to the *supplier*
+side of each invoice -- the natural actor for an input invoice is the
+vendor, not NEMA), so certification, VAT-rule resolution, risk scoring
+and ledger entries are all genuine.
+
+The source workbook's own "AUDIT PERIOD: MAY - JUNE 2026" is a single
+bimonthly window, but `VatLifecycleService::generateReturn` ties every
+ledger entry to a single calendar-month `period_code` (an invoice's own
+`issue_date`, truncated to `YYYY-MM`) -- a real, pre-existing constraint
+of the ledger tagging, not something this seeder's job to fix. The
+sample is therefore split into two real monthly `VatPeriod` rows,
+`2026-05` and `2026-06`, each independently reconciled and returned via
+a real `generateReturn()` call -- which is also how a NamRA officer
+would actually browse this taxpayer's history one period at a time. The
+two "input adjustment" lines the workbook dates in March 2026 (purchases
+claimed in the May-June return) are carried into the May period with
+their `issue_date` moved to 2026-05-01, since this app has no separate
+"claim period" distinct from `issue_date` to express that otherwise.
+Splitting a two-month window into two independently-rounded monthly
+periods means the combined net payable across both (-N$52,066.66) is a
+few cents off the source workbook's own single-window figure
+(-N$52,066.62) -- expected drift from independent per-period rounding,
+not a defect.
+
+Idempotent and safe to re-run (`php artisan db:seed --class=
+NemaPropertyDevelopersDemoSeeder`): every invoice submission is guarded
+by a pre-check against `source_system`/`source_document_id` before
+calling `submit()`, and every party/period row uses `updateOrCreate`.
+
+Live-verified over real HTTP as the seeded taxpayer's own owner login:
+both `/vat-management/reconciliation` and `/refunds` render the real
+sample figures for both the May and June periods (e.g. June's rated
+output taxable/VAT of N$115,778.29/N$17,366.74 and input of
+N$470,898.83/N$70,634.84 match the source workbook exactly), each with
+a "Reconciled" banner against its own freshly-generated return; `/vat-
+management/audit-report` shows the real spread of risk levels the
+unregistered high-value output invoices produced (Low/Medium/High/
+Critical, one each).
+
+Verified: full suite 707 tests, 0 regressions (this is demo data, not a
+code-path change -- no new tests were added; the existing suite's own
+pass confirms nothing was disturbed).
