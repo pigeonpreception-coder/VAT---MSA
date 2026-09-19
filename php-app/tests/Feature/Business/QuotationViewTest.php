@@ -271,4 +271,33 @@ class QuotationViewTest extends TestCase
         $response->assertSee('This quotation cannot be edited.');
         $response->assertDontSee('Save quotation revision');
     }
+
+    /**
+     * Closes the `quotation.converted` $plannedRoute placeholder: the
+     * register's own ?status= filter (QuotationService::search) already
+     * existed and was already tested server-side, but no Blade UI control
+     * ever reached it. This exercises the real status dropdown added to
+     * resources/views/quotations/index.blade.php, and the sidebar's own
+     * "Converted Quotations" link now points at exactly this URL.
+     */
+    public function test_the_register_can_be_filtered_to_only_converted_quotations(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0010');
+        $customerPartyId = $this->createCustomerParty($seller['owner']);
+        $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, ['quotation_number' => 'QUO-VIEW-CONVERTED']));
+        $convertedId = \App\Models\Quotation::where('quotation_number', 'QUO-VIEW-CONVERTED')->firstOrFail()->id;
+        $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/sending");
+        $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/accept");
+        $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/convert", [
+            'invoice_number' => 'INV-FROM-VIEW-CONVERTED', 'issue_date' => '2026-09-02',
+        ]);
+        $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, ['quotation_number' => 'QUO-VIEW-STILL-DRAFT']));
+
+        $response = $this->actingAs($seller['owner'])->get('/quotations?status=CONVERTED');
+
+        $response->assertOk();
+        $response->assertSee('QUO-VIEW-CONVERTED');
+        $response->assertSee('View invoice');
+        $response->assertDontSee('QUO-VIEW-STILL-DRAFT');
+    }
 }

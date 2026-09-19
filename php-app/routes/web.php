@@ -541,9 +541,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // '/operations/human-resources' etc. block above, defined alongside
     // the rest of the Operations routes rather than here among the
     // remaining placeholders.
-    $plannedRoute('/quotation/converted', 'quotation.converted', 'commercial:read', 'Quotation', 'Converted Quotations',
-        'Quotations that have progressed to a purchase order or invoice.',
-        'Not yet built as a dedicated view. Quotation status and conversion actions already exist on the quotation register.');
+    // Converted Quotations is no longer a planned-module placeholder --
+    // the existing quotation register (quotations.index) already had a
+    // real, tested ?status= filter server-side (QuotationService::search)
+    // with zero UI ever reaching it; a status dropdown was added to
+    // resources/views/quotations/index.blade.php instead of building a
+    // separate page, and the sidebar's "Converted Quotations" link now
+    // points at quotations.index?status=CONVERTED, the same pattern
+    // Customers/Suppliers/Service Providers already use for
+    // business-parties.index.
     $plannedRoute('/quotation/converted-invoices', 'quotation.converted-invoices', 'commercial:read', 'Quotation', 'Converted Quotations into Invoices',
         'The invoice, credit notes, debit notes and related quotation for each converted quotation, in one list.',
         'Not yet built as a dedicated cross-reference view. The invoice and quotation records this would join already exist independently.');

@@ -146,7 +146,7 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'quotation') show @endif" id="group-quotation" data-bs-parent="#sidebar-accordion">
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Create New Quotation</a></li>
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}">Issued Quotations</a></li>
-                                <li><a class="nav-link" href="{{ route('quotation.converted') }}" @if (request()->routeIs('quotation.converted')) aria-current="page" @endif>Converted Quotations</a></li>
+                                <li><a class="nav-link" href="{{ route('quotations.index', ['status' => 'CONVERTED']) }}" @if (request()->routeIs('quotations.index') && request()->query('status') === 'CONVERTED') aria-current="page" @endif>Converted Quotations</a></li>
                                 <li><a class="nav-link" href="{{ route('quotation.converted-invoices') }}" @if (request()->routeIs('quotation.converted-invoices')) aria-current="page" @endif>Converted Quotations into Invoices</a></li>
                         </ul>
                     </li>

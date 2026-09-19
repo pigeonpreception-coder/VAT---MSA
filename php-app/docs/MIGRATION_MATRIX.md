@@ -8941,3 +8941,55 @@ appear under the `SUPPLIER` filter; removed it afterward to restore the
 normal `DemoSeeder` baseline.
 
 Verified: full suite 755 tests, 0 regressions.
+
+## New feature: Converted Quotations (2026-09-19)
+
+Closes the `quotation.converted` `$plannedRoute` placeholder
+("Quotations that have progressed to a purchase order or invoice").
+Same shape as the Service Providers fix: the placeholder's own scope
+note already named the real fix ("Quotation status and conversion
+actions already exist on the quotation register") -- confirmed by
+reading `QuotationService::search()`/`BusinessValidator::
+quotationSearchQuery()` directly, which already fully implement and
+validate a `?status=` filter (including `CONVERTED`), and the register's
+own `CONVERTED` rows already render a real "View invoice" link to the
+certified invoice (`quotations/index.blade.php`'s own existing
+`@if ($item['status'] === 'CONVERTED' && $item['converted_invoice_id'])`
+branch). What was missing was any UI control ever reaching that filter --
+the same "command/query exists, no UI" class of gap Budgets/Cash Flow
+Projects closed.
+
+**`app/Http/Controllers/Business/QuotationViewController.php`** --
+`index()` now also passes `'filters' => $request->only(['status', 'q'])`
+to the view, so a status filter control can reflect the current
+selection.
+
+**View**: `resources/views/quotations/index.blade.php` -- a real status
+filter dropdown (All/Draft/Issued/Accepted/Converted/Rejected/Expired)
+added to the register's own card header, auto-submitting on change, plus
+a live count of the filtered result set. `resources/views/layouts/
+app.blade.php` -- the sidebar's "Converted Quotations" link now points
+directly at `quotations.index` with `?status=CONVERTED`, the exact same
+pattern its "Customers"/"Suppliers"/"Service Providers" siblings already
+use for `business-parties.index`, rather than a separate named route.
+
+**Tests**: `tests/Feature/Business/QuotationViewTest.php` -- 1 new test
+appended: a converted quotation and a still-draft quotation are created,
+the converted one carried through the real send/accept/convert flow to
+a genuine certified invoice, then `GET /quotations?status=CONVERTED`
+confirmed to show only the converted quotation (with its real "View
+invoice" link) and correctly exclude the draft one. All 12 pre-existing
+tests in that file still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+confirmed the sidebar's own rendered "Converted Quotations" link points
+at `/quotations?status=CONVERTED`; created a real quotation, drove it
+through send/accept/convert to a genuine certified invoice via the real
+Blade forms; confirmed it appeared under the `CONVERTED` filter with a
+working "View invoice" link and correctly did not appear under the
+`DRAFT` filter; removed all of it afterward (quotation, its lines/
+revisions, the certified invoice and its own lines/certificate/ledger/
+reconciliation rows, the customer party) to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 756 tests, 0 regressions.

@@ -71,6 +71,7 @@ class QuotationViewController extends Controller
             'quotedValueCents' => $quotedValueCents,
             'canManageQuotations' => $user->hasAppPermission('quotations:manage'),
             'canConvertQuotations' => $user->hasAppPermission('quotations:manage') && $user->hasAppPermission('invoices:submit'),
+            'filters' => $request->only(['status', 'q']),
         ]);
     }
 
