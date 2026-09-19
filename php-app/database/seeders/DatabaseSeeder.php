@@ -24,6 +24,7 @@ class DatabaseSeeder extends Seeder
             OrganisationAdministratorRoleSeeder::class,
             NavigationSeeder::class,
             DemoSeeder::class,
+            NemaPropertyDevelopersDemoSeeder::class,
         ]);
     }
 }

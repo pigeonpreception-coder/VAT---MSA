@@ -1,0 +1,484 @@
+{
+  "may": {
+    "output": [
+      {
+        "category": "ZERO_RATED",
+        "date": "2026-05-29",
+        "party": "VAT Refund from NamRA",
+        "description": "NamRA",
+        "net_cents": 15766911,
+        "tax_cents": 0
+      },
+      {
+        "category": "ZERO_RATED",
+        "date": "2026-05-29",
+        "party": "BUCO Refund Erf No, 2154 and 2161",
+        "description": " Cession Payment - Refund of the Balance",
+        "net_cents": 10882708,
+        "tax_cents": 0
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-16",
+        "party": "High Link Hardware Nkurunkuru",
+        "description": "Building Materials",
+        "net_cents": 406103,
+        "tax_cents": 60915
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-17",
+        "party": "High Link Hardware Nkurunkuru",
+        "description": "Building Materials",
+        "net_cents": 527760,
+        "tax_cents": 79164
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-18",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 851564,
+        "tax_cents": 127735
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-19",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 4113125,
+        "tax_cents": 616969
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-20",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 139910,
+        "tax_cents": 20987
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-21",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 466402,
+        "tax_cents": 69960
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-22",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 106032,
+        "tax_cents": 15905
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-23",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 362460,
+        "tax_cents": 54369
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-24",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 590848,
+        "tax_cents": 88627
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-25",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 1698120,
+        "tax_cents": 254718
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-26",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 358700,
+        "tax_cents": 53805
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-27",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 234248,
+        "tax_cents": 35137
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-28",
+        "party": "Shoprite & Checkers",
+        "description": "Building & Staff food Materials",
+        "net_cents": 180696,
+        "tax_cents": 27104
+      }
+    ],
+    "input": [
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials (March purchase, claimed in May period)",
+        "invoice_no": "WINDHO/100023346",
+        "net_cents": 1637553,
+        "tax_cents": 245633
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials (March purchase, claimed in May period)",
+        "invoice_no": "WINDHO/100023345",
+        "net_cents": 2214730,
+        "tax_cents": 332210
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "MegaBuild",
+        "description": "Building Materials",
+        "invoice_no": "1011/01560653",
+        "net_cents": 29283,
+        "tax_cents": 4392
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "Mr Price Home",
+        "description": "Building Materials",
+        "invoice_no": "8521-2-146240",
+        "net_cents": 339981,
+        "tax_cents": 50997
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "Mr Price Home",
+        "description": "Building Materials",
+        "invoice_no": "8521-2-146234",
+        "net_cents": 56520,
+        "tax_cents": 8478
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "Game",
+        "description": "Building Materials",
+        "invoice_no": "000G039/01-05-26/00033",
+        "net_cents": 60898,
+        "tax_cents": 9135
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-01",
+        "party": "Game",
+        "description": "Building Materials",
+        "invoice_no": "000G039/01-05-26/0847/106/0205",
+        "net_cents": 1029478,
+        "tax_cents": 154422
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-02",
+        "party": "MegaBuild",
+        "description": "Building Materials",
+        "invoice_no": "1011/01301226",
+        "net_cents": 45430,
+        "tax_cents": 6815
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-03",
+        "party": "High Link Hardware",
+        "description": "Building Materials",
+        "invoice_no": "#239867",
+        "net_cents": 303230,
+        "tax_cents": 45485
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-26",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100027223",
+        "net_cents": 3513720,
+        "tax_cents": 527058
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-05-30",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "3037/01433731",
+        "net_cents": 4172,
+        "tax_cents": 626
+      }
+    ]
+  },
+  "june": {
+    "output": [
+      {
+        "category": "EXEMPT",
+        "date": "2026-06-24",
+        "party": "FNB Home Loans",
+        "description": "Payment for Erf No.  2154 & 2161 Nkurenkuru",
+        "net_cents": 53700000,
+        "tax_cents": 0
+      },
+      {
+        "category": "EXEMPT",
+        "date": "2026-06-26",
+        "party": "Standard Bank Home Loans",
+        "description": "Payment for Erf No.  2178, Nkurenkuru",
+        "net_cents": 33178000,
+        "tax_cents": 0
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-04",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 53308,
+        "tax_cents": 7996
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-05",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 57032,
+        "tax_cents": 8555
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-06",
+        "party": "Timber Winhoek",
+        "description": "Building Materials",
+        "net_cents": 8395806,
+        "tax_cents": 1259371
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-07",
+        "party": "Timber Winhoek",
+        "description": "Building Materials",
+        "net_cents": 147739,
+        "tax_cents": 22161
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-08",
+        "party": "Timber Winhoek",
+        "description": "Building Materials",
+        "net_cents": 353022,
+        "tax_cents": 52953
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-09",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 20171,
+        "tax_cents": 3026
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-10",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 1574422,
+        "tax_cents": 236163
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-11",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "net_cents": 976329,
+        "tax_cents": 146449
+      }
+    ],
+    "input": [
+      {
+        "category": "STANDARD",
+        "date": "2026-06-06",
+        "party": "BUCO Ondangwa",
+        "description": "Building Materials",
+        "invoice_no": "ONDANG/00114792",
+        "net_cents": 1774237,
+        "tax_cents": 266136
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-06",
+        "party": "BUCO Ondangwa",
+        "description": "Building Materials",
+        "invoice_no": "ONDANG/00114793",
+        "net_cents": 1075383,
+        "tax_cents": 161307
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-08",
+        "party": "BUCO Ondangwa",
+        "description": "Building Materials",
+        "invoice_no": "ONDANG/00114813",
+        "net_cents": 11753225,
+        "tax_cents": 1762984
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-10",
+        "party": "Swachem Namibia (Pty) Ldt",
+        "description": "Building Materials",
+        "invoice_no": "*IN425359",
+        "net_cents": 125000,
+        "tax_cents": 18750
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-09",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100027807",
+        "net_cents": 5177664,
+        "tax_cents": 776650
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-11",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100027948",
+        "net_cents": 39385,
+        "tax_cents": 5908
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-11",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100027950",
+        "net_cents": 7893069,
+        "tax_cents": 1183960
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-12",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028010",
+        "net_cents": 1672222,
+        "tax_cents": 250833
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-12",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028012",
+        "net_cents": 253564,
+        "tax_cents": 38035
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-12",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028011",
+        "net_cents": 3556757,
+        "tax_cents": 533514
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-15",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028109",
+        "net_cents": 3826712,
+        "tax_cents": 574007
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-15",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028111",
+        "net_cents": 3760880,
+        "tax_cents": 564132
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-17",
+        "party": "Bargain Building Suppliers Goreangab Mall Katutura",
+        "description": "Building Materials",
+        "invoice_no": "*INO1001505",
+        "net_cents": 13055,
+        "tax_cents": 1958
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-17",
+        "party": "High Link Hardware",
+        "description": "Building Materials",
+        "invoice_no": "#246531",
+        "net_cents": 89134,
+        "tax_cents": 13370
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-17",
+        "party": "High Link Hardware",
+        "description": "Building Materials",
+        "invoice_no": "#246402",
+        "net_cents": 215746,
+        "tax_cents": 32362
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-18",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028312",
+        "net_cents": 280000,
+        "tax_cents": 42000
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-23",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028531",
+        "net_cents": 107826,
+        "tax_cents": 16174
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-27",
+        "party": "High Link Hardware",
+        "description": "Building Materials",
+        "invoice_no": "#248163",
+        "net_cents": 298360,
+        "tax_cents": 44754
+      },
+      {
+        "category": "STANDARD",
+        "date": "2026-06-30",
+        "party": "BUCO Winhoek",
+        "description": "Building Materials",
+        "invoice_no": "WINDHO/100028849",
+        "net_cents": 5177664,
+        "tax_cents": 776650
+      }
+    ]
+  }
+}
