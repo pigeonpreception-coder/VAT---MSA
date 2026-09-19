@@ -6,6 +6,8 @@ use App\Domain\Business\BusinessValidator;
 use App\Exceptions\BusinessResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\BusinessParty;
+use App\Models\Invoice;
+use App\Models\InvoiceCorrection;
 use App\Models\PartyRelationship;
 use App\Models\Quotation;
 use App\Models\QuotationLine;
@@ -222,6 +224,60 @@ class QuotationService
             ->map(fn (Quotation $q) => $this->presentSummary($q))->values()->all();
 
         return ['organisation_id' => $organisation->id, 'quotations' => $quotations, 'total_count' => $totalCount, 'limit' => $query['limit'], 'offset' => $query['offset']];
+    }
+
+    /**
+     * Closes the `quotation.converted-invoices` $plannedRoute placeholder
+     * ("The invoice, credit notes, debit notes and related quotation for
+     * each converted quotation, in one list") -- a genuine cross-reference
+     * join this platform never had, unlike the read-only-filter gaps
+     * Budgets/Cash Flow Projects/Converted Quotations closed: the
+     * placeholder's own scope note was accurate ("The invoice and
+     * quotation records this would join already exist independently").
+     * Every CONVERTED quotation, its real certified invoice
+     * (Quotation.converted_invoice_id), and every credit/debit note ever
+     * raised against that invoice (invoice_corrections.original_invoice_id),
+     * batched into three queries total regardless of row count -- the same
+     * N+1-avoidance shape search()'s own doc comment above already
+     * establishes for this file.
+     *
+     * @return array<string, mixed>
+     */
+    public function crossReference(User $actor, ?string $requestedOrganisationId): array
+    {
+        $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
+
+        $quotations = Quotation::where('organisation_id', $organisation->id)->where('status', 'CONVERTED')
+            ->whereNotNull('converted_invoice_id')->with('customer')
+            ->orderByDesc('issue_date')->orderByDesc('created_at')->limit(200)->get();
+
+        $invoiceIds = $quotations->pluck('converted_invoice_id')->filter()->unique()->values();
+        $invoicesById = $invoiceIds->isEmpty() ? collect() : Invoice::whereIn('id', $invoiceIds)->get()->keyBy('id');
+        $correctionsByOriginal = $invoiceIds->isEmpty() ? collect() : InvoiceCorrection::whereIn('original_invoice_id', $invoiceIds)
+            ->with('correctionInvoice')->orderBy('created_at')->get()->groupBy('original_invoice_id');
+
+        $rows = $quotations->map(function (Quotation $quotation) use ($invoicesById, $correctionsByOriginal) {
+            $invoice = $invoicesById->get($quotation->converted_invoice_id);
+
+            return [
+                'quotation_id' => $quotation->id, 'quotation_number' => $quotation->quotation_number,
+                'customer_name' => optional($quotation->customer)->display_name, 'currency' => $quotation->currency,
+                'quotation_total_cents' => (int) $quotation->total_cents,
+                'invoice' => $invoice ? [
+                    'id' => $invoice->id, 'invoice_number' => $invoice->invoice_number, 'issue_date' => $invoice->issue_date->toDateString(),
+                    'status' => $invoice->status, 'total_cents' => (int) $invoice->total_cents,
+                ] : null,
+                'corrections' => ($correctionsByOriginal->get($quotation->converted_invoice_id) ?? collect())
+                    ->map(fn (InvoiceCorrection $c) => [
+                        'id' => $c->id, 'correction_type' => $c->correction_type, 'reason' => $c->reason, 'status' => $c->status,
+                        'invoice_number' => optional($c->correctionInvoice)->invoice_number,
+                        'issue_date' => optional($c->correctionInvoice)->issue_date?->toDateString(),
+                        'total_cents' => (int) optional($c->correctionInvoice)->total_cents,
+                    ])->values()->all(),
+            ];
+        })->values()->all();
+
+        return ['organisation_id' => $organisation->id, 'rows' => $rows];
     }
 
     /**

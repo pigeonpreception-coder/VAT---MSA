@@ -264,6 +264,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // App\Services\Business\BusinessPartyService and its own
     // business-parties.index route from the Business Parties slice.
     Route::get('/quotations', [QuotationViewController::class, 'index'])->name('quotations.index');
+    // Converted Quotations into Invoices is no longer a planned-module
+    // placeholder -- see the removed $plannedRoute call below among the
+    // remaining placeholders and QuotationViewController::convertedInvoices
+    // / QuotationService::crossReference for the real implementation.
+    // Route name and commercial:read permission kept identical to the
+    // placeholder this replaces so the sidebar's Quotation > Converted
+    // Quotations into Invoices link needed no change.
+    Route::get('/quotations/converted-invoices', [QuotationViewController::class, 'convertedInvoices'])->name('quotation.converted-invoices');
     Route::post('/quotations', [QuotationViewController::class, 'store'])->name('quotations.store');
     Route::get('/quotations/{id}/edit', [QuotationViewController::class, 'edit'])->name('quotations.edit');
     Route::patch('/quotations/{id}', [QuotationViewController::class, 'update'])->name('quotations.update');
@@ -550,9 +558,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // points at quotations.index?status=CONVERTED, the same pattern
     // Customers/Suppliers/Service Providers already use for
     // business-parties.index.
-    $plannedRoute('/quotation/converted-invoices', 'quotation.converted-invoices', 'commercial:read', 'Quotation', 'Converted Quotations into Invoices',
-        'The invoice, credit notes, debit notes and related quotation for each converted quotation, in one list.',
-        'Not yet built as a dedicated cross-reference view. The invoice and quotation records this would join already exist independently.');
+    // Converted Quotations into Invoices is no longer a planned-module
+    // placeholder -- see the real route registered alongside the other
+    // quotation routes above (QuotationViewController::convertedInvoices).
+    // Unlike Converted Quotations above, this placeholder's own scope note
+    // was accurate: it is a genuine new three-table join (Quotation ->
+    // Invoice via converted_invoice_id -> InvoiceCorrection via
+    // original_invoice_id) that did not exist anywhere else in the
+    // codebase, not a UI-only gap over an existing filter.
     $plannedRoute('/project-management/new', 'project-management.new', 'projects:read', 'Project Management', 'Create New Project',
         'Capture project name, customer, description, location, dates, budget, expected revenue, category, VAT treatment and owner.',
         'Not yet built. No dedicated project domain model exists in the platform today.');

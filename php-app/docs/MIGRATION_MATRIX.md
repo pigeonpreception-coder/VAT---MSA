@@ -8993,3 +8993,78 @@ reconciliation rows, the customer party) to restore the normal
 `DemoSeeder` baseline.
 
 Verified: full suite 756 tests, 0 regressions.
+
+## New feature: Converted Quotations into Invoices (2026-09-19)
+
+Closes the `quotation.converted-invoices` `$plannedRoute` placeholder
+("The invoice, credit notes, debit notes and related quotation for each
+converted quotation, in one list"). Unlike Converted Quotations above,
+this placeholder's own scope note was accurate: a full-repo grep found
+no query anywhere that joined a converted `Quotation` to its certified
+`Invoice` (via `converted_invoice_id`) and every credit/debit note ever
+raised against that invoice (`InvoiceCorrection.original_invoice_id` ->
+`InvoiceCorrection.correction_invoice_id`, both FKs into `invoices`).
+This is a genuine new three-table join, not a UI-only gap over an
+existing filter.
+
+**`app/Services/Business/QuotationService.php`** -- new
+`crossReference(User $actor, ?string $requestedOrganisationId): array`
+method. Loads every `CONVERTED` quotation with a `converted_invoice_id`
+for the organisation (capped at 200, most recent first), then batches
+the join into two more queries regardless of row count: one
+`Invoice::whereIn('id', ...)` keyed by id, and one
+`InvoiceCorrection::whereIn('original_invoice_id', ...)` (eager-loading
+`correctionInvoice`) grouped by the original invoice id -- the same
+N+1-avoidance batching pattern Budgets/Cash Flow Projects/Purchase
+Orders all use. Maps each quotation to its invoice (number, issue date,
+status, total) and an ordered list of its corrections (type, reason,
+status, the correction invoice's own number/date/total).
+
+**`app/Http/Controllers/Business/QuotationViewController.php`** -- new
+`convertedInvoices(Request $request): View` action, gated on
+`commercial:read` (identical to the placeholder), rendering
+`quotations.converted-invoices` from `crossReference()`'s result.
+
+**View**: `resources/views/quotations/converted-invoices.blade.php`
+(new) -- one row per converted quotation showing the quotation number
+and quoted total, the customer, a link to the real certified invoice
+(`invoices.show`) with its issue date and status badge and total, and a
+per-row list of every credit/debit note against that invoice (type
+badge, correction invoice number, issue date, total, reason), with a
+graceful empty state when nothing has been converted yet.
+
+**Routes**: `routes/web.php` -- the `$plannedRoute` call removed;
+`GET /quotations/converted-invoices` registered under the existing
+`quotations.*` route group with the identical route name
+(`quotation.converted-invoices`) and `commercial:read` permission, so
+the sidebar's Quotation > "Converted Quotations into Invoices" link
+needed no change.
+
+**Tests**: `tests/Feature/Business/QuotationViewTest.php` -- 2 new
+tests appended: one drives a quotation through the real send/accept/
+convert flow to a certified invoice, raises a real credit note against
+it via the existing invoice-correction path
+(`POST /api/v1/invoices` with `document_type=CREDIT_NOTE` and an
+`original_document_reference`), then confirms
+`GET /quotations/converted-invoices` shows the quotation, its invoice,
+and the credit note with its reason all joined on one page; the other
+confirms the empty state when nothing has been converted. All 13
+pre-existing tests in that file still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner
+login: created a real customer party and quotation through the actual
+Blade forms, drove it through send/accept/convert to a genuine
+certified invoice, then raised a real credit note against that invoice
+through the JSON API's own correction path. Confirmed
+`/quotations/converted-invoices` rendered the quotation, its invoice
+(N$ 1,150.00) and the credit note (N$ -115.00, with its reason) exactly
+as designed, and that the empty state read "No quotations have been
+converted to an invoice yet." before any of this data existed. Removed
+all of it afterward (the credit note, the original invoice and both
+invoices' lines/certificates/VAT transactions, the quotation and its
+lines/revisions, the customer party and its relationship row) to
+restore the normal `DemoSeeder` baseline -- confirmed by re-querying
+zero quotations/invoices/business parties for the demo organisation
+and the page showing the empty state again.
+
+Verified: full suite 758 tests, 0 regressions.
