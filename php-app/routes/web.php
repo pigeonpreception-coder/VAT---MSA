@@ -32,6 +32,7 @@ use App\Http\Controllers\Business\LocalInvoiceViewController;
 use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\BudgetsViewController;
 use App\Http\Controllers\Business\CustomerLedgerViewController;
+use App\Http\Controllers\Business\CashFlowViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\PurchaseOrderViewController;
 use App\Http\Controllers\Business\QuotationController;
@@ -289,6 +290,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/accounting/purchase-orders/{id}/issuance', [PurchaseOrderViewController::class, 'issue'])->name('accounting.purchase-orders.issue');
     Route::post('/accounting/purchase-orders/{id}/conversion', [PurchaseOrderViewController::class, 'convert'])->name('accounting.purchase-orders.convert');
     Route::post('/accounting/purchase-orders/{id}/cancellation', [PurchaseOrderViewController::class, 'cancel'])->name('accounting.purchase-orders.cancel');
+    Route::get('/accounting/cash-flow', [CashFlowViewController::class, 'index'])->name('accounting.cash-flow');
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
@@ -525,9 +527,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // this placeholder's own "no domain model exists" scope note was
     // confirmed accurate (a full-repo grep found nothing), so this is a
     // genuinely new domain model, not a UI-only gap.
-    $plannedRoute('/accounting/cash-flow', 'accounting.cash-flow', 'accounting:read', 'Accounting & Finance', 'Cash Flow Projects',
-        'Project-level cash flow forecasting and monitoring.',
-        'Not yet built. Project Management does not yet have a dedicated project domain model to derive cash flow from.');
+    // Cash Flow Projects is no longer a planned-module placeholder -- see
+    // the real route registered alongside the other Accounting routes
+    // above (CashFlowViewController). Route name and permission kept
+    // identical to the placeholder this replaces so the sidebar's
+    // Accounting & Finance > Cash Flow Projects link needed no change.
+    // Like Budgets, this placeholder's own "no project domain model"
+    // scope note was stale -- Project/ProjectBudget/ProjectCost already
+    // existed, and ProjectService::profitability() already computed
+    // exactly this, just with no Blade UI reaching it.
     // The five Operations modules (Human Resources, Immovable/Movable
     // Asset Management, Logistics, ERP) are now real routes -- see the
     // '/operations/human-resources' etc. block above, defined alongside

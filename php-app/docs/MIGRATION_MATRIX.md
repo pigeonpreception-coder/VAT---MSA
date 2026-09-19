@@ -8826,3 +8826,54 @@ features). Verification rows removed afterward to restore the normal
 `DemoSeeder` baseline.
 
 Verified: full suite 745 tests, 0 regressions.
+
+## New feature: Cash Flow Projects (2026-09-19)
+
+Closes the `accounting.cash-flow` `$plannedRoute` placeholder
+("Project-level cash flow forecasting and monitoring"). Like Budgets,
+its own scope note ("Project Management does not yet have a dedicated
+project domain model to derive cash flow from") was confirmed stale by
+reading `App\Services\Business\ProjectService::profitability()` directly
+-- it already computes real per-project revenue (`REVENUE`-type
+`journal_lines` tagged to the project), cost (`ProjectCost`) and budget
+(`ProjectBudget`), and is already exercised end to end by
+`tests/Feature/Business/ProjectTest.php`. A full-repo grep confirmed
+`ProjectController::profitability` (the JSON API) had no Blade UI
+anywhere reaching it, the same class of gap Budgets closed.
+
+**`app/Http/Controllers/Business/CashFlowViewController.php`** (new) --
+serves `accounting.cash-flow` (`/accounting/cash-flow`), batching the
+same three reads `profitability()` makes per-project (revenue/cost/
+budget) into three organisation-wide queries rather than calling that
+method once per project, the same N+1-avoidance shape
+`BudgetsViewController`'s own index already established (that
+single-project method shape doesn't fit a list view). "Forecasting"
+(the placeholder's own word) is deliberately not attempted -- there is
+no projection data anywhere in this platform to forecast from, so this
+page monitors real posted cash flow to date rather than fabricating a
+projection. An optional `?project_id=` shows that one project's own
+cost timeline with a running cumulative total.
+
+**View**: `resources/views/accounting/cash-flow.blade.php` (new) --
+organisation-wide summary cards (approved budget, revenue posted, cost
+posted, net cash flow), a per-project table (net cash flow highlighted
+red when negative) with a "View cost timeline" link per row, and the
+selected project's own cost timeline below.
+
+**Tests**: `tests/Feature/Business/CashFlowViewTest.php` (new, 7 tests)
+-- auth/permission gates, graceful empty state, revenue/cost/net-cash-flow
+computed correctly from real `ChartOfAccount`/`JournalEntry`/
+`JournalLine`/`ProjectCost`/`ProjectBudget` rows (not fixtures shaped to
+match the assertion), a project with cost exceeding revenue rendering a
+correctly negative net figure, cross-organisation scoping, and the
+per-project cost timeline with its own running cumulative total.
+
+Live-verified over real HTTP: posted a real `REVENUE`-type journal line
+and a real `ProjectCost` against a demo project via `php artisan
+tinker`, confirmed the summary page showed the correct budget/revenue/
+cost/net-cash-flow figures (N$9,000.00/N$7,000.00/N$4,000.00/N$3,000.00)
+and the drill-down timeline showed the cost line with its cumulative
+total, then removed the verification rows to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 752 tests, 0 regressions.
