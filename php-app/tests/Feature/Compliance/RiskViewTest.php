@@ -206,4 +206,49 @@ class RiskViewTest extends TestCase
         $evaluateAttempt = $this->actingAs($this->namraRefundOfficer())->post(route('risk-indicators.evaluation.store'), ['vat_number' => 'VAT-VIEW-RISK-0006']);
         $evaluateAttempt->assertForbidden();
     }
+
+    public function test_the_index_page_links_to_the_summary_report(): void
+    {
+        $response = $this->actingAs($this->namraAuditor())->get('/risk-indicators');
+
+        $response->assertOk();
+        $response->assertSee(route('risk-indicators.report'), false);
+    }
+
+    public function test_the_summary_report_requires_authentication(): void
+    {
+        $this->get('/risk-indicators/report')->assertRedirect('/login');
+    }
+
+    public function test_the_summary_report_is_never_taxpayer_visible(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-RISK-0007');
+
+        $this->actingAs($this->taxpayerOwner($tp['taxpayer']->id))->get('/risk-indicators/report')->assertForbidden();
+    }
+
+    public function test_the_summary_report_shows_a_graceful_empty_state_with_no_indicators(): void
+    {
+        $response = $this->actingAs($this->namraAuditor())->get(route('risk-indicators.report'));
+
+        $response->assertOk()->assertViewIs('risk-indicators.report');
+        $response->assertSee('No risk indicators have been raised yet.');
+    }
+
+    public function test_the_summary_report_breaks_down_a_real_indicator_by_severity_status_and_rule_and_ranks_the_taxpayer(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-RISK-0008');
+        $this->makeOverdueObligation($tp);
+        $this->actingAs($this->namraAuditor())->post(route('risk-indicators.evaluation.store'), ['vat_number' => 'VAT-VIEW-RISK-0008']);
+        $indicator = RiskIndicator::where('taxpayer_id', $tp['taxpayer']->id)->firstOrFail();
+
+        $response = $this->actingAs($this->namraAuditor('auditor2@namra.test'))->get(route('risk-indicators.report'));
+
+        $response->assertOk()->assertViewIs('risk-indicators.report');
+        $response->assertSee('Obligation Overdue'); // by-rule breakdown
+        $response->assertSee($indicator->severity === 'CRITICAL' ? 'Critical' : 'High'); // by-severity breakdown (x-status-badge title-cases)
+        $response->assertSee('Open'); // by-status breakdown (x-status-badge title-cases)
+        $response->assertSee('VAT-VIEW-RISK-0008 Trading Co'); // most-flagged taxpayer
+        $response->assertSee('VAT-VIEW-RISK-0008');
+    }
 }

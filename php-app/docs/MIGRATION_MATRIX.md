@@ -8413,3 +8413,55 @@ report placeholders are now real. Dev database reset back to the normal
 `DemoSeeder` baseline afterward.
 
 Verified: full suite 702 tests, 0 regressions.
+
+## New feature: Risk Indicators summary report (2026-09-19)
+
+Unlike the four VAT Management reports above, `Risk indicators` was
+already a real, fully-built officer-facing feature (`RiskViewController`/
+`RiskService`, a live filterable register and detail/decision pages) --
+not a `$plannedRoute` placeholder. The user's own request was to add
+the register's own aggregate report, which didn't exist in any form.
+Confirmed with the user up front (via a clarifying question) that this
+meant a genuine aggregate rollup -- severity/status/rule-type breakdown
+and the most-flagged taxpayers -- rather than an export of the existing
+raw list.
+
+**`RiskService::summary()`** (new method, same class as `restricted()`)
+-- national, all-time, cross-taxpayer (risk indicators are a live signal,
+not a VAT-period figure, so this deliberately has no period picker,
+matching `restricted()`'s own scope): counts by severity and status
+(fixed enum order, zero-filled), counts by the rule catalogue's three
+fixed `indicator_code` values (`HIGH_VALUE_INVOICE_PATTERN`/
+`RECONCILIATION_EXCEPTION_BACKLOG`/`OBLIGATION_OVERDUE` -- confirmed by
+reading the catalogue directly, not guessed), and the ten
+most-flagged taxpayers by total indicator count (with their critical
+and open/under-review counts alongside). Same `TenantScope::isNational()`
+guard as every other method on this service.
+
+**`RiskViewController::report()`** (new) -- serves the new
+`risk-indicators.report` route (`GET /risk-indicators/report`,
+registered *before* the existing `/risk-indicators/{id}` wildcard so
+the literal path segment "report" is never swallowed as an indicator
+id), gated on the same `risk:read` permission as the register.
+
+**Views**: `resources/views/risk-indicators/report.blade.php` (new) --
+severity/status side-by-side cards, a by-rule table, and a most-flagged-
+taxpayers table, each with a graceful empty state. `resources/views/
+risk-indicators/index.blade.php` -- added a "View summary report" link
+in the page header; the report page links back to the register in turn.
+
+**Tests**: `tests/Feature/Compliance/RiskViewTest.php` -- 7 new tests
+appended to the existing file (auth, taxpayer-visibility denial matching
+the register's own precedent, a link from the register to the report,
+graceful empty state, and a real `OBLIGATION_OVERDUE` indicator --
+raised via the same live-evidence `evaluate()` flow the existing tests
+already use, not a fixture inserted directly -- correctly appearing in
+the severity/status/rule breakdown and ranking that taxpayer in the
+most-flagged list).
+
+Live-verified over real HTTP as a NamRA national-scope user: the report
+route renders the correct empty state against the demo seed (no risk
+indicators exist there), and the register page's new link points at the
+real report route.
+
+Verified: full suite 707 tests, 0 regressions.

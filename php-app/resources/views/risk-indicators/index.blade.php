@@ -8,10 +8,13 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance domain &middot; NamRA-restricted</div>
-    <h1 class="h3 mb-1">Risk indicators</h1>
-    <p class="text-muted mb-0">Advisory-only signals from a small, fixed, code-versioned rule catalogue -- never a black-box score, and never auto-escalated to a case without an authorised officer's own decision.</p>
+<div class="mb-4 d-flex justify-content-between align-items-start">
+    <div>
+        <div class="text-uppercase text-muted small fw-semibold">Compliance domain &middot; NamRA-restricted</div>
+        <h1 class="h3 mb-1">Risk indicators</h1>
+        <p class="text-muted mb-0">Advisory-only signals from a small, fixed, code-versioned rule catalogue -- never a black-box score, and never auto-escalated to a case without an authorised officer's own decision.</p>
+    </div>
+    <a href="{{ route('risk-indicators.report') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">View summary report</a>
 </div>
 
 @if (session('status'))

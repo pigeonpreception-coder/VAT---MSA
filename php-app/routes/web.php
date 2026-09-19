@@ -169,6 +169,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // built so far there is no taxpayer-facing counterpart to any of
     // this -- purely an officer-facing screen.
     Route::get('/risk-indicators', [RiskViewController::class, 'index'])->name('risk-indicators.index');
+    // Registered before the {id} wildcard below so "report" is never
+    // swallowed as an indicator id.
+    Route::get('/risk-indicators/report', [RiskViewController::class, 'report'])->name('risk-indicators.report');
     Route::get('/risk-indicators/{id}', [RiskViewController::class, 'show'])->name('risk-indicators.show');
     Route::post('/risk-indicators/evaluation', [RiskViewController::class, 'storeEvaluation'])->name('risk-indicators.evaluation.store');
     Route::post('/risk-indicators/{id}/assignment', [RiskViewController::class, 'storeAssignment'])->name('risk-indicators.assignment.store');

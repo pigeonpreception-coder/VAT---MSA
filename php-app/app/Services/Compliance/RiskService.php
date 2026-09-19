@@ -33,6 +33,19 @@ class RiskService
     private const RULE_VERSION = 'RISK-PILOT-2026.2';
     private const SEVERITY_RANK = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2, 'CRITICAL' => 3];
 
+    /**
+     * Human-readable labels for the rule catalogue's own three
+     * `indicatorCode` values (see the `evaluate*` methods below) -- the
+     * only codes any application code ever writes to `risk_indicators.
+     * indicator_code`, confirmed by reading this class's own rule
+     * catalogue rather than assumed.
+     */
+    private const INDICATOR_CATALOGUE = [
+        'HIGH_VALUE_INVOICE_PATTERN' => 'High-Value Invoice Pattern',
+        'RECONCILIATION_EXCEPTION_BACKLOG' => 'Reconciliation Exception Backlog',
+        'OBLIGATION_OVERDUE' => 'Obligation Overdue',
+    ];
+
     /** @return array<string, mixed> */
     public function assignReview(string $indicatorId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
@@ -254,6 +267,53 @@ class RiskService
         $items = $builder->orderByRaw($severityOrder)->orderByDesc('detected_at')->limit($query['limit'])->offset($query['offset'])->get();
 
         return ['items' => $items->map(fn (RiskIndicator $i) => $this->present($i))->values()->all(), 'totalCount' => $totalCount, 'limit' => $query['limit'], 'offset' => $query['offset']];
+    }
+
+    /**
+     * An aggregate rollup of the live `restricted()` register -- national
+     * oversight posture at a glance (severity/status/indicator-type
+     * breakdown, the most-flagged taxpayers) rather than another page of
+     * raw rows. Not period-scoped: a risk indicator is a live signal, not
+     * a VAT-period figure, matching `restricted()`'s own all-time,
+     * cross-taxpayer scope.
+     *
+     * @return array<string, mixed>
+     */
+    public function summary(User $actor): array
+    {
+        if (! TenantScope::isNational($actor)) {
+            throw new AuthorizationException('Risk indicators are restricted to authorised national risk roles.');
+        }
+
+        $severityOrder = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        $statusOrder = ['OPEN', 'UNDER_REVIEW', 'ESCALATED_TO_CASE', 'DISMISSED'];
+
+        $bySeverityCounts = RiskIndicator::query()->selectRaw('severity, COUNT(*) as count')->groupBy('severity')->pluck('count', 'severity');
+        $byStatusCounts = RiskIndicator::query()->selectRaw('status, COUNT(*) as count')->groupBy('status')->pluck('count', 'status');
+        $byCodeCounts = RiskIndicator::query()->selectRaw('indicator_code, COUNT(*) as count')->groupBy('indicator_code')->pluck('count', 'indicator_code');
+
+        $topRows = RiskIndicator::query()
+            ->selectRaw("taxpayer_id, COUNT(*) as indicator_count, SUM(CASE WHEN severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count, SUM(CASE WHEN status IN ('OPEN', 'UNDER_REVIEW') THEN 1 ELSE 0 END) as open_count")
+            ->groupBy('taxpayer_id')->orderByDesc('indicator_count')->limit(10)->get();
+        $taxpayers = Taxpayer::whereIn('id', $topRows->pluck('taxpayer_id'))->get()->keyBy('id');
+
+        return [
+            'total_count' => RiskIndicator::count(),
+            'by_severity' => collect($severityOrder)
+                ->map(fn ($severity) => ['severity' => $severity, 'count' => (int) ($bySeverityCounts[$severity] ?? 0)])->all(),
+            'by_status' => collect($statusOrder)
+                ->map(fn ($status) => ['status' => $status, 'count' => (int) ($byStatusCounts[$status] ?? 0)])->all(),
+            'by_indicator_code' => collect(self::INDICATOR_CATALOGUE)
+                ->map(fn ($label, $code) => ['indicator_code' => $code, 'label' => $label, 'count' => (int) ($byCodeCounts[$code] ?? 0)])->values()->all(),
+            'top_taxpayers' => $topRows->map(fn ($row) => [
+                'taxpayer_id' => $row->taxpayer_id,
+                'legal_name' => $taxpayers[$row->taxpayer_id]->legal_name ?? null,
+                'vat_number' => $taxpayers[$row->taxpayer_id]->vat_number ?? null,
+                'indicator_count' => (int) $row->indicator_count,
+                'critical_count' => (int) $row->critical_count,
+                'open_count' => (int) $row->open_count,
+            ])->all(),
+        ];
     }
 
     // -- risk rule catalogue: a small, fixed, code-versioned set (see RiskService::RULE_VERSION) --
