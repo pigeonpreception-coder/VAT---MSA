@@ -116,6 +116,46 @@ function toPath(string $baseUrl, string $url): string
     return str_starts_with($url, $baseUrl) ? substr($url, strlen($baseUrl)) : $url;
 }
 
+/**
+ * Standalone RFC 6238 TOTP-SHA1 code generator, ported from
+ * App\Support\Access\Totp::generateCode/hotp/base32Decode -- this script
+ * runs standalone over plain HTTP against a deployed instance with no
+ * access to the Laravel app itself, so the algorithm is duplicated here
+ * rather than reused. Keep in sync with that class if the algorithm ever
+ * changes (it shouldn't -- RFC 6238 is fixed).
+ */
+function totpCode(string $secretBase32, int $nowMs): string
+{
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $clean = preg_replace('/[^A-Z2-7]/', '', strtoupper($secretBase32));
+    $bits = 0;
+    $value = 0;
+    $secretBytes = '';
+    foreach (str_split($clean) as $char) {
+        $index = strpos($alphabet, $char);
+        if ($index === false) {
+            continue;
+        }
+        $value = ($value << 5) | $index;
+        $bits += 5;
+        if ($bits >= 8) {
+            $secretBytes .= chr(($value >> ($bits - 8)) & 0xFF);
+            $bits -= 8;
+        }
+    }
+
+    $counter = intdiv(intdiv($nowMs, 1000), 30);
+    $counterBytes = pack('N2', 0, $counter);
+    $signature = hash_hmac('sha1', $counterBytes, $secretBytes, true);
+    $offset = ord($signature[strlen($signature) - 1]) & 0x0F;
+    $binary = ((ord($signature[$offset]) & 0x7F) << 24)
+        | ((ord($signature[$offset + 1]) & 0xFF) << 16)
+        | ((ord($signature[$offset + 2]) & 0xFF) << 8)
+        | (ord($signature[$offset + 3]) & 0xFF);
+
+    return str_pad((string) ($binary % 1000000), 6, '0', STR_PAD_LEFT);
+}
+
 /** @var list<array{name: string, ok: bool, detail: string}> */
 $results = [];
 
@@ -171,19 +211,69 @@ step($results, 'POST /login', function () use ($baseUrl, $cookieJar, $email, $pa
 // 3. Step up. A sensitive report's export (the demo seed's own
 // SALES_VAT_SUMMARY/COMPLIANCE_CASELOAD, TAX_CONFIDENTIAL, or
 // PORTFOLIO_EXCEPTIONS/CASE_EVIDENCE_SUMMARY, RESTRICTED) requires a
-// freshly re-confirmed password (App\Support\Access\StepUp::isFresh).
-// VAT_POSITION itself (used below) is CONFIDENTIAL, not sensitive, and
-// auto-approves -- but step up anyway so this also smoke-tests the
-// re-authentication path a sensitive report's export actually needs.
-step($results, 'POST /confirm-password', function () use ($baseUrl, $cookieJar, $password) {
-    $get = httpRequest($baseUrl, $cookieJar, 'GET', '/confirm-password');
-    $token = extractCsrfToken($get['body']);
-    if ($get['status'] !== 200 || $token === null) {
-        throw new RuntimeException("expected 200 with a CSRF token, got {$get['status']}");
+// fresh TOTP step-up confirmation (App\Services\Identity\MfaService::
+// hasFreshStepUp, via App\Http\Middleware\EnsureFreshStepUp). VAT_POSITION
+// itself (used below) is CONFIDENTIAL, not sensitive, and auto-approves --
+// but step up anyway so this also smoke-tests the real MFA path a
+// sensitive report's export actually needs.
+//
+// 2026-09-15 TOTP cutover: this used to re-confirm the account's own
+// password (Laravel's `password.confirm`); that route and
+// ConfirmPasswordController are gone. MfaService::enrollTotp() refuses to
+// re-enrol an already-ACTIVE credential, and the real UI only ever shows
+// a freshly-generated secret once (by design -- see MfaViewController's
+// own doc comment), so a repeatable smoke test against a persistently-
+// enrolled demo account has nowhere else to keep it: the secret is
+// cached locally, once, right after the first successful enrolment.
+$totpSecretCacheFile = sys_get_temp_dir().'/vatmsa-smoke-totp-'.md5($baseUrl.'|'.$email).'.secret';
+step($results, 'TOTP step-up (POST /security/mfa + /security/mfa/verification + /security/step-up)', function () use ($baseUrl, $cookieJar, $totpSecretCacheFile) {
+    $mfaGet = httpRequest($baseUrl, $cookieJar, 'GET', '/security/mfa');
+    if ($mfaGet['status'] !== 200) {
+        throw new RuntimeException("expected 200 on GET /security/mfa, got {$mfaGet['status']} -- does this user have identity:read?");
     }
-    $r = httpRequest($baseUrl, $cookieJar, 'POST', '/confirm-password', ['_token' => $token, 'password' => $password]);
-    if ($r['status'] !== 200 || str_contains($r['url'], 'confirm-password')) {
-        throw new RuntimeException("password confirmation did not succeed (final status {$r['status']}, url {$r['url']})");
+    $token = extractCsrfToken($mfaGet['body']);
+    if ($token === null) {
+        throw new RuntimeException('no CSRF token found on the MFA page');
+    }
+
+    $secret = is_file($totpSecretCacheFile) ? trim((string) file_get_contents($totpSecretCacheFile)) : null;
+
+    if ($secret === null) {
+        if (! str_contains($mfaGet['body'], 'Not enabled')) {
+            throw new RuntimeException('this account already has MFA enrolled but no locally cached secret is available -- '.
+                "delete its mfa_totp_credentials row to let this script re-enrol, or restore {$totpSecretCacheFile}.");
+        }
+        $enroll = httpRequest($baseUrl, $cookieJar, 'POST', '/security/mfa', ['_token' => $token]);
+        if (! preg_match('/Secret key<\/dt>\s*<dd[^>]*><code>([^<]+)<\/code>/', $enroll['body'], $m)) {
+            throw new RuntimeException("enrolment did not show a fresh secret (status {$enroll['status']}, url {$enroll['url']})");
+        }
+        $secret = $m[1];
+        if (file_put_contents($totpSecretCacheFile, $secret) === false) {
+            throw new RuntimeException("could not cache the TOTP secret at {$totpSecretCacheFile}");
+        }
+        chmod($totpSecretCacheFile, 0600);
+
+        $verifyToken = extractCsrfToken($enroll['body']);
+        $verify = httpRequest($baseUrl, $cookieJar, 'POST', '/security/mfa/verification', [
+            '_token' => $verifyToken, 'code' => totpCode($secret, (int) (microtime(true) * 1000)),
+        ]);
+        if ($verify['status'] !== 200 || ! str_contains($verify['body'], 'Enabled')) {
+            throw new RuntimeException("TOTP verification did not activate the credential (status {$verify['status']}, url {$verify['url']})");
+        }
+        $token = extractCsrfToken($verify['body']) ?? $token;
+    }
+
+    // One TOTP step ahead of "now": guarantees a higher HOTP counter than
+    // whatever code verification (if it just ran) already consumed, so
+    // MfaService::confirmStepUp's own anti-replay check
+    // (matchedCounter > last_used_counter) doesn't reject this as a
+    // reused code, while still landing well within the server's own
+    // real-time ±1-step drift tolerance for the near-instant round trip.
+    $stepUp = httpRequest($baseUrl, $cookieJar, 'POST', '/security/step-up', [
+        '_token' => $token, 'code' => totpCode($secret, (int) (microtime(true) * 1000) + 30_000),
+    ]);
+    if ($stepUp['status'] !== 200 || ! str_contains($stepUp['body'], 'Fresh')) {
+        throw new RuntimeException("step-up confirmation did not succeed (status {$stepUp['status']}, url {$stepUp['url']})");
     }
 });
 

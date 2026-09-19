@@ -197,8 +197,10 @@ class WorkflowService
      * covers this workflow (or ALL workflows) and is currently in its
      * effective window. A workflow-specific delegation takes precedence
      * over a general ALL delegation when both exist.
+     *
+     * @return array{userId: string, delegatedFromUserId: ?string}
      */
-    private function redirectThroughDelegation(string $organisationId, string $userId, string $workflowId): string
+    private function redirectThroughDelegation(string $organisationId, string $userId, string $workflowId): array
     {
         $now = now();
         $delegateUserId = DB::table('workflow_delegations')
@@ -208,14 +210,22 @@ class WorkflowService
             ->orderByRaw('workflow_id IS NULL')
             ->limit(1)->value('delegate_user_id');
 
-        return $delegateUserId ?? $userId;
+        return $delegateUserId
+            ? ['userId' => $delegateUserId, 'delegatedFromUserId' => $userId]
+            : ['userId' => $userId, 'delegatedFromUserId' => null];
     }
 
     /**
      * Resolves a workflow node's ROLE/USER/MANAGER assignee into a
      * concrete user or role to assign the next task to.
      *
-     * @return array{assignedUserId: ?string, assignedRoleId: ?string}
+     * `delegatedFromUserId` is carried all the way into the
+     * `workflow_assignments` row (see assignWorkflow()/decideWorkflowTask())
+     * so a decision can re-verify, at decide time, that the delegation
+     * which redirected this task is still active -- see
+     * decideWorkflowTask()'s own doc comment for why that recheck exists.
+     *
+     * @return array{assignedUserId: ?string, assignedRoleId: ?string, delegatedFromUserId: ?string}
      */
     private function resolveAssignee(Organisation $organisation, string $initiatedBy, string $workflowId, ?string $assigneeType, ?string $assigneeReference): array
     {
@@ -228,7 +238,9 @@ class WorkflowService
                 throw new LicensingValidationException('ASSIGNEE_NOT_FOUND', "The workflow node's assigned user could not be found.");
             }
 
-            return ['assignedUserId' => $this->redirectThroughDelegation($organisation->id, $assigneeReference, $workflowId), 'assignedRoleId' => null];
+            $redirect = $this->redirectThroughDelegation($organisation->id, $assigneeReference, $workflowId);
+
+            return ['assignedUserId' => $redirect['userId'], 'assignedRoleId' => null, 'delegatedFromUserId' => $redirect['delegatedFromUserId']];
         }
         if ($assigneeType === 'ROLE') {
             if (! $assigneeReference) {
@@ -239,7 +251,7 @@ class WorkflowService
                 throw new LicensingValidationException('ASSIGNEE_NOT_FOUND', "The workflow node's assigned role could not be found.");
             }
 
-            return ['assignedUserId' => null, 'assignedRoleId' => $role->id];
+            return ['assignedUserId' => null, 'assignedRoleId' => $role->id, 'delegatedFromUserId' => null];
         }
         $employee = DB::table('employees')->where('user_id', $initiatedBy)->where('organisation_id', $organisation->id)->first(['manager_employee_id']);
         if (! $employee || ! $employee->manager_employee_id) {
@@ -250,7 +262,9 @@ class WorkflowService
             throw new RepositoryConflictException("The initiator's manager has no linked user account.");
         }
 
-        return ['assignedUserId' => $this->redirectThroughDelegation($organisation->id, $manager->user_id, $workflowId), 'assignedRoleId' => null];
+        $redirect = $this->redirectThroughDelegation($organisation->id, $manager->user_id, $workflowId);
+
+        return ['assignedUserId' => $redirect['userId'], 'assignedRoleId' => null, 'delegatedFromUserId' => $redirect['delegatedFromUserId']];
     }
 
     private function outboxInsert(string $aggregateId, string $eventType, string $partitionKey, array $payload, $now): void
@@ -335,7 +349,7 @@ class WorkflowService
             ]);
             DB::table('workflow_assignments')->insert([
                 'id' => $assignmentId, 'workflow_instance_id' => $instanceId, 'node_key' => $next['nodeKey'],
-                'assigned_user_id' => $assignee['assignedUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
+                'assigned_user_id' => $assignee['assignedUserId'], 'delegated_from_user_id' => $assignee['delegatedFromUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
                 'status' => 'PENDING', 'due_at' => null, 'assigned_at' => $now,
             ]);
             $this->outboxInsert($instanceId, 'WorkflowInstanceAssigned', $organisation->id, ['instance_id' => $instanceId, 'assignment_id' => $assignmentId, 'domain_action' => $assignment['domainAction'], 'resource_type' => $assignment['resourceType'], 'resource_id' => $assignment['resourceId'], 'node_key' => $next['nodeKey']], $now);
@@ -369,15 +383,25 @@ class WorkflowService
     {
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'BUSINESS_WRITE', 0, $requestedOrganisationId);
 
-        $decision = mb_strtoupper(trim((string) ($payload['decision'] ?? '')));
-        $reason = trim((string) ($payload['reason'] ?? ''));
+        // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): a bare `(string) $x` cast on a JSON value doesn't
+        // reject a malformed array/object payload the way this codebase's
+        // own `is_string($x) ? ... : ''` idiom (BusinessValidator::
+        // textValue(), ComplianceValidator::text(), etc.) does -- PHP
+        // silently converts any array to the literal 5-character string
+        // "Array", which then slides straight past a `mb_strlen(...) < 5`
+        // minimum check as if it were real justification text. Guarding
+        // with is_string() first makes a non-string `reason` normalize to
+        // '' instead, correctly failing that same check.
+        $decision = mb_strtoupper(trim(is_string($payload['decision'] ?? null) ? $payload['decision'] : ''));
+        $reason = trim(is_string($payload['reason'] ?? null) ? $payload['reason'] : '');
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character decision reason.');
         }
 
         $task = DB::table('workflow_assignments as a')->join('workflow_instances as i', 'i.id', '=', 'a.workflow_instance_id')
             ->where('a.id', $assignmentId)->where('i.organisation_id', $organisation->id)
-            ->select('a.id', 'a.status', 'a.assigned_user_id', 'a.assigned_role_id', 'a.node_key', 'i.id as instance_id', 'i.initiated_by', 'i.workflow_version_id', 'i.context_snapshot')
+            ->select('a.id', 'a.status', 'a.assigned_user_id', 'a.delegated_from_user_id', 'a.assigned_role_id', 'a.node_key', 'i.id as instance_id', 'i.initiated_by', 'i.workflow_version_id', 'i.context_snapshot')
             ->first();
         if (! $task) {
             throw new LicensingValidationException('WORKFLOW_TASK_NOT_FOUND', 'The workflow task is outside the active organisation scope.');
@@ -392,8 +416,30 @@ class WorkflowService
                 throw new LicensingValidationException('TASK_NOT_ASSIGNED', 'You do not hold the role assigned to this workflow task.');
             }
         }
-
+        // Red-team punch list #7 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): resolveAssignee() resolves a delegation redirect
+        // once, at assign time, overwriting assigned_user_id with the
+        // delegate's own id -- so the plain actor-id === assigned_user_id
+        // check below (WorkflowValidator::assertDecision) can no longer
+        // tell a direct assignment from a delegated one, and previously
+        // never re-checked whether the delegation was still ACTIVE. A task
+        // is typically pending for hours to days, so this was a real,
+        // wide-open gap, not a narrow concurrent race: revoking a
+        // delegation (revokeDelegation()) never stopped an
+        // already-redirected task from still being decided by the former
+        // delegate. Re-verify here, every time, right before the decision
+        // is allowed to proceed.
         $now = now();
+        if ($task->delegated_from_user_id && $task->delegated_from_user_id !== $actor->id) {
+            $stillDelegated = DB::table('workflow_delegations')
+                ->where('organisation_id', $organisation->id)
+                ->where('delegator_user_id', $task->delegated_from_user_id)->where('delegate_user_id', $actor->id)
+                ->where('status', 'ACTIVE')->where('effective_from', '<=', $now)->where('effective_to', '>=', $now)
+                ->exists();
+            if (! $stillDelegated) {
+                throw new LicensingValidationException('TASK_NOT_ASSIGNED', 'The delegation that assigned this task to you has been revoked or has expired; it can no longer be decided.');
+            }
+        }
         try {
             WorkflowValidator::assertDecision($actor->id, $task->initiated_by, $task->assigned_user_id, $decision, ($payload['emergency_override'] ?? null) === true);
         } catch (LicensingValidationException $e) {
@@ -415,14 +461,27 @@ class WorkflowService
         $instanceStatus = null;
         $nextAssignmentId = null;
         DB::transaction(function () use ($task, $actor, $decision, $reason, $organisation, $now, &$instanceStatus, &$nextAssignmentId) {
+            // Concurrent User Simulation follow-up (2026-09-15): the
+            // assignment's own guarded UPDATE must run -- and its
+            // affected-row count be checked -- before any side effect is
+            // written, the same "check-then-write" order transition()'s
+            // own comment establishes elsewhere in this codebase. Writing
+            // the workflow_approvals row first meant a genuine concurrent
+            // double-decide (two requests both reading PENDING before
+            // either commits) could still log two approval rows even
+            // though only one assignment-status change ever won -- the
+            // final status stayed correct, but the audit trail didn't.
+            $updated = DB::table('workflow_assignments')->where('id', $task->id)->where('status', 'PENDING')
+                ->update(['status' => $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED']);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Workflow task {$task->id} was changed by another action; reload and try again.");
+            }
             DB::table('workflow_approvals')->insert([
                 'id' => (string) Str::uuid(), 'workflow_instance_id' => $task->instance_id, 'workflow_assignment_id' => $task->id,
                 'workflow_version_id' => $task->workflow_version_id, 'actor_id' => $actor->id, 'decision' => $decision, 'reason' => $reason,
                 'authority_snapshot' => AuditService::canonicalJson(['role' => $actor->role, 'permissions' => DynamicPermissions::forUser($actor)]),
                 'decided_at' => $now,
             ]);
-            DB::table('workflow_assignments')->where('id', $task->id)->where('status', 'PENDING')
-                ->update(['status' => $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED']);
 
             if ($decision === 'REJECT') {
                 $instanceStatus = 'REJECTED';
@@ -441,7 +500,7 @@ class WorkflowService
                     $nextAssignmentId = (string) Str::uuid();
                     DB::table('workflow_assignments')->insert([
                         'id' => $nextAssignmentId, 'workflow_instance_id' => $task->instance_id, 'node_key' => $next['nodeKey'],
-                        'assigned_user_id' => $assignee['assignedUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
+                        'assigned_user_id' => $assignee['assignedUserId'], 'delegated_from_user_id' => $assignee['delegatedFromUserId'], 'assigned_role_id' => $assignee['assignedRoleId'],
                         'status' => 'PENDING', 'due_at' => null, 'assigned_at' => $now,
                     ]);
                     DB::table('workflow_instances')->where('id', $task->instance_id)->update(['current_node_key' => $next['nodeKey']]);
@@ -499,11 +558,27 @@ class WorkflowService
         return ['versionId' => $versionId, 'context' => $context, 'path' => $path, 'terminal' => $terminal];
     }
 
-    /** @return array<string, mixed> */
-    public function createDelegation(array $payload, User $actor, ?string $requestedOrganisationId): array
+    /**
+     * Duplicate-Submission Sweep follow-up (2026-09-15): unlike
+     * assignWorkflow (this file's own CommandLedger precedent) and every
+     * other create-shaped command in this codebase, this had no
+     * idempotency-key guard at all -- a double-submit (double-click, a
+     * retried request after a dropped response) created two identical
+     * delegation rows outright, with no replay detection to catch it.
+     *
+     * @return array<string, mixed>
+     */
+    public function createDelegation(array $payload, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         $delegation = WorkflowValidator::delegation($payload);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
+
+        $requestHash = CommandLedger::requestHash($delegation);
+        $prior = CommandLedger::prior($actor->id, 'CREATE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash);
+        if ($prior !== null) {
+            return $this->presentDelegation($prior);
+        }
 
         foreach ([$delegation['delegatorUserId'], $delegation['delegateUserId']] as $userId) {
             $exists = User::where('id', $userId)->where('status', 'ACTIVE')->exists();
@@ -519,19 +594,30 @@ class WorkflowService
         }
 
         $id = (string) Str::uuid();
-        DB::transaction(function () use ($id, $organisation, $delegation, $actor) {
+        $now = now();
+        DB::transaction(function () use ($id, $organisation, $delegation, $actor, $now, $idempotencyKey, $requestHash) {
             DB::table('workflow_delegations')->insert([
                 'id' => $id, 'organisation_id' => $organisation->id, 'delegator_user_id' => $delegation['delegatorUserId'],
                 'delegate_user_id' => $delegation['delegateUserId'], 'workflow_id' => $delegation['workflowId'], 'scope' => $delegation['scope'],
                 'status' => 'ACTIVE', 'effective_from' => Carbon::parse($delegation['effectiveFrom']), 'effective_to' => Carbon::parse($delegation['effectiveTo']),
                 'approved_by' => $actor->id, 'reason' => $delegation['reason'], 'revoked_reason' => null,
             ]);
-            AuditService::append($actor, 'WORKFLOW_DELEGATION_CREATED', 'WORKFLOW_DELEGATION', $id, ['organisationId' => $organisation->id, 'delegatorUserId' => $delegation['delegatorUserId'], 'delegateUserId' => $delegation['delegateUserId'], 'reason' => $delegation['reason']], now());
+            AuditService::append($actor, 'WORKFLOW_DELEGATION_CREATED', 'WORKFLOW_DELEGATION', $id, ['organisationId' => $organisation->id, 'delegatorUserId' => $delegation['delegatorUserId'], 'delegateUserId' => $delegation['delegateUserId'], 'reason' => $delegation['reason']], $now);
+            CommandLedger::record($actor->id, 'CREATE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash, 'WORKFLOW_DELEGATION', $id, $now);
         });
 
+        return $this->presentDelegation($id);
+    }
+
+    /** Reconstructs createDelegation()'s own return shape from an already-created row, for a recognised replay. */
+    private function presentDelegation(string $id): array
+    {
+        $row = DB::table('workflow_delegations')->where('id', $id)->firstOrFail();
+
         return [
-            'id' => $id, 'status' => 'ACTIVE', 'delegatorUserId' => $delegation['delegatorUserId'], 'delegateUserId' => $delegation['delegateUserId'],
-            'workflowId' => $delegation['workflowId'], 'scope' => $delegation['scope'], 'effectiveFrom' => $delegation['effectiveFrom'], 'effectiveTo' => $delegation['effectiveTo'],
+            'id' => $row->id, 'status' => $row->status, 'delegatorUserId' => $row->delegator_user_id, 'delegateUserId' => $row->delegate_user_id,
+            'workflowId' => $row->workflow_id, 'scope' => $row->scope,
+            'effectiveFrom' => Carbon::parse($row->effective_from)->toISOString(), 'effectiveTo' => Carbon::parse($row->effective_to)->toISOString(),
         ];
     }
 
@@ -551,14 +637,34 @@ class WorkflowService
             ])->get()->map(fn ($row) => (array) $row)->all();
     }
 
-    /** @return array<string, mixed> */
-    public function revokeDelegation(string $delegationId, array $payload, User $actor, ?string $requestedOrganisationId): array
+    /**
+     * Duplicate-Submission Sweep follow-up (2026-09-15): now carries the
+     * same CommandLedger idempotency guard createDelegation() does, plus
+     * an affected-row check on the guarded UPDATE (the same
+     * decideWorkflowTask fix, above, applies here too) -- a genuine
+     * concurrent double-revoke (two requests both reading ACTIVE before
+     * either commits) could otherwise still write two
+     * WORKFLOW_DELEGATION_REVOKED audit rows even though only one status
+     * change ever won.
+     *
+     * @return array<string, mixed>
+     */
+    public function revokeDelegation(string $delegationId, array $payload, User $actor, ?string $requestedOrganisationId, string $idempotencyKey): array
     {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
 
-        $reason = trim((string) preg_replace('/\s+/', ' ', (string) ($payload['reason'] ?? '')));
+        // Red-team punch list #9: same is_string() guard as
+        // decideWorkflowTask() above -- see its own doc comment.
+        $reason = trim((string) preg_replace('/\s+/', ' ', is_string($payload['reason'] ?? null) ? $payload['reason'] : ''));
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character revocation reason.');
+        }
+
+        $requestHash = CommandLedger::requestHash(['delegationId' => $delegationId, 'reason' => $reason]);
+        $prior = CommandLedger::prior($actor->id, 'REVOKE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash);
+        if ($prior !== null) {
+            return ['id' => $prior, 'status' => 'REVOKED'];
         }
 
         $row = DB::table('workflow_delegations')->where('id', $delegationId)->where('organisation_id', $organisation->id)->first(['id', 'status']);
@@ -569,10 +675,15 @@ class WorkflowService
             throw new RepositoryConflictException('Only an active delegation can be revoked.');
         }
 
-        DB::transaction(function () use ($delegationId, $organisation, $reason, $actor) {
-            DB::table('workflow_delegations')->where('id', $delegationId)->where('status', 'ACTIVE')
+        $now = now();
+        DB::transaction(function () use ($delegationId, $organisation, $reason, $actor, $now, $idempotencyKey, $requestHash) {
+            $updated = DB::table('workflow_delegations')->where('id', $delegationId)->where('status', 'ACTIVE')
                 ->update(['status' => 'REVOKED', 'revoked_reason' => $reason]);
-            AuditService::append($actor, 'WORKFLOW_DELEGATION_REVOKED', 'WORKFLOW_DELEGATION', $delegationId, ['organisationId' => $organisation->id, 'reason' => $reason], now());
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Delegation {$delegationId} was changed by another action; reload and try again.");
+            }
+            AuditService::append($actor, 'WORKFLOW_DELEGATION_REVOKED', 'WORKFLOW_DELEGATION', $delegationId, ['organisationId' => $organisation->id, 'reason' => $reason], $now);
+            CommandLedger::record($actor->id, 'REVOKE_WORKFLOW_DELEGATION', $idempotencyKey, $requestHash, 'WORKFLOW_DELEGATION', $delegationId, $now);
         });
 
         return ['id' => $delegationId, 'status' => 'REVOKED'];

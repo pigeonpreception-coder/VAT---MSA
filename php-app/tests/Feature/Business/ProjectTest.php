@@ -7,6 +7,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -99,6 +100,35 @@ class ProjectTest extends TestCase
         ], ['Idempotency-Key' => 'test-idem-proj-approve-0001']);
         $approve->assertStatus(200)->assertJsonPath('resource.status', 'APPROVED')->assertJsonPath('resource.approved_amount_cents', 450000);
         $this->assertDatabaseHas('audit_events', ['action' => 'PROJECT_BUDGET_APPROVED']);
+    }
+
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): approveBudget()'s PROPOSED check ran before its
+     * transaction, unguarded -- a concurrent approval race with two
+     * different approved amounts could lost-update the approved figure.
+     */
+    public function test_approving_a_project_budget_that_races_a_concurrent_approval_is_rejected_not_silently_applied(): void
+    {
+        $org = $this->makeOrganisation('VAT-PROJ-RACE-0001');
+        $projectId = $this->createProject($org['owner']);
+        $budgetId = DB::table('project_budgets')->where('project_id', $projectId)->where('category', 'TOTAL')->value('id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $budgetId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `project_budgets`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('project_budgets')->where('id', $budgetId)->update(['status' => 'APPROVED', 'approved_amount_cents' => 400000]);
+        });
+
+        $response = $this->actingAs($org['admin'])->postJson("/api/v1/projects/{$projectId}/budget-approval", [
+            'schema_version' => '1.0.0', 'approved_amount_cents' => 450000, 'notes' => 'Racing a concurrent approval.',
+        ], ['Idempotency-Key' => 'test-idem-proj-race-approve-0001']);
+
+        $response->assertStatus(409);
+        $this->assertSame(400000, (int) DB::table('project_budgets')->where('id', $budgetId)->value('approved_amount_cents'), "The concurrent winner's approved amount must survive untouched.");
     }
 
     public function test_an_approved_expense_can_be_posted_as_a_project_cost_but_not_twice(): void

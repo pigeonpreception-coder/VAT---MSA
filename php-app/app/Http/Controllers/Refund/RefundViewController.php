@@ -6,9 +6,11 @@ use App\Domain\Compliance\ComplianceValidator;
 use App\Exceptions\ComplianceResourceException;
 use App\Exceptions\ComplianceValidationException;
 use App\Exceptions\RepositoryConflictException;
+use App\Exceptions\VatLifecycleResourceException;
 use App\Http\Controllers\Controller;
 use App\Models\RefundClaim;
 use App\Services\Refund\RefundService;
+use App\Services\VatLifecycle\VatReconciliationReportService;
 use App\Support\Access\TenantScope;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
@@ -34,10 +36,18 @@ use Symfony\Component\HttpFoundation\Response;
  * per-period detail. Every write action (`storeRequest`/`storeTransition`/
  * `storeDispute`) still reuses `RefundService` directly, the same service
  * instance the JSON controller calls.
+ *
+ * `index()` also renders the NamRA VAT Summary Report (VatReconciliationReportService::namraSummary)
+ * below the refund claim register -- placed on this same route/page because
+ * this is the "VAT Refund Report" sidebar slot (VAT Management workspace);
+ * the refund-claim register itself is unchanged.
  */
 class RefundViewController extends Controller
 {
-    public function __construct(private readonly RefundService $refunds) {}
+    public function __construct(
+        private readonly RefundService $refunds,
+        private readonly VatReconciliationReportService $reports,
+    ) {}
 
     public function index(Request $request): View
     {
@@ -50,7 +60,15 @@ class RefundViewController extends Controller
             ->orderByDesc('requested_at')->get()
             ->map(fn (RefundClaim $claim) => $this->presentSummary($claim))->all();
 
-        return view('refunds.index', ['claims' => $claims]);
+        $periods = $this->reports->periodOptions($actor);
+        $periodId = $request->query('period_id');
+        try {
+            $namraSummary = ($periodId === null && $periods->isEmpty()) ? null : $this->reports->namraSummary($actor, $periodId);
+        } catch (VatLifecycleResourceException) {
+            $namraSummary = null;
+        }
+
+        return view('refunds.index', ['claims' => $claims, 'periods' => $periods, 'namraSummary' => $namraSummary]);
     }
 
     public function show(Request $request, string $id): View

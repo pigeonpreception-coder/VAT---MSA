@@ -106,6 +106,31 @@ class DisputeViewTest extends TestCase
         $show->assertSee('Awaiting review assignment');
     }
 
+    /**
+     * Red-team follow-up (2026-09-15): store() read the disputed amount
+     * through a private `centsFromDecimal()` helper doing
+     * `(int) round(((float) $amount) * 100)` -- the exact same silent-
+     * zero coercion RT-017 (Input Validation & Robustness, 2026-09-14)
+     * fixed elsewhere, just under a different name that RT-017's own grep
+     * sweep never matched. Now rejected cleanly via the shared
+     * Controller::safeDecimalCentsInput() helper.
+     */
+    public function test_a_non_numeric_disputed_amount_is_rejected_not_silently_zeroed(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-DSP-NAN-0001');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+
+        $response = $this->actingAs($owner)->post(route('disputes.store'), [
+            'disputed_resource_type' => 'VAT_RETURN', 'disputed_resource_id' => (string) Str::uuid(),
+            'grounds' => 'The assessed liability does not reflect the input tax credits actually claimed on the return.',
+            'disputed_amount' => 'not-a-number',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseMissing('disputes', ['taxpayer_id' => $tp['taxpayer']->id]);
+    }
+
     public function test_a_national_officer_filing_on_behalf_of_a_taxpayer_sees_a_vat_number_picker(): void
     {
         $tp = $this->makeTaxpayer('VAT-VIEW-DSP-0002');

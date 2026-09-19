@@ -174,7 +174,7 @@ class AuditCaseViewController extends Controller
         $payload = [
             'schema_version' => '1.0.0', 'finding_code' => (string) $request->input('finding_code'), 'title' => (string) $request->input('title'),
             'description' => (string) $request->input('description'), 'legal_reference' => $request->input('legal_reference') ?: null,
-            'amount_cents' => $this->centsFromDecimal($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: 'NAD'),
+            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: 'NAD'),
             'override_reason' => $request->input('override_reason') ?: null,
         ];
 
@@ -246,11 +246,6 @@ class AuditCaseViewController extends Controller
         }
 
         return redirect()->route('audit-cases.show', $id)->with('status', 'Note added.');
-    }
-
-    private function centsFromDecimal(mixed $amount): int
-    {
-        return (int) round(((float) $amount) * 100);
     }
 
     /** @return array<string, string> */

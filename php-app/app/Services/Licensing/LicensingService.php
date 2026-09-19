@@ -4,6 +4,7 @@ namespace App\Services\Licensing;
 
 use App\Domain\Licensing\LicensingValidator;
 use App\Exceptions\LicensingValidationException;
+use App\Exceptions\RepositoryConflictException;
 use App\Models\LicenseEvent;
 use App\Models\LicensePlan;
 use App\Models\Organisation;
@@ -79,7 +80,19 @@ class LicensingService
         $eventType = self::STATE_EVENT_TYPE[$input['action']];
 
         DB::transaction(function () use ($license, $input, $toState, $organisation, $actor, $now, $eventType) {
-            OrganisationLicense::where('id', $license['id'])->update(['state' => $toState, 'state_version' => DB::raw('state_version + 1'), 'updated_at' => $now]);
+            // Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+            // 2026-09-15.md): assertStateTransition() validated against the
+            // state this method read a moment ago, but the write itself was
+            // unguarded -- state_version exists precisely for optimistic
+            // locking yet was only ever bumped, never checked. Concurrent
+            // ACTIVATE/SUSPEND/RENEW on the same license could both "win",
+            // corrupting the from_state/to_state audit trail and, on RENEW,
+            // double-extending the subscription period.
+            $updated = OrganisationLicense::where('id', $license['id'])->where('state', $license['state'])
+                ->update(['state' => $toState, 'state_version' => DB::raw('state_version + 1'), 'updated_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("License {$license['id']} was changed by another action; reload and try again.");
+            }
             LicenseEvent::create([
                 'id' => (string) Str::uuid(), 'organisation_license_id' => $license['id'], 'organisation_id' => $organisation->id,
                 'event_type' => $eventType, 'from_state' => $license['state'], 'to_state' => $toState,

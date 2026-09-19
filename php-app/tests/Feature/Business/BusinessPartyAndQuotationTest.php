@@ -9,6 +9,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -253,5 +254,42 @@ class BusinessPartyAndQuotationTest extends TestCase
         $response = $this->actingAs($seller['owner'])->getJson('/api/v1/quotations?status=DRAFT&customer_party_id='.$customerPartyId);
 
         $response->assertStatus(200)->assertJsonPath('total_count', 1)->assertJsonPath('quotations.0.quotation_number', 'QUO-TEST-0001');
+    }
+
+    /**
+     * Red-team punch list #12 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): "Real query/N+1 performance at production-
+     * representative data volumes was never tested" -- true against the
+     * dev seed's near-empty tables, but a synthetic load seed
+     * (database/seeders/SyntheticLoadSeeder.php, added the same day)
+     * made two genuine N+1s concretely visible for the first time:
+     * QuotationService::search() mapping every row through present()
+     * (built for the single-record find() case), lazy-loading `customer`
+     * and running a full QuotationLine query per row; and
+     * BusinessPartyService::search() (reached here via the customer-
+     * party lookups this test also exercises) running a PartyRelationship
+     * query per row. Both are now batched. This asserts the fix holds at
+     * a size where an unfixed N+1 would be unmistakable in the query
+     * count (30 quotations, each with its own customer party and line).
+     */
+    public function test_quotation_search_does_not_n_plus_one_at_scale(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-NPLUS1');
+        $rows = 30;
+
+        for ($i = 0; $i < $rows; $i++) {
+            $customerPartyId = $this->createCustomerParty($seller['owner'], sprintf('VAT-CUST-NPLUS1-%04d', $i));
+            $this->actingAs($seller['owner'])
+                ->postJson('/api/v1/quotations', $this->quotationPayload($customerPartyId, ['quotation_number' => "QUO-NPLUS1-{$i}"]), ['Idempotency-Key' => "test-idem-quo-nplus1-{$i}"])
+                ->assertStatus(201);
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($seller['owner'])->getJson('/api/v1/quotations?limit=100');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertStatus(200)->assertJsonPath('total_count', $rows);
+        $this->assertLessThan(20, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for {$rows} quotation rows -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

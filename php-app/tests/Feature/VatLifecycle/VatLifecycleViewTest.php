@@ -206,6 +206,29 @@ class VatLifecycleViewTest extends TestCase
         $this->assertSame(0, VatAdjustment::where('vat_period_id', $period->id)->count());
     }
 
+    /**
+     * Red-team follow-up (2026-09-15): adjustments.store() read the
+     * amount through a private `centsFromDecimal()` helper doing
+     * `(int) round(((float) $amount) * 100)` -- the exact same silent-
+     * zero coercion RT-017 (Input Validation & Robustness, 2026-09-14)
+     * fixed elsewhere, just under a different name that RT-017's own grep
+     * sweep never matched. Now rejected cleanly via the shared
+     * Controller::safeDecimalCentsInput() helper.
+     */
+    public function test_a_non_numeric_adjustment_amount_is_rejected_not_silently_zeroed(): void
+    {
+        $party = $this->makeTradingParty('VAT-VIEW-NAN-0001');
+        $period = $this->openPeriod($party['organisation']->id, $party['taxpayer']->id);
+
+        $response = $this->actingAs($party['owner'])->post(route('vat-periods.adjustments.store', $period->id), [
+            'adjustment_type' => 'OUTPUT_TAX', 'direction' => 'INCREASE', 'amount' => 'not-a-number',
+            'reason_code' => 'LATE_INVOICE', 'explanation' => 'A supplier invoice arrived after period close.',
+        ]);
+
+        $response->assertSessionHasErrors();
+        $this->assertSame(0, VatAdjustment::where('vat_period_id', $period->id)->count());
+    }
+
     public function test_requesting_approval_moves_the_return_to_pending_and_self_approval_is_a_friendly_form_error_not_a_403_page(): void
     {
         $party = $this->makeTradingParty('VAT-VIEW-0006');

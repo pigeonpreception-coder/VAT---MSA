@@ -7,6 +7,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
@@ -124,6 +125,42 @@ class RegistrationApplicationTest extends TestCase
         $decision->assertStatus(200)->assertJsonPath('decision.status', 'REJECTED');
         $this->assertDatabaseHas('registration_applications', ['id' => $registrationId, 'status' => 'REJECTED']);
         $this->assertDatabaseMissing('taxpayers', ['vat_number' => 'VAT-REJ-0001']);
+        $this->assertDatabaseCount('organisations', 0);
+    }
+
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): decide()'s own status check ran before its
+     * transaction, unguarded -- a concurrent APPROVE/REJECT race could
+     * create a live Taxpayer/Organisation/Membership *and* mark the
+     * application REJECTED.
+     */
+    public function test_approving_a_registration_that_races_a_concurrent_rejection_is_rejected_not_silently_applied(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $admin = $this->pilotAdmin();
+        $submit = $this->actingAs($owner)->postJson('/api/v1/registration-applications', $this->submissionPayload(['vat_number' => 'VAT-RACE-0001', 'tin' => 'TIN-RACE-0001']), [
+            'Idempotency-Key' => 'test-idempotency-key-race-0001',
+        ]);
+        $registrationId = $submit->json('registration_id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $registrationId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `registration_applications`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('registration_applications')->where('id', $registrationId)->update(['status' => 'REJECTED', 'reviewed_at' => now(), 'review_reason' => 'Concurrent winner rejected it first.']);
+        });
+
+        $decision = $this->actingAs($admin)->withFreshStepUp()
+            ->postJson("/api/v1/registration-applications/{$registrationId}/decision", [
+                'decision' => 'APPROVE', 'reason' => 'Racing a concurrent rejection.',
+            ]);
+
+        $decision->assertStatus(409);
+        $this->assertDatabaseHas('registration_applications', ['id' => $registrationId, 'status' => 'REJECTED']);
+        $this->assertDatabaseMissing('taxpayers', ['vat_number' => 'VAT-RACE-0001']);
         $this->assertDatabaseCount('organisations', 0);
     }
 

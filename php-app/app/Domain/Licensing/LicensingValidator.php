@@ -51,7 +51,12 @@ class LicensingValidator
         if (! in_array($action, self::ACTIONS, true)) {
             throw new LicensingValidationException('LICENSE_ACTION_INVALID', 'action must be one of: '.implode(', ', self::ACTIONS).'.');
         }
-        $reason = trim((string) preg_replace('/\s+/', ' ', (string) ($input['reason'] ?? '')));
+        // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): a bare (string) cast on a JSON array silently
+        // produces the literal 5-character string "Array", sliding past
+        // the `< 5` minimum check below as if it were a real reason for
+        // this license state change -- guard with is_string() first.
+        $reason = trim((string) preg_replace('/\s+/', ' ', is_string($input['reason'] ?? null) ? $input['reason'] : ''));
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character reason.');
         }

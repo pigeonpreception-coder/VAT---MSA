@@ -80,7 +80,8 @@ class WorkflowController extends Controller
     public function storeDelegation(Request $request): JsonResponse
     {
         $this->authorize('permission', 'workflows:manage');
-        $delegation = $this->workflows->createDelegation((array) $request->json()->all(), $request->user(), $request->query('organisation_id'));
+        $idempotencyKey = (string) $request->header('Idempotency-Key', '');
+        $delegation = $this->workflows->createDelegation((array) $request->json()->all(), $request->user(), $request->query('organisation_id'), $idempotencyKey);
 
         return response()->json(['delegation' => $delegation], Response::HTTP_CREATED);
     }
@@ -88,7 +89,8 @@ class WorkflowController extends Controller
     public function revokeDelegation(Request $request, string $id): JsonResponse
     {
         $this->authorize('permission', 'workflows:manage');
-        $delegation = $this->workflows->revokeDelegation($id, (array) $request->json()->all(), $request->user(), $request->query('organisation_id'));
+        $idempotencyKey = (string) $request->header('Idempotency-Key', '');
+        $delegation = $this->workflows->revokeDelegation($id, (array) $request->json()->all(), $request->user(), $request->query('organisation_id'), $idempotencyKey);
 
         return response()->json(['delegation' => $delegation]);
     }

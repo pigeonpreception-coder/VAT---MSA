@@ -249,6 +249,51 @@ class ComplianceCaseTest extends TestCase
         $listing->assertStatus(200)->assertJsonCount(2, 'evidence');
     }
 
+    /**
+     * Red-team punch list #8 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+     * 2026-09-15.md): addEvidence()'s PRESERVED check on the evidence
+     * being superseded ran before its transaction, unguarded -- a race
+     * could let two new evidence rows both claim succession of the same
+     * original, corrupting the chain-of-custody this model exists to
+     * protect.
+     */
+    public function test_superseding_evidence_that_races_a_concurrent_supersession_is_rejected_not_silently_applied(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-CASE-RACE-0001');
+        $auditor = $this->namraAuditor();
+        $caseId = $this->openCase($auditor, $tp['taxpayer']->id);
+        $invoiceId = (string) Str::uuid();
+        \App\Models\Invoice::create([
+            'id' => $invoiceId, 'invoice_number' => 'INV-EVID-RACE-0001', 'document_type' => 'TAX_INVOICE', 'source_system' => 'test',
+            'source_document_id' => 'doc-evid-race-0001', 'supplier_taxpayer_id' => $tp['taxpayer']->id, 'supplier_name' => $tp['taxpayer']->legal_name,
+            'supplier_vat_number' => $tp['taxpayer']->vat_number, 'customer_name' => 'Some Customer', 'issue_date' => '2026-09-01',
+            'currency' => 'NAD', 'line_net_cents' => 100000, 'tax_cents' => 15000, 'total_cents' => 115000, 'status' => 'CERTIFIED',
+            'risk_level' => 'LOW', 'payload_hash' => str_repeat('a', 64), 'transaction_id' => (string) Str::uuid(),
+            'certificate_id' => (string) Str::uuid(), 'verification_token' => 'vfy_'.Str::random(32),
+        ]);
+        $evidenceId = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/evidence", [
+            'schema_version' => '1.0.0', 'source_resource_type' => 'INVOICE', 'source_resource_id' => $invoiceId, 'description' => 'The invoice underlying the disputed period.',
+        ], ['Idempotency-Key' => 'test-idem-evidence-race-0001'])->json('resource.id');
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $evidenceId) {
+            if ($sabotaged || ! str_contains($query->sql, 'from `audit_evidence`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('audit_evidence')->where('id', $evidenceId)->update(['status' => 'SUPERSEDED']);
+        });
+
+        $supersede = $this->actingAs($auditor)->postJson("/api/v1/audit-cases/{$caseId}/evidence", [
+            'schema_version' => '1.0.0', 'source_resource_type' => 'INVOICE', 'source_resource_id' => $invoiceId,
+            'description' => 'Racing a concurrent supersession.', 'supersedes_evidence_id' => $evidenceId,
+        ], ['Idempotency-Key' => 'test-idem-evidence-race-0002']);
+
+        $supersede->assertStatus(409);
+        $this->assertSame(1, DB::table('audit_evidence')->where('audit_case_id', $caseId)->count(), 'The loser of the race must never create its own duplicate superseding evidence row.');
+        $this->assertSame(0, DB::table('audit_evidence_custody_events')->where('audit_evidence_id', $evidenceId)->where('action', 'SUPERSEDED')->count());
+    }
+
     public function test_vat_return_evidence_can_be_cited_and_verified_and_an_unknown_document_is_still_a_404(): void
     {
         $tp = $this->makeTaxpayer('VAT-CASE-0005B');
@@ -509,5 +554,46 @@ class ComplianceCaseTest extends TestCase
 
         $response->assertStatus(409);
         $this->assertSame($secondOfficer->id, DB::table('risk_indicators')->where('id', $indicatorId)->value('assigned_officer_id'), 'The concurrent winners assignment must survive untouched.');
+    }
+
+    /**
+     * Red-team follow-up (2026-09-15): `RiskService::approveAction()`
+     * carries the identical guarded-UPDATE-with-affected-row-check
+     * pattern the two race regressions above already prove for
+     * transition()/assignReview(), but until now only by code-review
+     * parity -- its own independent regression, same simulation
+     * technique, for the DISMISS branch (approveAction's other branch,
+     * ESCALATE_TO_CASE, shares the identical guard on the same row).
+     */
+    public function test_a_risk_action_decision_that_races_a_concurrent_decision_is_rejected_not_silently_applied(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-CASE-RACE-0003');
+        $auditor = $this->namraAuditor();
+        \App\Models\TaxObligation::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'obligation_type' => 'VAT_RETURN', 'period_code' => '2026-06', 'due_date' => '2026-07-25', 'amount_cents' => 100000,
+            'currency' => 'NAD', 'status' => 'PENDING', 'source_system' => 'VAT_MSA', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->actingAs($auditor)->postJson("/api/v1/taxpayers/{$tp['taxpayer']->id}/risk-evaluation", ['schema_version' => '1.0.0'], ['Idempotency-Key' => 'test-idem-race-decide-evaluate-0001'])->assertStatus(200);
+        $indicatorId = \App\Models\RiskIndicator::where('taxpayer_id', $tp['taxpayer']->id)->where('indicator_code', 'OBLIGATION_OVERDUE')->firstOrFail()->id;
+        $this->actingAs($auditor)->postJson("/api/v1/risk-indicators/{$indicatorId}/assignment", [
+            'schema_version' => '1.0.0', 'officer_id' => $auditor->id,
+        ], ['Idempotency-Key' => 'test-idem-race-decide-assign-0001'])->assertStatus(200);
+
+        $sabotaged = false;
+        DB::listen(function ($query) use (&$sabotaged, $indicatorId) {
+            if ($sabotaged || ! str_contains($query->sql, 'select * from `risk_indicators`')) {
+                return;
+            }
+            $sabotaged = true;
+            DB::table('risk_indicators')->where('id', $indicatorId)->update(['status' => 'DISMISSED']);
+        });
+
+        $response = $this->actingAs($auditor)->postJson("/api/v1/risk-indicators/{$indicatorId}/decision", [
+            'schema_version' => '1.0.0', 'decision' => 'DISMISS', 'rationale' => 'Attempting to decide against a stale review state.',
+        ], ['Idempotency-Key' => 'test-idem-race-decide-0001']);
+
+        $response->assertStatus(409);
+        $this->assertDatabaseMissing('audit_events', ['action' => 'RISK_ACTION_DISMISSED', 'resource_id' => $indicatorId]);
     }
 }

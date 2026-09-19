@@ -125,7 +125,15 @@ class VatRuleService
 
         $now = now();
         DB::transaction(function () use ($rule, $superseding, $actor, $now, $approval, $idempotencyKey, $requestHash, $correlationId) {
-            VatRule::where('id', $rule->id)->update(['status' => 'APPROVED', 'approved_by' => $actor->id, 'approved_at' => $now, 'approval_reason' => $approval['reason']]);
+            // Red-team punch list #8: the DRAFT check above ran before this
+            // transaction, unguarded against a concurrent approval race
+            // that could corrupt the effective/superseded chain of VAT
+            // rules -- this feeds tax-rate calculation directly.
+            $updated = VatRule::where('id', $rule->id)->where('status', 'DRAFT')
+                ->update(['status' => 'APPROVED', 'approved_by' => $actor->id, 'approved_at' => $now, 'approval_reason' => $approval['reason']]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("VAT rule {$rule->id} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'APPROVE_VAT_RULE', $idempotencyKey, $requestHash, 'VAT_RULE', $rule->id, $now);
             $this->outbox($rule->id, 'VatRuleApproved', $rule->tax_category, [
                 'ruleId' => $rule->id, 'taxCategory' => $rule->tax_category, 'rateBps' => $rule->rate_bps, 'version' => $rule->version, 'correlationId' => $correlationId,
@@ -134,7 +142,11 @@ class VatRuleService
                 'taxCategory' => $rule->tax_category, 'rateBps' => $rule->rate_bps, 'version' => $rule->version, 'reason' => $approval['reason'],
             ], $now);
             if ($superseding) {
-                VatRule::where('id', $superseding->id)->update(['effective_to' => $rule->effective_from->toDateString(), 'superseded_by' => $rule->id]);
+                $supersededUpdated = VatRule::where('id', $superseding->id)->whereNull('effective_to')->whereNull('superseded_by')
+                    ->update(['effective_to' => $rule->effective_from->toDateString(), 'superseded_by' => $rule->id]);
+                if ($supersededUpdated === 0) {
+                    throw new RepositoryConflictException("The previously approved VAT rule {$superseding->id} was changed by another action; reload and try again.");
+                }
             }
         });
 

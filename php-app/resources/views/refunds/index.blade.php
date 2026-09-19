@@ -73,6 +73,145 @@
         <p id="claim-empty" class="text-center text-muted py-4 mb-0" hidden>No claims match this view. Adjust the search or status filter.</p>
     </div>
 </div>
+
+<div class="mt-5">
+    <div class="text-uppercase text-muted small fw-semibold">VAT Refund Report</div>
+    <h2 class="h4 mb-3">NamRA VAT Summary Report</h2>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <form method="GET" action="{{ route('refunds.index') }}" class="row g-2 align-items-end">
+                <div class="col-md-8">
+                    <label for="namra-period-id" class="form-label">VAT period</label>
+                    <select name="period_id" id="namra-period-id" class="form-select" onchange="this.form.submit()">
+                        @foreach ($periods as $period)
+                            <option value="{{ $period->id }}" @selected(($namraSummary['period']['id'] ?? null) === $period->id)>
+                                {{ $period->taxpayer?->legal_name }} &mdash; {{ $period->period_code }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    @if (! $namraSummary)
+        <div class="card"><div class="card-body text-center text-muted py-4">No VAT period is available to report on.</div></div>
+    @else
+        @php
+            $np = $namraSummary['period'];
+            $nfmt = fn (int $cents) => 'N$ '.number_format($cents / 100, 2);
+        @endphp
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <div class="text-muted small">TIN</div>
+                        <div class="fw-semibold">{{ $np['tin'] }}</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-muted small">Taxpayer</div>
+                        <div class="fw-semibold">{{ $np['legal_name'] }}</div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-muted small">Tax type</div>
+                        <div>Value Added Tax</div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-muted small">Return period</div>
+                        <div>{{ $np['period_code'] }}</div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-muted small">Due date</div>
+                        <div>{{ $np['due_date'] }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header"><strong>VAT declared (outputs)</strong></div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <caption class="visually-hidden">VAT declared by category</caption>
+                            <thead>
+                                <tr><th scope="col">Category</th><th scope="col" class="text-end">Sales (excl. VAT)</th><th scope="col" class="text-end">Output tax due</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($namraSummary['output']['categories'] as $category)
+                                    <tr>
+                                        <td>{{ $category['label'] }}</td>
+                                        <td class="text-end">{{ $nfmt($category['taxable_cents']) }}</td>
+                                        <td class="text-end">{{ $nfmt($category['vat_cents']) }}</td>
+                                    </tr>
+                                @endforeach
+                                <tr class="fw-semibold table-light">
+                                    <td>Total</td>
+                                    <td class="text-end">{{ $nfmt($namraSummary['output']['total_taxable_cents']) }}</td>
+                                    <td class="text-end">{{ $nfmt($namraSummary['output']['total_vat_cents']) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header"><strong>VAT claimed (inputs)</strong></div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <caption class="visually-hidden">VAT claimed by category</caption>
+                            <thead>
+                                <tr><th scope="col">Category</th><th scope="col" class="text-end">Purchases (excl. VAT)</th><th scope="col" class="text-end">Input tax claimed</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($namraSummary['input']['categories'] as $category)
+                                    <tr>
+                                        <td>{{ $category['label'] }}</td>
+                                        <td class="text-end">{{ $nfmt($category['taxable_cents']) }}</td>
+                                        <td class="text-end">{{ $nfmt($category['vat_cents']) }}</td>
+                                    </tr>
+                                @endforeach
+                                <tr class="fw-semibold table-light">
+                                    <td>Total</td>
+                                    <td class="text-end">{{ $nfmt($namraSummary['input']['total_taxable_cents']) }}</td>
+                                    <td class="text-end">{{ $nfmt($namraSummary['input']['total_vat_cents']) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><strong>VAT payable</strong></div>
+            <div class="card-body">
+                @if ($namraSummary['filed_return'])
+                    @php $f = $namraSummary['filed_return']; @endphp
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="text-muted small">Total output tax due</div>
+                            <div class="fw-semibold">{{ $nfmt($f['output_tax_cents']) }}</div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-muted small">Less input tax claimed</div>
+                            <div class="fw-semibold">{{ $nfmt($f['input_tax_cents']) }}</div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-muted small">Amount due / (repayable)</div>
+                            <div class="h5 mb-0">{{ $nfmt($f['net_payable_cents']) }}</div>
+                        </div>
+                    </div>
+                @else
+                    <div class="text-muted small">No VAT return has been generated for this period yet.</div>
+                @endif
+            </div>
+        </div>
+    @endif
+</div>
 @endsection
 
 @push('scripts')

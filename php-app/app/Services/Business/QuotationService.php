@@ -207,8 +207,19 @@ class QuotationService
         }
 
         $totalCount = (clone $builder)->count();
-        $quotations = $builder->orderByDesc('issue_date')->orderByDesc('created_at')->limit($query['limit'])->offset($query['offset'])->get()
-            ->map(fn (Quotation $q) => $this->present($q))->values()->all();
+        // Red-team punch list #12 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): this used to map each row through present()
+        // (built for find()/findOrFail()'s single-record case), which
+        // lazy-loads `customer` and runs a full QuotationLine query --
+        // both per row, N+1, on every page of this register/list view.
+        // A synthetic load seed (2026-09-15) made this concretely visible
+        // for the first time in this codebase's history (the dev seed
+        // never had enough quotations to show it). `->with('customer')`
+        // plus presentSummary() (line items are never rendered on this
+        // list, only on the single-record view) collapses it back to a
+        // fixed, small number of queries regardless of row count.
+        $quotations = $builder->with('customer')->orderByDesc('issue_date')->orderByDesc('created_at')->limit($query['limit'])->offset($query['offset'])->get()
+            ->map(fn (Quotation $q) => $this->presentSummary($q))->values()->all();
 
         return ['organisation_id' => $organisation->id, 'quotations' => $quotations, 'total_count' => $totalCount, 'limit' => $query['limit'], 'offset' => $query['offset']];
     }
@@ -482,6 +493,31 @@ class QuotationService
      * omitted until now; closing that gap here benefits every caller
      * (JSON API and the new Blade views alike), not a second query path.
      *
+     * A register/list-view row never renders line items (see
+     * resources/views/quotations/index.blade.php) -- this omits the
+     * `lines` key (and the per-row query it costs) that present() below
+     * still needs for the single-record find()/findOrFail() case.
+     * Expects `customer` already eager-loaded by the caller, per
+     * search()'s own doc comment on why.
+     *
+     * @return array<string, mixed>
+     */
+    private function presentSummary(Quotation $quotation): array
+    {
+        return [
+            'id' => $quotation->id, 'organisation_id' => $quotation->organisation_id, 'branch_id' => $quotation->branch_id,
+            'customer_party_id' => $quotation->customer_party_id, 'customer_name' => optional($quotation->customer)->display_name,
+            'quotation_number' => $quotation->quotation_number,
+            'currency' => $quotation->currency, 'issue_date' => $quotation->issue_date->toDateString(),
+            'valid_until' => $quotation->valid_until->toDateString(), 'status' => $quotation->status,
+            'subtotal_cents' => (int) $quotation->subtotal_cents, 'tax_cents' => (int) $quotation->tax_cents, 'total_cents' => (int) $quotation->total_cents,
+            'notes' => $quotation->notes, 'created_by' => $quotation->created_by, 'approved_by' => $quotation->approved_by,
+            'accepted_at' => optional($quotation->accepted_at)->toISOString(), 'converted_invoice_id' => $quotation->converted_invoice_id,
+            'created_at' => optional($quotation->created_at)->toISOString(), 'updated_at' => optional($quotation->updated_at)->toISOString(),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function present(Quotation $quotation): array

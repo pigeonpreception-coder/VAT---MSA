@@ -323,6 +323,20 @@ dependency left on this list are**:
 - The handful of red-team reports above that named an explicit,
   not-yet-individually-verified follow-up in their own "what this pass
   did not cover" section (each report says exactly what it left open).
+  Consolidated into a single punch list, cross-checked against the
+  current codebase and this document, at
+  `docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md` -- **every
+  buildable-now item on that list (the 5-item small batch and the
+  5-item medium batch, #1-#10) is now closed**, the same day it was
+  pulled together, across several genuine fixes (a workflow-delegation
+  authorization race, 9 unguarded status-transition races, 6 instances
+  of a JSON-array-to-"Array"-string coercion bug, an invoice-endpoint
+  crash on malformed `lines`) and several honestly-audited-clean
+  results. What's left on that list is 2 items already tracked here as
+  blocked on external access (#6/#7 above) and one (multi-invoice
+  circular self-dealing between colluding taxpayers) that needs a
+  beneficial-ownership data model this platform doesn't have, not a
+  code fix.
 
 One narrower item sits between "buildable now" and "needs
 infrastructure" rather than cleanly in either bucket: a real

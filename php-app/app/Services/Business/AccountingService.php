@@ -142,6 +142,18 @@ class AccountingService
         $journalNumber = "{$original->journal_number}-REV";
 
         DB::transaction(function () use ($original, $originalLines, $organisation, $actor, $id, $journalNumber, $journalDate, $journalEntryId, $now, $idempotencyKey, $requestHash, $correlationId, $input) {
+            // Red-team punch list #8: the POSTED/alreadyReversed checks
+            // above ran before this transaction, unguarded -- two
+            // concurrent reversal requests could both pass them and both
+            // create a reversing entry against the same original. Guarding
+            // this status flip (and checking it actually landed) before
+            // creating the new entry closes both races at once: a second,
+            // losing request now finds the original already REVERSED and
+            // never creates its own duplicate reversal.
+            $updated = JournalEntry::where('id', $journalEntryId)->where('status', 'POSTED')->update(['status' => 'REVERSED']);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Journal entry {$journalEntryId} was changed by another action; reload and try again.");
+            }
             JournalEntry::create([
                 'id' => $id, 'organisation_id' => $organisation->id, 'journal_number' => $journalNumber, 'journal_date' => $journalDate,
                 'reference' => $original->journal_number, 'description' => "Reversal of {$original->journal_number}: {$input['reason']}",
@@ -149,7 +161,6 @@ class AccountingService
                 'created_by' => $actor->id, 'posted_by' => $actor->id, 'created_at' => $now, 'posted_at' => $now,
                 'reverses_journal_entry_id' => $journalEntryId,
             ]);
-            JournalEntry::where('id', $journalEntryId)->update(['status' => 'REVERSED']);
             foreach ($originalLines as $index => $line) {
                 JournalLine::create([
                     'id' => (string) Str::uuid(), 'journal_entry_id' => $id, 'line_number' => $index + 1,

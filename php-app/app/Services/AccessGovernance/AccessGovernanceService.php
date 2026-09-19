@@ -74,11 +74,17 @@ class AccessGovernanceService
     {
         ['organisation' => $organisation] = EntitlementGate::assert($actor, 'ADVANCED_WORKFLOW', 'ADMIN_WRITE', 0, $requestedOrganisationId);
 
-        $decision = mb_strtoupper(trim((string) ($payload['decision'] ?? '')));
+        // Red-team punch list #9: a bare (string) cast on a JSON array
+        // silently produces the literal 5-character string "Array",
+        // sliding past the `< 5` minimum check below as if it were real
+        // reason text -- guard with is_string() first. See
+        // WorkflowService::decideWorkflowTask()'s own doc comment for the
+        // full explanation of this class of finding.
+        $decision = mb_strtoupper(trim(is_string($payload['decision'] ?? null) ? $payload['decision'] : ''));
         if (! in_array($decision, ['APPROVE', 'REJECT'], true)) {
             throw new LicensingValidationException('DECISION_INVALID', 'Access decisions must be APPROVE or REJECT.');
         }
-        $reason = trim((string) ($payload['reason'] ?? ''));
+        $reason = trim(is_string($payload['reason'] ?? null) ? $payload['reason'] : '');
         if (mb_strlen($reason) < 5 || mb_strlen($reason) > 240) {
             throw new LicensingValidationException('REASON_REQUIRED', 'Provide a 5 to 240 character decision reason.');
         }
@@ -94,14 +100,38 @@ class AccessGovernanceService
             throw new LicensingValidationException('SELF_APPROVAL_DENIED', 'A requester or access subject cannot approve their own access request.');
         }
 
+        // Red-team punch list #7 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
+        // 2026-09-15.md): requestRoleAccess()'s own subjectIsMember check
+        // only runs at request time -- an access request can sit
+        // PENDING_MANAGER for days, and offboardUser()/
+        // certifyQuarterlyAccess(REVOKE) can end the subject's membership
+        // any time in between. Without this recheck, APPROVE would still
+        // grant a role to someone no longer in the organisation at all.
+        if ($decision === 'APPROVE') {
+            $subjectIsMember = DB::table('organisation_memberships')->where('organisation_id', $organisation->id)
+                ->where('user_id', $access->subject_user_id)->where('status', 'ACTIVE')->exists();
+            if (! $subjectIsMember) {
+                throw new LicensingValidationException('ACCESS_REFERENCE_INVALID', 'The access request subject is no longer an active member of this organisation.');
+            }
+        }
+
         $now = now();
         $status = $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
         DB::transaction(function () use ($access, $actor, $decision, $reason, $status, $organisation, $now) {
+            // Same check-then-write order as decideWorkflowTask()'s own
+            // guarded UPDATE -- the affected-row count is checked before
+            // any side effect is written, so a concurrent double-decide
+            // can never log two approval rows (or grant a role twice) for
+            // one real status change.
+            $updated = DB::table('access_requests')->where('id', $access->id)->where('status', 'PENDING_MANAGER')
+                ->update(['status' => $status, 'completed_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Access request {$access->id} was changed by another action; reload and try again.");
+            }
             DB::table('access_approvals')->insert([
                 'id' => (string) Str::uuid(), 'access_request_id' => $access->id, 'reviewer_id' => $actor->id,
                 'reviewer_stage' => 'MANAGER', 'decision' => $decision, 'reason' => $reason, 'decided_at' => $now,
             ]);
-            $access->update(['status' => $status, 'completed_at' => $now]);
             AuditService::append($actor, "ACCESS_{$decision}", 'ACCESS_REQUEST', $access->id, ['organisationId' => $organisation->id, 'reason' => $reason], $now);
             if ($decision === 'APPROVE') {
                 DB::table('user_role_assignments')->insert([
