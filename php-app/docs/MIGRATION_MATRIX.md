@@ -8618,3 +8618,65 @@ balance) rendered correctly over `GET /accounting/supplier-ledger` and
 verification rows to restore the normal `DemoSeeder` baseline.
 
 Verified: full suite 716 tests, 0 regressions.
+
+## New feature: Customer Ledger (2026-09-19)
+
+Closes the `accounting.customer-ledger` `$plannedRoute` placeholder,
+the receivables-side twin of the Supplier Ledger above. Same reasoning
+applies here, confirmed by reading the relevant code directly rather than
+assuming symmetry with the supplier side: nothing posts a `JournalEntry`
+on a sale either, and `journal_lines` carries no customer attribution
+regardless. The real receivable-recognition event on this platform is
+`QuotationService::convertToInvoice()` -- a `Quotation` transitions
+`ACCEPTED` -> `CONVERTED` with a real certified `Invoice` created via
+`InvoiceService::submit()` and linked back via `converted_invoice_id`.
+A `CONVERTED` quotation is a genuine recognised amount owed by that
+customer, the direct counterpart of an `APPROVED` expense being a
+recognised amount owed to a supplier -- so this follows the same design
+the user already chose for the Supplier Ledger (derive from the existing
+lifecycle data, not from new GL postings) without needing to ask again,
+since it's the same choice applied to the parallel case.
+
+**`app/Services/Business/CustomerLedgerService.php`** (new) --
+`customerOptions()`, `summary()` (per-customer posted/pending totals and
+counts, ranked by posted balance -- `ACCEPTED` is the pending figure, the
+receivables-side "not yet recognised" state, the same reasoning
+`SupplierLedgerService` gives `SUBMITTED` expenses), `statement()` (one
+customer's full quotation history, oldest first, with a running posted
+balance that only `CONVERTED` lines move). Unlike `Expense.
+supplier_party_id`, `Quotation.customer_party_id` is a mandatory
+(non-nullable) column, so there is no "unassigned" bucket to account for
+here. Scoped via the same `OrganisationResolver` every other
+Business-domain service already uses.
+
+**`app/Http/Controllers/Business/CustomerLedgerViewController.php`**
+(new) -- serves `accounting.customer-ledger`
+(`/accounting/customer-ledger`), a route that was a `$plannedRoute` stub
+until now (removed; route name and `accounting:read` permission kept
+identical so the sidebar link needed no change). Same
+`BusinessResourceException` 404-on-foreign-id precedent as the Supplier
+Ledger.
+
+**View**: `resources/views/accounting/customer-ledger.blade.php` (new) --
+mirrors the Supplier Ledger's own layout (summary cards, a
+customer-balance table with a per-row "View statement" link, a customer
+picker whose selection renders a running-balance statement), with each
+statement line showing the linked certified invoice id where one exists.
+
+**Tests**: `tests/Feature/Business/CustomerLedgerViewTest.php` (new, 8
+tests) -- auth/permission gates, graceful empty state, posted/pending
+totals correctly computed and ranked (with a `DRAFT` quotation confirmed
+to never appear), cross-organisation scoping, a real running-balance
+statement (confirming a `REJECTED` line is shown but never moves the
+balance), a foreign customer id 404ing, and the picker only ever listing
+active-CUSTOMER parties (not a supplier-only party).
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+created a real customer (`BusinessParty` + active `CUSTOMER`
+`PartyRelationship`) and a real `CONVERTED` quotation against it via
+`php artisan tinker`, confirmed both the summary table (N$2,300.00 posted
+balance) and the drill-down statement (`QUO-VERIFY-1`, N$2,300.00 running
+balance) rendered correctly, then removed the verification rows to
+restore the normal `DemoSeeder` baseline.
+
+Verified: full suite 724 tests, 0 regressions.

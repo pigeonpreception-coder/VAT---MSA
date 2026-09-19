@@ -30,6 +30,7 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ForeignInvoiceViewController;
 use App\Http\Controllers\Business\LocalInvoiceViewController;
 use App\Http\Controllers\Business\OperationsViewController;
+use App\Http\Controllers\Business\CustomerLedgerViewController;
 use App\Http\Controllers\Business\ProjectController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
@@ -275,6 +276,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // introduced). See AccountingViewController's own doc comment.
     Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
     Route::get('/accounting/supplier-ledger', [SupplierLedgerViewController::class, 'index'])->name('accounting.supplier-ledger');
+    Route::get('/accounting/customer-ledger', [CustomerLedgerViewController::class, 'index'])->name('accounting.customer-ledger');
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
@@ -481,9 +483,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // below (SupplierLedgerViewController). Route name and permission
     // kept identical to the placeholder this replaces so the sidebar's
     // Accounting & Finance > Supplier Ledger link needed no change.
-    $plannedRoute('/accounting/customer-ledger', 'accounting.customer-ledger', 'accounting:read', 'Accounting & Finance', 'Customer Ledger',
-        'Per-customer posted balances derived from the general ledger.',
-        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    // Customer Ledger is no longer a planned-module placeholder -- see
+    // the real route registered alongside the other Accounting routes
+    // above (CustomerLedgerViewController). Route name and permission
+    // kept identical to the placeholder this replaces so the sidebar's
+    // Accounting & Finance > Customer Ledger link needed no change.
     // Superseded by the real Immovable/Movable Asset Management modules
     // below (accounting:read is still the gate, matching the placeholder
     // this replaces): a fixed-asset domain model now exists, so this is a
