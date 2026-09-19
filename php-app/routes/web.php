@@ -50,6 +50,7 @@ use App\Http\Controllers\Document\DocumentViewController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\Refund\RefundViewController;
 use App\Http\Controllers\VatLifecycle\InvoiceReconciliationViewController;
+use App\Http\Controllers\VatLifecycle\VatAdjustmentReportViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
@@ -137,6 +138,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // InvoiceReconciliationViewController's own doc comment. Was previously
     // a $plannedRoute placeholder further down this file.
     Route::get('/vat-management/reconciliation', [InvoiceReconciliationViewController::class, 'index'])->name('vat-management.reconciliation');
+
+    // Real Blade UI for the VAT Adjustment Report -- see
+    // VatAdjustmentReportViewController's own doc comment. Was previously
+    // a $plannedRoute placeholder further down this file.
+    Route::get('/vat-management/adjustment-report', [VatAdjustmentReportViewController::class, 'index'])->name('vat-management.adjustment-report');
 
     // Real Blade UI for refund claims, alongside the JSON API surface
     // below -- see RefundViewController's own doc comment. The JSON API
@@ -447,9 +453,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // permission kept identical to the placeholder this replaces so the
     // sidebar's VAT Management > Invoice Reconciliation link needed no
     // change.
-    $plannedRoute('/vat-management/adjustment-report', 'vat-management.adjustment-report', 'compliance:read', 'VAT Management', 'VAT Adjustment Report',
-        'A summary of credit and debit note adjustments against filed VAT periods.',
-        'This report format is not yet approved. The underlying VAT-period and adjustment data already exists in the platform.');
+    // VAT Adjustment Report is no longer a planned-module placeholder --
+    // see the real route registered alongside the other VAT-lifecycle
+    // routes above (VatAdjustmentReportViewController). Route name and
+    // permission kept identical to the placeholder this replaces so the
+    // sidebar's VAT Management > VAT Adjustment Report link needed no
+    // change.
     // Local Invoices is no longer a planned-module placeholder -- see the
     // real routes registered alongside /operations above.
     // Foreign Invoices is no longer a planned-module placeholder -- see
