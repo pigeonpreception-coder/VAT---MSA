@@ -49,6 +49,7 @@ use App\Http\Controllers\Document\DocumentController;
 use App\Http\Controllers\Document\DocumentViewController;
 use App\Http\Controllers\Refund\RefundController;
 use App\Http\Controllers\Refund\RefundViewController;
+use App\Http\Controllers\VatLifecycle\InvoiceReconciliationViewController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleController;
 use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
@@ -131,6 +132,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/vat-returns/{id}/submission', [VatLifecycleViewController::class, 'submit'])->name('vat-returns.submission.store');
     Route::post('/approval-tasks/{id}/decision', [VatLifecycleViewController::class, 'decideApproval'])->name('approval-tasks.decision.store');
     Route::post('/vat-returns/{id}/refund-request', [RefundViewController::class, 'storeRequest'])->name('vat-returns.refund-request.store');
+
+    // Real Blade UI for the Invoice Reconciliation Report -- see
+    // InvoiceReconciliationViewController's own doc comment. Was previously
+    // a $plannedRoute placeholder further down this file.
+    Route::get('/vat-management/reconciliation', [InvoiceReconciliationViewController::class, 'index'])->name('vat-management.reconciliation');
 
     // Real Blade UI for refund claims, alongside the JSON API surface
     // below -- see RefundViewController's own doc comment. The JSON API
@@ -435,9 +441,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     $plannedRoute('/vat-management/audit-report', 'vat-management.audit-report', 'compliance:read', 'VAT Management', 'VAT Audit Report',
         'A real-time invoice and VAT summary drawn from certified invoices and reconciliation evidence.',
         'This report format is not yet approved. Today, the closest equivalent data lives in Audit Cases and Compliance Overview.');
-    $plannedRoute('/vat-management/reconciliation', 'vat-management.reconciliation', 'compliance:read', 'VAT Management', 'Invoice Reconciliation',
-        'Matching of issued invoices, received invoices and unlocated issued invoices.',
-        'Not yet built. Risk Indicators is the closest existing equivalent today.');
+    // Invoice Reconciliation is no longer a planned-module placeholder --
+    // see the real route registered alongside the other VAT-lifecycle
+    // routes above (InvoiceReconciliationViewController). Route name and
+    // permission kept identical to the placeholder this replaces so the
+    // sidebar's VAT Management > Invoice Reconciliation link needed no
+    // change.
     $plannedRoute('/vat-management/adjustment-report', 'vat-management.adjustment-report', 'compliance:read', 'VAT Management', 'VAT Adjustment Report',
         'A summary of credit and debit note adjustments against filed VAT periods.',
         'This report format is not yet approved. The underlying VAT-period and adjustment data already exists in the platform.');

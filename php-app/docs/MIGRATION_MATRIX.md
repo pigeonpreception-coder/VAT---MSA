@@ -8174,3 +8174,106 @@ non-local target -- neither exists in this sandbox, and large data
 volume alone doesn't substitute for it. That half stays blocked.
 
 Verified: full suite 681 tests, 0 regressions.
+
+## New feature: Invoice Reconciliation Report + NamRA VAT Summary Report (2026-09-19)
+
+Requested directly (not from a red-team punch list), against two real
+sample documents the user attached: an accountant's own "Invoice
+Reconciliation Summary Report" working-paper spreadsheet (taxpayer
+NEMA PROPERTY DEVELOPERS CC, period May-June 2026) and the matching
+official NamRA "VAT Summary Report" PDF for the same taxpayer/period.
+Both were read in full (openpyxl for the xlsx, pdfminer.six for the
+PDF -- neither was preinstalled in this sandbox; both were `pip
+install`ed, along with `cffi` to fix a broken system `cryptography`
+rust backend blocking the PDF extractor) before any code was written,
+to match their real structure rather than guess at it. The user then
+specified exact navigation placement: both reports live under the
+existing "VAT Management" sidebar group (`resources/views/layouts/
+app.blade.php`'s `group-vat-management`), with the NamRA Summary
+Report under the existing "VAT Refund Report" item and Invoice
+Reconciliation under the existing "Invoice Reconciliation" item --
+confirmed by reading the sidebar markup directly: in this codebase a
+"subfolder" is a `<li>` entry inside a sidebar group's flat
+`.sidebar-subnav` list (see `resources/css/app.css`'s own comment at
+line 101), not a further-nested third level, so both instructions
+resolved to two exact, already-existing navigation slots rather than
+anything needing new sidebar structure.
+
+**`app/Services/VatLifecycle/VatReconciliationReportService.php`** (new)
+-- a read-only reporting service backing both reports, sharing one
+private `categoryBreakdown()` helper that buckets `invoice_lines.
+tax_category` (STANDARD/ZERO_RATED/EXEMPT/OUTSIDE_SCOPE/REVERSE_CHARGE/
+OTHER) totals for a taxpayer+period, filtering invoice status exactly
+the way `VatLifecycleService::generateReturn()` already does (OUTPUT:
+`CERTIFIED`/`MATCHED`/`EXCEPTION` on `supplier_taxpayer_id`; INPUT:
+`MATCHED` only on `customer_taxpayer_id`), so a period with no drift
+since it was filed reproduces the filed figures exactly and any
+difference is a genuine signal, not a modelling artefact. Two public
+methods:
+- `invoiceReconciliation()` -- the full category+line-item breakdown
+  for both output and input VAT, a locally-computed net payable
+  (`output_vat - input_vat`), the taxpayer's latest filed
+  `VatReturnVersion` for that period (if any), and a signed
+  `discrepancy_cents` between the two.
+- `namraSummary()` -- the same category breakdown rendered in NamRA's
+  own VAT-Declared/VAT-Claimed/VAT-Payable shape, sourced from the
+  filed `VatReturnVersion`'s own persisted `output_tax_cents`/
+  `input_tax_cents`/`net_payable_cents` (the actual filed figures, not
+  a recomputation) alongside the per-category breakdown.
+- `periodOptions()` -- the period picker's data source, `TenantScope`-
+  scoped the same way `VatLifecycleService::snapshot()` already is.
+
+**`app/Http/Controllers/VatLifecycle/InvoiceReconciliationViewController.php`**
+(new) -- serves `vat-management.reconciliation` (`/vat-management/
+reconciliation`), a route that was a `$plannedRoute` stub in
+`routes/web.php` until now (removed; route name and `compliance:read`
+permission kept identical so the sidebar link needed no change). A
+period-outside-scope request throws `AuthorizationException` via
+`TenantScope::requireTaxpayer` uncaught, reproducing the exact
+clean-403 behaviour `VatLifecycleViewController::showReturn` already
+established for the same situation.
+
+**`app/Http/Controllers/Refund/RefundViewController.php`** -- `index()`
+extended (constructor now also takes `VatReconciliationReportService`)
+to additionally compute `namraSummary()` for a period picked via the
+same `?period_id=` query param, passed to the existing `refunds.index`
+view alongside the untouched refund-claim register data. The refund
+register itself (`RefundService`, `RefundClaim` query, every existing
+route/test) is completely unchanged -- the NamRA report is additive
+content on the same page, not a replacement.
+
+**Views**: `resources/views/vat-management/reconciliation.blade.php`
+(new) -- period picker, taxpayer/period header, Output VAT and Input
+VAT sections each broken into per-category tables with full line-item
+detail and subtotals, and a "VAT payable reconciliation" panel showing
+the computed figure, the filed figure, and a plain-language
+reconciled/discrepancy banner. `resources/views/refunds/index.blade.php`
+-- extended with a "NamRA VAT Summary Report" section below the
+existing claims table: return-info header (TIN/taxpayer/period/due
+date), side-by-side VAT-declared/VAT-claimed category tables, and a
+VAT-payable summary box, or a graceful "no return generated yet"
+empty state.
+
+**Tests**: `tests/Feature/VatLifecycle/InvoiceReconciliationViewTest.php`
+(new, 6 tests) -- auth/permission gates, graceful empty state with no
+periods, a real certified-invoice category breakdown reconciling
+cleanly against a filed return, a second invoice certified *after*
+filing correctly surfacing as a discrepancy (with the exact signed-cents
+reasoning verified: a second 150.00 input line pushes the computed net
+payable from -150.00 to -300.00, numerically *less* than the filed
+-150.00), and the same cross-tenant clean-403 as `VatLifecycleViewTest`'s
+own precedent. `tests/Feature/Refund/RefundViewTest.php` -- 2 new tests
+for the NamRA summary section (a real filed-return rendering via the
+existing `makeRefundableReturn()` fixture, and the empty-state path).
+
+Live-verified over real HTTP: certified a real invoice between two
+demo taxpayers, opened a VAT period, generated a return via the actual
+form-post flow, then loaded both `/vat-management/reconciliation` and
+`/refunds` as the customer taxpayer -- both rendered the correct
+category breakdown (N$ 1,000.00 taxable / N$ 150.00 VAT) and a
+"Reconciled" banner; confirmed both sidebar links (`Invoice
+Reconciliation`, `VAT Refund Report`) point at the real routes, not
+the old placeholder. Dev database reset back to the normal
+`DemoSeeder` baseline afterward.
+
+Verified: full suite 689 tests, 0 regressions.

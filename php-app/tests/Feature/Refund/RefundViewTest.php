@@ -284,4 +284,42 @@ class RefundViewTest extends TestCase
         $duplicate->assertSessionHasErrors('form');
         $this->assertSame(1, RefundClaim::where('vat_return_version_id', $version->id)->count());
     }
+
+    /**
+     * The NamRA VAT Summary Report lives on this same page/route (the
+     * "VAT Refund Report" sidebar slot under VAT Management) -- see
+     * RefundViewController::index's own doc comment for why. Reuses
+     * makeRefundableReturn's fixture: a genuine certified-invoice-backed,
+     * approved VAT return with a real -15000 net payable position.
+     */
+    public function test_the_refunds_page_shows_the_namra_vat_summary_report_for_the_filed_period(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2008');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2008');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+
+        $response = $this->actingAs($customer['owner'])->get(route('refunds.index', ['period_id' => $version->vat_period_id]));
+
+        $response->assertOk()->assertViewIs('refunds.index');
+        $response->assertSee('NamRA VAT Summary Report');
+        $response->assertSee($customer['taxpayer']->tin);
+        $response->assertSee('Standard-Rated VAT');
+        $response->assertSee('N$ 150.00'); // input tax claimed, from the one certified invoice
+        $response->assertSee('N$ -150.00'); // amount due / (repayable) -- a genuine refund position
+    }
+
+    public function test_the_namra_vat_summary_shows_a_graceful_empty_state_before_any_return_is_generated(): void
+    {
+        $party = $this->makeTradingParty('VAT-VIEW-0009');
+        $period = VatPeriod::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $party['organisation']->id, 'taxpayer_id' => $party['taxpayer']->id,
+            'period_code' => '2026-09', 'period_start' => '2026-09-01', 'period_end' => '2026-09-30', 'due_date' => '2026-10-25',
+            'status' => 'OPEN', 'lock_version' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($party['owner'])->get(route('refunds.index', ['period_id' => $period->id]));
+
+        $response->assertOk();
+        $response->assertSee('No VAT return has been generated for this period yet.');
+    }
 }
