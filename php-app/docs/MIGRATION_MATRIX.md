@@ -8877,3 +8877,67 @@ total, then removed the verification rows to restore the normal
 `DemoSeeder` baseline.
 
 Verified: full suite 752 tests, 0 regressions.
+
+## New feature: Service Providers (2026-09-19)
+
+Closes the `registered.service-providers` `$plannedRoute` placeholder.
+Unlike Budgets/Cash Flow Projects, this placeholder's own scope note
+("Business-party records do not yet carry a service-provider
+relationship or category") was confirmed accurate: `party_relationships.
+relationship` was a hard `ENUM('CUSTOMER','SUPPLIER')`. Rather than build
+a separate page, Service Providers is now a third real
+`PartyRelationship` value on the exact same `business_parties`/
+`business-parties.index` feature Customers and Suppliers already use --
+the sidebar's own three "Registered" links only ever differed by a
+`?relationship=` filter value for the first two, so the third was always
+meant to be the same feature, not a new one.
+
+**`database/migrations/2026_09_19_000001_widen_party_relationships_relationship.php`**
+(new) -- widened `party_relationships.relationship` from
+`ENUM('CUSTOMER','SUPPLIER')` to `VARCHAR(20)`, rather than adding a
+third enum value, matching this codebase's own established convention
+for exactly this situation (see `2026_09_01_200000_widen_vat_
+transactions_transaction_type.php`'s own doc comment: "using VARCHAR
+rather than ENUM once a value set turns out not to have been
+exhaustively confirmed up front"). `BusinessValidator::
+PARTY_RELATIONSHIPS` (now `CUSTOMER`/`SUPPLIER`/`SERVICE_PROVIDER`)
+remains the real application-level allow-list.
+
+**`app/Domain/Business/BusinessValidator.php`** -- `PARTY_RELATIONSHIPS`
+widened; the `RELATIONSHIP_REQUIRED`/`RELATIONSHIP_INVALID` error
+messages updated to mention all three values.
+
+**`app/Services/Business/BusinessPartyService.php`** -- `update()`'s own
+hardcoded `['CUSTOMER', 'SUPPLIER']` relationship-reconciliation loop
+extended to include `SERVICE_PROVIDER` (`create()` already iterated the
+submitted relationship list dynamically and needed no change).
+
+**Views**: `resources/views/business-parties/index.blade.php` -- a third
+relationship checkbox on the create form and a third option on the
+filter dropdown; both here and in `business-parties/show.blade.php`, the
+relationship badge's own label formatting (`ucfirst(strtolower(...))`,
+which would have rendered "Service_provider") was fixed to
+`ucwords(strtolower(str_replace('_', ' ', ...)))` so it reads "Service
+Provider". `resources/views/layouts/app.blade.php` -- the sidebar's
+"Service Providers" link now points directly at `business-parties.index`
+with `?relationship=SERVICE_PROVIDER`, the exact same pattern its own
+"Customers"/"Suppliers" siblings already use, rather than a separate
+named route.
+
+**Tests**: `tests/Feature/Business/BusinessPartyViewTest.php` -- 3 new
+tests appended to the existing file: registering a party with only a
+`SERVICE_PROVIDER` relationship creates a real row, the list page's own
+relationship filter correctly includes/excludes a service provider (and
+renders "Service Provider", not "Service_provider"), and a single party
+can hold both a `CUSTOMER` and a `SERVICE_PROVIDER` relationship at
+once. All 12 pre-existing tests in that file still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+confirmed the sidebar's own rendered "Service Providers" link points at
+`/business-parties?relationship=SERVICE_PROVIDER`; created a real party
+with only that relationship through the actual form; confirmed it
+appeared under the `SERVICE_PROVIDER` filter and correctly did not
+appear under the `SUPPLIER` filter; removed it afterward to restore the
+normal `DemoSeeder` baseline.
+
+Verified: full suite 755 tests, 0 regressions.

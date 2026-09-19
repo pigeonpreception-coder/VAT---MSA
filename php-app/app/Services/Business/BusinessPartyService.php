@@ -95,7 +95,7 @@ class BusinessPartyService
                 'tin' => $party['tin'], 'email' => $party['email'], 'phone' => $party['phone'], 'address' => $party['address'],
                 'updated_at' => $now,
             ]);
-            foreach (['CUSTOMER', 'SUPPLIER'] as $relationship) {
+            foreach (['CUSTOMER', 'SUPPLIER', 'SERVICE_PROVIDER'] as $relationship) {
                 if (in_array($relationship, $party['relationships'], true)) {
                     // Mirrors the source's own ON CONFLICT upsert: reactivating an existing
                     // (organisation_id, party_id, relationship) row keeps its original

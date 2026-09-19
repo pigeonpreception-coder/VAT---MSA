@@ -169,7 +169,7 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'registered') show @endif" id="group-registered" data-bs-parent="#sidebar-accordion">
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'CUSTOMER') aria-current="page" @endif>Customers</a></li>
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SUPPLIER') aria-current="page" @endif>Suppliers</a></li>
-                                <li><a class="nav-link" href="{{ route('registered.service-providers') }}" @if (request()->routeIs('registered.service-providers')) aria-current="page" @endif>Service Providers</a></li>
+                                <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SERVICE_PROVIDER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SERVICE_PROVIDER') aria-current="page" @endif>Service Providers</a></li>
                         </ul>
                     </li>
 

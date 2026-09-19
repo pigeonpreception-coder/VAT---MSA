@@ -58,6 +58,10 @@
                     <input class="form-check-input" type="checkbox" id="rel_supplier" name="relationships[]" value="SUPPLIER" @checked(in_array('SUPPLIER', old('relationships', [])))>
                     <label class="form-check-label small" for="rel_supplier">Supplier</label>
                 </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" id="rel_service_provider" name="relationships[]" value="SERVICE_PROVIDER" @checked(in_array('SERVICE_PROVIDER', old('relationships', [])))>
+                    <label class="form-check-label small" for="rel_service_provider">Service provider</label>
+                </div>
                 @error('relationships')<div class="text-danger small">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-8">
@@ -81,6 +85,7 @@
                     <option value="" @selected(($filters['relationship'] ?? '') === '')>All</option>
                     <option value="CUSTOMER" @selected(($filters['relationship'] ?? '') === 'CUSTOMER')>Customer</option>
                     <option value="SUPPLIER" @selected(($filters['relationship'] ?? '') === 'SUPPLIER')>Supplier</option>
+                    <option value="SERVICE_PROVIDER" @selected(($filters['relationship'] ?? '') === 'SERVICE_PROVIDER')>Service provider</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -112,7 +117,7 @@
                         <td class="font-monospace">{{ $party['vat_number'] ?? '—' }}</td>
                         <td>
                             @foreach ($party['relationships'] as $relationship)
-                                <span class="badge text-bg-light border">{{ ucfirst(strtolower($relationship)) }}</span>
+                                <span class="badge text-bg-light border">{{ ucwords(strtolower(str_replace('_', ' ', $relationship))) }}</span>
                             @endforeach
                         </td>
                         <td><x-status-badge :value="$party['status']" type="status" /></td>

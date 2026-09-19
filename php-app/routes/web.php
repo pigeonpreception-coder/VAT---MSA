@@ -556,9 +556,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     $plannedRoute('/project-management/completed', 'project-management.completed', 'projects:read', 'Project Management', 'Completed Projects',
         'Summary lists and reports for finished projects.',
         'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
-    $plannedRoute('/registered/service-providers', 'registered.service-providers', 'parties:manage', 'Registered', 'Service Providers',
-        'A categorised register of service providers, distinct from customers and suppliers.',
-        'Not yet built. Business-party records do not yet carry a service-provider relationship or category; Customers and Suppliers are available today under Registered.');
+    // Service Providers is no longer a planned-module placeholder -- it is
+    // now a third real PartyRelationship value (SERVICE_PROVIDER) on the
+    // same business_parties/business-parties.index feature Customers and
+    // Suppliers already use above, not a separate page. See
+    // database/migrations/2026_09_19_000001_widen_party_relationships_relationship.php's
+    // own doc comment for why the underlying column was widened rather
+    // than a new enum value added, and resources/views/layouts/app.blade.php's
+    // sidebar link, which now points at business-parties.index with
+    // ?relationship=SERVICE_PROVIDER, the same pattern the Customers/
+    // Suppliers links already use.
     $plannedRoute('/new-registration/credit-note', 'new-registration.credit-note', 'invoices:read', 'New Registration', 'New Credit Note',
         'A controlled form to issue a credit note against an original tax invoice.',
         'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the credit, and the lines to reverse -- with amounts recorded as a reduction. Awaiting approval before the UI is built.');

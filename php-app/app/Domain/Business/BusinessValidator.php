@@ -22,7 +22,7 @@ class BusinessValidator
     private const CURRENCY_PATTERN = '/^[A-Z]{3}$/';
     private const ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$/';
     private const TAX_CATEGORIES = ['STANDARD', 'ZERO_RATED', 'EXEMPT', 'OUT_OF_SCOPE'];
-    private const PARTY_RELATIONSHIPS = ['CUSTOMER', 'SUPPLIER'];
+    private const PARTY_RELATIONSHIPS = ['CUSTOMER', 'SUPPLIER', 'SERVICE_PROVIDER'];
     private const PARTY_STATUSES = ['ACTIVE', 'INACTIVE'];
     private const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
     private const JOURNAL_SOURCE_TYPES = ['MANUAL', 'EXPENSE', 'INVOICE', 'IMPORT', 'ADJUSTMENT'];
@@ -65,7 +65,7 @@ class BusinessValidator
         $rawRelationships = is_array($input['relationships'] ?? null) ? $input['relationships'] : [];
         $relationships = array_values(array_unique(array_map(fn ($v) => mb_strtoupper(self::textValue($v)), $rawRelationships)));
         if (count($relationships) < 1) {
-            $messages[] = ['code' => 'RELATIONSHIP_REQUIRED', 'path' => '/relationships', 'message' => 'Select at least one customer or supplier relationship.'];
+            $messages[] = ['code' => 'RELATIONSHIP_REQUIRED', 'path' => '/relationships', 'message' => 'Select at least one customer, supplier or service-provider relationship.'];
         }
         foreach ($relationships as $relationship) {
             if (! in_array($relationship, self::PARTY_RELATIONSHIPS, true)) {
@@ -104,7 +104,7 @@ class BusinessValidator
 
         $relationship = isset($params['relationship']) && $params['relationship'] !== '' ? mb_strtoupper(trim((string) $params['relationship'])) : null;
         if ($relationship && ! in_array($relationship, self::PARTY_RELATIONSHIPS, true)) {
-            $messages[] = ['code' => 'RELATIONSHIP_INVALID', 'path' => '/relationship', 'message' => 'relationship must be CUSTOMER or SUPPLIER.'];
+            $messages[] = ['code' => 'RELATIONSHIP_INVALID', 'path' => '/relationship', 'message' => 'relationship must be CUSTOMER, SUPPLIER or SERVICE_PROVIDER.'];
         }
 
         $status = isset($params['status']) && $params['status'] !== '' ? mb_strtoupper(trim((string) $params['status'])) : null;

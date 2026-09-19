@@ -232,4 +232,57 @@ class BusinessPartyViewTest extends TestCase
         $customers = $this->actingAs($org['owner'])->get(route('business-parties.index', ['relationship' => 'CUSTOMER']));
         $customers->assertOk();
     }
+
+    /**
+     * Closes the `registered.service-providers` $plannedRoute placeholder:
+     * SERVICE_PROVIDER is now a real third PartyRelationship value on the
+     * same business_parties feature Customers/Suppliers already use, not a
+     * separate page. `party_relationships.relationship` was widened from
+     * ENUM('CUSTOMER','SUPPLIER') to VARCHAR(20) to allow it (see
+     * database/migrations/2026_09_19_000001_widen_party_relationships_relationship.php).
+     */
+    public function test_registering_a_service_provider_creates_a_real_row(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0013');
+
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.store'), [
+            'display_name' => 'Acme Logistics Consulting', 'legal_name' => 'Acme Logistics Consulting CC',
+            'vat_number' => 'VAT-VIEW-BP-0013SP', 'email' => 'contact@acme-logistics.test', 'relationships' => ['SERVICE_PROVIDER'],
+        ]);
+
+        $party = BusinessParty::where('organisation_id', $org['organisation']->id)->where('display_name', 'Acme Logistics Consulting')->firstOrFail();
+        $response->assertRedirect(route('business-parties.show', $party->id));
+        $this->assertSame('ACTIVE', $party->status);
+        $this->assertContains('SERVICE_PROVIDER', $party->relationships()->pluck('relationship')->all());
+    }
+
+    public function test_the_list_page_filters_by_the_service_provider_relationship(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0014');
+        $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0014-SVC', ['SERVICE_PROVIDER']);
+        $this->makeParty($org['organisation'], 'VAT-VIEW-BP-0014-SUP', ['SUPPLIER']);
+
+        $response = $this->actingAs($org['owner'])->get(route('business-parties.index', ['relationship' => 'SERVICE_PROVIDER']));
+
+        $response->assertOk();
+        $response->assertSee('VAT-VIEW-BP-0014-SVC');
+        $response->assertDontSee('VAT-VIEW-BP-0014-SUP');
+        $response->assertSee('Service Provider');
+    }
+
+    public function test_a_party_can_hold_both_a_customer_and_a_service_provider_relationship(): void
+    {
+        $org = $this->makeOrganisation('VAT-VIEW-BP-0015');
+
+        $response = $this->actingAs($org['owner'])->post(route('business-parties.store'), [
+            'display_name' => 'Dual Role Consultancy', 'vat_number' => 'VAT-VIEW-BP-0015DR',
+            'relationships' => ['CUSTOMER', 'SERVICE_PROVIDER'],
+        ]);
+
+        $party = BusinessParty::where('organisation_id', $org['organisation']->id)->where('display_name', 'Dual Role Consultancy')->firstOrFail();
+        $response->assertRedirect(route('business-parties.show', $party->id));
+        $relationships = $party->relationships()->pluck('relationship')->all();
+        $this->assertContains('CUSTOMER', $relationships);
+        $this->assertContains('SERVICE_PROVIDER', $relationships);
+    }
 }
