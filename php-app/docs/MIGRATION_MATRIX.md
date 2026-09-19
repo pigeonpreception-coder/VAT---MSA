@@ -8353,3 +8353,63 @@ placeholder. Dev database reset back to the normal `DemoSeeder`
 baseline afterward.
 
 Verified: full suite 696 tests, 0 regressions.
+
+## New feature: VAT Audit Report (2026-09-19)
+
+Closes the fourth and last "VAT Management" `$plannedRoute` placeholder,
+completing the group started with the Invoice Reconciliation Report.
+The placeholder's own scope note named the closest existing equivalents
+as Risk Indicators, Audit Cases, and Compliance Overview -- rather than
+duplicate any of those three existing pages' own detail views, this
+report is a period-scoped rollup drawn from the same underlying data:
+
+- **Certified invoices by risk level** -- the taxpayer's own output
+  invoices issued within the period, grouped by `invoices.risk_level`
+  (set by `InvoiceCalculator::score()` at certification time) with
+  per-level counts and total value, plus a status breakdown
+  (CERTIFIED/MATCHED/EXCEPTION/CANCELLED).
+- **Reconciliation exceptions** -- `reconciliation_exceptions` rows
+  raised during the period (written by `InvoiceService::submit()`'s own
+  risk-flagging block), each showing the invoice, exception type,
+  severity, status, and summary.
+- **Audit cases opened this period** -- `audit_cases` rows opened
+  against the taxpayer during the period.
+
+`reconciliation_matches` was deliberately left out despite being a
+plausible fourth source: `VatLifecycleService::snapshot()` already
+reads it, but no application code anywhere writes to it (confirmed by
+reading that migration's own doc comment and grepping for writers) --
+including it here would render a permanently-empty section that reads
+as a bug, not real evidence.
+
+**`app/Services/VatLifecycle/VatAuditReportService.php`** (new) --
+`report()` returns all three sections; `periodOptions()` reuses the
+identical `TenantScope`-scoped pattern already established by the other
+three VAT Management report services.
+
+**`app/Http/Controllers/VatLifecycle/VatAuditReportViewController.php`**
+(new) -- serves `vat-management.audit-report`, replacing the
+`$plannedRoute` stub (route name and `compliance:read` permission kept
+identical, so the sidebar link needed no change). Same cross-tenant
+clean-403 behaviour as the other three.
+
+**View**: `resources/views/vat-management/audit-report.blade.php` (new)
+-- period picker, a risk-level breakdown table with a status-badge
+footer, a reconciliation-exceptions table, and an audit-cases table,
+each with a graceful empty state.
+
+**Tests**: `tests/Feature/VatLifecycle/VatAuditReportViewTest.php` (new,
+6 tests) -- auth/permission gates, graceful empty state, a real
+certified invoice summarized correctly by risk level, a genuine
+reconciliation exception and audit case both rendering correctly, and
+the same cross-tenant clean-403 precedent.
+
+Live-verified over real HTTP: confirmed the route renders (graceful
+empty state against the demo seed, which has no VAT periods) and that
+the sidebar's "VAT Audit Report" link now points at the real route
+rather than the old placeholder -- alongside Invoice Reconciliation,
+VAT Refund Report, and VAT Adjustment Report, all four "VAT Management"
+report placeholders are now real. Dev database reset back to the normal
+`DemoSeeder` baseline afterward.
+
+Verified: full suite 702 tests, 0 regressions.
