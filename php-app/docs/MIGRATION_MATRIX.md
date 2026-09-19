@@ -8277,3 +8277,79 @@ the old placeholder. Dev database reset back to the normal
 `DemoSeeder` baseline afterward.
 
 Verified: full suite 689 tests, 0 regressions.
+
+## New feature: VAT Adjustment Report (2026-09-19)
+
+Follow-up to the reconciliation reports above, closing the last of the
+three `$plannedRoute` "VAT Management" placeholders (`vat-management.
+audit-report` remains a genuine placeholder -- `VAT Audit Report`'s data
+already lives in Audit Cases and Compliance Overview under the same
+"VAT Management" group).
+
+The placeholder's own copy ("A summary of credit and debit note
+adjustments against filed VAT periods") turned out to describe two
+genuinely distinct mechanisms once the underlying tables were read
+directly, so the report shows both side by side rather than conflating
+them:
+
+1. **`invoice_corrections`** -- CREDIT_NOTE/DEBIT_NOTE invoices linked
+   back to the original they correct. These already flow through the
+   normal `OUTPUT_VAT`/`INPUT_VAT` ledger entries at certification time
+   (`InvoiceService::submit()`'s own `$reversesVat` block), and a credit
+   note's monetary fields are already negative / a debit note's already
+   positive (`InvoiceCalculator`'s own sign validation) -- so this
+   report sums `tax_cents`/`net_amount_cents` across corrections with no
+   extra sign handling needed. Shown purely as an audit trail of *why*
+   a period's output/input VAT moved, split into Output (corrections the
+   taxpayer issued to customers) and Input (corrections the taxpayer
+   received from suppliers), mirroring the Invoice Reconciliation
+   Report's own output/input split.
+2. **`vat_adjustments`** -- the pre-existing manual, maker-checker-
+   approved period-level adjustment mechanism
+   (`VatLifecycleService::createAdjustment()`/`decideApproval()`), which
+   is *not* invoice-driven and feeds directly into a filed
+   `VatReturnVersion`'s own `adjustment_cents`/`BOX_ADJUST`. This is the
+   one half with a real figure to reconcile against the filed return --
+   the report computes an "approved net" (INCREASE/DECREASE-signed sum
+   of `APPROVED`-status rows) and flags a discrepancy against the
+   return's own `adjustment_cents` the same way the Invoice
+   Reconciliation Report already does for VAT payable.
+
+**`app/Services/VatLifecycle/VatAdjustmentReportService.php`** (new) --
+`report()` returns both sections plus the filed-return comparison;
+`periodOptions()` reuses the identical `TenantScope`-scoped pattern
+already established by `VatReconciliationReportService`.
+
+**`app/Http/Controllers/VatLifecycle/VatAdjustmentReportViewController.php`**
+(new) -- serves `vat-management.adjustment-report`, replacing the
+`$plannedRoute` stub (route name and `compliance:read` permission kept
+identical, so the sidebar link needed no change). Same cross-tenant
+clean-403 behaviour as the other two VAT Management reports.
+
+**View**: `resources/views/vat-management/adjustment-report.blade.php`
+(new) -- period picker, Output/Input correction tables with per-row
+detail and net-effect footers, a Period VAT Adjustments table with an
+approved-net footer, and an "Adjustment reconciliation" panel.
+
+**Tests**: `tests/Feature/VatLifecycle/VatAdjustmentReportViewTest.php`
+(new, 7 tests) -- auth/permission gates, graceful empty state, a real
+credit-note correction rendering correctly, an approved adjustment
+reconciling cleanly against a filed return, an adjustment approved
+*after* filing correctly surfacing as a discrepancy, and the same
+cross-tenant clean-403 precedent. One genuine pre-existing constraint
+was hit and worked around rather than "fixed" (out of this report's
+scope): a VAT period containing *only* a credit note with no offsetting
+output invoice of its own trips `VatLifecycleValidator::checkedSum()`'s
+per-entry non-negative guard inside `generateReturn()` -- confirmed by
+reading that code path directly, not assumed; the credit-note-display
+test therefore doesn't also generate a return for that same period,
+and the reconciliation tests use adjustment-only periods instead.
+
+Live-verified over real HTTP: confirmed the route renders (`vat-
+management/adjustment-report`, graceful empty state against the demo
+seed, which has no VAT periods) and that the sidebar's "VAT Adjustment
+Report" link now points at the real route rather than the old
+placeholder. Dev database reset back to the normal `DemoSeeder`
+baseline afterward.
+
+Verified: full suite 696 tests, 0 regressions.
