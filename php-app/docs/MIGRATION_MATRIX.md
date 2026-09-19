@@ -8742,3 +8742,87 @@ real `403`. Verification rows removed afterward to restore the normal
 `DemoSeeder` baseline.
 
 Verified: full suite 734 tests, 0 regressions.
+
+## New feature: Purchase Orders (2026-09-19)
+
+Closes the `accounting.purchase-orders` `$plannedRoute` placeholder
+("Purchase order issuance, approval and conversion to supplier
+invoices"). Unlike Budgets, a full-repo grep for `purchase_order`/
+`PurchaseOrder` before writing a line of this feature confirmed the
+placeholder's own scope note ("No purchase-order domain model exists in
+the platform today") was accurate -- this is a genuinely new domain,
+the first one added in this window that isn't ported from the TS
+source and isn't a UI-only gap over existing data.
+
+**`database/migrations/2026_09_19_000000_create_purchase_orders_table.php`**
+(new) -- deliberately a single amount per order
+(`net_cents`/`tax_cents`/`total_cents`), not a multi-line catalogue like
+`quotations`/`quotation_lines`: mirrors `expenses`' own single-amount
+shape (the conversion target), which keeps the conversion step a direct
+1:1 field carry-over rather than synthesizing a multi-line payload, and
+matches this platform's own "lighter CRUD standard" precedent
+(`AccountingService`'s own doc comment).
+
+**`app/Models/PurchaseOrder.php`** (new).
+
+**`app/Domain/Business/BusinessValidator.php`** -- three new methods:
+`purchaseOrder()`, `purchaseOrderRejection()`, `purchaseOrderCancellation()`,
+each mirroring the equivalent `expense*`/`quotation*` validator's own
+shape and helpers.
+
+**`app/Services/Business/PurchaseOrderService.php`** (new) -- lifecycle
+`DRAFT` -> `SUBMITTED` -> `APPROVED` -> `ISSUED` -> `CONVERTED`, mirroring
+`ExpenseService`'s own maker-checker shape for the first three
+transitions (the creator can never approve or reject their own order --
+the same self-review guard `ExpenseService::approve`/`reject` and
+`ProjectService::approveBudget` already establish; confirmed against a
+real `403` over HTTP, not just unit-level), then two PO-specific
+additions: `issue()` (a plain status flip -- the "issuance" the
+placeholder promised) and `convertToExpense()` (the "conversion" the
+placeholder promised -- to a real `Expense`, reusing
+`ExpenseService::create()` directly rather than a second write path,
+since this platform has no inbound-supplier-invoice concept distinct
+from `Expense`). `cancel()` is the escape hatch a real purchasing flow
+needs that expenses/quotations don't (an order can be called off any
+time before conversion or rejection).
+
+**`app/Http/Controllers/Business/PurchaseOrderViewController.php`** (new)
+-- serves `accounting.purchase-orders` and its six action routes
+(submission/approval/rejection/issuance/conversion/cancellation). The
+index view keeps the placeholder's own `accounting:read` gate (no
+sidebar change needed); every lifecycle-mutating action is gated
+`accounting:post` (the same permission `AccountingController`'s own
+journal-posting API already uses) except `convert()`, gated
+`expenses:manage` directly -- the real permission boundary
+`ExpenseService::create()` itself already enforces for the `Expense`
+this action creates. No new permission was added; both were already
+granted to `TAXPAYER_OWNER`/`TAXPAYER_ACCOUNTANT`.
+
+**View**: `resources/views/accounting/purchase-orders.blade.php` (new) --
+a purchase-order register with per-status inline actions (submit /
+approve+reject / issue+cancel / convert-with-expense-number), and a
+create form gated the same way the register's own actions are. A
+`CONVERTED` row links the resulting expense's id; a `REJECTED`/
+`CANCELLED` row shows its own reason.
+
+**Tests**: `tests/Feature/Business/PurchaseOrderViewTest.php` (new, 11
+tests) -- auth/permission gates, graceful empty state, creation through
+the form, the full lifecycle end to end through real Blade routes
+(DRAFT through a real converted `Expense`, asserting the resulting
+`Expense` row and the `converted_expense_id` link), the maker-checker
+self-review 403, rejection with a reason, cancellation from `APPROVED`,
+converting a not-yet-`ISSUED` order rejected cleanly, and
+cross-organisation scoping.
+
+Live-verified over real HTTP: drove a real purchase order through every
+transition (create -> submit -> approve as an independent approver ->
+issue -> convert) against the demo organisation, confirming the register
+showed `CONVERTED` and the linked expense id, and that the real
+resulting `Expense` (N$5,750.00) was created with `status = DRAFT` --
+correctly *not* yet counted on the Supplier Ledger's own posted balance
+until that expense clears its own independent approval in turn, exactly
+as designed (no double-counting, no gate-skipping between the two
+features). Verification rows removed afterward to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 745 tests, 0 regressions.

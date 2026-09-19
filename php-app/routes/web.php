@@ -33,6 +33,7 @@ use App\Http\Controllers\Business\OperationsViewController;
 use App\Http\Controllers\Business\BudgetsViewController;
 use App\Http\Controllers\Business\CustomerLedgerViewController;
 use App\Http\Controllers\Business\ProjectController;
+use App\Http\Controllers\Business\PurchaseOrderViewController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
 use App\Http\Controllers\Business\SupplierLedgerViewController;
@@ -280,6 +281,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/accounting/customer-ledger', [CustomerLedgerViewController::class, 'index'])->name('accounting.customer-ledger');
     Route::get('/accounting/budgets', [BudgetsViewController::class, 'index'])->name('accounting.budgets');
     Route::post('/accounting/budgets/{id}/approval', [BudgetsViewController::class, 'approve'])->name('accounting.budgets.approval');
+    Route::get('/accounting/purchase-orders', [PurchaseOrderViewController::class, 'index'])->name('accounting.purchase-orders');
+    Route::post('/accounting/purchase-orders', [PurchaseOrderViewController::class, 'store'])->name('accounting.purchase-orders.store');
+    Route::post('/accounting/purchase-orders/{id}/submission', [PurchaseOrderViewController::class, 'submit'])->name('accounting.purchase-orders.submit');
+    Route::post('/accounting/purchase-orders/{id}/approval', [PurchaseOrderViewController::class, 'approve'])->name('accounting.purchase-orders.approve');
+    Route::post('/accounting/purchase-orders/{id}/rejection', [PurchaseOrderViewController::class, 'reject'])->name('accounting.purchase-orders.reject');
+    Route::post('/accounting/purchase-orders/{id}/issuance', [PurchaseOrderViewController::class, 'issue'])->name('accounting.purchase-orders.issue');
+    Route::post('/accounting/purchase-orders/{id}/conversion', [PurchaseOrderViewController::class, 'convert'])->name('accounting.purchase-orders.convert');
+    Route::post('/accounting/purchase-orders/{id}/cancellation', [PurchaseOrderViewController::class, 'cancel'])->name('accounting.purchase-orders.cancel');
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
@@ -508,9 +517,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // Finance > Budgets link needed no change. The placeholder's own
     // scope note ("No budget domain model exists") was stale --
     // App\Models\ProjectBudget/ProjectCost already existed.
-    $plannedRoute('/accounting/purchase-orders', 'accounting.purchase-orders', 'accounting:read', 'Accounting & Finance', 'Purchase Orders',
-        'Purchase order issuance, approval and conversion to supplier invoices.',
-        'Not yet built. No purchase-order domain model exists in the platform today.');
+    // Purchase Orders is no longer a planned-module placeholder -- see
+    // the real routes registered alongside the other Accounting routes
+    // above (PurchaseOrderViewController). Route name kept identical to
+    // the placeholder this replaces so the sidebar's Accounting &
+    // Finance > Purchase Orders link needed no change. Unlike Budgets,
+    // this placeholder's own "no domain model exists" scope note was
+    // confirmed accurate (a full-repo grep found nothing), so this is a
+    // genuinely new domain model, not a UI-only gap.
     $plannedRoute('/accounting/cash-flow', 'accounting.cash-flow', 'accounting:read', 'Accounting & Finance', 'Cash Flow Projects',
         'Project-level cash flow forecasting and monitoring.',
         'Not yet built. Project Management does not yet have a dedicated project domain model to derive cash flow from.');
