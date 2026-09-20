@@ -1,6 +1,8 @@
 # VAT-MSA: Launch Readiness Backlog
 
-Compiled 2026-09-03, refreshed 2026-09-13, refreshed again 2026-09-15.
+Compiled 2026-09-03, refreshed 2026-09-13, refreshed again 2026-09-15,
+refreshed again 2026-09-20 (every remaining `$plannedRoute` sidebar
+placeholder closed -- see item #2's own update below).
 `docs/MIGRATION_MATRIX.md`
 remains the authoritative, continuously-updated record of what's been
 built; this document is a prioritized view specifically answering "what's
@@ -70,11 +72,45 @@ access-rights screen. A taxpayer or NamRA officer can now use essentially
 every module through the actual application, not just invoices and VAT
 returns.
 
-**Evidence**: `find resources/views -name "*.blade.php" | wc -l` = 56 (up
+**Evidence (as of 2026-09-13)**: `find resources/views -name "*.blade.php" | wc -l` = 56 (up
 from 14); `grep -c "Route::" routes/web.php` = 308. `docs/MIGRATION_MATRIX.md`'s
 own "Next steps" section independently confirms: "every phase this
 migration originally scoped (1 through 15) is now COMPLETE for its own
 actual scope."
+
+**Update (2026-09-20)**: the 2026-09-13 closure above covered every
+*whole missing module*. It did not cover a different, narrower class of
+gap: individual sidebar links inside already-built modules that were
+still wired to `$plannedRoute` -- a stub closure in `routes/web.php`
+that gates on the correct permission and renders a generic "not yet
+built" page rather than the real one, so the sidebar link worked but led
+nowhere real. A full sweep this session found and closed every one of
+these still remaining: Supplier Ledger, Customer Ledger, Budgets,
+Purchase Orders, Cash Flow Projects, Service Providers, Converted
+Quotations, Converted Quotations into Invoices, the three Project
+Management views (Create New Project, Ongoing Project Reports, Completed
+Projects), and New Credit Note/New Debit Note -- 13 sidebar links across
+9 dated `docs/MIGRATION_MATRIX.md` sections (2026-09-19 through
+2026-09-20). Each was individually investigated first, not
+mechanically stubbed out: about half turned out to be a stale scope note
+over an already-existing, already-tested service with no Blade UI
+reaching it (Budgets, Cash Flow Projects); a couple were not a new page
+at all, just a missing filter/relationship value on an existing page
+(Service Providers, Converted Quotations); one pair required closing a
+genuine gap in the ported domain service itself, not just the UI
+(`ProjectService::activate()`/`complete()`, since nothing in the source
+ever moved a project off `PLANNED`); and the last two (New Credit
+Note/New Debit Note) carried their own explicit change-control note and
+had their form design proposed and approved before being built, unlike
+every other item here. `grep -c "\$plannedRoute(" routes/web.php` is now
+`0`.
+
+**Evidence (2026-09-20)**: `find resources/views -name "*.blade.php" | wc -l`
+= 73 (up from 56); `grep -c "Route::" routes/web.php` = 351;
+`grep -c "\$plannedRoute(" routes/web.php` = 0; full suite 784 tests
+(up from 573 at the 2026-09-13 closure), 0 regressions. Each item has its
+own dated section in `docs/MIGRATION_MATRIX.md` with live-HTTP
+verification against the demo organisation and cleanup back to baseline.
 
 ---
 
@@ -274,7 +310,9 @@ item was tracking as of 2026-09-13 is closed.
 
 **Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (14 files);
 `docs/MIGRATION_MATRIX.md`'s own dated sections for each pass; full suite
-645 tests, 0 regressions as of the latest pass.
+645 tests, 0 regressions as of the latest security-review pass (2026-09-15;
+784 tests, 0 regressions as of 2026-09-20 after the unrelated
+`$plannedRoute` sweep in #2 above added further coverage).
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made
@@ -310,11 +348,15 @@ cutover. No visibility into any of this from the codebase alone.
 
 ---
 
-## Recommended next step (refreshed 2026-09-15, after the TOTP cutover)
+## Recommended next step (refreshed 2026-09-20, after every remaining `$plannedRoute` placeholder closed)
 
 #8 is now fully closed, infrastructure and the full route cutover both --
 see its own entry above. #10 (broader security review) closed the same
-refresh, just before it. With ITAS (#1) still the one genuine
+refresh, just before it. #2 (UI coverage) has now had its own final
+mop-up: every sidebar link that still fell through to a generic
+`$plannedRoute` stub -- 13 of them, found by a full sweep of
+`routes/web.php` rather than assumed complete -- is now a real page (see
+its own updated entry above). With ITAS (#1) still the one genuine
 launch-blocker and still blocked on external NamRA credentials/API
 access, and #3/#4/#6/#7/#11 all similarly blocked on external credentials
 or production host access, **the buildable-now items with no external
@@ -337,6 +379,13 @@ dependency left on this list are**:
   circular self-dealing between colluding taxpayers) that needs a
   beneficial-ownership data model this platform doesn't have, not a
   code fix.
+- The `$plannedRoute` sweep itself (see #2's updated entry above): all
+  13 remaining sidebar stubs closed 2026-09-19/20. `grep -c
+  "\$plannedRoute(" routes/web.php` is `0`. This was the last
+  no-external-dependency item of its kind on this list.
+
+With that sweep done, **no further buildable-now, no-external-dependency
+item remains on this backlog.**
 
 One narrower item sits between "buildable now" and "needs
 infrastructure" rather than cleanly in either bucket: a real

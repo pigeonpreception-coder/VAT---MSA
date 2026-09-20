@@ -84,6 +84,50 @@ class ProjectTest extends TestCase
         $this->assertDatabaseHas('project_budgets', ['category' => 'TOTAL', 'status' => 'PROPOSED', 'amount_cents' => 500000]);
     }
 
+    /**
+     * Not ported from the source -- see ProjectService::activate()/
+     * complete()'s own doc comments for why these transitions had to be
+     * added: createProject always leaves a project at 'PLANNED' and
+     * nothing in the source ever moved it further.
+     */
+    public function test_a_planned_project_can_be_activated_then_completed_in_order(): void
+    {
+        $org = $this->makeOrganisation('VAT-PROJ-LIFECYCLE-0001');
+        $projectId = $this->createProject($org['owner'], 'PROJ-LIFECYCLE-0001');
+
+        $activate = $this->actingAs($org['owner'])->postJson("/api/v1/projects/{$projectId}/activation", [], ['Idempotency-Key' => 'test-idem-proj-activate-0001']);
+        $activate->assertStatus(200)->assertJsonPath('resource.status', 'ACTIVE');
+        $this->assertDatabaseHas('projects', ['id' => $projectId, 'status' => 'ACTIVE']);
+        $this->assertDatabaseHas('audit_events', ['action' => 'PROJECT_ACTIVATED']);
+
+        $complete = $this->actingAs($org['owner'])->postJson("/api/v1/projects/{$projectId}/completion", [], ['Idempotency-Key' => 'test-idem-proj-complete-0001']);
+        $complete->assertStatus(200)->assertJsonPath('resource.status', 'COMPLETED');
+        $this->assertDatabaseHas('projects', ['id' => $projectId, 'status' => 'COMPLETED']);
+        $this->assertDatabaseHas('audit_events', ['action' => 'PROJECT_COMPLETED']);
+    }
+
+    public function test_a_project_cannot_be_completed_before_it_is_activated(): void
+    {
+        $org = $this->makeOrganisation('VAT-PROJ-LIFECYCLE-0002');
+        $projectId = $this->createProject($org['owner'], 'PROJ-LIFECYCLE-0002');
+
+        $response = $this->actingAs($org['owner'])->postJson("/api/v1/projects/{$projectId}/completion", [], ['Idempotency-Key' => 'test-idem-proj-skip-0001']);
+
+        $response->assertStatus(409);
+        $this->assertDatabaseHas('projects', ['id' => $projectId, 'status' => 'PLANNED']);
+    }
+
+    public function test_activating_a_project_a_second_time_is_a_conflict(): void
+    {
+        $org = $this->makeOrganisation('VAT-PROJ-LIFECYCLE-0003');
+        $projectId = $this->createProject($org['owner'], 'PROJ-LIFECYCLE-0003');
+        $this->actingAs($org['owner'])->postJson("/api/v1/projects/{$projectId}/activation", [], ['Idempotency-Key' => 'test-idem-proj-activate-twice-0001'])->assertStatus(200);
+
+        $response = $this->actingAs($org['owner'])->postJson("/api/v1/projects/{$projectId}/activation", [], ['Idempotency-Key' => 'test-idem-proj-activate-twice-0002']);
+
+        $response->assertStatus(409);
+    }
+
     public function test_budget_approval_requires_a_different_manager_and_records_the_approved_amount(): void
     {
         $org = $this->makeOrganisation('VAT-PROJ-0002');

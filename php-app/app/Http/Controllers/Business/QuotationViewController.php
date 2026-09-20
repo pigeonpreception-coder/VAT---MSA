@@ -71,7 +71,24 @@ class QuotationViewController extends Controller
             'quotedValueCents' => $quotedValueCents,
             'canManageQuotations' => $user->hasAppPermission('quotations:manage'),
             'canConvertQuotations' => $user->hasAppPermission('quotations:manage') && $user->hasAppPermission('invoices:submit'),
+            'filters' => $request->only(['status', 'q']),
         ]);
+    }
+
+    /**
+     * Serves quotation.converted-invoices, a route that was a
+     * $plannedRoute stub until now (removed; route name and
+     * commercial:read permission kept identical so the sidebar's
+     * Quotation > Converted Quotations into Invoices link needed no
+     * change). See QuotationService::crossReference's own doc comment for
+     * why this -- unlike Converted Quotations above -- is a genuine new
+     * join, not a UI-only gap over an existing filter.
+     */
+    public function convertedInvoices(Request $request): View
+    {
+        $this->authorize('permission', 'commercial:read');
+
+        return view('quotations.converted-invoices', $this->quotations->crossReference($request->user(), $request->query('organisation_id')));
     }
 
     public function store(Request $request): RedirectResponse

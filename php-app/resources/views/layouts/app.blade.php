@@ -146,7 +146,7 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'quotation') show @endif" id="group-quotation" data-bs-parent="#sidebar-accordion">
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Create New Quotation</a></li>
                                 <li><a class="nav-link" href="{{ route('quotations.index') }}">Issued Quotations</a></li>
-                                <li><a class="nav-link" href="{{ route('quotation.converted') }}" @if (request()->routeIs('quotation.converted')) aria-current="page" @endif>Converted Quotations</a></li>
+                                <li><a class="nav-link" href="{{ route('quotations.index', ['status' => 'CONVERTED']) }}" @if (request()->routeIs('quotations.index') && request()->query('status') === 'CONVERTED') aria-current="page" @endif>Converted Quotations</a></li>
                                 <li><a class="nav-link" href="{{ route('quotation.converted-invoices') }}" @if (request()->routeIs('quotation.converted-invoices')) aria-current="page" @endif>Converted Quotations into Invoices</a></li>
                         </ul>
                     </li>
@@ -169,7 +169,7 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'registered') show @endif" id="group-registered" data-bs-parent="#sidebar-accordion">
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'CUSTOMER') aria-current="page" @endif>Customers</a></li>
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SUPPLIER') aria-current="page" @endif>Suppliers</a></li>
-                                <li><a class="nav-link" href="{{ route('registered.service-providers') }}" @if (request()->routeIs('registered.service-providers')) aria-current="page" @endif>Service Providers</a></li>
+                                <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SERVICE_PROVIDER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SERVICE_PROVIDER') aria-current="page" @endif>Service Providers</a></li>
                         </ul>
                     </li>
 

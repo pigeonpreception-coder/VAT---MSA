@@ -58,4 +58,24 @@ class ProjectController extends Controller
 
         return response()->json($this->projects->profitability($id, $request->user(), $request->query('organisation_id')));
     }
+
+    /** Not ported from the source -- see ProjectService::activate()'s own doc comment. */
+    public function activate(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'projects:manage');
+        $correlationId = (string) Str::uuid();
+        $project = $this->projects->activate($id, $request->user(), (string) $request->header('Idempotency-Key', ''), $correlationId, $request->query('organisation_id'));
+
+        return response()->json(['resource' => $project], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
+    }
+
+    /** Not ported from the source -- see ProjectService::complete()'s own doc comment. */
+    public function complete(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'projects:manage');
+        $correlationId = (string) Str::uuid();
+        $project = $this->projects->complete($id, $request->user(), (string) $request->header('Idempotency-Key', ''), $correlationId, $request->query('organisation_id'));
+
+        return response()->json(['resource' => $project], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
+    }
 }

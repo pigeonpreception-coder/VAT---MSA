@@ -22,7 +22,7 @@ class BusinessValidator
     private const CURRENCY_PATTERN = '/^[A-Z]{3}$/';
     private const ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._:-]{1,99}$/';
     private const TAX_CATEGORIES = ['STANDARD', 'ZERO_RATED', 'EXEMPT', 'OUT_OF_SCOPE'];
-    private const PARTY_RELATIONSHIPS = ['CUSTOMER', 'SUPPLIER'];
+    private const PARTY_RELATIONSHIPS = ['CUSTOMER', 'SUPPLIER', 'SERVICE_PROVIDER'];
     private const PARTY_STATUSES = ['ACTIVE', 'INACTIVE'];
     private const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
     private const JOURNAL_SOURCE_TYPES = ['MANUAL', 'EXPENSE', 'INVOICE', 'IMPORT', 'ADJUSTMENT'];
@@ -65,7 +65,7 @@ class BusinessValidator
         $rawRelationships = is_array($input['relationships'] ?? null) ? $input['relationships'] : [];
         $relationships = array_values(array_unique(array_map(fn ($v) => mb_strtoupper(self::textValue($v)), $rawRelationships)));
         if (count($relationships) < 1) {
-            $messages[] = ['code' => 'RELATIONSHIP_REQUIRED', 'path' => '/relationships', 'message' => 'Select at least one customer or supplier relationship.'];
+            $messages[] = ['code' => 'RELATIONSHIP_REQUIRED', 'path' => '/relationships', 'message' => 'Select at least one customer, supplier or service-provider relationship.'];
         }
         foreach ($relationships as $relationship) {
             if (! in_array($relationship, self::PARTY_RELATIONSHIPS, true)) {
@@ -104,7 +104,7 @@ class BusinessValidator
 
         $relationship = isset($params['relationship']) && $params['relationship'] !== '' ? mb_strtoupper(trim((string) $params['relationship'])) : null;
         if ($relationship && ! in_array($relationship, self::PARTY_RELATIONSHIPS, true)) {
-            $messages[] = ['code' => 'RELATIONSHIP_INVALID', 'path' => '/relationship', 'message' => 'relationship must be CUSTOMER or SUPPLIER.'];
+            $messages[] = ['code' => 'RELATIONSHIP_INVALID', 'path' => '/relationship', 'message' => 'relationship must be CUSTOMER, SUPPLIER or SERVICE_PROVIDER.'];
         }
 
         $status = isset($params['status']) && $params['status'] !== '' ? mb_strtoupper(trim((string) $params['status'])) : null;
@@ -485,6 +485,73 @@ class BusinessValidator
         $messages = [];
         self::schemaVersion($input, $messages);
         $reason = self::textField($input['reason'] ?? null, '/reason', 'Rejection reason', 5, 500, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
+    /**
+     * @return array{schema_version: string, supplier_party_id: string, category_id: string, branch_id: ?string,
+     *   po_number: string, currency: string, issue_date: string, valid_until: string, description: string,
+     *   net_cents: int, tax_cents: int, total_cents: int, notes: ?string}
+     */
+    public static function purchaseOrder(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $supplierPartyId = self::idField($input['supplier_party_id'] ?? null, '/supplier_party_id', 'Supplier party', $messages) ?? '';
+        $categoryId = self::idField($input['category_id'] ?? null, '/category_id', 'Expense category', $messages) ?? '';
+        $branchId = self::idField($input['branch_id'] ?? null, '/branch_id', 'Branch', $messages, true);
+        $poNumber = mb_strtoupper(self::textField($input['po_number'] ?? null, '/po_number', 'Purchase order number', 2, 40, $messages));
+        if ($poNumber && ! preg_match(self::CODE_PATTERN, $poNumber)) {
+            $messages[] = ['code' => 'CODE_INVALID', 'path' => '/po_number', 'message' => 'Purchase order number contains unsupported characters.'];
+        }
+        $currency = self::currencyField($input['currency'] ?? null, $messages);
+        $issueDate = self::dateField($input['issue_date'] ?? null, '/issue_date', 'Issue date', $messages);
+        $validUntil = self::dateField($input['valid_until'] ?? null, '/valid_until', 'Valid-until date', $messages);
+        if ($issueDate && $validUntil && $validUntil < $issueDate) {
+            $messages[] = ['code' => 'DATE_ORDER_INVALID', 'path' => '/valid_until', 'message' => 'Valid-until date cannot be earlier than issue date.'];
+        }
+        $description = self::textField($input['description'] ?? null, '/description', 'Description', 2, 500, $messages);
+        $netCents = self::integerField($input['net_cents'] ?? null, '/net_cents', 'Net cents', $messages);
+        $taxCents = self::integerField($input['tax_cents'] ?? null, '/tax_cents', 'Tax cents', $messages);
+        $totalCents = self::integerField($input['total_cents'] ?? null, '/total_cents', 'Total cents', $messages);
+        if ($netCents + $taxCents !== $totalCents) {
+            $messages[] = ['code' => 'TOTAL_MISMATCH', 'path' => '/total_cents', 'message' => 'Total cents must equal net cents plus tax cents.'];
+        }
+        $notes = self::optionalText($input['notes'] ?? null, '/notes', 'Notes', 2000, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return [
+            'schema_version' => '1.0.0', 'supplier_party_id' => $supplierPartyId, 'category_id' => $categoryId, 'branch_id' => $branchId,
+            'po_number' => $poNumber, 'currency' => $currency, 'issue_date' => $issueDate, 'valid_until' => $validUntil,
+            'description' => $description, 'net_cents' => $netCents, 'tax_cents' => $taxCents, 'total_cents' => $totalCents, 'notes' => $notes,
+        ];
+    }
+
+    /** @return array{schema_version: string, reason: string} */
+    public static function purchaseOrderRejection(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Rejection reason', 5, 500, $messages);
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'reason' => $reason];
+    }
+
+    /** @return array{schema_version: string, reason: string} */
+    public static function purchaseOrderCancellation(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Cancellation reason', 5, 500, $messages);
         if (count($messages) > 0) {
             throw new BusinessValidationException($messages);
         }

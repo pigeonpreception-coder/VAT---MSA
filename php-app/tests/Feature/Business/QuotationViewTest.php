@@ -271,4 +271,88 @@ class QuotationViewTest extends TestCase
         $response->assertSee('This quotation cannot be edited.');
         $response->assertDontSee('Save quotation revision');
     }
+
+    /**
+     * Closes the `quotation.converted` $plannedRoute placeholder: the
+     * register's own ?status= filter (QuotationService::search) already
+     * existed and was already tested server-side, but no Blade UI control
+     * ever reached it. This exercises the real status dropdown added to
+     * resources/views/quotations/index.blade.php, and the sidebar's own
+     * "Converted Quotations" link now points at exactly this URL.
+     */
+    public function test_the_register_can_be_filtered_to_only_converted_quotations(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0010');
+        $customerPartyId = $this->createCustomerParty($seller['owner']);
+        $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, ['quotation_number' => 'QUO-VIEW-CONVERTED']));
+        $convertedId = \App\Models\Quotation::where('quotation_number', 'QUO-VIEW-CONVERTED')->firstOrFail()->id;
+        $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/sending");
+        $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/accept");
+        $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/convert", [
+            'invoice_number' => 'INV-FROM-VIEW-CONVERTED', 'issue_date' => '2026-09-02',
+        ]);
+        $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, ['quotation_number' => 'QUO-VIEW-STILL-DRAFT']));
+
+        $response = $this->actingAs($seller['owner'])->get('/quotations?status=CONVERTED');
+
+        $response->assertOk();
+        $response->assertSee('QUO-VIEW-CONVERTED');
+        $response->assertSee('View invoice');
+        $response->assertDontSee('QUO-VIEW-STILL-DRAFT');
+    }
+
+    /**
+     * Closes the `quotation.converted-invoices` $plannedRoute placeholder.
+     * Unlike Converted Quotations above, this one really was a gap: no
+     * single query anywhere joined a converted quotation to its certified
+     * invoice and every credit/debit note against that invoice. Exercises
+     * the real join (QuotationService::crossReference) end to end,
+     * including a real credit note raised through the existing invoice
+     * correction path (POST /api/v1/invoices with document_type=CREDIT_NOTE).
+     */
+    public function test_the_cross_reference_page_shows_a_converted_quotations_invoice_and_its_credit_note(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0011');
+        $customerPartyId = $this->createCustomerParty($seller['owner'], 'VAT-CUST-0011', 'Northgate Customer');
+        $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, ['quotation_number' => 'QUO-VIEW-XREF']));
+        $quotationId = \App\Models\Quotation::where('quotation_number', 'QUO-VIEW-XREF')->firstOrFail()->id;
+        $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/sending");
+        $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/accept");
+        $convert = $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/convert", [
+            'invoice_number' => 'INV-VIEW-XREF', 'issue_date' => '2026-09-02',
+        ]);
+        $invoiceId = \App\Models\Invoice::where('invoice_number', 'INV-VIEW-XREF')->firstOrFail()->id;
+        $sourceDocumentId = \App\Models\Invoice::findOrFail($invoiceId)->source_document_id;
+
+        $creditNote = $this->actingAs($seller['owner'])->postJson('/api/v1/invoices', [
+            'schema_version' => '1.0.0', 'invoice_number' => 'CN-VIEW-XREF', 'document_type' => 'CREDIT_NOTE',
+            'source' => ['system_id' => 'erp-test', 'document_id' => 'doc-cn-view-xref', 'submitted_at' => '2026-09-03T09:00:00Z'],
+            'supplier' => ['name' => 'VAT-SELLER-0011 Trading Co', 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => 'VAT-SELLER-0011']]],
+            'customer' => ['name' => 'Northgate Customer', 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => 'VAT-CUST-0011']]],
+            'issue_date' => '2026-09-03', 'currency' => 'NAD',
+            'original_document_reference' => ['vat_msa_invoice_id' => $invoiceId, 'source_document_id' => $sourceDocumentId, 'reason_code' => 'PRICING_ERROR', 'reason' => 'Agreed pricing correction.'],
+            'lines' => [['line_number' => 1, 'description' => 'Consulting services', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => '-100.00', 'net_amount' => '-100.00', 'tax' => ['category' => 'STANDARD', 'rate' => '15.00', 'taxable_amount' => '-100.00', 'tax_amount' => '-15.00']]],
+            'totals' => ['line_net_amount' => '-100.00', 'tax_exclusive_amount' => '-100.00', 'tax_amount' => '-15.00', 'tax_inclusive_amount' => '-115.00', 'payable_amount' => '-115.00'],
+        ], ['Idempotency-Key' => 'test-idem-cn-view-xref']);
+        $creditNote->assertStatus(201);
+
+        $response = $this->actingAs($seller['owner'])->get('/quotations/converted-invoices');
+
+        $response->assertOk()->assertViewIs('quotations.converted-invoices');
+        $response->assertSee('QUO-VIEW-XREF');
+        $response->assertSee('Northgate Customer');
+        $response->assertSee('INV-VIEW-XREF');
+        $response->assertSee('CN-VIEW-XREF');
+        $response->assertSee('Agreed pricing correction.');
+    }
+
+    public function test_the_cross_reference_page_shows_an_empty_state_when_nothing_has_been_converted(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0012');
+
+        $response = $this->actingAs($seller['owner'])->get('/quotations/converted-invoices');
+
+        $response->assertOk();
+        $response->assertSee('No quotations have been converted to an invoice yet.');
+    }
 }

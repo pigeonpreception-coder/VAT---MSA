@@ -65,7 +65,24 @@
     <div class="col-lg-7">
         <div class="card">
             <div class="card-header">
-                <div class="fw-semibold">Quotation register</div>
+                <div class="fw-semibold mb-2">Quotation register</div>
+                <form method="GET" action="{{ route('quotations.index') }}" class="row g-2 align-items-center">
+                    <div class="col-auto">
+                        <label for="status" class="form-label small mb-0">Status</label>
+                        <select id="status" name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="" @selected(($filters['status'] ?? '') === '')>All</option>
+                            <option value="DRAFT" @selected(($filters['status'] ?? '') === 'DRAFT')>Draft</option>
+                            <option value="ISSUED" @selected(($filters['status'] ?? '') === 'ISSUED')>Issued</option>
+                            <option value="ACCEPTED" @selected(($filters['status'] ?? '') === 'ACCEPTED')>Accepted</option>
+                            <option value="CONVERTED" @selected(($filters['status'] ?? '') === 'CONVERTED')>Converted</option>
+                            <option value="REJECTED" @selected(($filters['status'] ?? '') === 'REJECTED')>Rejected</option>
+                            <option value="EXPIRED" @selected(($filters['status'] ?? '') === 'EXPIRED')>Expired</option>
+                        </select>
+                    </div>
+                    <div class="col-auto align-self-end text-muted small">
+                        {{ number_format($snapshot['total_count']) }} quotation{{ $snapshot['total_count'] === 1 ? '' : 's' }}
+                    </div>
+                </form>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">

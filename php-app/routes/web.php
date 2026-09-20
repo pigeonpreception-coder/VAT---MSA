@@ -19,6 +19,7 @@ use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
+use App\Http\Controllers\Invoice\InvoiceCorrectionViewController;
 use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
@@ -30,9 +31,15 @@ use App\Http\Controllers\Business\InventoryController;
 use App\Http\Controllers\Business\ForeignInvoiceViewController;
 use App\Http\Controllers\Business\LocalInvoiceViewController;
 use App\Http\Controllers\Business\OperationsViewController;
+use App\Http\Controllers\Business\BudgetsViewController;
+use App\Http\Controllers\Business\CustomerLedgerViewController;
+use App\Http\Controllers\Business\CashFlowViewController;
 use App\Http\Controllers\Business\ProjectController;
+use App\Http\Controllers\Business\ProjectManagementViewController;
+use App\Http\Controllers\Business\PurchaseOrderViewController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
+use App\Http\Controllers\Business\SupplierLedgerViewController;
 use App\Http\Controllers\Compliance\AuditCaseController;
 use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceOverviewViewController;
@@ -118,6 +125,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // ambiguity: this is a genuinely different URL (no api/v1 prefix).
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
+    // New Credit Note / New Debit Note are no longer $plannedRoute
+    // placeholders -- see InvoiceCorrectionViewController's own doc
+    // comment. Route names and invoices:read permission kept identical to
+    // the placeholders they replace so the sidebar's New Registration
+    // group needed no change; the write actions use invoices:submit,
+    // matching InvoiceController::store()'s own gate for this same
+    // underlying command.
+    Route::get('/new-registration/credit-note', [InvoiceCorrectionViewController::class, 'newCreditNote'])->name('new-registration.credit-note');
+    Route::post('/new-registration/credit-note', [InvoiceCorrectionViewController::class, 'storeCreditNote'])->name('new-registration.credit-note.store');
+    Route::get('/new-registration/debit-note', [InvoiceCorrectionViewController::class, 'newDebitNote'])->name('new-registration.debit-note');
+    Route::post('/new-registration/debit-note', [InvoiceCorrectionViewController::class, 'storeDebitNote'])->name('new-registration.debit-note.store');
 
     // Real Blade UI for the VAT returns lifecycle, alongside the JSON API
     // surface below -- see VatLifecycleViewController's own doc comment.
@@ -259,6 +277,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // App\Services\Business\BusinessPartyService and its own
     // business-parties.index route from the Business Parties slice.
     Route::get('/quotations', [QuotationViewController::class, 'index'])->name('quotations.index');
+    // Converted Quotations into Invoices is no longer a planned-module
+    // placeholder -- see the removed $plannedRoute call below among the
+    // remaining placeholders and QuotationViewController::convertedInvoices
+    // / QuotationService::crossReference for the real implementation.
+    // Route name and commercial:read permission kept identical to the
+    // placeholder this replaces so the sidebar's Quotation > Converted
+    // Quotations into Invoices link needed no change.
+    Route::get('/quotations/converted-invoices', [QuotationViewController::class, 'convertedInvoices'])->name('quotation.converted-invoices');
     Route::post('/quotations', [QuotationViewController::class, 'store'])->name('quotations.store');
     Route::get('/quotations/{id}/edit', [QuotationViewController::class, 'edit'])->name('quotations.edit');
     Route::patch('/quotations/{id}', [QuotationViewController::class, 'update'])->name('quotations.update');
@@ -268,11 +294,36 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
     Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
 
+    // The three Project Management sidebar links are no longer
+    // planned-module placeholders -- see ProjectManagementViewController's
+    // own doc comment. Route names and projects:read permission kept
+    // identical to the placeholders they replace so the sidebar's Project
+    // Management group needed no change.
+    Route::get('/project-management/new', [ProjectManagementViewController::class, 'newProject'])->name('project-management.new');
+    Route::post('/project-management', [ProjectManagementViewController::class, 'store'])->name('project-management.store');
+    Route::post('/project-management/{id}/activation', [ProjectManagementViewController::class, 'activate'])->name('project-management.activate');
+    Route::get('/project-management/ongoing', [ProjectManagementViewController::class, 'ongoing'])->name('project-management.ongoing');
+    Route::post('/project-management/{id}/completion', [ProjectManagementViewController::class, 'complete'])->name('project-management.complete');
+    Route::get('/project-management/completed', [ProjectManagementViewController::class, 'completed'])->name('project-management.completed');
+
     // Ported from the source's own app/accounting/page.tsx -- read-only,
     // matching the source exactly (its own closing note says interactive
     // journal authoring is a future scope, not a gap this port silently
     // introduced). See AccountingViewController's own doc comment.
     Route::get('/accounting', [AccountingViewController::class, 'index'])->name('accounting.index');
+    Route::get('/accounting/supplier-ledger', [SupplierLedgerViewController::class, 'index'])->name('accounting.supplier-ledger');
+    Route::get('/accounting/customer-ledger', [CustomerLedgerViewController::class, 'index'])->name('accounting.customer-ledger');
+    Route::get('/accounting/budgets', [BudgetsViewController::class, 'index'])->name('accounting.budgets');
+    Route::post('/accounting/budgets/{id}/approval', [BudgetsViewController::class, 'approve'])->name('accounting.budgets.approval');
+    Route::get('/accounting/purchase-orders', [PurchaseOrderViewController::class, 'index'])->name('accounting.purchase-orders');
+    Route::post('/accounting/purchase-orders', [PurchaseOrderViewController::class, 'store'])->name('accounting.purchase-orders.store');
+    Route::post('/accounting/purchase-orders/{id}/submission', [PurchaseOrderViewController::class, 'submit'])->name('accounting.purchase-orders.submit');
+    Route::post('/accounting/purchase-orders/{id}/approval', [PurchaseOrderViewController::class, 'approve'])->name('accounting.purchase-orders.approve');
+    Route::post('/accounting/purchase-orders/{id}/rejection', [PurchaseOrderViewController::class, 'reject'])->name('accounting.purchase-orders.reject');
+    Route::post('/accounting/purchase-orders/{id}/issuance', [PurchaseOrderViewController::class, 'issue'])->name('accounting.purchase-orders.issue');
+    Route::post('/accounting/purchase-orders/{id}/conversion', [PurchaseOrderViewController::class, 'convert'])->name('accounting.purchase-orders.convert');
+    Route::post('/accounting/purchase-orders/{id}/cancellation', [PurchaseOrderViewController::class, 'cancel'])->name('accounting.purchase-orders.cancel');
+    Route::get('/accounting/cash-flow', [CashFlowViewController::class, 'index'])->name('accounting.cash-flow');
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
@@ -474,12 +525,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // real routes registered alongside /operations above.
     // Foreign Invoices is no longer a planned-module placeholder -- see
     // the real routes registered alongside /operations above.
-    $plannedRoute('/accounting/supplier-ledger', 'accounting.supplier-ledger', 'accounting:read', 'Accounting & Finance', 'Supplier Ledger',
-        'Per-supplier posted balances derived from the general ledger.',
-        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
-    $plannedRoute('/accounting/customer-ledger', 'accounting.customer-ledger', 'accounting:read', 'Accounting & Finance', 'Customer Ledger',
-        'Per-customer posted balances derived from the general ledger.',
-        'Not yet built as a dedicated sub-ledger view. Accounting already holds the posted journal entries this would summarise.');
+    // Supplier Ledger is no longer a planned-module placeholder -- see
+    // the real route registered alongside the other Accounting routes
+    // below (SupplierLedgerViewController). Route name and permission
+    // kept identical to the placeholder this replaces so the sidebar's
+    // Accounting & Finance > Supplier Ledger link needed no change.
+    // Customer Ledger is no longer a planned-module placeholder -- see
+    // the real route registered alongside the other Accounting routes
+    // above (CustomerLedgerViewController). Route name and permission
+    // kept identical to the placeholder this replaces so the sidebar's
+    // Accounting & Finance > Customer Ledger link needed no change.
     // Superseded by the real Immovable/Movable Asset Management modules
     // below (accounting:read is still the gate, matching the placeholder
     // this replaces): a fixed-asset domain model now exists, so this is a
@@ -490,44 +545,78 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
 
         return view('accounting.fixed-assets');
     })->name('accounting.fixed-assets');
-    $plannedRoute('/accounting/budgets', 'accounting.budgets', 'accounting:read', 'Accounting & Finance', 'Budgets',
-        'Budget planning and budget-versus-actual tracking.',
-        'Not yet built. No budget domain model exists in the platform today.');
-    $plannedRoute('/accounting/purchase-orders', 'accounting.purchase-orders', 'accounting:read', 'Accounting & Finance', 'Purchase Orders',
-        'Purchase order issuance, approval and conversion to supplier invoices.',
-        'Not yet built. No purchase-order domain model exists in the platform today.');
-    $plannedRoute('/accounting/cash-flow', 'accounting.cash-flow', 'accounting:read', 'Accounting & Finance', 'Cash Flow Projects',
-        'Project-level cash flow forecasting and monitoring.',
-        'Not yet built. Project Management does not yet have a dedicated project domain model to derive cash flow from.');
+    // Budgets is no longer a planned-module placeholder -- see the real
+    // routes registered alongside the other Accounting routes above
+    // (BudgetsViewController). Route name and permission kept identical
+    // to the placeholder this replaces so the sidebar's Accounting &
+    // Finance > Budgets link needed no change. The placeholder's own
+    // scope note ("No budget domain model exists") was stale --
+    // App\Models\ProjectBudget/ProjectCost already existed.
+    // Purchase Orders is no longer a planned-module placeholder -- see
+    // the real routes registered alongside the other Accounting routes
+    // above (PurchaseOrderViewController). Route name kept identical to
+    // the placeholder this replaces so the sidebar's Accounting &
+    // Finance > Purchase Orders link needed no change. Unlike Budgets,
+    // this placeholder's own "no domain model exists" scope note was
+    // confirmed accurate (a full-repo grep found nothing), so this is a
+    // genuinely new domain model, not a UI-only gap.
+    // Cash Flow Projects is no longer a planned-module placeholder -- see
+    // the real route registered alongside the other Accounting routes
+    // above (CashFlowViewController). Route name and permission kept
+    // identical to the placeholder this replaces so the sidebar's
+    // Accounting & Finance > Cash Flow Projects link needed no change.
+    // Like Budgets, this placeholder's own "no project domain model"
+    // scope note was stale -- Project/ProjectBudget/ProjectCost already
+    // existed, and ProjectService::profitability() already computed
+    // exactly this, just with no Blade UI reaching it.
     // The five Operations modules (Human Resources, Immovable/Movable
     // Asset Management, Logistics, ERP) are now real routes -- see the
     // '/operations/human-resources' etc. block above, defined alongside
     // the rest of the Operations routes rather than here among the
     // remaining placeholders.
-    $plannedRoute('/quotation/converted', 'quotation.converted', 'commercial:read', 'Quotation', 'Converted Quotations',
-        'Quotations that have progressed to a purchase order or invoice.',
-        'Not yet built as a dedicated view. Quotation status and conversion actions already exist on the quotation register.');
-    $plannedRoute('/quotation/converted-invoices', 'quotation.converted-invoices', 'commercial:read', 'Quotation', 'Converted Quotations into Invoices',
-        'The invoice, credit notes, debit notes and related quotation for each converted quotation, in one list.',
-        'Not yet built as a dedicated cross-reference view. The invoice and quotation records this would join already exist independently.');
-    $plannedRoute('/project-management/new', 'project-management.new', 'projects:read', 'Project Management', 'Create New Project',
-        'Capture project name, customer, description, location, dates, budget, expected revenue, category, VAT treatment and owner.',
-        'Not yet built. No dedicated project domain model exists in the platform today.');
-    $plannedRoute('/project-management/ongoing', 'project-management.ongoing', 'projects:read', 'Project Management', 'Ongoing Project Reports',
-        'Real-time/periodic progress reporting for active projects.',
-        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
-    $plannedRoute('/project-management/completed', 'project-management.completed', 'projects:read', 'Project Management', 'Completed Projects',
-        'Summary lists and reports for finished projects.',
-        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
-    $plannedRoute('/registered/service-providers', 'registered.service-providers', 'parties:manage', 'Registered', 'Service Providers',
-        'A categorised register of service providers, distinct from customers and suppliers.',
-        'Not yet built. Business-party records do not yet carry a service-provider relationship or category; Customers and Suppliers are available today under Registered.');
-    $plannedRoute('/new-registration/credit-note', 'new-registration.credit-note', 'invoices:read', 'New Registration', 'New Credit Note',
-        'A controlled form to issue a credit note against an original tax invoice.',
-        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the credit, and the lines to reverse -- with amounts recorded as a reduction. Awaiting approval before the UI is built.');
-    $plannedRoute('/new-registration/debit-note', 'new-registration.debit-note', 'invoices:read', 'New Registration', 'New Debit Note',
-        'A controlled form to issue a debit note against an original tax invoice.',
-        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the debit, and the additional lines/amounts. Awaiting approval before the UI is built.');
+    // Converted Quotations is no longer a planned-module placeholder --
+    // the existing quotation register (quotations.index) already had a
+    // real, tested ?status= filter server-side (QuotationService::search)
+    // with zero UI ever reaching it; a status dropdown was added to
+    // resources/views/quotations/index.blade.php instead of building a
+    // separate page, and the sidebar's "Converted Quotations" link now
+    // points at quotations.index?status=CONVERTED, the same pattern
+    // Customers/Suppliers/Service Providers already use for
+    // business-parties.index.
+    // Converted Quotations into Invoices is no longer a planned-module
+    // placeholder -- see the real route registered alongside the other
+    // quotation routes above (QuotationViewController::convertedInvoices).
+    // Unlike Converted Quotations above, this placeholder's own scope note
+    // was accurate: it is a genuine new three-table join (Quotation ->
+    // Invoice via converted_invoice_id -> InvoiceCorrection via
+    // original_invoice_id) that did not exist anywhere else in the
+    // codebase, not a UI-only gap over an existing filter.
+    // The three Project Management views are no longer planned-module
+    // placeholders -- see the real routes registered alongside the other
+    // business routes above (ProjectManagementViewController). Route names
+    // and projects:read permission kept identical to the placeholders they
+    // replace so the sidebar's Project Management group needed no change.
+    // All three scope notes ("No dedicated project domain model exists")
+    // were stale, the same class of gap Budgets/Cash Flow Projects closed;
+    // see ProjectManagementViewController's own doc comment for the one
+    // genuine gap this did have to close (a project could never move off
+    // 'PLANNED', which ProjectService::activate()/complete() now fix).
+    // Service Providers is no longer a planned-module placeholder -- it is
+    // now a third real PartyRelationship value (SERVICE_PROVIDER) on the
+    // same business_parties/business-parties.index feature Customers and
+    // Suppliers already use above, not a separate page. See
+    // database/migrations/2026_09_19_000001_widen_party_relationships_relationship.php's
+    // own doc comment for why the underlying column was widened rather
+    // than a new enum value added, and resources/views/layouts/app.blade.php's
+    // sidebar link, which now points at business-parties.index with
+    // ?relationship=SERVICE_PROVIDER, the same pattern the Customers/
+    // Suppliers links already use.
+    // New Credit Note / New Debit Note are no longer planned-module
+    // placeholders awaiting change-control approval -- the proposed form
+    // (original invoice reference, reason, and the lines to reverse/add)
+    // was reviewed and approved, then built; see the real routes
+    // registered alongside the other invoice routes above
+    // (InvoiceCorrectionViewController).
 
     // TOTP step-up parity (2026-09-15). No 'step-up' gate on any of these
     // routes themselves: enrolling/using your own second factor is the
@@ -696,6 +785,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/projects/{id}/budget-approval', [ProjectController::class, 'approveBudget']);
         Route::post('/projects/{id}/costs', [ProjectController::class, 'postCost']);
         Route::get('/projects/{id}/profitability', [ProjectController::class, 'profitability']);
+        // Not part of the source's own ported shape above -- see
+        // ProjectService::activate()/complete()'s own doc comments for why
+        // these two transitions were added (closing the Project Management
+        // $plannedRoute placeholders in routes/web.php needed a real way to
+        // move a project off 'PLANNED', which nothing in the source ever did).
+        Route::post('/projects/{id}/activation', [ProjectController::class, 'activate']);
+        Route::post('/projects/{id}/completion', [ProjectController::class, 'complete']);
 
         // Phase 11 (slice 1): audit cases + evidence/notes, obligations,
         // disputes, and risk. Kept 1:1 with the source's app/api/v1/{

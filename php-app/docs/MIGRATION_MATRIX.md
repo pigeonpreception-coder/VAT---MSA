@@ -8546,3 +8546,733 @@ Critical, one each).
 Verified: full suite 707 tests, 0 regressions (this is demo data, not a
 code-path change -- no new tests were added; the existing suite's own
 pass confirms nothing was disturbed).
+
+## New feature: Supplier Ledger (2026-09-19)
+
+Closes the `accounting.supplier-ledger` `$plannedRoute` placeholder under
+"Accounting & Finance". The placeholder's own copy promised balances
+"derived from the general ledger", but reading `ExpenseService::approve`
+and the `journal_lines` migration directly confirmed neither is true
+today: nothing in this codebase ever posts a `JournalEntry` when an
+expense is approved, and `journal_lines` carries no supplier attribution
+column at all regardless -- the only real per-supplier posted-amount data
+anywhere in the platform is `Expense.supplier_party_id` (the same
+`BusinessParty`/`PartyRelationship` register Business Parties and
+Operations already use). Rather than guess, this was put to the user
+directly as a clarifying question with two designs: derive the ledger
+from `Expense` rows as-is, or first wire real double-entry GL postings
+into `ExpenseService::approve()` (a behavioural change to an already-
+shipped, already-tested service) and derive from those. The user chose
+the former.
+
+**`app/Services/Business/SupplierLedgerService.php`** (new) --
+`supplierOptions()` (every active-SUPPLIER-relationship `BusinessParty`
+in scope, for the picker), `summary()` (per-supplier posted/pending
+totals and counts, ranked by posted balance, plus a separate "unassigned"
+bucket for expenses with no `supplier_party_id`), `statement()` (one
+supplier's full expense history, oldest first, with a running posted
+balance). An expense's own maker-checker lifecycle has no separate
+"posted"/"paid" status, so `APPROVED` is treated as "posted" (the same
+meaning "posted" carries everywhere else in this platform, e.g. a
+`JournalEntry`'s own `POSTED` status); `SUBMITTED` is shown as a distinct
+pending figure that never moves the posted balance, and a `REJECTED` line
+is shown on a supplier's statement for transparency but likewise never
+moves it -- an unapproved or rejected expense is not a recognised
+liability. Scoped via the same `OrganisationResolver` every other
+Business-domain service already uses.
+
+**`app/Http/Controllers/Business/SupplierLedgerViewController.php`**
+(new) -- serves `accounting.supplier-ledger`
+(`/accounting/supplier-ledger`), a route that was a `$plannedRoute` stub
+in `routes/web.php` until now (removed; route name and `accounting:read`
+permission kept identical so the sidebar's Accounting & Finance >
+Supplier Ledger link needed no change). An optional `?supplier_id=` query
+param drills into that one supplier's own statement; an id outside the
+actor's organisation surfaces `BusinessResourceException`'s own JSON 404,
+matching the same uncaught-propagation precedent already established by
+`OperationsViewController`/`QuotationViewController` for this exception.
+
+**View**: `resources/views/accounting/supplier-ledger.blade.php` (new) --
+summary cards (suppliers with activity, total posted balance, total
+pending), a supplier-balance table with a per-row "View statement" link,
+an unassigned-expenses row when applicable, and a supplier picker whose
+selection renders that supplier's full line-item statement with a
+running-balance column.
+
+**Tests**: `tests/Feature/Business/SupplierLedgerViewTest.php` (new, 9
+tests) -- auth/permission gates, graceful empty state, posted/pending
+totals correctly computed and ranked (with a `DRAFT` expense confirmed to
+never appear at all), the unassigned-expenses bucket, cross-organisation
+scoping, a real running-balance statement (confirming a `REJECTED` line
+is shown but never moves the balance), a foreign supplier id 404ing, and
+the picker only ever listing active-SUPPLIER parties (not a
+customer-only party).
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+created a real supplier (`BusinessParty` + active `SUPPLIER`
+`PartyRelationship`) and a real `APPROVED` expense against it via
+`php artisan tinker`, confirmed both the summary table (N$2,300.00 posted
+balance) and the drill-down statement (`EXP-VERIFY-1`, N$2,300.00 running
+balance) rendered correctly over `GET /accounting/supplier-ledger` and
+`GET /accounting/supplier-ledger?supplier_id=...`, then removed the
+verification rows to restore the normal `DemoSeeder` baseline.
+
+Verified: full suite 716 tests, 0 regressions.
+
+## New feature: Customer Ledger (2026-09-19)
+
+Closes the `accounting.customer-ledger` `$plannedRoute` placeholder,
+the receivables-side twin of the Supplier Ledger above. Same reasoning
+applies here, confirmed by reading the relevant code directly rather than
+assuming symmetry with the supplier side: nothing posts a `JournalEntry`
+on a sale either, and `journal_lines` carries no customer attribution
+regardless. The real receivable-recognition event on this platform is
+`QuotationService::convertToInvoice()` -- a `Quotation` transitions
+`ACCEPTED` -> `CONVERTED` with a real certified `Invoice` created via
+`InvoiceService::submit()` and linked back via `converted_invoice_id`.
+A `CONVERTED` quotation is a genuine recognised amount owed by that
+customer, the direct counterpart of an `APPROVED` expense being a
+recognised amount owed to a supplier -- so this follows the same design
+the user already chose for the Supplier Ledger (derive from the existing
+lifecycle data, not from new GL postings) without needing to ask again,
+since it's the same choice applied to the parallel case.
+
+**`app/Services/Business/CustomerLedgerService.php`** (new) --
+`customerOptions()`, `summary()` (per-customer posted/pending totals and
+counts, ranked by posted balance -- `ACCEPTED` is the pending figure, the
+receivables-side "not yet recognised" state, the same reasoning
+`SupplierLedgerService` gives `SUBMITTED` expenses), `statement()` (one
+customer's full quotation history, oldest first, with a running posted
+balance that only `CONVERTED` lines move). Unlike `Expense.
+supplier_party_id`, `Quotation.customer_party_id` is a mandatory
+(non-nullable) column, so there is no "unassigned" bucket to account for
+here. Scoped via the same `OrganisationResolver` every other
+Business-domain service already uses.
+
+**`app/Http/Controllers/Business/CustomerLedgerViewController.php`**
+(new) -- serves `accounting.customer-ledger`
+(`/accounting/customer-ledger`), a route that was a `$plannedRoute` stub
+until now (removed; route name and `accounting:read` permission kept
+identical so the sidebar link needed no change). Same
+`BusinessResourceException` 404-on-foreign-id precedent as the Supplier
+Ledger.
+
+**View**: `resources/views/accounting/customer-ledger.blade.php` (new) --
+mirrors the Supplier Ledger's own layout (summary cards, a
+customer-balance table with a per-row "View statement" link, a customer
+picker whose selection renders a running-balance statement), with each
+statement line showing the linked certified invoice id where one exists.
+
+**Tests**: `tests/Feature/Business/CustomerLedgerViewTest.php` (new, 8
+tests) -- auth/permission gates, graceful empty state, posted/pending
+totals correctly computed and ranked (with a `DRAFT` quotation confirmed
+to never appear), cross-organisation scoping, a real running-balance
+statement (confirming a `REJECTED` line is shown but never moves the
+balance), a foreign customer id 404ing, and the picker only ever listing
+active-CUSTOMER parties (not a supplier-only party).
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+created a real customer (`BusinessParty` + active `CUSTOMER`
+`PartyRelationship`) and a real `CONVERTED` quotation against it via
+`php artisan tinker`, confirmed both the summary table (N$2,300.00 posted
+balance) and the drill-down statement (`QUO-VERIFY-1`, N$2,300.00 running
+balance) rendered correctly, then removed the verification rows to
+restore the normal `DemoSeeder` baseline.
+
+Verified: full suite 724 tests, 0 regressions.
+
+## New feature: Budgets (2026-09-19)
+
+Closes the `accounting.budgets` `$plannedRoute` placeholder. Its own
+scope note claimed "No budget domain model exists in the platform
+today" -- true when originally written, but confirmed stale by reading
+`App\Services\Business\ProjectService` directly:
+`App\Models\ProjectBudget`/`ProjectCost` and
+`ProjectService::approveBudget()` already exist and are already
+exercised end to end by `tests/Feature/Business/ProjectTest.php`. A
+full-repo grep before writing a line of this page confirmed the actual
+gap: `ProjectController::approveBudget` (the JSON API) had no Blade UI
+action anywhere reaching it at all, and `operations/index.blade.php`'s
+own "Project control" panel only ever shows each project's *already-
+approved* budget vs cost, read-only, with no organisation-wide totals
+and no way to see or act on a still-`PROPOSED` budget.
+
+**`app/Http/Controllers/Business/BudgetsViewController.php`** (new) --
+serves `accounting.budgets` (`/accounting/budgets`, batched
+Project/ProjectBudget/ProjectCost reads, the same N+1-avoidance shape
+`OperationsViewController`'s own project panel already established) and
+`accounting.budgets.approval` (`POST /accounting/budgets/{id}/approval`).
+The index route keeps the placeholder's own `accounting:read` gate (no
+sidebar change needed); the approval action is separately gated
+`projects:manage`, matching `ProjectController::approveBudget`'s own
+permission exactly -- reused directly, never a second write path, so its
+maker-checker self-review guard (the project's own manager can never
+approve its own budget), idempotency and audit trail all apply exactly
+as they already do via the JSON API. A self-review attempt's
+`AuthorizationException` is left uncaught, the same clean-403 precedent
+`ExpenseService`'s own self-review guard already established for
+Operations.
+
+**View**: `resources/views/accounting/budgets.blade.php` (new) --
+organisation-wide summary cards (total proposed, total approved, total
+actual cost, total variance), and a per-project table (budget status
+badge, proposed/approved/cost/variance) with an inline approve form
+(pre-filled with the proposed amount) on every still-`PROPOSED` row, shown
+only to an actor holding `projects:manage`.
+
+**Tests**: `tests/Feature/Business/BudgetsViewTest.php` (new, 10 tests)
+-- auth/permission gates, graceful empty state, a project with no budget
+proposed at all rendering "No budget proposed" rather than a false zero,
+proposed/approved/cost/variance figures and organisation-wide totals
+computed correctly, cross-organisation scoping, a real approval by an
+independent approver updating the database, the project's own manager
+denied with a 403, a role without `projects:manage` denied, and a
+non-numeric approved amount rejected cleanly rather than silently
+coerced to zero (the same input-hardening class of fix this codebase's
+own red-team punch list already applied elsewhere).
+
+Live-verified over real HTTP: created a real `PROPOSED` `ProjectBudget`
+(N$5,000.00) with a real `ProjectCost` (N$1,000.00) against the demo
+organisation, confirmed the page rendered the correct proposed/cost
+figures and a pre-filled approve form; posted a real approval as an
+independent approver (N$4,500.00) and confirmed the page then showed
+`APPROVED` and the correct variance (N$3,500.00); separately confirmed
+the project's own manager attempting to approve the same budget gets a
+real `403`. Verification rows removed afterward to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 734 tests, 0 regressions.
+
+## New feature: Purchase Orders (2026-09-19)
+
+Closes the `accounting.purchase-orders` `$plannedRoute` placeholder
+("Purchase order issuance, approval and conversion to supplier
+invoices"). Unlike Budgets, a full-repo grep for `purchase_order`/
+`PurchaseOrder` before writing a line of this feature confirmed the
+placeholder's own scope note ("No purchase-order domain model exists in
+the platform today") was accurate -- this is a genuinely new domain,
+the first one added in this window that isn't ported from the TS
+source and isn't a UI-only gap over existing data.
+
+**`database/migrations/2026_09_19_000000_create_purchase_orders_table.php`**
+(new) -- deliberately a single amount per order
+(`net_cents`/`tax_cents`/`total_cents`), not a multi-line catalogue like
+`quotations`/`quotation_lines`: mirrors `expenses`' own single-amount
+shape (the conversion target), which keeps the conversion step a direct
+1:1 field carry-over rather than synthesizing a multi-line payload, and
+matches this platform's own "lighter CRUD standard" precedent
+(`AccountingService`'s own doc comment).
+
+**`app/Models/PurchaseOrder.php`** (new).
+
+**`app/Domain/Business/BusinessValidator.php`** -- three new methods:
+`purchaseOrder()`, `purchaseOrderRejection()`, `purchaseOrderCancellation()`,
+each mirroring the equivalent `expense*`/`quotation*` validator's own
+shape and helpers.
+
+**`app/Services/Business/PurchaseOrderService.php`** (new) -- lifecycle
+`DRAFT` -> `SUBMITTED` -> `APPROVED` -> `ISSUED` -> `CONVERTED`, mirroring
+`ExpenseService`'s own maker-checker shape for the first three
+transitions (the creator can never approve or reject their own order --
+the same self-review guard `ExpenseService::approve`/`reject` and
+`ProjectService::approveBudget` already establish; confirmed against a
+real `403` over HTTP, not just unit-level), then two PO-specific
+additions: `issue()` (a plain status flip -- the "issuance" the
+placeholder promised) and `convertToExpense()` (the "conversion" the
+placeholder promised -- to a real `Expense`, reusing
+`ExpenseService::create()` directly rather than a second write path,
+since this platform has no inbound-supplier-invoice concept distinct
+from `Expense`). `cancel()` is the escape hatch a real purchasing flow
+needs that expenses/quotations don't (an order can be called off any
+time before conversion or rejection).
+
+**`app/Http/Controllers/Business/PurchaseOrderViewController.php`** (new)
+-- serves `accounting.purchase-orders` and its six action routes
+(submission/approval/rejection/issuance/conversion/cancellation). The
+index view keeps the placeholder's own `accounting:read` gate (no
+sidebar change needed); every lifecycle-mutating action is gated
+`accounting:post` (the same permission `AccountingController`'s own
+journal-posting API already uses) except `convert()`, gated
+`expenses:manage` directly -- the real permission boundary
+`ExpenseService::create()` itself already enforces for the `Expense`
+this action creates. No new permission was added; both were already
+granted to `TAXPAYER_OWNER`/`TAXPAYER_ACCOUNTANT`.
+
+**View**: `resources/views/accounting/purchase-orders.blade.php` (new) --
+a purchase-order register with per-status inline actions (submit /
+approve+reject / issue+cancel / convert-with-expense-number), and a
+create form gated the same way the register's own actions are. A
+`CONVERTED` row links the resulting expense's id; a `REJECTED`/
+`CANCELLED` row shows its own reason.
+
+**Tests**: `tests/Feature/Business/PurchaseOrderViewTest.php` (new, 11
+tests) -- auth/permission gates, graceful empty state, creation through
+the form, the full lifecycle end to end through real Blade routes
+(DRAFT through a real converted `Expense`, asserting the resulting
+`Expense` row and the `converted_expense_id` link), the maker-checker
+self-review 403, rejection with a reason, cancellation from `APPROVED`,
+converting a not-yet-`ISSUED` order rejected cleanly, and
+cross-organisation scoping.
+
+Live-verified over real HTTP: drove a real purchase order through every
+transition (create -> submit -> approve as an independent approver ->
+issue -> convert) against the demo organisation, confirming the register
+showed `CONVERTED` and the linked expense id, and that the real
+resulting `Expense` (N$5,750.00) was created with `status = DRAFT` --
+correctly *not* yet counted on the Supplier Ledger's own posted balance
+until that expense clears its own independent approval in turn, exactly
+as designed (no double-counting, no gate-skipping between the two
+features). Verification rows removed afterward to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 745 tests, 0 regressions.
+
+## New feature: Cash Flow Projects (2026-09-19)
+
+Closes the `accounting.cash-flow` `$plannedRoute` placeholder
+("Project-level cash flow forecasting and monitoring"). Like Budgets,
+its own scope note ("Project Management does not yet have a dedicated
+project domain model to derive cash flow from") was confirmed stale by
+reading `App\Services\Business\ProjectService::profitability()` directly
+-- it already computes real per-project revenue (`REVENUE`-type
+`journal_lines` tagged to the project), cost (`ProjectCost`) and budget
+(`ProjectBudget`), and is already exercised end to end by
+`tests/Feature/Business/ProjectTest.php`. A full-repo grep confirmed
+`ProjectController::profitability` (the JSON API) had no Blade UI
+anywhere reaching it, the same class of gap Budgets closed.
+
+**`app/Http/Controllers/Business/CashFlowViewController.php`** (new) --
+serves `accounting.cash-flow` (`/accounting/cash-flow`), batching the
+same three reads `profitability()` makes per-project (revenue/cost/
+budget) into three organisation-wide queries rather than calling that
+method once per project, the same N+1-avoidance shape
+`BudgetsViewController`'s own index already established (that
+single-project method shape doesn't fit a list view). "Forecasting"
+(the placeholder's own word) is deliberately not attempted -- there is
+no projection data anywhere in this platform to forecast from, so this
+page monitors real posted cash flow to date rather than fabricating a
+projection. An optional `?project_id=` shows that one project's own
+cost timeline with a running cumulative total.
+
+**View**: `resources/views/accounting/cash-flow.blade.php` (new) --
+organisation-wide summary cards (approved budget, revenue posted, cost
+posted, net cash flow), a per-project table (net cash flow highlighted
+red when negative) with a "View cost timeline" link per row, and the
+selected project's own cost timeline below.
+
+**Tests**: `tests/Feature/Business/CashFlowViewTest.php` (new, 7 tests)
+-- auth/permission gates, graceful empty state, revenue/cost/net-cash-flow
+computed correctly from real `ChartOfAccount`/`JournalEntry`/
+`JournalLine`/`ProjectCost`/`ProjectBudget` rows (not fixtures shaped to
+match the assertion), a project with cost exceeding revenue rendering a
+correctly negative net figure, cross-organisation scoping, and the
+per-project cost timeline with its own running cumulative total.
+
+Live-verified over real HTTP: posted a real `REVENUE`-type journal line
+and a real `ProjectCost` against a demo project via `php artisan
+tinker`, confirmed the summary page showed the correct budget/revenue/
+cost/net-cash-flow figures (N$9,000.00/N$7,000.00/N$4,000.00/N$3,000.00)
+and the drill-down timeline showed the cost line with its cumulative
+total, then removed the verification rows to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 752 tests, 0 regressions.
+
+## New feature: Service Providers (2026-09-19)
+
+Closes the `registered.service-providers` `$plannedRoute` placeholder.
+Unlike Budgets/Cash Flow Projects, this placeholder's own scope note
+("Business-party records do not yet carry a service-provider
+relationship or category") was confirmed accurate: `party_relationships.
+relationship` was a hard `ENUM('CUSTOMER','SUPPLIER')`. Rather than build
+a separate page, Service Providers is now a third real
+`PartyRelationship` value on the exact same `business_parties`/
+`business-parties.index` feature Customers and Suppliers already use --
+the sidebar's own three "Registered" links only ever differed by a
+`?relationship=` filter value for the first two, so the third was always
+meant to be the same feature, not a new one.
+
+**`database/migrations/2026_09_19_000001_widen_party_relationships_relationship.php`**
+(new) -- widened `party_relationships.relationship` from
+`ENUM('CUSTOMER','SUPPLIER')` to `VARCHAR(20)`, rather than adding a
+third enum value, matching this codebase's own established convention
+for exactly this situation (see `2026_09_01_200000_widen_vat_
+transactions_transaction_type.php`'s own doc comment: "using VARCHAR
+rather than ENUM once a value set turns out not to have been
+exhaustively confirmed up front"). `BusinessValidator::
+PARTY_RELATIONSHIPS` (now `CUSTOMER`/`SUPPLIER`/`SERVICE_PROVIDER`)
+remains the real application-level allow-list.
+
+**`app/Domain/Business/BusinessValidator.php`** -- `PARTY_RELATIONSHIPS`
+widened; the `RELATIONSHIP_REQUIRED`/`RELATIONSHIP_INVALID` error
+messages updated to mention all three values.
+
+**`app/Services/Business/BusinessPartyService.php`** -- `update()`'s own
+hardcoded `['CUSTOMER', 'SUPPLIER']` relationship-reconciliation loop
+extended to include `SERVICE_PROVIDER` (`create()` already iterated the
+submitted relationship list dynamically and needed no change).
+
+**Views**: `resources/views/business-parties/index.blade.php` -- a third
+relationship checkbox on the create form and a third option on the
+filter dropdown; both here and in `business-parties/show.blade.php`, the
+relationship badge's own label formatting (`ucfirst(strtolower(...))`,
+which would have rendered "Service_provider") was fixed to
+`ucwords(strtolower(str_replace('_', ' ', ...)))` so it reads "Service
+Provider". `resources/views/layouts/app.blade.php` -- the sidebar's
+"Service Providers" link now points directly at `business-parties.index`
+with `?relationship=SERVICE_PROVIDER`, the exact same pattern its own
+"Customers"/"Suppliers" siblings already use, rather than a separate
+named route.
+
+**Tests**: `tests/Feature/Business/BusinessPartyViewTest.php` -- 3 new
+tests appended to the existing file: registering a party with only a
+`SERVICE_PROVIDER` relationship creates a real row, the list page's own
+relationship filter correctly includes/excludes a service provider (and
+renders "Service Provider", not "Service_provider"), and a single party
+can hold both a `CUSTOMER` and a `SERVICE_PROVIDER` relationship at
+once. All 12 pre-existing tests in that file still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+confirmed the sidebar's own rendered "Service Providers" link points at
+`/business-parties?relationship=SERVICE_PROVIDER`; created a real party
+with only that relationship through the actual form; confirmed it
+appeared under the `SERVICE_PROVIDER` filter and correctly did not
+appear under the `SUPPLIER` filter; removed it afterward to restore the
+normal `DemoSeeder` baseline.
+
+Verified: full suite 755 tests, 0 regressions.
+
+## New feature: Converted Quotations (2026-09-19)
+
+Closes the `quotation.converted` `$plannedRoute` placeholder
+("Quotations that have progressed to a purchase order or invoice").
+Same shape as the Service Providers fix: the placeholder's own scope
+note already named the real fix ("Quotation status and conversion
+actions already exist on the quotation register") -- confirmed by
+reading `QuotationService::search()`/`BusinessValidator::
+quotationSearchQuery()` directly, which already fully implement and
+validate a `?status=` filter (including `CONVERTED`), and the register's
+own `CONVERTED` rows already render a real "View invoice" link to the
+certified invoice (`quotations/index.blade.php`'s own existing
+`@if ($item['status'] === 'CONVERTED' && $item['converted_invoice_id'])`
+branch). What was missing was any UI control ever reaching that filter --
+the same "command/query exists, no UI" class of gap Budgets/Cash Flow
+Projects closed.
+
+**`app/Http/Controllers/Business/QuotationViewController.php`** --
+`index()` now also passes `'filters' => $request->only(['status', 'q'])`
+to the view, so a status filter control can reflect the current
+selection.
+
+**View**: `resources/views/quotations/index.blade.php` -- a real status
+filter dropdown (All/Draft/Issued/Accepted/Converted/Rejected/Expired)
+added to the register's own card header, auto-submitting on change, plus
+a live count of the filtered result set. `resources/views/layouts/
+app.blade.php` -- the sidebar's "Converted Quotations" link now points
+directly at `quotations.index` with `?status=CONVERTED`, the exact same
+pattern its "Customers"/"Suppliers"/"Service Providers" siblings already
+use for `business-parties.index`, rather than a separate named route.
+
+**Tests**: `tests/Feature/Business/QuotationViewTest.php` -- 1 new test
+appended: a converted quotation and a still-draft quotation are created,
+the converted one carried through the real send/accept/convert flow to
+a genuine certified invoice, then `GET /quotations?status=CONVERTED`
+confirmed to show only the converted quotation (with its real "View
+invoice" link) and correctly exclude the draft one. All 12 pre-existing
+tests in that file still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+confirmed the sidebar's own rendered "Converted Quotations" link points
+at `/quotations?status=CONVERTED`; created a real quotation, drove it
+through send/accept/convert to a genuine certified invoice via the real
+Blade forms; confirmed it appeared under the `CONVERTED` filter with a
+working "View invoice" link and correctly did not appear under the
+`DRAFT` filter; removed all of it afterward (quotation, its lines/
+revisions, the certified invoice and its own lines/certificate/ledger/
+reconciliation rows, the customer party) to restore the normal
+`DemoSeeder` baseline.
+
+Verified: full suite 756 tests, 0 regressions.
+
+## New feature: Converted Quotations into Invoices (2026-09-19)
+
+Closes the `quotation.converted-invoices` `$plannedRoute` placeholder
+("The invoice, credit notes, debit notes and related quotation for each
+converted quotation, in one list"). Unlike Converted Quotations above,
+this placeholder's own scope note was accurate: a full-repo grep found
+no query anywhere that joined a converted `Quotation` to its certified
+`Invoice` (via `converted_invoice_id`) and every credit/debit note ever
+raised against that invoice (`InvoiceCorrection.original_invoice_id` ->
+`InvoiceCorrection.correction_invoice_id`, both FKs into `invoices`).
+This is a genuine new three-table join, not a UI-only gap over an
+existing filter.
+
+**`app/Services/Business/QuotationService.php`** -- new
+`crossReference(User $actor, ?string $requestedOrganisationId): array`
+method. Loads every `CONVERTED` quotation with a `converted_invoice_id`
+for the organisation (capped at 200, most recent first), then batches
+the join into two more queries regardless of row count: one
+`Invoice::whereIn('id', ...)` keyed by id, and one
+`InvoiceCorrection::whereIn('original_invoice_id', ...)` (eager-loading
+`correctionInvoice`) grouped by the original invoice id -- the same
+N+1-avoidance batching pattern Budgets/Cash Flow Projects/Purchase
+Orders all use. Maps each quotation to its invoice (number, issue date,
+status, total) and an ordered list of its corrections (type, reason,
+status, the correction invoice's own number/date/total).
+
+**`app/Http/Controllers/Business/QuotationViewController.php`** -- new
+`convertedInvoices(Request $request): View` action, gated on
+`commercial:read` (identical to the placeholder), rendering
+`quotations.converted-invoices` from `crossReference()`'s result.
+
+**View**: `resources/views/quotations/converted-invoices.blade.php`
+(new) -- one row per converted quotation showing the quotation number
+and quoted total, the customer, a link to the real certified invoice
+(`invoices.show`) with its issue date and status badge and total, and a
+per-row list of every credit/debit note against that invoice (type
+badge, correction invoice number, issue date, total, reason), with a
+graceful empty state when nothing has been converted yet.
+
+**Routes**: `routes/web.php` -- the `$plannedRoute` call removed;
+`GET /quotations/converted-invoices` registered under the existing
+`quotations.*` route group with the identical route name
+(`quotation.converted-invoices`) and `commercial:read` permission, so
+the sidebar's Quotation > "Converted Quotations into Invoices" link
+needed no change.
+
+**Tests**: `tests/Feature/Business/QuotationViewTest.php` -- 2 new
+tests appended: one drives a quotation through the real send/accept/
+convert flow to a certified invoice, raises a real credit note against
+it via the existing invoice-correction path
+(`POST /api/v1/invoices` with `document_type=CREDIT_NOTE` and an
+`original_document_reference`), then confirms
+`GET /quotations/converted-invoices` shows the quotation, its invoice,
+and the credit note with its reason all joined on one page; the other
+confirms the empty state when nothing has been converted. All 13
+pre-existing tests in that file still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner
+login: created a real customer party and quotation through the actual
+Blade forms, drove it through send/accept/convert to a genuine
+certified invoice, then raised a real credit note against that invoice
+through the JSON API's own correction path. Confirmed
+`/quotations/converted-invoices` rendered the quotation, its invoice
+(N$ 1,150.00) and the credit note (N$ -115.00, with its reason) exactly
+as designed, and that the empty state read "No quotations have been
+converted to an invoice yet." before any of this data existed. Removed
+all of it afterward (the credit note, the original invoice and both
+invoices' lines/certificates/VAT transactions, the quotation and its
+lines/revisions, the customer party and its relationship row) to
+restore the normal `DemoSeeder` baseline -- confirmed by re-querying
+zero quotations/invoices/business parties for the demo organisation
+and the page showing the empty state again.
+
+Verified: full suite 758 tests, 0 regressions.
+
+## New feature: Project Management (Create New Project, Ongoing Project Reports, Completed Projects) (2026-09-20)
+
+Closes all three Project Management `$plannedRoute` placeholders in one
+pass. Each claimed "No dedicated project domain model exists in the
+platform today" -- stale, the same class of gap Budgets/Cash Flow Projects
+closed: `App\Models\Project`/`ProjectBudget`/`ProjectCost` and
+`App\Services\Business\ProjectService::create()` already exist, already
+validated by `BusinessValidator::project()`, already exercised end to end
+by `tests/Feature/Business/ProjectTest.php`, with no Blade UI reaching
+them. The Create New Project placeholder's own proposed field list
+("description, location, ... expected revenue, category, VAT treatment")
+is wider than the ported `projects` table actually carries (code, name,
+customer, currency, dates, budget, manager) -- the new form captures
+exactly what the real domain model supports, not the placeholder's
+aspirational superset, the same call `BudgetsViewController` made rather
+than inventing columns nothing else reads.
+
+One genuine gap, not just a missing view: `ProjectService::create()`
+always leaves a project at `PLANNED`, and nothing anywhere in the ported
+source (`lib/data/business-repository.ts`) ever moves it further --
+confirmed by a full-repo grep. `App\Http\Controllers\Operations\
+ErpViewController` already reads `PLANNED` and `ACTIVE` as two distinct,
+coexisting project states, so "Ongoing Project Reports" (active projects)
+and "Completed Projects" (finished projects) were structurally
+unreachable: every project ever created would stay `PLANNED` forever.
+Closing this needed two new, not-ported service methods:
+
+**`app/Services/Business/ProjectService.php`** -- new `activate(string
+$id, ...)` (`PLANNED` -> `ACTIVE`) and `complete(string $id, ...)`
+(`ACTIVE` -> `COMPLETED`), each mirroring `PurchaseOrderService`'s own
+guarded single-step transition pattern exactly (a conditional `UPDATE`
+scoped to the expected prior status; zero affected rows means a
+concurrent change beat this one and raises a conflict, not a silent
+no-op), with the same `CommandLedger`/audit/outbox recording every other
+mutation in this file already has. No self-review restriction (unlike
+`approveBudget`'s maker-checker guard) -- this is a plain lifecycle
+progression, not a financial approval.
+
+**`app/Http/Controllers/Business/ProjectController.php`** -- new
+`activate()`/`complete()` JSON actions (`projects:manage`), and
+**`routes/web.php`** -- two new routes (`POST /api/v1/projects/{id}
+/activation` and `.../completion`) added directly below the existing
+Phase 10 projects block, with a comment marking them as not part of that
+block's "kept 1:1 with the source" claim, so the JSON API stays testable
+and consistent with every other `ProjectService` method without
+misrepresenting what was actually ported.
+
+**`app/Http/Controllers/Business/ProjectManagementViewController.php`**
+(new) -- `newProject()` (planned-projects register + create form),
+`store()` (calls `ProjectService::create()`), `activate()` (calls
+`ProjectService::activate()`, redirects to Ongoing), `ongoing()`
+(active-projects list), `complete()` (calls `ProjectService::complete()`,
+redirects to Completed), `completed()` (read-only finished-projects
+list). `ongoing()`/`completed()` share a private `presentProjects()`
+that batches revenue (`REVENUE`-type `journal_lines` tagged to the
+project)/cost (`ProjectCost`)/budget (`ProjectBudget`) into three
+organisation-wide queries regardless of row count -- the exact
+N+1-avoidance shape `BudgetsViewController`/`CashFlowViewController`'s
+own index already established, never `ProjectService::profitability()`
+called once per row.
+
+**Views**: `resources/views/project-management/{new,ongoing,completed}
+.blade.php` (all new). `new.blade.php` lists planned projects with an
+Activate action and the create form; `ongoing.blade.php` lists active
+projects with approved budget/revenue/cost/profit and a Mark Completed
+action; `completed.blade.php` is a read-only summary with no actions.
+
+**Routes**: `routes/web.php` -- the three `$plannedRoute` calls removed;
+`GET /project-management/{new,ongoing,completed}`, `POST
+/project-management`, and `POST /project-management/{id}/{activation,
+completion}` registered with the identical route names and
+`projects:read` permission the placeholders used, so the sidebar's
+Project Management group needed no change.
+
+**Tests**: `tests/Feature/Business/ProjectTest.php` -- 3 new tests for
+`activate()`/`complete()` (a full `PLANNED` -> `ACTIVE` -> `COMPLETED`
+lifecycle with audit events, completing before activating rejected with
+409, activating twice rejected with 409). `tests/Feature/Business/
+ProjectManagementViewTest.php` (new, 13 tests) -- access gates on all
+three pages, the create form, `projects:manage` denial, activation
+moving a project off the Planned page and onto Ongoing, the
+budget/revenue/cost/profit computation on Ongoing, completion moving a
+project onto the read-only Completed page with no action buttons, and
+organisation scoping across all three pages. All 10 pre-existing tests
+in `ProjectTest.php` still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+confirmed all three pages loaded; created a real project through the
+actual Blade form (appeared correctly under Planned); activated it
+through the real form action (moved to Ongoing, no longer listed under
+Planned); marked it completed through the real form action (moved to
+Completed, read-only, no longer listed under Ongoing). Removed the
+project (and its proposed budget, command-idempotency/audit/outbox rows)
+afterward to restore the normal `DemoSeeder` baseline -- confirmed by
+re-querying zero projects for the demo organisation and all three pages
+showing their empty states again.
+
+Verified: full suite 774 tests, 0 regressions.
+
+## New feature: New Credit Note / New Debit Note (2026-09-20)
+
+Closes the `new-registration.credit-note`/`.debit-note` `$plannedRoute`
+placeholders. Unlike every other placeholder closed this session, these
+two carried their own explicit change-control note ("an unapproved form
+must be proposed before it is built") rather than a stale-or-missing-
+model excuse. The form design below was proposed against the exact
+contract `App\Domain\Invoice\InvoiceCalculator`/`App\Services\Invoice\
+InvoiceService::resolveOriginalInvoice()` already enforce (read directly,
+not guessed) and approved before anything was built:
+
+- **Credit note**: pick an original invoice; its own lines are shown
+  read-only with an editable "quantity to credit" per line (capped at
+  that line's own quantity); reason code, reason, issue date.
+- **Debit note**: pick an original invoice; a free-form single line
+  (description, quantity, unit price) at the standard 15% rate, the same
+  single-line-at-creation shape `QuotationViewController`'s own create
+  form already uses; reason code, reason, issue date.
+
+The write path itself is not new: both submit the exact same
+`InvoiceService::submit()` with `document_type` `CREDIT_NOTE`/
+`DEBIT_NOTE` and an `original_document_reference` that
+`POST /api/v1/invoices` already accepts and
+`tests/Feature/Invoice/InvoiceLifecycleTest.php` already exercises --
+never a second write path.
+
+**`app/Http/Controllers/Invoice/InvoiceCorrectionViewController.php`**
+(new) -- `newCreditNote()`/`newDebitNote()` (`invoices:read`),
+`storeCreditNote()`/`storeDebitNote()` (`invoices:submit`, matching
+`InvoiceController::store()`'s own gate for this same command). Supplier
+and customer are never asked for: both are carried over verbatim from
+the original invoice's own stored `supplier_name`/`supplier_vat_number`/
+`customer_name`/`customer_vat_number`, because
+`resolveOriginalInvoice()` requires the correction to preserve the
+original's exact customer identity -- retyping it is the one way this
+could fail with a confusing error rather than never being wrong in the
+first place. For the credit note, each credited line's `unit_price`/
+`tax_rate_bps`/`tax_category` are likewise carried over from the
+original line, never retyped, with only the quantity-to-credit editable
+-- net/tax amounts are computed with the same half-up, sign-preserving
+integer arithmetic `InvoiceCalculator`'s own (private) `roundedDivide`
+uses, reimplemented here rather than widening that class's visibility
+for one caller.
+
+One disclosed limit: `eligibleOriginals()` excludes an original invoice
+whose customer was identified by TIN or another non-VAT identifier at
+creation time (only `customer_vat_number` is stored on the `invoices`
+table, so a non-VAT-number identifier can't be reconstructed here to
+re-resolve the same customer `Taxpayer` the way `resolveCapableTaxpayer`
+requires) -- confirmed by reading that resolution path directly. An
+invoice with no customer at all (`customer_taxpayer_id` null) is
+unaffected and remains eligible.
+
+A read-only "remaining creditable amount" (original total minus every
+prior active credit note's own total) is shown on the credit note page
+so the form doesn't ask for more than can actually be credited -- it
+mirrors, but does not replace, `resolveOriginalInvoice()`'s own
+cumulative-credit-cap check, which still independently re-enforces the
+cap on submit.
+
+**Routes**: `routes/web.php` -- the two `$plannedRoute` calls removed;
+`GET/POST /new-registration/{credit,debit}-note` registered alongside
+the other invoice routes with the identical route names and
+`invoices:read` permission the placeholders used, so the sidebar's New
+Registration group needed no change.
+
+**Views**: `resources/views/invoices/new-{credit,debit}-note.blade.php`
+(both new) -- an original-invoice picker (auto-submitting `<select>`,
+the same drill-down pattern `CashFlowViewController`'s own `?project_id=`
+already uses), a read-only summary, and the form itself.
+
+**Tests**: `tests/Feature/Invoice/InvoiceCorrectionViewTest.php` (new,
+10 tests) -- access gates on both pages, the picker scoped to the
+actor's own supplier taxpayer, selecting an invoice rendering its lines
+and remaining-creditable amount, a credit note issued against one line
+of a two-unit original (asserting the resulting `-575.00` correction
+invoice and its `ACTIVE` `invoice_corrections` row), crediting more than
+a line's own quantity rejected, a credit note with nothing credited
+rejected, `invoices:submit` denial, a debit note issued with a free-form
+line, and a debit note with a non-positive quantity rejected. One real
+bug caught by live verification, not by this test suite (fixed
+immediately, with a new test added for the exact path that missed it,
+`test_selecting_an_original_invoice_shows_its_lines_and_remaining_
+creditable_amount`): `remainingCreditableCents()`'s own `WHERE status =
+'ACTIVE'` was ambiguous once joined against `invoices` (both
+`invoice_corrections` and `invoices` have a `status` column), a MySQL
+error the JSON-API-only test suite never exercised because no existing
+test ever selected an original invoice on the GET page.
+
+Live-verified over real HTTP as the demo organisation's own owner
+login: created a real two-unit original invoice and a real customer
+taxpayer via the JSON API, then through the actual Blade forms issued a
+credit note against 1 of the 2 units (confirmed the resulting `-575.00`
+correction invoice, the original's own page listing it, and the
+remaining-creditable figure updating from `NAD 1,150.00` to
+`NAD 575.00`) and a debit note with a free-form surcharge line
+(confirmed the resulting `230.00` correction invoice on the original's
+own page). Removed all of it afterward (both correction invoices, the
+original invoice and all three invoices' lines/certificates/VAT
+transactions, the synthetic customer taxpayer/organisation) to restore
+the normal `DemoSeeder` baseline -- confirmed by re-querying zero
+invoices for the demo organisation and the credit note page showing its
+empty state again.
+
+Verified: full suite 784 tests, 0 regressions.
+
+This closes out every remaining `$plannedRoute` placeholder in
+`routes/web.php`.

@@ -17,7 +17,7 @@
                 &middot; <span class="font-monospace">{{ $party['vat_number'] }}</span>
             @endif
             @foreach ($party['relationships'] as $relationship)
-                <span class="badge text-bg-light border ms-1">{{ ucfirst(strtolower($relationship)) }}</span>
+                <span class="badge text-bg-light border ms-1">{{ ucwords(strtolower(str_replace('_', ' ', $relationship))) }}</span>
             @endforeach
         </p>
     </div>
