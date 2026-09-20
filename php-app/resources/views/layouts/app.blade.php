@@ -59,7 +59,7 @@
                         'operations' => ['operations.*'],
                         'quotation' => ['quotation.*', 'quotations.*'],
                         'project-management' => ['project-management.*'],
-                        'registered' => ['registered.*', 'business-parties.*', 'taxpayer-systems.*'],
+                        'registered' => ['registered.*', 'business-parties.*', 'taxpayer-systems.*', 'saas-providers.*'],
                         'new-registration' => ['new-registration.*'],
                         'documents' => ['documents.*'],
                         'reporting' => ['reports.*'],
@@ -171,6 +171,7 @@
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SUPPLIER') aria-current="page" @endif>Suppliers</a></li>
                                 <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SERVICE_PROVIDER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SERVICE_PROVIDER') aria-current="page" @endif>Service Providers</a></li>
                                 <li><a class="nav-link" href="{{ route('taxpayer-systems.index') }}" @if (request()->routeIs('taxpayer-systems.*')) aria-current="page" @endif>Taxpayer Systems</a></li>
+                                <li><a class="nav-link" href="{{ route('saas-providers.index') }}" @if (request()->routeIs('saas-providers.*')) aria-current="page" @endif>SaaS Providers</a></li>
                         </ul>
                     </li>
 
