@@ -10,11 +10,12 @@ use Illuminate\Support\Facades\DB;
  * IDENTITY/BUSINESS/COMPLIANCE/PLATFORM/CONTROL_PLANE_SEED_STATEMENTS) --
  * (code, resource, action, description, classification) copied verbatim.
  *
- * NOTE -- a second genuine source gap, same shape as RoleSeeder's: 12
+ * NOTE -- a second genuine source gap, same shape as RoleSeeder's: 15
  * permission codes are granted by lib/domain/access.ts's ROLE_PERMISSIONS
  * (taxpayers:suspend, registrations:approve, invoices:cancel, vat-rules:read,
  * vat-rules:manage, cases:override-sod, obligations:manage, payments:record,
- * security:manage, accounting:close-period, documents:manage, exceptions:read)
+ * security:manage, accounting:close-period, documents:manage, exceptions:read,
+ * taxpayer-systems:read, taxpayer-systems:manage, taxpayer-systems:approve)
  * but were never seeded into access_permissions in the source either.
  * Completed below, marked distinctly, with reasonable resource/action/
  * classification values following the seeded rows' own pattern -- not
@@ -118,6 +119,9 @@ class PermissionSeeder extends Seeder
             ['accounting:close-period', 'ACCOUNTING', 'CLOSE_PERIOD', 'Close an accounting period and block further postings', 'CONFIDENTIAL'],
             ['documents:manage', 'DOCUMENT', 'MANAGE', 'Record scan verdicts and manage retention holds on documents', 'CONFIDENTIAL'],
             ['exceptions:read', 'RECONCILIATION_EXCEPTION', 'READ', 'Read authorised VAT reconciliation exceptions', 'RESTRICTED'],
+            ['taxpayer-systems:read', 'TAXPAYER_SYSTEM_REGISTRATION', 'READ', 'Read registered taxpayer ERP/POS/accounting systems', 'RESTRICTED'],
+            ['taxpayer-systems:manage', 'TAXPAYER_SYSTEM_REGISTRATION', 'MANAGE', 'Register, suspend and record synchronization for a taxpayer\'s own systems', 'RESTRICTED'],
+            ['taxpayer-systems:approve', 'TAXPAYER_SYSTEM_REGISTRATION', 'APPROVE', 'Approve a taxpayer system registration', 'CONFIDENTIAL'],
 
             // Genuinely new module (Super Admin "grant a user an access
             // right" screen, user's own explicit request) -- not from the

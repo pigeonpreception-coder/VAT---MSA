@@ -87,6 +87,8 @@ use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\Security\SecurityOperationsViewController;
+use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemController;
+use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemViewController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowAuthoringViewController;
 use App\Http\Controllers\Workflow\WorkflowController;
@@ -261,6 +263,18 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/business-parties', [BusinessPartyViewController::class, 'store'])->name('business-parties.store');
     Route::post('/business-parties/{id}/verification', [BusinessPartyViewController::class, 'storeVerification'])->name('business-parties.verification.store');
     Route::post('/business-parties/{id}/deactivation', [BusinessPartyViewController::class, 'storeDeactivation'])->name('business-parties.deactivation.store');
+
+    // Real Blade UI for TaxpayerSystemService (NamRA e-VAT MS Registered
+    // Taxpayer Systems Framework), alongside the JSON API surface below --
+    // see TaxpayerSystemViewController's own doc comment. Approval wears
+    // 'step-up', matching this migration's own established posture for
+    // approval-type actions.
+    Route::get('/taxpayer-systems', [TaxpayerSystemViewController::class, 'index'])->name('taxpayer-systems.index');
+    Route::post('/taxpayer-systems', [TaxpayerSystemViewController::class, 'store'])->name('taxpayer-systems.store');
+    Route::post('/taxpayer-systems/{id}/approval', [TaxpayerSystemViewController::class, 'approve'])
+        ->name('taxpayer-systems.approval.store')->middleware('step-up');
+    Route::post('/taxpayer-systems/{id}/suspension', [TaxpayerSystemViewController::class, 'suspend'])
+        ->name('taxpayer-systems.suspension.store');
 
     // Real Blade UI for ComplianceSnapshotService, alongside the JSON API
     // surface below -- see ComplianceOverviewViewController's own doc
@@ -1001,6 +1015,26 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware('step-up');
         Route::post('/tax-authority-onboarding-cases/{id}/decisions', [AuthorityGovernanceController::class, 'decide'])
             ->middleware('step-up');
+
+        // NamRA e-VAT MS Registered Taxpayer Systems Framework (master
+        // prompt section 6) -- a taxpayer's own ERP/POS/accounting/
+        // invoicing system, self-registered and approved by a national-
+        // scope NamRA role. Kept 1:1 with the source's own
+        // app/api/v1/taxpayer-systems/** shape. Only approval (a
+        // NamRA-officer-only compliance write, matching the source's own
+        // COMPLIANCE_WRITE operation class) wears 'step-up', matching this
+        // migration's own established posture for approval-type actions;
+        // register/suspend/sync stay self-service, matching the source.
+        Route::get('/taxpayer-systems', [TaxpayerSystemController::class, 'index']);
+        Route::get('/taxpayer-systems/{id}', [TaxpayerSystemController::class, 'show']);
+        Route::post('/taxpayer-systems', [TaxpayerSystemController::class, 'store'])
+            ->middleware('rate-limit:taxpayer-systems');
+        Route::post('/taxpayer-systems/{id}/approval', [TaxpayerSystemController::class, 'approve'])
+            ->middleware(['step-up', 'rate-limit:taxpayer-systems']);
+        Route::post('/taxpayer-systems/{id}/suspension', [TaxpayerSystemController::class, 'suspend'])
+            ->middleware('rate-limit:taxpayer-systems');
+        Route::post('/taxpayer-systems/{id}/sync', [TaxpayerSystemController::class, 'sync'])
+            ->middleware('rate-limit:taxpayer-systems');
 
         // Phase 12 (portals/licensing/governance), slice 1: Licensing &
         // Entitlements (lib/data/control-plane-repository.ts's

@@ -9782,3 +9782,68 @@ sound) plus this port's own step-up/Blade-view coverage. Real MySQL, real
 HTTP requests, a genuine maker-checker-driven claim reaching
 PAYMENT_PENDING through the actual transition sequence -- no mocks. Full
 suite: 831 tests, 0 regressions.
+
+## New feature: the Registered Taxpayer Systems Framework (2026-09-20)
+
+User asked to pick a next module and proceed unprompted. Of the remaining
+genuinely-unported TypeScript source modules (self-serve signup, this
+framework, and SaaS provider onboarding), this one was chosen as the most
+self-contained and similarly scoped to the just-merged Payment connector,
+and unlike self-serve signup it needs no new pre-auth/unauthenticated
+infrastructure. Master prompt section 6: a taxpayer's own ERP/POS/
+accounting/invoicing system must be registered and approved by NamRA
+before it may integrate, then can be suspended and report its own
+connectivity state. Ported in full from `lib/domain/taxpayer-system.ts`,
+`lib/data/taxpayer-system-repository.ts` and `lib/api/taxpayer-system.ts`:
+identifier/name/vendor validation, the VAT/TIN cross-check against the
+registering actor's own taxpayer record, the DRAFT -> APPROVED ->
+SUSPENDED -> APPROVED state machine (`App\Domain\TaxpayerSystem\
+TaxpayerSystemValidator`), and the repository's tenant/national load
+scoping (`App\Services\TaxpayerSystem\TaxpayerSystemService`).
+
+**A second genuine source gap**, of the same kind `PermissionSeeder.php`'s
+own doc comment already tracked (permission codes granted via
+`lib/domain/access.ts`'s `ROLE_PERMISSIONS` map but never actually seeded
+into `access_permissions`): `taxpayer-systems:read`/`:manage`/`:approve`
+were granted to roles in source but absent from the seed catalogue
+(confirmed via `grep -n "access_permissions" db/runtime.ts`, zero
+`taxpayer-systems:*` rows -- not to be confused with the unrelated
+`LICENSE_PERMISSION_POLICIES` array, which does reference the family for
+a different table entirely). Closed by extending the same pre-existing
+"Completed here" block in `PermissionSeeder.php` from 12 to 15 codes, and
+granting `read`+`manage` to `TAXPAYER_OWNER`/`TAXPAYER_ADMIN`, `read` only
+to `NAMRA_COMPLIANCE_OFFICER`, and `read`+`approve` to
+`NAMRA_VAT_SUPERVISOR` (source's `NAMRA_SUPERVISOR`) in
+`App\Support\Access\Permissions.php`.
+
+Kept 1:1 with source's route shape (`app/api/v1/taxpayer-systems/...`,
+`App\Http\Controllers\TaxpayerSystem\TaxpayerSystemController`) and its
+`rate-limit:taxpayer-systems` bucket -- free to wire onto the new routes,
+since `EnforceRateLimit`'s existing generic `enforceCommand` branch
+already covers any family name it doesn't special-case. `step-up` gates
+`APPROVE_TAXPAYER_SYSTEM` only, matching source's own `COMPLIANCE_WRITE`
+vs. `BUSINESS_WRITE` operation-class split (register/suspend/sync have no
+source-side step-up equivalent, matching this port's own established
+posture of reserving `step-up` for approval/compliance-write actions).
+
+A Blade UI was added despite source being JSON-API-only (matching the
+Security Operations/Payment precedent): a single `/taxpayer-systems` list
+page carries register (taxpayer's own organisation, `:manage`), approve
+(national-scope NamRA role, `:approve`, step-up gated) and suspend (the
+owning taxpayer, `:manage`) actions, each row showing only what the
+viewer could actually do. `RecordSynchronization` (the `sync` command)
+was deliberately left JSON-API-only -- it is the taxpayer's own ERP/POS
+system reporting its post-sync connectivity state machine-to-machine, not
+something a human clicks a button for.
+
+19 new PHPUnit tests (`tests/Feature/TaxpayerSystem/TaxpayerSystemTest.php`):
+registration success/VAT-mismatch/invalid-category, duplicate conflict,
+idempotency replay, national-supervisor approval, approve-without-step-up
+(423), taxpayer-cannot-approve-own (403), approve-already-approved
+conflict, owning-taxpayer suspends own system, cross-org suspend denied,
+sync refused before approval (409) and succeeding after, tenant/national
+list scoping, and Blade-view coverage (auth required, form+data render,
+register creates DRAFT, approve without step-up redirects to MFA). Real
+MySQL, real HTTP requests throughout, plus a genuine browser round-trip
+through the Blade register form confirming the full DRAFT registration
+flow end to end. Full suite: 850 tests, 0 regressions.

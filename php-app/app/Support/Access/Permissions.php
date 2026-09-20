@@ -78,6 +78,7 @@ final class Permissions
             'invoices:read', 'invoices:submit', 'exceptions:read', 'returns:read', 'returns:generate', 'returns:approve',
             'returns:submit', 'vat-adjustments:manage', 'compliance:read', 'communications:respond', 'disputes:manage',
             'refunds:read', 'refunds:request', 'consents:manage', 'integrations:read', 'integrations:manage',
+            'taxpayer-systems:read', 'taxpayer-systems:manage',
             'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'commercial:read', 'parties:manage',
             'quotations:manage', 'accounting:read', 'accounting:post', 'accounting:close-period', 'expenses:read', 'expenses:manage',
             'inventory:read', 'inventory:manage', 'projects:read', 'projects:manage', 'imports:read', 'imports:manage',
@@ -88,6 +89,7 @@ final class Permissions
             'invoices:submit', 'exceptions:read', 'returns:read', 'returns:generate', 'returns:approve', 'returns:submit',
             'vat-adjustments:manage', 'compliance:read', 'communications:respond', 'disputes:manage', 'refunds:read',
             'refunds:request', 'consents:manage', 'integrations:read', 'integrations:manage', 'developer:read', 'developer:manage',
+            'taxpayer-systems:read', 'taxpayer-systems:manage',
             'offline:read', 'offline:sync', 'reports:read', 'reports:run', 'commercial:read', 'parties:manage', 'quotations:manage',
             'accounting:read', 'expenses:read', 'expenses:manage', 'inventory:read', 'inventory:manage', 'projects:read',
             'projects:manage', 'imports:read', 'imports:manage', 'documents:read', 'documents:upload',
@@ -135,6 +137,7 @@ final class Permissions
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'invoices:read', 'exceptions:read',
             'returns:read', 'reconciliation:manage', 'compliance:read', 'cases:manage', 'disputes:manage', 'obligations:manage',
             'refunds:read', 'risk:read', 'risk:review', 'communications:manage', 'notifications:manage', 'integrations:read',
+            'taxpayer-systems:read',
             'reports:read', 'reports:run', 'platform:read', 'payments:read', 'vat-rules:read',
         ],
         'NAMRA_VAT_AUDITOR' => [
@@ -150,7 +153,8 @@ final class Permissions
             'dashboard:read', 'identity:read', 'taxpayers:read', 'registrations:read', 'invoices:read', 'exceptions:read',
             'returns:read', 'reconciliation:manage', 'compliance:read', 'cases:manage', 'cases:override-sod', 'disputes:manage',
             'obligations:manage', 'refunds:read', 'refunds:review', 'risk:read', 'risk:review', 'communications:manage',
-            'integrations:read', 'integrations:manage', 'reports:read', 'reports:run', 'reports:executive', 'platform:read',
+            'integrations:read', 'integrations:manage', 'taxpayer-systems:read', 'taxpayer-systems:approve',
+            'reports:read', 'reports:run', 'reports:executive', 'platform:read',
             'payments:read', 'payments:record', 'audit:read', 'vat-rules:read',
         ],
         // access-rights:read/manage added at the user's own explicit
