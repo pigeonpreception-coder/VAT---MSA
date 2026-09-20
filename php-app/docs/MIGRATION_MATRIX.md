@@ -9421,3 +9421,43 @@ taxpayers and the normal 55-invoice baseline restored.
 Verified: full suite 790 tests, 0 regressions (unchanged from the
 section above -- this pass added no new code, only a heavier run of
 already-covered ground).
+
+## Sidebar sign-in footer pinned to the viewport bottom (2026-09-20)
+
+User-reported bug: on every page, at desktop widths (`>=992px`), the
+"Signed in as / <name> / <role badge> / Log out" block at the bottom of
+the sidebar scrolled away with the rest of the nav instead of staying
+fixed in view -- a regression of the earlier "make the sidebar
+scrollable" fix (this same file's "Sidebar restructuring" pass and
+`resources/css/app.css`'s own `.sidebar.offcanvas-lg` comment), which
+had deliberately let the *whole* sidebar (brand, nav, and footer
+together) scroll as one unit after an earlier attempt at pinning just
+the footer broke Bootstrap's Collapse: nesting `.sidebar-nav` inside an
+`overflow-y: hidden`/flex-constrained ancestor made Collapse's
+`scrollHeight` measurement on group-expand come back wrong (confirmed
+live at the time: a group's caret flipped to "expanded" but its
+subitems never rendered).
+
+Fixed with `position: sticky; bottom: 0;` on `.sidebar-user`
+(`resources/css/app.css`) instead of any new overflow/flex constraint on
+`.sidebar-nav` -- sticky only repositions the footer element itself
+within whichever ancestor already scrolls (`.sidebar` at `>=992px`,
+Bootstrap's own `.offcanvas-body` below that), leaving `.sidebar-nav` a
+plain, unconstrained flow element with nothing for Collapse's
+measurement to collide with. Gave `.sidebar-user` its own opaque
+background (the sidebar's gradient lives several ancestors up on
+`.sidebar` itself) so scrolled-past nav items don't show through behind
+it while stuck.
+
+Verified live via Playwright against the demo login
+(`owner@demo-trading.test`): expanded a sidebar group with enough
+content to force scrolling, scrolled the sidebar, and confirmed the
+footer's bounding box stayed pinned to the exact bottom of the 800px
+viewport (`top: 659, bottom: 800`) while `.sidebar`'s own `scrollTop`
+moved. Separately expanded "New Registration" (5 subitems) and
+confirmed all 5 rendered with the group's `.show` class and a non-zero
+measured height, i.e. Collapse's own expand measurement is unaffected
+by this change -- the exact failure mode the earlier attempt hit.
+Screenshots captured both states.
+
+Verified: full suite 790 tests, 0 regressions.
