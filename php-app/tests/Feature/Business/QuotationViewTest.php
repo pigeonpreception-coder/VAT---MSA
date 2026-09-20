@@ -9,6 +9,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -354,5 +355,71 @@ class QuotationViewTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('No quotations have been converted to an invoice yet.');
+    }
+
+    /**
+     * Backlog item #10's follow-up (docs/LAUNCH_READINESS_BACKLOG.md,
+     * 2026-09-20): crossReference()'s own doc comment claims it batches
+     * into a fixed number of queries regardless of row count -- checked
+     * directly at a volume unmistakable enough that an unfixed N+1 (one
+     * extra query per converted quotation) can't be missed. Eloquent-
+     * creates the rows directly (matching BudgetsViewTest's own
+     * precedent) rather than driving 40 real send/accept/convert HTTP
+     * flows -- this test's own job is the read path's query count, not
+     * re-exercising the write path already covered above.
+     */
+    public function test_the_cross_reference_page_query_count_does_not_scale_with_row_count(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLERNPLUS1-0001');
+        $customerPartyId = $this->createCustomerParty($seller['owner']);
+        for ($i = 0; $i < 40; $i++) {
+            $invoiceId = (string) Str::uuid();
+            \App\Models\Invoice::create([
+                'id' => $invoiceId, 'invoice_number' => "INV-NPLUS1-{$i}", 'document_type' => 'TAX_INVOICE',
+                'source_system' => 'test', 'source_document_id' => "doc-nplus1-{$i}",
+                'supplier_taxpayer_id' => $seller['taxpayer']->id, 'supplier_name' => 'Seller', 'supplier_vat_number' => $seller['taxpayer']->vat_number,
+                'customer_taxpayer_id' => null, 'customer_name' => 'Customer', 'customer_vat_number' => null,
+                'issue_date' => now()->toDateString(), 'currency' => 'NAD',
+                'line_net_cents' => 100000, 'tax_cents' => 15000, 'total_cents' => 115000,
+                'status' => 'CERTIFIED', 'risk_level' => 'LOW', 'payload_hash' => hash('sha256', "nplus1-{$i}"),
+                'transaction_id' => (string) Str::uuid(), 'certificate_id' => (string) Str::uuid(),
+                'verification_token' => 'vfy_nplus1_'.Str::random(20), 'created_at' => now(), 'certified_at' => now(),
+            ]);
+            \App\Models\Quotation::create([
+                'id' => (string) Str::uuid(), 'organisation_id' => $seller['organisation']->id, 'branch_id' => null,
+                'customer_party_id' => $customerPartyId, 'quotation_number' => "QUO-NPLUS1-{$i}", 'currency' => 'NAD',
+                'issue_date' => now()->toDateString(), 'valid_until' => now()->addDays(30)->toDateString(), 'status' => 'CONVERTED',
+                'subtotal_cents' => 100000, 'tax_cents' => 15000, 'total_cents' => 115000, 'notes' => null,
+                'created_by' => $seller['owner']->id, 'approved_by' => null, 'accepted_at' => now(),
+                'converted_invoice_id' => $invoiceId, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            if ($i % 5 === 0) {
+                $correctionInvoiceId = (string) Str::uuid();
+                \App\Models\Invoice::create([
+                    'id' => $correctionInvoiceId, 'invoice_number' => "CN-NPLUS1-{$i}", 'document_type' => 'CREDIT_NOTE',
+                    'source_system' => 'test', 'source_document_id' => "doc-cn-nplus1-{$i}",
+                    'supplier_taxpayer_id' => $seller['taxpayer']->id, 'supplier_name' => 'Seller', 'supplier_vat_number' => $seller['taxpayer']->vat_number,
+                    'customer_taxpayer_id' => null, 'customer_name' => 'Customer', 'customer_vat_number' => null,
+                    'issue_date' => now()->toDateString(), 'currency' => 'NAD',
+                    'line_net_cents' => -20000, 'tax_cents' => -3000, 'total_cents' => -23000,
+                    'status' => 'CERTIFIED', 'risk_level' => 'LOW', 'payload_hash' => hash('sha256', "cn-nplus1-{$i}"),
+                    'transaction_id' => (string) Str::uuid(), 'certificate_id' => (string) Str::uuid(),
+                    'verification_token' => 'vfy_cnnplus1_'.Str::random(20), 'created_at' => now(), 'certified_at' => now(),
+                ]);
+                \App\Models\InvoiceCorrection::create([
+                    'id' => (string) Str::uuid(), 'original_invoice_id' => $invoiceId, 'correction_invoice_id' => $correctionInvoiceId,
+                    'correction_type' => 'CREDIT_NOTE', 'reason_code' => 'PRICING_ERROR', 'reason' => 'N+1 volume test correction.',
+                    'status' => 'ACTIVE', 'created_by' => $seller['owner']->id, 'created_at' => now(),
+                ]);
+            }
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($seller['owner'])->get('/quotations/converted-invoices');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk();
+        $this->assertLessThan(15, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 converted quotations -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

@@ -12,6 +12,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -237,5 +238,31 @@ class SupplierLedgerViewTest extends TestCase
         $response->assertOk();
         $response->assertSee('<option value="'.$activeSupplier->id.'"', false);
         $response->assertDontSee('<option value="'.$customerOnly->id.'"', false);
+    }
+
+    /**
+     * Backlog item #10's follow-up (docs/LAUNCH_READINESS_BACKLOG.md,
+     * 2026-09-20): summary()'s own single GROUP BY query has no per-row
+     * query to begin with, but this checks that stays true at volume
+     * rather than assuming it from a code read alone.
+     */
+    public function test_the_index_query_count_does_not_scale_with_supplier_or_expense_count(): void
+    {
+        $org = $this->makeOrganisation('VAT-SLNPLUS1-0001');
+        $category = $this->makeCategory($org['organisation']);
+        for ($i = 0; $i < 40; $i++) {
+            $supplier = $this->makeSupplier($org['organisation'], "Supplier {$i}");
+            for ($e = 0; $e < 3; $e++) {
+                $this->makeExpense($org['organisation'], $category, $supplier, $org['owner'], ['expense_number' => "EXP-NPLUS1-{$i}-{$e}"]);
+            }
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($org['owner'])->get('/accounting/supplier-ledger');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk();
+        $this->assertLessThan(10, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 suppliers/120 expenses -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

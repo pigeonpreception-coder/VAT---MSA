@@ -9276,3 +9276,83 @@ Verified: full suite 784 tests, 0 regressions.
 
 This closes out every remaining `$plannedRoute` placeholder in
 `routes/web.php`.
+
+## N+1/query-plan volume testing extended to this session's own new pages (2026-09-20)
+
+Backlog item #10's own "Recommended next step" section (`docs/
+LAUNCH_READINESS_BACKLOG.md`) briefly and wrongly described real
+production-scale performance/N+1 testing as still open. It was already
+closed 2026-09-15 (see this file's own "Consolidated red-team punch
+list: item #12" section above) -- but that closure's own
+`database/seeders/SyntheticLoadSeeder.php` run never touched
+quotations, projects, business parties at volume, or chart-of-accounts/
+journal postings, because the pages reading those tables at list-view
+volume didn't exist yet. This session added several that explicitly
+claim to batch those same reads into a fixed number of queries
+regardless of row count (`SupplierLedgerService`/`CustomerLedgerService`,
+`BudgetsViewController`, `CashFlowViewController`,
+`ProjectManagementViewController`, `QuotationService::crossReference()`)
+-- a claim never checked against real volume until now.
+
+**`database/seeders/SyntheticLoadSeeder.php`** -- extended with a new
+`seedLedgerAndProjectVolume()` method, concentrated on one organisation
+(index 0) rather than spread across all 20: what makes an N+1 visible is
+row count *on one page*, not total rows in the database, and every one
+of these pages is itself organisation-scoped. Adds 200 business parties
+(customers/suppliers/service providers), 200 quotations (a mix of
+statuses, 133 landed `CONVERTED` with a real linked invoice, 20 of those
+further corrected with a real credit note), 200 projects across
+PLANNED/ACTIVE/COMPLETED each with a budget and several costs (half with
+a real REVENUE journal posting), and 200 supplier-tagged expenses. Same
+bulk `DB::table()->insert()` discipline as the rest of the file. Run
+against real MySQL in ~25s total (unchanged from the original run's own
+timing plus this addition).
+
+**Two-pronged verification, matching the 2026-09-15 pass's own
+methodology exactly:**
+
+1. **Query-count regression tests** (the precise, permanent check): 6
+   new tests across `BudgetsViewTest`, `CashFlowViewTest`,
+   `ProjectManagementViewTest`, `QuotationViewTest`,
+   `SupplierLedgerViewTest`, `CustomerLedgerViewTest` -- each seeds 40
+   rows inline (`DB::enableQueryLog()`/`getQueryLog()`, the same
+   mechanism `OperationsViewTest`/`BusinessPartyAndQuotationTest`
+   already established) and asserts the request's total query count
+   stays small and doesn't scale with row count. All passed on first
+   run: Budgets and Cash Flow at 4 queries for 40 projects each,
+   Project Management's Ongoing page likewise, the Converted Quotations
+   into Invoices cross-reference under its own ceiling for 40 converted
+   quotations (20% with a credit note), and Supplier/Customer Ledger
+   (whose `summary()` methods are a single `GROUP BY` query each, with
+   no per-row query to begin with) confirmed to stay that way at
+   volume rather than assumed from the code alone.
+2. **Live-HTTP timing against the real seeded volume** (the same
+   200-row scale, not the lighter 40-row in-test fixture): all seven
+   routes (`/accounting/supplier-ledger`, `/accounting/customer-ledger`,
+   `/accounting/budgets`, `/accounting/cash-flow`,
+   `/project-management/{ongoing,completed}`,
+   `/quotations/converted-invoices`) returned `200` in 20-55ms each as
+   the target organisation's own owner, with the rendered HTML confirmed
+   to contain the actual seeded rows (200 projects on Budgets, 100
+   active projects on Ongoing, 140/183 supplier/customer party mentions
+   on the two ledgers, 133 converted quotations on the cross-reference
+   page) -- not a silently-empty 200.
+
+No N+1 was found this time -- every one of these pages' own batching
+claim held at volume, unlike the 2026-09-15 pass which found 4 genuine
+bugs. That is itself the result, not a non-finding to gloss over: the
+claim was unverified until now, and confirming it holds is exactly what
+closes the gap.
+
+Database reset via `php artisan migrate:fresh --seed` afterward (the
+synthetic seed is on-demand tooling, not a permanent fixture, matching
+the 2026-09-15 precedent) -- confirmed zero `VAT-LOAD%` taxpayers, zero
+projects/quotations/business parties, and the normal 55-invoice
+`DemoSeeder`/`NemaPropertyDevelopersDemoSeeder` baseline restored.
+
+`docs/LAUNCH_READINESS_BACKLOG.md` corrected in the same pass: its
+"Recommended next step" section no longer describes this as open, and
+now says plainly that no further buildable-now, no-external-dependency
+item remains on the backlog.
+
+Verified: full suite 790 tests, 0 regressions.

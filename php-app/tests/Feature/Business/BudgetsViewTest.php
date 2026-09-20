@@ -11,6 +11,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -211,5 +212,34 @@ class BudgetsViewTest extends TestCase
         $response->assertRedirect(route('accounting.budgets'));
         $response->assertSessionHasErrors();
         $this->assertDatabaseHas('project_budgets', ['project_id' => $project->id, 'status' => 'PROPOSED']);
+    }
+
+    /**
+     * Backlog item #10's follow-up (docs/LAUNCH_READINESS_BACKLOG.md,
+     * 2026-09-20): this controller's own doc comment claims its budget/
+     * cost batching stays a fixed number of queries regardless of row
+     * count, the same shape database/seeders/SyntheticLoadSeeder.php's
+     * 2026-09-15 run confirmed elsewhere and later extended to cover
+     * this page's own tables. This is that claim checked directly.
+     */
+    public function test_the_index_query_count_does_not_scale_with_project_count(): void
+    {
+        $org = $this->makeOrganisation('VAT-BVNPLUS1-0001');
+        for ($i = 0; $i < 40; $i++) {
+            $project = $this->makeProject($org['organisation'], $org['owner'], ['code' => "PRJ-NPLUS1-{$i}"]);
+            $this->makeBudget($project, ['amount_cents' => 200000, 'approved_amount_cents' => 180000, 'status' => 'APPROVED']);
+            ProjectCost::create([
+                'id' => (string) Str::uuid(), 'project_id' => $project->id, 'cost_type' => 'MANUAL', 'source_id' => "cost-{$i}",
+                'amount_cents' => 50000, 'currency' => 'NAD', 'occurred_at' => now()->toDateString(), 'created_at' => now(),
+            ]);
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($org['owner'])->get('/accounting/budgets');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk();
+        $this->assertLessThan(15, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 projects -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }
