@@ -9,6 +9,39 @@
     <p class="text-muted mb-0">Every claim traces back to a filed VAT return's negative net position, with a frozen eligibility snapshot and full maker-checker history.</p>
 </div>
 
+@if ($outstanding)
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="fw-semibold">Outstanding refund payments</div>
+            <span class="badge {{ $outstanding['connector']['configured'] ? 'text-bg-success' : 'text-bg-secondary' }}">
+                Payment connector: {{ $outstanding['connector']['configured'] ? 'Sandbox active' : 'Requires authority contract' }}
+            </span>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">Claims that have cleared every review stage but have no payment instruction recorded yet -- what NamRA owes once Payment is authorised.</p>
+            <div class="fs-4 fw-semibold">NAD {{ number_format($outstanding['total_outstanding_cents'] / 100, 2) }}</div>
+        </div>
+        @if (count($outstanding['claims']))
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                    <caption class="visually-hidden">Refund claims awaiting a recorded payment instruction</caption>
+                    <thead><tr><th scope="col">Claim</th><th scope="col">Taxpayer</th><th scope="col">Amount</th><th scope="col">Approved</th></tr></thead>
+                    <tbody>
+                        @foreach ($outstanding['claims'] as $claim)
+                            <tr>
+                                <td><a href="{{ route('refunds.show', $claim['id']) }}">{{ $claim['claim_number'] }}</a></td>
+                                <td>{{ $claim['legal_name'] }}</td>
+                                <td>NAD {{ number_format(($claim['net_payable_cents'] ?? $claim['amount_cents']) / 100, 2) }}</td>
+                                <td>{{ $claim['approved_at'] ? \Illuminate\Support\Carbon::parse($claim['approved_at'])->format('d M Y') : '—' }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </div>
+@endif
+
 <div class="card">
     <div class="card-header">
         <div class="row g-2 align-items-center">

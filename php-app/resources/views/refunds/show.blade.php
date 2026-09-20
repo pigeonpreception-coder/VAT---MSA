@@ -107,7 +107,72 @@
             </div>
         </div>
     @endif
+
+    @if ($canRecordPayment)
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h6">Record payment</h2>
+                    <p class="text-muted small">This claim has cleared payment authorisation. Recording a payment goes through the payment connector -- in this deployment that connector stays DISABLED PENDING AUTHORITY (see the Platform console's service posture), so this will honestly report "Awaiting authority" rather than issue a live payment instruction.</p>
+                    <form method="POST" action="{{ route('refunds.payment.store', $claim['id']) }}">
+                        @csrf
+                    <x-idempotency-key />
+                        <div class="mb-2">
+                            <label for="beneficiary_reference" class="form-label">Beneficiary reference</label>
+                            <input type="text" id="beneficiary_reference" name="beneficiary_reference" class="form-control @error('payment') is-invalid @enderror" minlength="4" maxlength="100" value="{{ old('beneficiary_reference') }}" required>
+                        </div>
+                        <div class="mb-2">
+                            <label for="provider" class="form-label">Provider</label>
+                            <input type="text" id="provider" name="provider" class="form-control @error('payment') is-invalid @enderror" minlength="2" maxlength="60" value="{{ old('provider') }}" required>
+                            @error('payment')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm">Record payment</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($canAllocatePayment)
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h6">Allocate settlement</h2>
+                    <p class="text-muted small">Match a settlement confirmation to the recorded payment instruction. Refused with the same "Awaiting authority" honesty until the connector is authorised.</p>
+                    <form method="POST" action="{{ route('refunds.payment.allocation.store', $claim['id']) }}">
+                        @csrf
+                    <x-idempotency-key />
+                        <div class="mb-2">
+                            <label for="settlement_reference" class="form-label">Settlement reference</label>
+                            <input type="text" id="settlement_reference" name="settlement_reference" class="form-control @error('allocation') is-invalid @enderror" minlength="4" maxlength="100" value="{{ old('settlement_reference') }}" required>
+                        </div>
+                        <div class="mb-2">
+                            <label for="settled_amount" class="form-label">Settled amount</label>
+                            <input type="number" step="0.01" min="0.01" id="settled_amount" name="settled_amount" class="form-control @error('allocation') is-invalid @enderror" value="{{ old('settled_amount') }}" required>
+                            @error('allocation')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm">Allocate settlement</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>
+
+@if ($instruction)
+    <div class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="fw-semibold">Payment instruction</div>
+            <x-status-badge :value="$instruction['status']" type="status" />
+        </div>
+        <dl class="card-body row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-0">
+            <div class="col"><dt class="text-muted small">Provider</dt><dd class="mb-0 fw-semibold">{{ $instruction['provider'] }}</dd></div>
+            <div class="col"><dt class="text-muted small">Beneficiary</dt><dd class="mb-0 fw-semibold">{{ $instruction['beneficiary_reference_masked'] }}</dd></div>
+            <div class="col"><dt class="text-muted small">Provider reference</dt><dd class="mb-0 fw-semibold">{{ $instruction['provider_reference'] ?? '—' }}</dd></div>
+            <div class="col"><dt class="text-muted small">Settled</dt><dd class="mb-0 fw-semibold">{{ $instruction['settled_at'] ? \Illuminate\Support\Carbon::parse($instruction['settled_at'])->format('d M Y, H:i') : '—' }}</dd></div>
+        </dl>
+    </div>
+@endif
 
 <div class="card mt-3">
     <div class="card-header">

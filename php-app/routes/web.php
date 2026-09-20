@@ -75,6 +75,7 @@ use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformConfigViewController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
+use App\Http\Controllers\Payment\PaymentController;
 use App\Http\Controllers\Platform\ReportController;
 use App\Http\Controllers\Platform\ReportViewController;
 use App\Http\Controllers\Portal\BuyerPortalController;
@@ -179,6 +180,10 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/refunds/{id}', [RefundViewController::class, 'show'])->name('refunds.show');
     Route::post('/refunds/{id}/transition', [RefundViewController::class, 'storeTransition'])->name('refunds.transition.store');
     Route::post('/refunds/{id}/dispute', [RefundViewController::class, 'storeDispute'])->name('refunds.dispute.store');
+    Route::post('/refunds/{id}/payment', [RefundViewController::class, 'storePayment'])
+        ->name('refunds.payment.store')->middleware('step-up');
+    Route::post('/refunds/{id}/payment/allocation', [RefundViewController::class, 'storeAllocation'])
+        ->name('refunds.payment.allocation.store')->middleware('step-up');
 
     // Real Blade UI for Module 4 Phases A-B (risk indicators), alongside
     // the JSON API surface below -- see RiskViewController's own doc
@@ -960,6 +965,27 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/refunds/{id}/checks', [RefundController::class, 'checks']);
         Route::post('/refunds/{id}/transition', [RefundController::class, 'transition']);
         Route::post('/refunds/{id}/disputes', [RefundController::class, 'dispute']);
+
+        // Module 9 Phase D: RecordPayment/AllocatePayment/GetOutstanding
+        // (lib/data/payment-repository.ts), the refund lifecycle's final,
+        // previously-unmodeled step -- see App\Services\Payment\
+        // PaymentService's own doc comment for why PAYMENT_PENDING was the
+        // state machine's own deliberate terminal boundary until now, and
+        // App\Integrations\Payment\PaymentConnectorPort's for why this is
+        // safe to build despite issuing real payment instructions: every
+        // mutating call is gated by a real, DB-backed guard
+        // (service_components, seeded DISABLED) the source's own playbook
+        // demands, not just documentation. Kept 1:1 with the source's own
+        // app/api/v1/refunds/[id]/payment{,/allocation} and
+        // app/api/v1/payments/outstanding shape. Both writes wear
+        // 'step-up', matching this migration's own established posture for
+        // every other privileged command (the source has no equivalent
+        // gate here).
+        Route::post('/refunds/{id}/payment', [PaymentController::class, 'record'])
+            ->middleware(['step-up', 'rate-limit:payments']);
+        Route::post('/refunds/{id}/payment/allocation', [PaymentController::class, 'allocate'])
+            ->middleware(['step-up', 'rate-limit:payments']);
+        Route::get('/payments/outstanding', [PaymentController::class, 'outstanding']);
 
         // Authority Governance (lib/data/authority-governance-repository.ts's
         // getAuthorityGovernanceSnapshot/createAuthorityOnboardingCase/

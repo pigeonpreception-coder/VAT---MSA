@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Refund;
 use App\Domain\Compliance\ComplianceValidator;
 use App\Exceptions\ComplianceResourceException;
 use App\Exceptions\ComplianceValidationException;
+use App\Exceptions\PaymentResourceException;
+use App\Exceptions\PaymentValidationException;
 use App\Exceptions\RepositoryConflictException;
 use App\Exceptions\VatLifecycleResourceException;
 use App\Http\Controllers\Controller;
+use App\Models\PaymentInstruction;
 use App\Models\RefundClaim;
+use App\Services\Payment\PaymentService;
 use App\Services\Refund\RefundService;
 use App\Services\VatLifecycle\VatReconciliationReportService;
 use App\Support\Access\TenantScope;
@@ -47,6 +51,7 @@ class RefundViewController extends Controller
     public function __construct(
         private readonly RefundService $refunds,
         private readonly VatReconciliationReportService $reports,
+        private readonly PaymentService $payments,
     ) {}
 
     public function index(Request $request): View
@@ -68,7 +73,14 @@ class RefundViewController extends Controller
             $namraSummary = null;
         }
 
-        return view('refunds.index', ['claims' => $claims, 'periods' => $periods, 'namraSummary' => $namraSummary]);
+        // GetOutstanding: restricted to national-scope actors with
+        // payments:read (see App\Services\Payment\PaymentService::getOutstanding's
+        // own doc comment) -- no taxpayer-facing "my outstanding refund"
+        // view exists here either, matching the source.
+        $outstanding = (! $scoped && $actor->hasAppPermission('payments:read'))
+            ? $this->payments->getOutstanding($actor) : null;
+
+        return view('refunds.index', ['claims' => $claims, 'periods' => $periods, 'namraSummary' => $namraSummary, 'outstanding' => $outstanding]);
     }
 
     public function show(Request $request, string $id): View
@@ -95,12 +107,26 @@ class RefundViewController extends Controller
         // stripped out here so it isn't offered twice under two different
         // forms.
         $validActions = array_values(array_diff(ComplianceValidator::refundClaimActionsFor($claim->status), ['DISPUTE']));
+        $instruction = $claim->payment_instruction_id ? PaymentInstruction::find($claim->payment_instruction_id) : null;
 
         return view('refunds.show', [
             'claim' => $this->presentDetail($claim),
             'validActions' => $validActions,
             'canReview' => $request->user()->hasAppPermission('refunds:review'),
             'canDispute' => $claim->status === 'REJECTED' && $claim->requested_by === $actor->id,
+            'instruction' => $instruction ? [
+                'id' => $instruction->id, 'status' => $instruction->status, 'provider' => $instruction->provider,
+                'beneficiary_reference_masked' => $instruction->beneficiary_reference_masked,
+                'provider_reference' => $instruction->provider_reference, 'settled_at' => optional($instruction->settled_at)->toISOString(),
+            ] : null,
+            // Recording/allocating payment reuses payments:record, matching
+            // App\Services\Payment\PaymentService's own national-scope-only
+            // gate -- the view offers the action only when both hold, but
+            // the service itself is the real enforcement point either way.
+            'canRecordPayment' => $claim->status === 'PAYMENT_PENDING' && ! $claim->payment_instruction_id
+                && ! $scoped && $actor->hasAppPermission('payments:record'),
+            'canAllocatePayment' => $instruction && $instruction->status !== 'SETTLED'
+                && ! $scoped && $actor->hasAppPermission('payments:record'),
         ]);
     }
 
@@ -155,6 +181,46 @@ class RefundViewController extends Controller
         }
 
         return redirect()->route('refunds.show', $id)->with('status', 'Dispute submitted.');
+    }
+
+    public function storePayment(Request $request, string $id): RedirectResponse
+    {
+        $this->authorize('permission', 'payments:record');
+
+        $payload = [
+            'schema_version' => '1.0.0', 'beneficiary_reference' => (string) $request->input('beneficiary_reference'),
+            'provider' => (string) $request->input('provider'),
+        ];
+
+        try {
+            $this->payments->recordPayment($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
+        } catch (PaymentValidationException $e) {
+            return back()->withErrors(['payment' => $e->getMessage()]);
+        } catch (PaymentResourceException|RepositoryConflictException|AuthorizationException $e) {
+            return back()->withErrors(['payment' => $e->getMessage()]);
+        }
+
+        return redirect()->route('refunds.show', $id)->with('status', 'Payment recorded.');
+    }
+
+    public function storeAllocation(Request $request, string $id): RedirectResponse
+    {
+        $this->authorize('permission', 'payments:record');
+
+        $payload = [
+            'schema_version' => '1.0.0', 'settlement_reference' => (string) $request->input('settlement_reference'),
+            'settled_amount_cents' => $this->safeDecimalCentsInput($request->input('settled_amount')),
+        ];
+
+        try {
+            $this->payments->allocatePayment($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid());
+        } catch (PaymentValidationException $e) {
+            return back()->withErrors(['allocation' => $e->getMessage()]);
+        } catch (PaymentResourceException|RepositoryConflictException|AuthorizationException $e) {
+            return back()->withErrors(['allocation' => $e->getMessage()]);
+        }
+
+        return redirect()->route('refunds.show', $id)->with('status', 'Settlement allocated.');
     }
 
     /** @return array<string, string> */

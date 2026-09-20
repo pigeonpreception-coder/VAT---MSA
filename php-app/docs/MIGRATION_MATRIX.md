@@ -9720,3 +9720,65 @@ MySQL and real HTTP requests throughout -- including a genuine 429 over a
 real `rate-limit:identity` route after 31 requests, and a genuine
 detection-rule-fired incident after 5 repeated denials from the same real
 user, de-duplicated on a 6th. Full suite: 818 tests, 0 regressions.
+
+## New feature: the Payment connector, closing out the refund lifecycle's final step (2026-09-20)
+
+User asked to "build something new" again. `App\Domain\Compliance\ComplianceValidator::REFUND_CLAIM_TRANSITIONS`'s
+own doc comment already named the next gap explicitly: "PAYMENT_PENDING
+and CLOSED are deliberately terminal: Payment itself stays DISABLED
+PENDING AUTHORITY, so nothing beyond PAYMENT_PENDING is modeled." The
+`payment_instructions` migration's own comment went further, naming the
+exact permissions (`payments:read`/`payments:record`, already seeded)
+"for whichever future command needs them." Module 9 Phase D
+(`lib/domain/payment.ts`/`lib/data/payment-repository.ts`/`lib/integrations/payment.ts`/
+`lib/api/payment.ts`) is that command: RecordPayment/AllocatePayment/
+GetOutstanding, ported in full, plus the `service_components` reference
+data (`database/seeders/ServiceComponentSeeder.php`, the exact 7-row
+catalogue from `db/runtime.ts`'s own seed statements) that table had sat
+without any seeder for at all -- `PlatformSnapshotService` was already
+reading it for display with nothing populating it.
+
+**The connector is safe to build despite issuing real payment
+instructions**, because the source's own playbook demands a real, DB-backed
+environment guard, not just documentation: `App\Integrations\Payment\
+SandboxPaymentConnector::recordPayment()`/`allocatePayment()` both re-read
+`service_components` (component_key='PAYMENT_CONNECTOR') on every single
+call before doing anything else, and that row is seeded DISABLED/
+REQUIRES_AUTHORITY_CONTRACT with nothing anywhere in this codebase ever
+writing to it -- so every real command path is provably refused, exactly
+mirroring the source's own test file's two-part proof (the real command
+path always refused; a single clearly-labelled simulation, flipping the
+row directly in the database, exercising the mock connector's own sound
+logic in isolation). `App\Services\Payment\PaymentService` reproduces
+that same shape: on `PaymentIntegrationUnavailableException` it still
+records an honest audit-trail entry and reports "AWAITING_AUTHORITY"
+rather than a bare 5xx or a silent no-op.
+
+Kept 1:1 with the source's own `app/api/v1/refunds/[id]/payment{,/allocation}`
+and `app/api/v1/payments/outstanding` route shapes
+(`App\Http\Controllers\Payment\PaymentController`). Both writes wear
+`step-up` (this migration's own established posture for every privileged
+command, no source equivalent) and `rate-limit:payments` -- the latter
+free to wire, since `App\Http\Middleware\EnforceRateLimit`'s existing
+generic `enforceCommand` branch (built for the identity/control-plane/
+vat-rule families) already covers any family name it doesn't special-case,
+`payments` included, with no new code.
+
+A Blade UI extends the existing `/refunds` pages rather than adding a
+parallel page the source has no `page.tsx` for either (matching the
+Security Operations precedent): `refunds/show.blade.php` gets Record
+Payment/Allocate Settlement panels (officer-only, `payments:record`,
+step-up gated) plus a Payment Instruction detail card once one exists;
+`refunds/index.blade.php` gets an Outstanding Refund Payments summary
+panel (`payments:read`, national-scope only) showing the connector's real
+posture and the honest owed total.
+
+13 new PHPUnit tests (`tests/Feature/Payment/PaymentConnectorTest.php`),
+reusing the source's own `tests/routes/module-9-payment-connector.test.ts`
+scenarios verbatim (the guard refusing every real attempt including
+repeated retries, validation/permission/conflict edges, GetOutstanding's
+real read, and the one labelled simulation proving the sandbox mock is
+sound) plus this port's own step-up/Blade-view coverage. Real MySQL, real
+HTTP requests, a genuine maker-checker-driven claim reaching
+PAYMENT_PENDING through the actual transition sequence -- no mocks. Full
+suite: 831 tests, 0 regressions.
