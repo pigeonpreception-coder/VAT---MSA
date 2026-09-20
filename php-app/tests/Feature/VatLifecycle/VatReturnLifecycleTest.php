@@ -16,6 +16,7 @@ use Database\Seeders\RoleSeeder;
 use Database\Seeders\TaxRuleSetSeeder;
 use Database\Seeders\VatRuleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -159,6 +160,64 @@ class VatReturnLifecycleTest extends TestCase
         $lockedPeriod = VatPeriod::findOrFail($period->id);
         $this->assertSame('LOCKED', $lockedPeriod->status);
         $this->assertSame(1, $lockedPeriod->lock_version);
+    }
+
+    /**
+     * Broader security-sweep follow-up (2026-09-20): same shape as the
+     * same-day fixes to PurchaseOrderService::convertToExpense() and
+     * QuotationService::convertToInvoice() (see either's own doc comment
+     * for the general pattern), found by systematically grepping every
+     * `App\Services\*` for a guarded transition missing the established
+     * affected-row check. requestReturnApproval()'s own
+     * `VatReturnVersion::where(...)->where('status','DRAFT')->update(...)`
+     * had no such check, and `ApprovalTask::create()` ran unconditionally
+     * right after regardless of whether it actually transitioned the row
+     * -- the workflow's own invariant is at most one live PENDING approval
+     * task per return, but two concurrent requests on the same DRAFT
+     * version could each create their own CRITICAL-risk task. Fixed with
+     * the same guarded-update-then-check pattern RT-020 already
+     * established elsewhere (no `lockForUpdate()` needed here, unlike the
+     * other two fixes: InnoDB's own row-level locking on the UPDATE
+     * statement itself is what makes the guard safe, the same reasoning
+     * behind every pre-existing RT-020 fix). Reproduced with the same
+     * `DB::listen()` technique, hooked on the version's own pre-transaction
+     * read (`getVersionForActor()`) rather than a `for update` query,
+     * since this fix's guard is a plain conditional UPDATE, not a lock.
+     */
+    public function test_requesting_approval_that_races_a_concurrent_request_does_not_create_a_duplicate_approval_task(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-SUP-1099');
+        $customer = $this->makeTradingParty('VAT-CUS-1099');
+        $this->certifyInvoice($supplier['owner'], 'VAT-SUP-1099', 'VAT-CUS-1099');
+        $period = $this->openPeriod($customer['organisation']->id, $customer['taxpayer']->id, 'OPEN', '2026-09');
+        $generate = $this->actingAs($customer['owner'])->postJson("/api/v1/vat-periods/{$period->id}/returns", [], ['Idempotency-Key' => 'race-gen-'.Str::random(20)]);
+        $versionId = $generate->json('resource.id');
+
+        $raced = false;
+        DB::listen(function ($query) use (&$raced, $versionId, $customer) {
+            if ($raced || ! str_contains($query->sql, 'select * from `vat_return_versions`')) {
+                return;
+            }
+            $raced = true;
+            // Models the concurrent winner's own request, already fully
+            // committed (a real ApprovalTask of its own, not modelled here
+            // since it isn't what this request's own code reads) by the
+            // time this request's own pre-transaction read runs.
+            DB::table('vat_return_versions')->where('id', $versionId)->update(['status' => 'PENDING_APPROVAL']);
+            DB::table('approval_tasks')->insert([
+                'id' => (string) Str::uuid(), 'organisation_id' => $customer['organisation']->id, 'taxpayer_id' => $customer['taxpayer']->id,
+                'domain' => 'VAT_RETURN', 'resource_type' => 'VAT_RETURN_VERSION', 'resource_id' => $versionId, 'requested_action' => 'APPROVE_RETURN',
+                'risk_tier' => 'CRITICAL', 'status' => 'PENDING', 'requested_by' => $customer['owner']->id, 'assigned_role' => 'TAXPAYER_OWNER',
+                'requested_at' => now(),
+            ]);
+        });
+
+        $approvalRequest = $this->actingAs($customer['owner'])->postJson("/api/v1/vat-returns/{$versionId}/approval-requests", [], ['Idempotency-Key' => 'race-appreq-'.Str::random(20)]);
+
+        $this->assertTrue($raced, 'The DB::listen() hook must have fired to simulate the race (it never fires at all on the pre-fix code path in the sense that matters: the guard there has no affected-row check to catch what this hook sets up).');
+        $approvalRequest->assertStatus(409);
+        // Only the concurrent winner's own task exists -- this request's own must not have landed a second, duplicate one.
+        $this->assertSame(1, ApprovalTask::where('resource_id', $versionId)->count());
     }
 
     public function test_regenerating_a_draft_return_supersedes_it_but_a_controlled_version_blocks_generation_and_requires_an_open_period(): void

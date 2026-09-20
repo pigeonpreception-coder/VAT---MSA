@@ -183,6 +183,58 @@ class BusinessPartyAndQuotationTest extends TestCase
         $this->assertDatabaseHas('audit_events', ['action' => 'QUOTATION_CONVERTED', 'resource_id' => $quotationId]);
     }
 
+    /**
+     * Broader security-sweep follow-up (2026-09-20): same shape and same
+     * fix as PurchaseOrderService::convertToExpense()'s own race, fixed
+     * the same day -- see that method's doc comment for the general
+     * pattern. QuotationService::convertToInvoice()'s own pre-checks
+     * (status, converted_invoice_id) used to be plain, unlocked reads,
+     * and the real side effect -- a certified TAX_INVOICE via
+     * InvoiceService::submit() -- ran before any guard on the quotation's
+     * own status update. Two concurrent conversions of the same ACCEPTED
+     * quotation could each certify their own real invoice, with the
+     * loser's left orphaned (no quotation reference) while still
+     * reporting success. Fixed by locking the quotation first and holding
+     * that lock for the whole conversion. Reproduced with the same
+     * `DB::listen()` same-connection race-simulation technique as the
+     * purchase-order regression test.
+     */
+    public function test_a_quotation_that_races_a_concurrent_conversion_does_not_create_an_orphaned_duplicate_invoice(): void
+    {
+        $seller = $this->makeOrganisation('VAT-SELLER-0001');
+        $customerPartyId = $this->createCustomerParty($seller['owner']);
+        $create = $this->actingAs($seller['owner'])->postJson('/api/v1/quotations', $this->quotationPayload($customerPartyId), ['Idempotency-Key' => 'test-idem-quo-race-create-0001']);
+        $quotationId = $create->json('resource.id');
+        $this->actingAs($seller['owner'])->postJson("/api/v1/quotations/{$quotationId}/sending", [], ['Idempotency-Key' => 'test-idem-quo-race-send-0001']);
+        $this->actingAs($seller['owner'])->postJson("/api/v1/quotations/{$quotationId}/accept", [], ['Idempotency-Key' => 'test-idem-quo-race-accept-0001']);
+
+        $raced = false;
+        DB::listen(function ($query) use (&$raced, $quotationId) {
+            if ($raced || ! str_contains($query->sql, 'for update')) {
+                return;
+            }
+            $raced = true;
+            // Models the concurrent winner's own conversion, already fully
+            // committed (a real, separately certified invoice, not
+            // modelled here since it isn't what this request's own code
+            // reads) by the time this request's lock-acquiring SELECT runs.
+            DB::table('quotations')->where('id', $quotationId)->update([
+                'status' => 'CONVERTED', 'converted_invoice_id' => (string) Str::uuid(), 'updated_at' => now(),
+            ]);
+        });
+
+        $convert = $this->actingAs($seller['owner'])->postJson("/api/v1/quotations/{$quotationId}/convert", [
+            'schema_version' => '1.0.0', 'invoice_number' => 'INV-RACE-LOSER-0001', 'issue_date' => '2026-09-02',
+        ], ['Idempotency-Key' => 'test-idem-quo-race-convert-0001']);
+
+        $this->assertTrue($raced, 'The DB::listen() hook must have fired to simulate the race (it never fires at all on the pre-fix code path, which has no lockForUpdate query).');
+        $convert->assertStatus(409);
+        // The would-be loser's own invoice must never have been created --
+        // pre-fix, it would exist here as a real, orphaned, certified
+        // invoice despite the request appearing to fail.
+        $this->assertDatabaseMissing('invoices', ['invoice_number' => 'INV-RACE-LOSER-0001']);
+    }
+
     public function test_a_draft_quotation_cannot_be_accepted_directly(): void
     {
         $seller = $this->makeOrganisation('VAT-SELLER-0001');

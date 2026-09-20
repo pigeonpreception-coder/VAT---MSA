@@ -8,6 +8,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -335,6 +336,51 @@ class DocumentTest extends TestCase
         $this->assertDatabaseHas('document_metadata', ['id' => $originalId, 'status' => 'SUPERSEDED']);
         $this->assertDatabaseHas('outbox_events', ['aggregate_id' => $newId, 'event_type' => 'DocumentSuperseded']);
         $this->assertDatabaseHas('audit_events', ['action' => 'DOCUMENT_SUPERSEDED', 'resource_id' => $newId]);
+    }
+
+    /**
+     * Broader security-sweep follow-up (2026-09-20): same shape as the
+     * same-day fixes elsewhere (PurchaseOrderService::convertToExpense(),
+     * QuotationService::convertToInvoice(),
+     * VatLifecycleService::requestReturnApproval() -- see any of their own
+     * doc comments). supersede()'s own new `DocumentMetadata` row is
+     * created unconditionally, and the original's SUPERSEDED update had no
+     * affected-row check -- two concurrent supersede() calls on the same
+     * ACTIVE document (both passing the pre-check before either commits)
+     * could each create their own QUARANTINED replacement, silently
+     * breaking this class's own doc comment's claim that a document "can
+     * only ever be superseded once."
+     */
+    public function test_superseding_a_document_that_races_a_concurrent_supersession_does_not_create_a_second_orphaned_replacement(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-DOC-RACE-0001');
+        $owner = $this->taxpayerOwner($tp['taxpayer']->id);
+        $admin = $this->systemAdmin();
+        $originalId = $this->activeDocument($owner, $admin, 'expense-race-0001');
+
+        $raced = false;
+        DB::listen(function ($query) use (&$raced, $originalId) {
+            if ($raced || ! str_contains($query->sql, 'select * from `document_metadata`')) {
+                return;
+            }
+            $raced = true;
+            // Models the concurrent winner's own supersession, already
+            // fully committed (a real replacement document of its own,
+            // not modelled here since it isn't what this request's own
+            // code reads) by the time this request's own pre-transaction
+            // read runs.
+            DB::table('document_metadata')->where('id', $originalId)->update(['status' => 'SUPERSEDED']);
+        });
+
+        $supersede = $this->actingAs($owner)->post("/api/v1/documents/{$originalId}/supersession", [
+            'file' => $this->fakeUpload("%PDF-1.4\n%raced\n%%EOF", 'application/pdf', 'raced.pdf'),
+        ]);
+
+        $this->assertTrue($raced, 'The DB::listen() hook must have fired to simulate the race (it never fires at all on the pre-fix code path in the sense that matters: the guard there has no affected-row check to catch what this hook sets up).');
+        $supersede->assertStatus(409);
+        // This request's own replacement must not have been created at all -- pre-fix, it
+        // would exist here as a real, orphaned QUARANTINED document despite the 409.
+        $this->assertSame(0, \App\Models\DocumentMetadata::where('supersedes_document_id', $originalId)->count());
     }
 
     public function test_only_a_clean_active_document_can_be_superseded(): void

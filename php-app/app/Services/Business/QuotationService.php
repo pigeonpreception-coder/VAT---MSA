@@ -305,78 +305,101 @@ class QuotationService
             return $existing;
         }
 
-        $quotation = Quotation::with(['customer', 'organisation.taxpayer'])->where('id', $id)->where('organisation_id', $organisation->id)->first();
-        if (! $quotation) {
-            throw new BusinessResourceException('Quotation was not found in the authorised organisation.', 404);
-        }
-        if ($quotation->converted_invoice_id) {
-            $existing = $this->invoices->find($quotation->converted_invoice_id, $actor);
-            if (! $existing) {
-                throw new RepositoryConflictException('The converted invoice is no longer available.');
-            }
-            if ($existing['invoiceNumber'] !== $conversion['invoice_number'] || $existing['issueDate'] !== $conversion['issue_date']) {
-                throw new RepositoryConflictException("Quotation was already converted to invoice {$existing['invoiceNumber']}.");
-            }
-
-            return $existing;
-        }
-        $transition = BusinessValidator::evaluateQuotationLifecycle($quotation->status, 'CONVERT', $quotation->valid_until->toDateString(), now()->toDateString());
-        if (! $transition['allowed']) {
-            throw new RepositoryConflictException($transition['reason']);
-        }
-        if ($conversion['issue_date'] < $quotation->issue_date->toDateString()) {
-            throw new RepositoryConflictException('The invoice cannot be issued before the quotation.');
-        }
-
-        $lines = QuotationLine::where('quotation_id', $quotation->id)->orderBy('line_number')->get();
-        if ($lines->isEmpty()) {
-            throw new RepositoryConflictException('The quotation has no lines and cannot be converted.');
-        }
-
-        $customerIdentifier = $quotation->customer->vat_number
-            ? ['type' => 'VAT_NUMBER', 'value' => $quotation->customer->vat_number]
-            : ($quotation->customer->tin
-                ? ['type' => 'TIN', 'value' => $quotation->customer->tin]
-                : ['type' => 'OTHER', 'value' => $quotation->customer_party_id]);
-        $submittedAt = optional($quotation->accepted_at)->toISOString() ?? ($quotation->issue_date->toDateString().'T00:00:00.000Z');
-
-        $invoicePayload = [
-            'schema_version' => '1.0.0', 'document_type' => 'TAX_INVOICE',
-            'source' => ['system_id' => 'VAT-MSA-QUOTATION', 'document_id' => $quotation->id, 'submitted_at' => $submittedAt],
-            'supplier' => ['name' => $quotation->organisation->taxpayer->legal_name, 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => $quotation->organisation->taxpayer->vat_number]]],
-            'customer' => ['name' => $quotation->customer->display_name, 'identifiers' => [$customerIdentifier]],
-            'invoice_number' => $conversion['invoice_number'], 'issue_date' => $conversion['issue_date'],
-            'due_date' => $conversion['due_date'], 'currency' => $quotation->currency,
-            'lines' => $lines->map(fn (QuotationLine $line) => [
-                'line_number' => $line->line_number, 'item_code' => $line->product_id, 'description' => $line->description,
-                'quantity' => $this->microsToDecimal((int) $line->quantity_micros), 'unit_code' => $line->unit_code,
-                'unit_price' => $this->calculator->centsToDecimal((int) $line->unit_price_cents),
-                'net_amount' => $this->calculator->centsToDecimal((int) $line->net_amount_cents),
-                'tax' => [
-                    'category' => $line->tax_category === 'OUT_OF_SCOPE' ? 'OUTSIDE_SCOPE' : $line->tax_category,
-                    'rate' => $this->calculator->centsToDecimal((int) $line->tax_rate_bps),
-                    'taxable_amount' => $this->calculator->centsToDecimal((int) $line->net_amount_cents),
-                    'tax_amount' => $this->calculator->centsToDecimal((int) $line->tax_amount_cents),
-                ],
-            ])->values()->all(),
-            'totals' => [
-                'line_net_amount' => $this->calculator->centsToDecimal((int) $quotation->subtotal_cents),
-                'tax_exclusive_amount' => $this->calculator->centsToDecimal((int) $quotation->subtotal_cents),
-                'tax_amount' => $this->calculator->centsToDecimal((int) $quotation->tax_cents),
-                'tax_inclusive_amount' => $this->calculator->centsToDecimal((int) $quotation->total_cents),
-                'payable_amount' => $this->calculator->centsToDecimal((int) $quotation->total_cents),
-            ],
-        ];
-
-        // Invoice certification is independently idempotent (Phase 9). If this process
-        // stops after that commit, the same key reloads the certified invoice and safely
-        // finishes quotation linkage below.
-        $invoice = $this->invoices->submit($invoicePayload, $actor, $idempotencyKey, $context);
+        // Broader security-sweep follow-up (2026-09-20): the whole
+        // conversion -- lock, invoice submission, and the now-guarded
+        // update -- now runs inside one transaction, `lockForUpdate()`
+        // acquired *before* any of it, mirroring the same-day fix to
+        // PurchaseOrderService::convertToExpense() (see that method's own
+        // doc comment for the exact shape of race this closes). Two
+        // concurrent conversions of the same ACCEPTED quotation used to be
+        // able to both pass this method's own pre-checks (all plain,
+        // unlocked reads) and both call InvoiceService::submit() -- each
+        // creating its own real, certified TAX_INVOICE, worse than the
+        // purchase-order case since this is the core fiscal document
+        // itself, not just a supplier expense -- then the loser's own
+        // unguarded `Quotation::where(...)->update([...])` would silently
+        // affect zero rows while still reporting success, leaving a
+        // second, real, government-certified invoice with no quotation
+        // reference at all. The lock now serializes any concurrent
+        // attempt behind this one, so it re-reads a status that can no
+        // longer be ACCEPTED and never reaches InvoiceService::submit()
+        // at all.
         $now = now();
-        DB::transaction(function () use ($quotation, $organisation, $actor, $id, $invoice, $now, $idempotencyKey, $requestHash, $context) {
-            Quotation::where('id', $id)->where('organisation_id', $organisation->id)->where('status', 'ACCEPTED')->update([
+        $invoice = null;
+        DB::transaction(function () use ($id, $organisation, $actor, $conversion, $idempotencyKey, $requestHash, $context, $now, &$invoice) {
+            $quotation = Quotation::with(['customer', 'organisation.taxpayer'])
+                ->where('id', $id)->where('organisation_id', $organisation->id)->lockForUpdate()->first();
+            if (! $quotation) {
+                throw new BusinessResourceException('Quotation was not found in the authorised organisation.', 404);
+            }
+            if ($quotation->converted_invoice_id) {
+                $existing = $this->invoices->find($quotation->converted_invoice_id, $actor);
+                if (! $existing) {
+                    throw new RepositoryConflictException('The converted invoice is no longer available.');
+                }
+                if ($existing['invoiceNumber'] !== $conversion['invoice_number'] || $existing['issueDate'] !== $conversion['issue_date']) {
+                    throw new RepositoryConflictException("Quotation was already converted to invoice {$existing['invoiceNumber']}.");
+                }
+                $invoice = $existing;
+
+                return;
+            }
+            $transition = BusinessValidator::evaluateQuotationLifecycle($quotation->status, 'CONVERT', $quotation->valid_until->toDateString(), now()->toDateString());
+            if (! $transition['allowed']) {
+                throw new RepositoryConflictException($transition['reason']);
+            }
+            if ($conversion['issue_date'] < $quotation->issue_date->toDateString()) {
+                throw new RepositoryConflictException('The invoice cannot be issued before the quotation.');
+            }
+
+            $lines = QuotationLine::where('quotation_id', $quotation->id)->orderBy('line_number')->get();
+            if ($lines->isEmpty()) {
+                throw new RepositoryConflictException('The quotation has no lines and cannot be converted.');
+            }
+
+            $customerIdentifier = $quotation->customer->vat_number
+                ? ['type' => 'VAT_NUMBER', 'value' => $quotation->customer->vat_number]
+                : ($quotation->customer->tin
+                    ? ['type' => 'TIN', 'value' => $quotation->customer->tin]
+                    : ['type' => 'OTHER', 'value' => $quotation->customer_party_id]);
+            $submittedAt = optional($quotation->accepted_at)->toISOString() ?? ($quotation->issue_date->toDateString().'T00:00:00.000Z');
+
+            $invoicePayload = [
+                'schema_version' => '1.0.0', 'document_type' => 'TAX_INVOICE',
+                'source' => ['system_id' => 'VAT-MSA-QUOTATION', 'document_id' => $quotation->id, 'submitted_at' => $submittedAt],
+                'supplier' => ['name' => $quotation->organisation->taxpayer->legal_name, 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => $quotation->organisation->taxpayer->vat_number]]],
+                'customer' => ['name' => $quotation->customer->display_name, 'identifiers' => [$customerIdentifier]],
+                'invoice_number' => $conversion['invoice_number'], 'issue_date' => $conversion['issue_date'],
+                'due_date' => $conversion['due_date'], 'currency' => $quotation->currency,
+                'lines' => $lines->map(fn (QuotationLine $line) => [
+                    'line_number' => $line->line_number, 'item_code' => $line->product_id, 'description' => $line->description,
+                    'quantity' => $this->microsToDecimal((int) $line->quantity_micros), 'unit_code' => $line->unit_code,
+                    'unit_price' => $this->calculator->centsToDecimal((int) $line->unit_price_cents),
+                    'net_amount' => $this->calculator->centsToDecimal((int) $line->net_amount_cents),
+                    'tax' => [
+                        'category' => $line->tax_category === 'OUT_OF_SCOPE' ? 'OUTSIDE_SCOPE' : $line->tax_category,
+                        'rate' => $this->calculator->centsToDecimal((int) $line->tax_rate_bps),
+                        'taxable_amount' => $this->calculator->centsToDecimal((int) $line->net_amount_cents),
+                        'tax_amount' => $this->calculator->centsToDecimal((int) $line->tax_amount_cents),
+                    ],
+                ])->values()->all(),
+                'totals' => [
+                    'line_net_amount' => $this->calculator->centsToDecimal((int) $quotation->subtotal_cents),
+                    'tax_exclusive_amount' => $this->calculator->centsToDecimal((int) $quotation->subtotal_cents),
+                    'tax_amount' => $this->calculator->centsToDecimal((int) $quotation->tax_cents),
+                    'tax_inclusive_amount' => $this->calculator->centsToDecimal((int) $quotation->total_cents),
+                    'payable_amount' => $this->calculator->centsToDecimal((int) $quotation->total_cents),
+                ],
+            ];
+
+            $invoice = $this->invoices->submit($invoicePayload, $actor, $idempotencyKey, $context);
+
+            $updated = Quotation::where('id', $id)->where('organisation_id', $organisation->id)->where('status', 'ACCEPTED')->update([
                 'status' => 'CONVERTED', 'converted_invoice_id' => $invoice['id'], 'updated_at' => $now,
             ]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Quotation {$id} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'CONVERT_QUOTATION', $idempotencyKey, $requestHash, 'INVOICE', $invoice['id'], $now);
             CommandLedger::outbox('QUOTATION', $id, 'QuotationConverted', $organisation->id, [
                 'quotation_id' => $id, 'organisation_id' => $organisation->id, 'invoice_id' => $invoice['id'], 'correlation_id' => $context['correlation_id'] ?? null,
