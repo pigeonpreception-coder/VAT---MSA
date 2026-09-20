@@ -277,8 +277,23 @@ class VatLifecycleService
 
         $taskId = (string) Str::uuid();
         $now = now();
+        // Broader security-sweep follow-up (2026-09-20): this update had no
+        // affected-row check, and ApprovalTask::create() below ran
+        // unconditionally regardless of whether it actually transitioned
+        // the row -- the exact same shape already fixed the same day in
+        // PurchaseOrderService::convertToExpense() and QuotationService::
+        // convertToInvoice() (see either's own doc comment), just with an
+        // ApprovalTask instead of an Expense/Invoice as the unconditional
+        // side effect. Two concurrent requests on the same DRAFT version
+        // could each pass the pre-check above (a plain read, before this
+        // transaction even opens) and each create their own CRITICAL-risk
+        // approval task for the same return -- two live PENDING tasks
+        // where the workflow's own invariant is at most one.
         DB::transaction(function () use ($version, $actor, $taskId, $now, $idempotencyKey, $requestHash, $correlationId) {
-            VatReturnVersion::where('id', $version->id)->where('status', 'DRAFT')->update(['status' => 'PENDING_APPROVAL']);
+            $updated = VatReturnVersion::where('id', $version->id)->where('status', 'DRAFT')->update(['status' => 'PENDING_APPROVAL']);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("VAT return version {$version->id} was changed by another action; reload and try again.");
+            }
             ApprovalTask::create([
                 'id' => $taskId, 'organisation_id' => $version->organisation_id, 'taxpayer_id' => $version->taxpayer_id, 'domain' => 'VAT_RETURN',
                 'resource_type' => 'VAT_RETURN_VERSION', 'resource_id' => $version->id, 'requested_action' => 'APPROVE_RETURN', 'risk_tier' => 'CRITICAL',
@@ -321,29 +336,47 @@ class VatLifecycleService
 
         $now = now();
         $nextTaskStatus = $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+        // Broader security-sweep follow-up (2026-09-20): none of the four
+        // updates below had an affected-row check -- a concurrent decision
+        // on the same task (or, before the same day's requestReturnApproval()
+        // fix, on one of two duplicate tasks for the same return) could
+        // silently no-op while this request still recorded a
+        // CommandLedger/outbox/audit trail claiming its own decision took
+        // effect, and the VatPeriod lock/unlock below ran unconditionally
+        // regardless of whether the version transition above it actually
+        // happened. Each guarded now, throwing before any further write.
         DB::transaction(function () use ($task, $decision, $nextTaskStatus, $comment, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
-            ApprovalTask::where('id', $task->id)->where('status', 'PENDING')
+            $taskUpdated = ApprovalTask::where('id', $task->id)->where('status', 'PENDING')
                 ->update(['status' => $nextTaskStatus, 'decided_by' => $actor->id, 'decided_at' => $now, 'decision_comment' => $comment]);
+            if ($taskUpdated === 0) {
+                throw new RepositoryConflictException("Approval task {$task->id} was changed by another action; reload and try again.");
+            }
 
             if ($task->resource_type === 'VAT_RETURN_VERSION') {
                 $version = $this->getVersionForActor($task->resource_id, $actor);
                 if ($version->status !== 'PENDING_APPROVAL') {
                     throw new RepositoryConflictException("Return approval state is {$version->status}, not PENDING_APPROVAL.");
                 }
-                VatReturnVersion::where('id', $version->id)->where('status', 'PENDING_APPROVAL')->update([
+                $versionUpdated = VatReturnVersion::where('id', $version->id)->where('status', 'PENDING_APPROVAL')->update([
                     'status' => $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
                     'approved_by' => $decision === 'APPROVE' ? $actor->id : null,
                     'approved_at' => $decision === 'APPROVE' ? $now : null,
                 ]);
+                if ($versionUpdated === 0) {
+                    throw new RepositoryConflictException("VAT return version {$version->id} was changed by another action; reload and try again.");
+                }
                 VatPeriod::where('id', $version->vat_period_id)->update([
                     'status' => $decision === 'APPROVE' ? 'LOCKED' : 'OPEN', 'lock_version' => DB::raw('lock_version + 1'), 'updated_at' => $now,
                 ]);
             } elseif ($task->resource_type === 'VAT_ADJUSTMENT') {
-                VatAdjustment::where('id', $task->resource_id)->where('status', 'PENDING_APPROVAL')->update([
+                $adjustmentUpdated = VatAdjustment::where('id', $task->resource_id)->where('status', 'PENDING_APPROVAL')->update([
                     'status' => $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
                     'approved_by' => $decision === 'APPROVE' ? $actor->id : null,
                     'approved_at' => $decision === 'APPROVE' ? $now : null,
                 ]);
+                if ($adjustmentUpdated === 0) {
+                    throw new RepositoryConflictException("VAT adjustment {$task->resource_id} was changed by another action; reload and try again.");
+                }
             } else {
                 throw new VatLifecycleResourceException('Approval task resource type is unsupported.');
             }

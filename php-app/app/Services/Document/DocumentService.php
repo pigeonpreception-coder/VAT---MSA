@@ -236,7 +236,23 @@ class DocumentService
                     'status' => 'QUARANTINED', 'uploaded_by' => $actor->id, 'uploaded_at' => $now, 'retained_until' => null,
                     'legal_hold' => false, 'scanned_by' => null, 'scanned_at' => null, 'supersedes_document_id' => $documentId,
                 ]);
-                DocumentMetadata::where('id', $documentId)->where('status', 'ACTIVE')->update(['status' => 'SUPERSEDED']);
+                // Broader security-sweep follow-up (2026-09-20): same shape
+                // as the same-day fixes to PurchaseOrderService::
+                // convertToExpense(), QuotationService::convertToInvoice(),
+                // and VatLifecycleService::requestReturnApproval() (see
+                // any of their own doc comments) -- the new document row
+                // above is created unconditionally, and this update had no
+                // affected-row check, so two concurrent supersede() calls
+                // on the same ACTIVE document (both passing the pre-check
+                // above before either commits) could each create their own
+                // QUARANTINED replacement, both claiming
+                // supersedes_document_id = $documentId -- silently
+                // breaking this class's own doc comment's claim that "a
+                // given document can only ever be superseded once."
+                $updated = DocumentMetadata::where('id', $documentId)->where('status', 'ACTIVE')->update(['status' => 'SUPERSEDED']);
+                if ($updated === 0) {
+                    throw new RepositoryConflictException("Document {$documentId} was changed by another action; reload and try again.");
+                }
                 CommandLedger::outbox('DOCUMENT', $id, 'DocumentSuperseded', $scope->taxpayer_id, ['document_id' => $id, 'supersedes_document_id' => $documentId, 'correlation_id' => $correlationId], $now);
                 AuditService::append($actor, 'DOCUMENT_SUPERSEDED', 'DOCUMENT', $id, ['organisationId' => $scope->id, 'supersedesDocumentId' => $documentId, 'checksum' => $checksum, 'correlationId' => $correlationId], $now);
             });

@@ -9527,3 +9527,54 @@ Permanent regression test:
 confirmed to fail against the pre-fix code and pass against the fix.
 
 Verified: full suite 792 tests, 0 regressions.
+
+## Older-module sweep for the same correction-race pattern (2026-09-20, user requested)
+
+User asked for another deep security sweep, this time on the older
+modules (the same-day sweep above only covered this session's own
+newest code). A systematic `grep`/`awk` search of every `App\Services\*`
+for the same "status-guarded update with no affected-row check, followed
+by an unconditional real side-effecting write" shape found and fixed
+three more genuine instances:
+
+- **`VatLifecycleService::requestReturnApproval()`** -- the VAT return
+  approval pipeline's own entry point. Two concurrent requests on the
+  same DRAFT return version could each create their own CRITICAL-risk
+  `ApprovalTask`, breaking the workflow's "at most one live PENDING task"
+  invariant.
+- **`VatLifecycleService::decideApproval()`** -- found alongside the
+  above; none of its four status updates (task/version/period/adjustment)
+  had an affected-row check. Fixed all four for defense-in-depth.
+- **`QuotationService::convertToInvoice()`** -- same shape as the
+  same-day purchase-order fix, but worse: the unconditional side effect
+  is a real, government-certified TAX_INVOICE, not a supplier expense.
+- **`DocumentService::supersede()`** -- a new replacement document could
+  be created unconditionally even when the original's own SUPERSEDED
+  transition lost the race, breaking that class's own "superseded at
+  most once" invariant.
+
+None needed `lockForUpdate()` (unlike the same-day credit-note fix):
+InnoDB's own row-level locking on the `UPDATE` statement itself already
+makes a plain guarded update safe against a concurrent second `UPDATE` on
+the same row -- the credit-note case needed a lock only because its own
+guard was a `SUM()` aggregate `SELECT`, not a single row's own `UPDATE`.
+
+Also documented (not fixed, lower priority): the same missing-check
+pattern in `BusinessPartyService`/`QuotationService`'s own simple
+transitions/`CommunicationService`/`NotificationService` -- none of these
+create a second real resource; under a race they converge to the same end
+state, with only a misleading extra audit-trail entry as the actual
+effect. See `docs/RED_TEAM_ASSESSMENT_2026-09-20-OLDER-MODULE-SWEEP.md`
+for the full write-up, all three live pre-fix/post-fix reproductions, and
+the areas checked with no finding (an already-guarded evidence-supersede
+site, and `PosService::checkout()`, structurally not vulnerable to this
+shape).
+
+Permanent regression tests:
+- `tests/Feature/VatLifecycle/VatReturnLifecycleTest.php::test_requesting_approval_that_races_a_concurrent_request_does_not_create_a_duplicate_approval_task`
+- `tests/Feature/Business/BusinessPartyAndQuotationTest.php::test_a_quotation_that_races_a_concurrent_conversion_does_not_create_an_orphaned_duplicate_invoice`
+- `tests/Feature/Document/DocumentTest.php::test_superseding_a_document_that_races_a_concurrent_supersession_does_not_create_a_second_orphaned_replacement`
+
+Each confirmed to fail against the pre-fix code and pass against the fix.
+
+Verified: full suite 795 tests, 0 regressions.

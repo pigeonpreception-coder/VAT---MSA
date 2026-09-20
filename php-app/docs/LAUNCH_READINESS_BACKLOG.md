@@ -337,11 +337,32 @@ deliberately-unfixed limitation (per-line credit-quantity tracking
 across multiple credit notes -- inherited from the original source's own
 aggregate-only cap design, not a migration-introduced gap).
 
-**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (15 files);
+**Second follow-up (2026-09-20, same day, user requested "another deep
+security sweep on the older modules"):** a systematic sweep of every
+`App\Services\*` for the same missing-affected-row-check shape found
+three more genuine instances, this time in modules well older than the
+ones above -- `VatLifecycleService::requestReturnApproval()`/
+`decideApproval()` (the VAT return approval pipeline itself: two
+concurrent requests could create duplicate CRITICAL-risk approval tasks),
+`QuotationService::convertToInvoice()` (worse than the purchase-order
+case: the unconditional side effect is a real certified TAX_INVOICE), and
+`DocumentService::supersede()` (a duplicate document record). Same fix
+pattern, no `lockForUpdate()` needed this time (InnoDB's own row locking
+on a plain `UPDATE` is sufficient when the guard is a single row's own
+transition, not an aggregate `SUM()`). Also documented, not fixed: the
+same pattern in a handful of lower-stakes transitions
+(`BusinessPartyService`/`QuotationService`'s simple transitions/
+`CommunicationService`/`NotificationService`) where a race only produces
+a misleading extra audit-trail entry, not a second real resource -- see
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-OLDER-MODULE-SWEEP.md` for the full
+write-up and all three live pre-fix/post-fix reproductions.
+
+**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (16 files);
 `docs/MIGRATION_MATRIX.md`'s own dated sections for each pass; full suite
 645 tests, 0 regressions as of the 2026-09-15 security-review pass; 784
-tests as of the 2026-09-20 `$plannedRoute` sweep in #2 above; 792 tests,
-0 regressions as of this follow-up.
+tests as of the 2026-09-20 `$plannedRoute` sweep in #2 above; 792 tests as
+of the same day's first security-sweep follow-up; 795 tests, 0
+regressions as of this second follow-up.
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made
