@@ -159,6 +159,10 @@ class InvoiceService
                 $originalInvoice, $documentType, $invoiceId, $invoiceNumber, $transactionId, $certificateId, $verificationToken,
                 $risk, $status, $signature, $period, $now, $vatRuleIdByLineNumber, $context,
             ) {
+                if ($originalInvoice && $documentType === 'CREDIT_NOTE') {
+                    $this->enforceCumulativeCreditCap($originalInvoice, $calculated);
+                }
+
                 Invoice::create([
                     'id' => $invoiceId, 'invoice_number' => $invoiceNumber, 'document_type' => $documentType,
                     'source_system' => trim($payload['source']['system_id']), 'source_document_id' => trim($payload['source']['document_id']),
@@ -696,21 +700,58 @@ class InvoiceService
         if ($originalInvoice->customer_taxpayer_id !== ($customer->id ?? null) || ($originalInvoice->customer_vat_number ?? null) !== $customerVat) {
             throw new RepositoryConflictException('A correction must preserve the original customer identity.');
         }
-        if ($payload['document_type'] === 'CREDIT_NOTE') {
-            $prior = InvoiceCorrection::where('invoice_corrections.original_invoice_id', $originalInvoice->id)
-                ->where('invoice_corrections.correction_type', 'CREDIT_NOTE')->where('invoice_corrections.status', 'ACTIVE')
-                ->join('invoices', 'invoices.id', '=', 'invoice_corrections.correction_invoice_id')
-                ->selectRaw('COALESCE(SUM(invoices.line_net_cents),0) as line_net_cents, COALESCE(SUM(invoices.tax_cents),0) as tax_cents, COALESCE(SUM(invoices.total_cents),0) as total_cents')
-                ->first();
-            $cumulativeLine = (int) ($prior->line_net_cents ?? 0) + $calculated['lineNetCents'];
-            $cumulativeTax = (int) ($prior->tax_cents ?? 0) + $calculated['taxCents'];
-            $cumulativeTotal = (int) ($prior->total_cents ?? 0) + $calculated['totalCents'];
-            if (abs($cumulativeLine) > $originalInvoice->line_net_cents || abs($cumulativeTax) > $originalInvoice->tax_cents || abs($cumulativeTotal) > $originalInvoice->total_cents) {
-                throw new RepositoryConflictException('The cumulative credit would exceed the original invoice value or VAT.');
-            }
-        }
+
+        // The CREDIT_NOTE cumulative-credit cap used to be checked right
+        // here -- moved into submit()'s own DB::transaction, under a row
+        // lock on $originalInvoice, by enforceCumulativeCreditCap() below.
+        // A read-then-check here, before any transaction has even opened,
+        // is a genuine TOCTOU race: two concurrent credit notes against the
+        // same original invoice (each individually within the cap) could
+        // both read the same pre-commit "prior credited" sum, both pass,
+        // and together exceed the original invoice's value/VAT -- found in
+        // this session's own red-team follow-up on the New Credit Note form
+        // (see docs/RED_TEAM_ASSESSMENT_2026-09-20-CORRECTION-RACE.md),
+        // reproduced live with two genuinely concurrent requests. Unlike
+        // the idempotency-key and invoice-number races just above (both
+        // backstopped by a real UNIQUE constraint the transaction's own
+        // catch(QueryException) already recovers from), there is no
+        // constraint here to catch the same race -- an aggregate SUM over
+        // several rows can't be a UNIQUE index. A row lock on the parent
+        // invoice, held for the duration of the check-and-insert, is the
+        // standard fix for exactly this "cap across many child rows"
+        // shape, distinct from this codebase's usual guarded-UPDATE/
+        // affected-row-count pattern (RT-020), which only fits a single
+        // row's own state transition, not a cap over a set of other rows.
 
         return $originalInvoice;
+    }
+
+    /**
+     * Authoritative CREDIT_NOTE cap check -- see resolveOriginalInvoice()'s
+     * own comment for why this moved here. Must run inside submit()'s
+     * DB::transaction, before any row for the new correction is written:
+     * lockForUpdate() on the original invoice serializes every concurrent
+     * credit-note submission against the same original (the second
+     * transaction blocks on this SELECT until the first commits or rolls
+     * back), and a locking read always sees the latest committed data
+     * regardless of this transaction's own snapshot, so the re-check below
+     * is guaranteed to see any credit note the first transaction just
+     * committed.
+     */
+    private function enforceCumulativeCreditCap(Invoice $originalInvoice, array $calculated): void
+    {
+        $locked = Invoice::whereKey($originalInvoice->id)->lockForUpdate()->first();
+        $prior = InvoiceCorrection::where('invoice_corrections.original_invoice_id', $originalInvoice->id)
+            ->where('invoice_corrections.correction_type', 'CREDIT_NOTE')->where('invoice_corrections.status', 'ACTIVE')
+            ->join('invoices', 'invoices.id', '=', 'invoice_corrections.correction_invoice_id')
+            ->selectRaw('COALESCE(SUM(invoices.line_net_cents),0) as line_net_cents, COALESCE(SUM(invoices.tax_cents),0) as tax_cents, COALESCE(SUM(invoices.total_cents),0) as total_cents')
+            ->first();
+        $cumulativeLine = (int) ($prior->line_net_cents ?? 0) + $calculated['lineNetCents'];
+        $cumulativeTax = (int) ($prior->tax_cents ?? 0) + $calculated['taxCents'];
+        $cumulativeTotal = (int) ($prior->total_cents ?? 0) + $calculated['totalCents'];
+        if (abs($cumulativeLine) > $locked->line_net_cents || abs($cumulativeTax) > $locked->tax_cents || abs($cumulativeTotal) > $locked->total_cents) {
+            throw new RepositoryConflictException('The cumulative credit would exceed the original invoice value or VAT.');
+        }
     }
 
     private function isUniqueViolation(QueryException $e): bool

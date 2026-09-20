@@ -157,9 +157,22 @@ body {
     padding: 0.4rem 0.9rem;
 }
 
+/* Pinned to the bottom of whichever ancestor actually scrolls (.sidebar
+   itself at >=992px per the fix above; Bootstrap's own .offcanvas-body
+   below that) via `position: sticky`, not a nested overflow/flex
+   constraint on `.sidebar-nav` -- that's the approach the comment above
+   already found broke Collapse's scrollHeight measurement on expand.
+   Sticky leaves `.sidebar-nav` a normal, unconstrained flow element, so
+   there is nothing for Collapse's measurement to collide with; only this
+   one element gains new positioning. Needs its own opaque background
+   (the gradient lives on `.sidebar`, several ancestors up) so scrolled-
+   past nav items don't show through underneath it while it's stuck. */
 .sidebar-user {
+    position: sticky;
+    bottom: 0;
     padding: 1rem 1.25rem;
     border-top: 1px solid rgba(255, 255, 255, 0.12);
+    background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%);
 }
 
 .mobile-topbar {

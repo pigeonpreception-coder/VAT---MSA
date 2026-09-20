@@ -13,6 +13,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -189,6 +190,66 @@ class PurchaseOrderViewTest extends TestCase
         $order = PurchaseOrder::find($orderId);
         $expense = Expense::where('expense_number', 'EXP-FROM-PO-0001')->firstOrFail();
         $this->assertSame($expense->id, $order->converted_expense_id);
+    }
+
+    /**
+     * Broader security-sweep follow-up (2026-09-20): convertToExpense() was
+     * the one status-transition method in PurchaseOrderService missing the
+     * affected-row check every sibling method (submit/approve/reject/
+     * issue/cancel) already has, and it also creates a real Expense row
+     * before any guard runs. Two concurrent conversions of the same ISSUED
+     * order (different idempotency keys -- two tabs, not a same-key
+     * retry/replay) could both pass the pre-check, both create their own
+     * real Expense, and the loser's unguarded update would silently no-op
+     * while still reporting success -- leaving a second, real, orphaned
+     * Expense with no PO reference and no error ever surfaced. Fixed by
+     * wrapping the lock, the expense creation, and the now-guarded update
+     * in one transaction: `lockForUpdate()` serializes a concurrent
+     * attempt behind this one, so it re-reads a status that can no longer
+     * be ISSUED and never reaches ExpenseService::create() at all.
+     * Reproduced the same way as InvoiceLifecycleTest's own credit-note
+     * race test: a `DB::listen()` hook simulates the concurrent winner's
+     * already-committed conversion landing the instant this request's own
+     * lock-acquiring SELECT fires.
+     */
+    public function test_converting_a_purchase_order_that_races_a_concurrent_conversion_does_not_create_an_orphaned_duplicate_expense(): void
+    {
+        $org = $this->makeOrganisation('VAT-PORACE-0001');
+        $supplier = $this->makeSupplier($org['organisation'], 'Race Supplier');
+        $category = $this->makeCategory($org['organisation']);
+        $this->actingAs($org['owner'])->post('/accounting/purchase-orders', [
+            'po_number' => 'PO-RACE-0001', 'supplier_party_id' => $supplier->id, 'category_id' => $category->id,
+            'description' => 'Raced conversion', 'issue_date' => now()->toDateString(), 'valid_until' => now()->addDays(30)->toDateString(),
+            'net_cents' => 200000, 'tax_cents' => 30000,
+        ]);
+        $orderId = PurchaseOrder::where('po_number', 'PO-RACE-0001')->firstOrFail()->id;
+        $this->actingAs($org['owner'])->post("/accounting/purchase-orders/{$orderId}/submission");
+        $this->actingAs($org['accountant'])->post("/accounting/purchase-orders/{$orderId}/approval");
+        $this->actingAs($org['owner'])->post("/accounting/purchase-orders/{$orderId}/issuance");
+
+        $raced = false;
+        DB::listen(function ($query) use (&$raced, $orderId) {
+            if ($raced || ! str_contains($query->sql, 'for update')) {
+                return;
+            }
+            $raced = true;
+            // Models the concurrent winner's own conversion, already fully
+            // committed (a real Expense row of its own, not modelled here
+            // since it isn't what this request's own code reads) by the
+            // time this request's lock-acquiring SELECT runs.
+            DB::table('purchase_orders')->where('id', $orderId)->update([
+                'status' => 'CONVERTED', 'converted_expense_id' => (string) Str::uuid(), 'updated_at' => now(),
+            ]);
+        });
+
+        $convert = $this->actingAs($org['owner'])->post("/accounting/purchase-orders/{$orderId}/conversion", ['expense_number' => 'EXP-RACE-LOSER-0001']);
+
+        $this->assertTrue($raced, 'The DB::listen() hook must have fired to simulate the race (it never fires at all on the pre-fix code path, which has no lockForUpdate query).');
+        $convert->assertSessionHasErrors('purchase_order');
+        // The would-be loser's own Expense must never have been created --
+        // pre-fix, it would exist here as a real, orphaned row despite the
+        // request appearing to fail.
+        $this->assertDatabaseMissing('expenses', ['expense_number' => 'EXP-RACE-LOSER-0001']);
     }
 
     public function test_the_creator_cannot_approve_their_own_submitted_order(): void

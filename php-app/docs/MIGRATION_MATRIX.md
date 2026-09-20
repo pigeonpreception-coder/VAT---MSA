@@ -9421,3 +9421,109 @@ taxpayers and the normal 55-invoice baseline restored.
 Verified: full suite 790 tests, 0 regressions (unchanged from the
 section above -- this pass added no new code, only a heavier run of
 already-covered ground).
+
+## Sidebar sign-in footer pinned to the viewport bottom (2026-09-20)
+
+User-reported bug: on every page, at desktop widths (`>=992px`), the
+"Signed in as / <name> / <role badge> / Log out" block at the bottom of
+the sidebar scrolled away with the rest of the nav instead of staying
+fixed in view -- a regression of the earlier "make the sidebar
+scrollable" fix (this same file's "Sidebar restructuring" pass and
+`resources/css/app.css`'s own `.sidebar.offcanvas-lg` comment), which
+had deliberately let the *whole* sidebar (brand, nav, and footer
+together) scroll as one unit after an earlier attempt at pinning just
+the footer broke Bootstrap's Collapse: nesting `.sidebar-nav` inside an
+`overflow-y: hidden`/flex-constrained ancestor made Collapse's
+`scrollHeight` measurement on group-expand come back wrong (confirmed
+live at the time: a group's caret flipped to "expanded" but its
+subitems never rendered).
+
+Fixed with `position: sticky; bottom: 0;` on `.sidebar-user`
+(`resources/css/app.css`) instead of any new overflow/flex constraint on
+`.sidebar-nav` -- sticky only repositions the footer element itself
+within whichever ancestor already scrolls (`.sidebar` at `>=992px`,
+Bootstrap's own `.offcanvas-body` below that), leaving `.sidebar-nav` a
+plain, unconstrained flow element with nothing for Collapse's
+measurement to collide with. Gave `.sidebar-user` its own opaque
+background (the sidebar's gradient lives several ancestors up on
+`.sidebar` itself) so scrolled-past nav items don't show through behind
+it while stuck.
+
+Verified live via Playwright against the demo login
+(`owner@demo-trading.test`): expanded a sidebar group with enough
+content to force scrolling, scrolled the sidebar, and confirmed the
+footer's bounding box stayed pinned to the exact bottom of the 800px
+viewport (`top: 659, bottom: 800`) while `.sidebar`'s own `scrollTop`
+moved. Separately expanded "New Registration" (5 subitems) and
+confirmed all 5 rendered with the group's `.show` class and a non-zero
+measured height, i.e. Collapse's own expand measurement is unaffected
+by this change -- the exact failure mode the earlier attempt hit.
+Screenshots captured both states.
+
+Verified: full suite 790 tests, 0 regressions.
+
+## Credit note cumulative-credit-cap race fixed (2026-09-20)
+
+A focused red-team follow-up on this session's own newest code (the New
+Credit Note form and the Project Management transitions -- neither had a
+dedicated adversarial pass yet) found and fixed a genuine TOCTOU race in
+`InvoiceService::submit()`: the cumulative-credit-cap check (no credit
+note, or sequence of them, may cumulatively exceed the original invoice's
+own value/VAT) ran as a plain read *before* the method's own
+`DB::transaction()` opened, with no lock -- two concurrent credit notes
+against the same original, each individually within the cap, could both
+pass on a stale read and together exceed it. Unlike the idempotency-key
+and invoice-number races the same method already guards a few lines
+below, there is no `UNIQUE` constraint that can backstop an aggregate
+`SUM()`, so nothing would have caught this.
+
+Fixed by moving the check inside the transaction under
+`Invoice::lockForUpdate()` on the original invoice
+(`InvoiceService::enforceCumulativeCreditCap()`) -- a different shape of
+race than this codebase's usual guarded-UPDATE/affected-row-count
+convention (RT-020), which only fits a single row's own state transition,
+not a cap over a set of other rows. See
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-CORRECTION-RACE.md` for the full
+finding, live pre-fix/post-fix reproduction, and the one area checked
+with no finding (Project Management's own new transitions, already
+race-safe via the established pattern) plus one documented, deliberately
+unfixed limitation (per-line credit-quantity tracking across multiple
+credit notes, inherited from the original source's own aggregate-only cap
+design, not a migration-introduced gap).
+
+Permanent regression test:
+`tests/Feature/Invoice/InvoiceLifecycleTest.php`'s
+`test_a_credit_note_that_races_a_concurrent_credit_note_does_not_jointly_exceed_the_original_invoice_value`,
+confirmed to fail against the pre-fix code and pass against the fix.
+
+Verified: full suite 791 tests, 0 regressions.
+
+## Purchase order conversion race fixed (2026-09-20, same sweep)
+
+The same follow-up found a second, related gap: unlike its five sibling
+transitions (create/submit/approve/reject/issue/cancel),
+`PurchaseOrderService::convertToExpense()` was missing the affected-row
+check every other transition in the file has, and it also creates a real
+side-effect row (a new `Expense`, via `ExpenseService::create()`) before
+that unguarded update runs. Two concurrent conversions of the same ISSUED
+order (different idempotency keys -- two tabs, not a same-key retry)
+could both create their own real Expense and both report success, with
+the loser's own Expense left orphaned -- no purchase-order reference, no
+error ever shown.
+
+Fixed by moving the lock, the expense creation, and the now-guarded
+update into one transaction, with `PurchaseOrder::lockForUpdate()`
+acquired *before* `ExpenseService::create()` is ever called -- a
+concurrent attempt blocks on the lock, re-reads a status that's no
+longer ISSUED, and throws before any Expense is created at all. See
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-CORRECTION-RACE.md` (finding #2)
+for the full write-up, live pre-fix/post-fix reproduction, and the
+systematic sweep of every other `App\Services\*` aggregate-before-write
+pattern that turned up nothing else exploitable.
+
+Permanent regression test:
+`tests/Feature/Business/PurchaseOrderViewTest.php`'s
+`test_converting_a_purchase_order_that_races_a_concurrent_conversion_does_not_create_an_orphaned_duplicate_expense`,
+confirmed to fail against the pre-fix code and pass against the fix.
+
+Verified: full suite 792 tests, 0 regressions.

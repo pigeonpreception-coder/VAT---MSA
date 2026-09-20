@@ -233,14 +233,45 @@ class PurchaseOrderService
             'currency' => $order->currency, 'net_cents' => (int) $order->net_cents, 'tax_cents' => (int) $order->tax_cents,
             'total_cents' => (int) $order->total_cents,
         ];
-        // Expense certification is independently idempotent. If this process stops
-        // after that commit, the same key reloads the created expense and safely
-        // finishes purchase-order linkage below.
-        $expense = $this->expenses->create($expensePayload, $actor, $idempotencyKey, $correlationId, $requestedOrganisationId);
         $now = now();
-        DB::transaction(function () use ($id, $organisation, $actor, $expense, $now, $idempotencyKey, $requestHash, $correlationId) {
-            PurchaseOrder::where('id', $id)->where('organisation_id', $organisation->id)->where('status', 'ISSUED')
+        // Broader security-sweep follow-up (2026-09-20): this used to call
+        // ExpenseService::create() *before* opening any transaction, then
+        // write the PO's own CONVERTED/converted_expense_id with a plain
+        // update() carrying no affected-row check -- the one transition in
+        // this file missing the guard every sibling method above has. Two
+        // concurrent conversions of the same ISSUED order (each with a
+        // different idempotency key -- a genuine double-click across two
+        // tabs, not a same-key retry) could both pass the pre-check above,
+        // both create their own real Expense row, and the loser's
+        // unguarded update would silently no-op while still reporting
+        // success -- leaving a second, real, unlinked Expense with no PO
+        // reference and no error ever shown. Fixed by moving the whole
+        // conversion -- lock, expense creation, and the now-guarded update
+        // -- inside one transaction: `lockForUpdate()` serializes a
+        // concurrent attempt on the same order behind this one, so it
+        // re-reads a status that can no longer be ISSUED and never reaches
+        // ExpenseService::create() at all, rather than racing this
+        // request's own now-stale pre-check. This also folds expense
+        // creation and PO linkage into one atomic unit -- the "independently
+        // idempotent, safely resumable on crash" recovery story the removed
+        // comment described no longer applies (there is no longer a window
+        // where one half can commit without the other), which is simpler
+        // and strictly safer, not a regression: a crash now leaves nothing
+        // committed at all, and the same idempotency key on retry starts
+        // clean from CommandLedger::prior()'s own check above.
+        DB::transaction(function () use ($id, $organisation, $actor, $expensePayload, $now, $idempotencyKey, $requestHash, $correlationId, $requestedOrganisationId) {
+            $locked = PurchaseOrder::whereKey($id)->lockForUpdate()->first();
+            if (! $locked || $locked->organisation_id !== $organisation->id || $locked->status !== 'ISSUED') {
+                throw new RepositoryConflictException("Purchase order {$id} was changed by another action; reload and try again.");
+            }
+
+            $expense = $this->expenses->create($expensePayload, $actor, $idempotencyKey, $correlationId, $requestedOrganisationId);
+
+            $updated = PurchaseOrder::where('id', $id)->where('status', 'ISSUED')
                 ->update(['status' => 'CONVERTED', 'converted_expense_id' => $expense['id'], 'updated_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Purchase order {$id} was changed by another action; reload and try again.");
+            }
             CommandLedger::record($actor->id, 'CONVERT_PURCHASE_ORDER', $idempotencyKey, $requestHash, 'EXPENSE', $expense['id'], $now);
             CommandLedger::outbox('PURCHASE_ORDER', $id, 'PurchaseOrderConverted', $organisation->id, ['purchase_order_id' => $id, 'organisation_id' => $organisation->id, 'expense_id' => $expense['id'], 'correlation_id' => $correlationId], $now);
             AuditService::append($actor, 'PURCHASE_ORDER_CONVERTED', 'PURCHASE_ORDER', $id, ['organisationId' => $organisation->id, 'expenseId' => $expense['id'], 'correlationId' => $correlationId], $now);
