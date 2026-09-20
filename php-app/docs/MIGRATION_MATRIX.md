@@ -9497,3 +9497,33 @@ Permanent regression test:
 confirmed to fail against the pre-fix code and pass against the fix.
 
 Verified: full suite 791 tests, 0 regressions.
+
+## Purchase order conversion race fixed (2026-09-20, same sweep)
+
+The same follow-up found a second, related gap: unlike its five sibling
+transitions (create/submit/approve/reject/issue/cancel),
+`PurchaseOrderService::convertToExpense()` was missing the affected-row
+check every other transition in the file has, and it also creates a real
+side-effect row (a new `Expense`, via `ExpenseService::create()`) before
+that unguarded update runs. Two concurrent conversions of the same ISSUED
+order (different idempotency keys -- two tabs, not a same-key retry)
+could both create their own real Expense and both report success, with
+the loser's own Expense left orphaned -- no purchase-order reference, no
+error ever shown.
+
+Fixed by moving the lock, the expense creation, and the now-guarded
+update into one transaction, with `PurchaseOrder::lockForUpdate()`
+acquired *before* `ExpenseService::create()` is ever called -- a
+concurrent attempt blocks on the lock, re-reads a status that's no
+longer ISSUED, and throws before any Expense is created at all. See
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-CORRECTION-RACE.md` (finding #2)
+for the full write-up, live pre-fix/post-fix reproduction, and the
+systematic sweep of every other `App\Services\*` aggregate-before-write
+pattern that turned up nothing else exploitable.
+
+Permanent regression test:
+`tests/Feature/Business/PurchaseOrderViewTest.php`'s
+`test_converting_a_purchase_order_that_races_a_concurrent_conversion_does_not_create_an_orphaned_duplicate_expense`,
+confirmed to fail against the pre-fix code and pass against the fix.
+
+Verified: full suite 792 tests, 0 regressions.

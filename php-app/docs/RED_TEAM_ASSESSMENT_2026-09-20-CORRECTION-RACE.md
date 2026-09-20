@@ -1,23 +1,26 @@
-# VAT-MSA Red Team Assessment — Credit Note Cumulative-Cap Race
+# VAT-MSA Red Team Assessment — New-Module TOCTOU Races (Credit Notes, Purchase Orders)
 
 **Date:** 2026-09-20
 **Scope:** A focused follow-up sweep on the modules built this session that
 had no dedicated adversarial pass yet -- principally the New Credit Note /
 New Debit Note flow (`App\Http\Controllers\Invoice\
-InvoiceCorrectionViewController`), the newest money-moving code in the app,
-and the Project Management status transitions (`ProjectService::activate()`/
-`complete()`). Not a re-run of the user's original 10-phase brief (already
-substantially complete per `docs/LAUNCH_READINESS_BACKLOG.md` item #10) --
-a targeted check of what that brief's own passes couldn't have covered yet,
-since this code didn't exist when they ran.
-**Method:** Direct code reading of the full write path (View controller
-through `InvoiceService::submit()`), the same live-reproduction discipline
-as every prior red-team pass in this series: a `DB::listen()`-based
-same-connection race simulation (this codebase's established technique,
-first used in RT-020/Concurrent User Simulation) proving the defect and the
-fix, plus manual tracing of the transaction/lock boundary.
+InvoiceCorrectionViewController`), Purchase Orders
+(`App\Services\Business\PurchaseOrderService`), and the Project Management
+status transitions (`ProjectService::activate()`/`complete()`). Not a
+re-run of the user's original 10-phase brief (already substantially
+complete per `docs/LAUNCH_READINESS_BACKLOG.md` item #10) -- a targeted
+check of what that brief's own passes couldn't have covered yet, since
+this code didn't exist when they ran.
+**Method:** Direct code reading of every write path in each module, plus a
+systematic `grep` sweep of every `App\Services\*` for the same aggregate-
+read-before-cap-check shape once the first finding below made the pattern
+concrete. Live-reproduction discipline matching every prior red-team pass
+in this series: a `DB::listen()`-based same-connection race simulation
+(this codebase's established technique, first used in RT-020/Concurrent
+User Simulation) proving each defect and its fix, plus manual tracing of
+each transaction/lock boundary.
 **Environment:** This session's own sandboxed dev stack, real MySQL. Full
-suite: 790 tests before this pass, 791 after.
+suite: 790 tests before this pass, 792 after (both fixes).
 **Tester:** Claude (Anthropic), acting as the migration engineer, at the
 user's explicit request ("do a deeper security sweep").
 
@@ -99,8 +102,103 @@ fail against the pre-fix code (`git stash` the fix, rerun: fails on
 — doesn't exist pre-fix) and pass against the fix. Full suite: 791 tests,
 0 regressions.
 
-## 2. Areas checked with no finding
+## 2. Confirmed finding
 
+### Purchase order conversion was missing the affected-row check every sibling transition has, and could create an orphaned duplicate Expense under a race
+
+> **Status: FIXED (2026-09-20).**
+> `PurchaseOrderService::convertToExpense()` is the ISSUED→CONVERTED
+> transition, and the only one of six transitions in the file
+> (create/submit/approve/reject/issue/cancel are the other five) that
+> creates a real side-effect row of its own — a new `Expense`, via
+> `ExpenseService::create()` — before writing the purchase order's own new
+> status. Unlike its five siblings, which all capture the guarded update's
+> affected-row count and throw `RepositoryConflictException` when it's
+> `0`, this one called `PurchaseOrder::where(...)->where('status',
+> 'ISSUED')->update([...])` and ignored the result entirely. Two
+> concurrent conversion attempts on the same `ISSUED` order (different
+> idempotency keys — two browser tabs, not a same-key double-click replay,
+> which `CommandLedger::prior()` already dedupes) could both pass the
+> pre-check, both call `ExpenseService::create()` and each get back a
+> real, distinct `Expense` row, and the loser's unguarded update would
+> silently affect zero rows while the method carried on as if it had
+> succeeded — recording a `CommandLedger`/outbox/audit trail for a
+> conversion that never actually took effect on the purchase order, and
+> leaving a second, real, fully valid Expense with no purchase-order
+> reference at all: an orphaned duplicate financial record, invisible to
+> anyone looking at the purchase order itself (its own
+> `converted_expense_id` only ever points at the winner's expense).
+>
+> Fixed by wrapping the lock, the expense creation, and the now-guarded
+> update in one transaction:
+> `PurchaseOrder::whereKey($id)->lockForUpdate()` is acquired *before*
+> `ExpenseService::create()` is ever called, so a concurrent attempt on
+> the same order blocks on the lock until the winner's transaction
+> commits, then re-reads a status that is no longer `ISSUED` and throws
+> before creating any Expense at all — closing the orphaned-duplicate
+> case entirely, not just converting it into an honest error while the
+> side effect still happens. This also makes expense creation and
+> purchase-order linkage one atomic unit; the method's old doc comment
+> described a deliberate two-phase "expense commits, then linkage
+> completes on retry" crash-recovery design, which this fix supersedes
+> with something simpler and strictly safer (a crash now leaves nothing
+> committed at all, and the same idempotency key retries clean from
+> `CommandLedger::prior()`), not a regression of that intent.
+
+| | |
+|---|---|
+| **Severity** | **Medium** — a real duplicate financial record (a genuine `Expense`, real money, real VAT-relevant total) could be created invisibly, though it requires a genuine two-tab/two-idempotency-key race rather than an ordinary double-click, and doesn't itself grant unauthorized access |
+| **User role** | Any role holding `accounting:post` on their own organisation — no privilege escalation, no cross-tenant access |
+| **Feature** | Purchase Orders → Convert to Expense (`/accounting/purchase-orders/{id}/conversion`), the newest domain model in the app (built 2026-09-19) |
+
+**Reproduction steps (pre-fix, live-verified with the same `DB::listen()`
+same-connection race-simulation technique as finding #1 above):**
+
+1. Create a purchase order and drive it through DRAFT→SUBMITTED→APPROVED→
+   ISSUED via the real Blade routes.
+2. POST a conversion request. Hook `DB::listen()` on the query the fix's
+   own lock issues (`... for update`) — on the pre-fix code path, no such
+   query exists, so the hook never fires and the request simply succeeds,
+   exactly as an unguarded concurrent request would.
+3. On the fixed code path, the hook fires and updates the purchase order
+   directly to `CONVERTED` with a fake `converted_expense_id` — modelling
+   a concurrent conversion that, pre-fix, would have fully committed
+   (including its own real Expense) between this request's own stale
+   pre-check and its own write.
+4. **Pre-fix**: the unguarded update silently affects zero rows (the
+   order is already `CONVERTED`), but the method has no way to notice —
+   it already called `ExpenseService::create()` moments earlier and
+   created a real, now-orphaned Expense, then reports success. **Post-fix**:
+   the lock blocks behind the simulated winner, re-reads `status !=
+   'ISSUED'`, and throws *before* `ExpenseService::create()` is ever
+   called — no Expense, orphaned or otherwise, is created at all.
+
+**Fix verification**: `tests/Feature/Business/PurchaseOrderViewTest.php`'s
+`test_converting_a_purchase_order_that_races_a_concurrent_conversion_does_not_create_an_orphaned_duplicate_expense`
+is a permanent regression test using this exact reproduction. Confirmed to
+fail against the pre-fix code (same `git stash`-and-rerun check as finding
+#1) and pass against the fix. Full suite: 792 tests, 0 regressions.
+
+## 3. Areas checked with no finding
+
+- **Systematic sweep for the same shape elsewhere**: `grep`ed every
+  `App\Services\*` for `SUM(`/`->sum(`/`selectRaw.*SUM` used ahead of a
+  write. The only other candidate,
+  `RefundService::transition()`'s own pre-transaction read of a
+  taxpayer's total `PENDING` `TaxObligation` debt (used to compute a
+  refund claim's own `offset_amount_cents`/`net_payable_cents`), does
+  **not** have the same defect: that read is never written back to
+  `TaxObligation` by this or any code path reachable from refund approval
+  (`ObligationService::markSatisfied()` is the only place a
+  `TaxObligation` status ever changes, and it is a fully independent,
+  separately-invoked action) — two concurrent refund approvals for the
+  same taxpayer could each display an offset computed against the same
+  debt snapshot, but neither actually consumes or double-spends that
+  debt, so there is no real financial-correctness violation to fix, only
+  a cosmetic staleness in what each claim's own `offset_amount_cents`
+  displays at the moment of approval. Every other `SUM()`/aggregate use
+  found is read-only reporting (dashboards, ledger statements, export
+  snapshots) with no write gated on it at all.
 - **`ProjectService::activate()`/`complete()`** (this session's own new
   status transitions): both already use the established guarded-UPDATE +
   affected-row-count pattern (`Project::where('id', $id)->where('status',
