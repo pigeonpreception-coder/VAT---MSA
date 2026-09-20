@@ -49,6 +49,20 @@ use Illuminate\Support\Str;
  * organisation (index 0) rather than spread across all 20, since every
  * one of those pages is itself organisation-scoped: what makes an N+1
  * visible is row count *on one page*, not total rows in the database.
+ *
+ * Scaled 15x on the row-volume constants (2026-09-20, same day) at the
+ * user's own request for a heavier stress pass, with one deliberate
+ * exception: TAXPAYER_COUNT/USERS_PER_TAXPAYER/NAMRA_STAFF_COUNT are
+ * left unchanged. Those control how many *organisations* exist, not how
+ * many rows land on any one organisation-scoped page -- every list view
+ * this seed exercises reads one organisation at a time, so multiplying
+ * the tenant count would balloon total row count and runtime without
+ * making any single page's own query count any more revealing. This
+ * remains, deliberately, a single-tenant volume/N+1 stress test, not an
+ * attempt to simulate global concurrent multi-tenant traffic -- that
+ * needs real load-testing tooling against a horizontally-scaled
+ * deployment (backlog item #7), which no amount of local seeding
+ * substitutes for.
  */
 class SyntheticLoadSeeder extends Seeder
 {
@@ -58,25 +72,25 @@ class SyntheticLoadSeeder extends Seeder
 
     private const NAMRA_STAFF_COUNT = 10;
 
-    private const INVOICES_TOTAL = 5000;
+    private const INVOICES_TOTAL = 75000;
 
-    private const EXPENSES_TOTAL = 2000;
+    private const EXPENSES_TOTAL = 30000;
 
-    private const AUDIT_CASES_TOTAL = 500;
+    private const AUDIT_CASES_TOTAL = 7500;
 
     private const EVIDENCE_PER_CASE = 4;
 
-    private const DOCUMENTS_TOTAL = 1000;
+    private const DOCUMENTS_TOTAL = 15000;
 
-    private const FIXED_ASSETS_TOTAL = 200;
+    private const FIXED_ASSETS_TOTAL = 3000;
 
-    private const TARGET_ORG_PARTIES = 200;
+    private const TARGET_ORG_PARTIES = 3000;
 
-    private const TARGET_ORG_QUOTATIONS = 200;
+    private const TARGET_ORG_QUOTATIONS = 3000;
 
-    private const TARGET_ORG_PROJECTS = 200;
+    private const TARGET_ORG_PROJECTS = 3000;
 
-    private const TARGET_ORG_LEDGER_EXPENSES = 200;
+    private const TARGET_ORG_LEDGER_EXPENSES = 3000;
 
     public function run(): void
     {
@@ -434,7 +448,7 @@ class SyntheticLoadSeeder extends Seeder
                 'tax_rate_bps' => 1500, 'tax_amount_cents' => $taxCents,
             ];
 
-            if (count($quotationRows) >= 100) {
+            if (count($quotationRows) >= 500) {
                 DB::table('quotations')->insert($quotationRows);
                 DB::table('quotation_lines')->insert($quotationLineRows);
                 if ($invoiceRows) {
@@ -509,7 +523,7 @@ class SyntheticLoadSeeder extends Seeder
                 ];
             }
 
-            if (count($projectRows) >= 100) {
+            if (count($projectRows) >= 500) {
                 DB::table('projects')->insert($projectRows);
                 DB::table('project_budgets')->insert($budgetRows);
                 DB::table('project_costs')->insert($costRows);
@@ -551,7 +565,7 @@ class SyntheticLoadSeeder extends Seeder
                 'approved_by' => $status === 'APPROVED' ? $userId : null, 'created_at' => $now,
                 'approved_at' => $status === 'APPROVED' ? $now : null, 'rejection_reason' => $status === 'REJECTED' ? 'Synthetic load-test rejection.' : null,
             ];
-            if (count($expenseRows) >= 100) {
+            if (count($expenseRows) >= 500) {
                 DB::table('expenses')->insert($expenseRows);
                 $expenseRows = [];
             }
