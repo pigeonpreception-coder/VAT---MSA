@@ -63,7 +63,7 @@
                         'new-registration' => ['new-registration.*'],
                         'documents' => ['documents.*'],
                         'reporting' => ['reports.*'],
-                        'administration' => ['administration.*', 'organisations.*', 'workflows.*'],
+                        'administration' => ['administration.*', 'organisations.*', 'workflows.*', 'security.operations', 'security.incidents.*'],
                         'licensing' => ['licensing.*'],
                         'platform' => ['platform.*'],
                     ];
@@ -197,6 +197,7 @@
                             <li><a class="nav-link" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration Command Centre</a></li>
                             <li><a class="nav-link" href="{{ route('organisations.index') }}" @if (request()->routeIs('organisations.*')) aria-current="page" @endif>Organisations</a></li>
                             <li><a class="nav-link" href="{{ route('workflows.index') }}" @if (request()->routeIs('workflows.*')) aria-current="page" @endif>Workflows</a></li>
+                            <li><a class="nav-link" href="{{ route('security.operations') }}" @if (request()->routeIs('security.operations') || request()->routeIs('security.incidents.*')) aria-current="page" @endif>Security Operations</a></li>
                         </ul>
                     </li>
 

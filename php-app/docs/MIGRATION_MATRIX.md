@@ -9596,3 +9596,127 @@ and purchase-order amount validation for negative-value rejection
 (correctly rejects, min 0). See
 `docs/RED_TEAM_ASSESSMENT_2026-09-20-SQL-INJECTION-AND-CHOKEPOINT-SWEEP.md`
 for the full write-up. No code changed; no PR opened.
+
+## New feature: multi-level rate limiting and the Security Operations Centre view (2026-09-20)
+
+User asked to "build something new" once the launch-readiness backlog was
+exhausted. Since every backlog item was either already closed or blocked
+on an external dependency, this required a fresh investigation of the
+source for genuinely unported functionality (not a re-read of the
+backlog) -- IMPLEMENTATION.md's own claimed-capabilities list ("Bounded
+streaming JSON ingestion and multi-level actor, device, source, tenant
+and global rate controls" / "Correlated structured security events,
+incident records and a Security Operations view") pointed at two
+capabilities never ported to this migration at all: `lib/security/
+request.ts`'s multi-level rate limiting and `lib/data/security-
+repository.ts`'s Security Operations Centre queue. A `grep -rln
+"RateLimiter::for\|throttle:"` found nothing but Laravel's own generic
+`throttle:api` framework default -- confirmed via a full read of both
+source files, not just their own doc comments (which had been repeated
+without being re-verified in a few older, now-stale places in this same
+document). The `security_events`/`rate_limit_windows`/`security_detection_rules`/
+`security_incidents`/`security_playbook_actions` migrations already
+existed, column-for-column matching the source's own D1 schema -- exactly
+the same "schema real but unconsumed" shape this document has already
+recorded for `platform_config` -- so the actual work was the enforcement
+logic, the detection-rule evaluation, the SOC queue, and the view, not
+new migrations.
+
+**Rate limiting** (`App\Support\Security\RateLimitGuard`, ported from
+`enforceRateLimits`/`enforceInvoiceRateLimits`/`enforceRegistrationRateLimits`/
+`commandRateLimitBuckets`): a fixed-window counter per bucket
+(actor/device/source/tenant/global), backed by the same `rate_limit_windows`
+table. The source's single D1 `INSERT...ON CONFLICT...RETURNING`
+round-trip becomes MySQL's `INSERT...ON DUPLICATE KEY UPDATE
+request_count = LAST_INSERT_ID(request_count + 1)` idiom -- with
+`LAST_INSERT_ID(1)` also called on the INSERT branch's own VALUES clause,
+since this table deliberately has no `AUTO_INCREMENT` column and MySQL
+never sets the connection's `LAST_INSERT_ID()` on a genuine first insert
+otherwise (a real bug a PHPUnit run caught: a bucket's very first,
+well-under-limit request threw, because `SELECT LAST_INSERT_ID()` was
+reading a stale value from an unrelated prior statement on the same
+connection). Applied via a new `rate-limit:{family}` route middleware
+(`App\Http\Middleware\EnforceRateLimit`) -- the Laravel-idiomatic
+adaptation of the source's own inline per-command enforcement, using the
+controller action's own method name as the `{command}` bucket-key
+component the source's generic wrapper took as an explicit argument.
+Wired to full parity with the source's own route-family coverage: every
+real Laravel route in the invoice (2), registration (2), identity (7)
+and vat-rule (2) families, plus every control-plane write across
+Licensing/OrganisationAdmin/AccessGovernance/Workflow (21) -- 34 routes
+in total. Reconciliation (no write controller exists in this port) and
+the three pre-auth surfaces (invitation-claim/verify-token/self-serve-
+signup -- no routes exist here at all) are genuinely not applicable
+rather than built speculatively.
+
+**Security events and detection rules** (`App\Support\Security\
+SecurityEventRecorder`, ported from `recordSecurityEvent`/
+`evaluateDetectionRules`/`recordAuthorizationDenial`/`recordRateLimitBreach`):
+every public method is deliberately best-effort (wrapped in
+`try/catch(\Throwable)`), matching every source call site's own
+`.catch(() => undefined)` -- a security-telemetry failure must never mask
+the real response the request was already going to get. Detection rules
+(`database/seeders/SecurityDetectionRuleSeeder.php`, the exact 3-rule
+catalogue from `db/runtime.ts`'s own seed statements -- REPEATED_AUTHORISATION_DENIALS,
+RATE_LIMIT_ABUSE, and AUDIT_CHAIN_INTEGRITY_BREACH, the last one seeded
+for parity even though nothing in this migration yet emits the
+`AUDIT_CHAIN_BREAK` event that would trigger it, since no audit-chain
+verification pass exists here) are evaluated inline on every recorded
+event rather than by a polling job, matching this codebase's established
+"no queue/cron infrastructure in this deployment" posture. A firing rule
+opens a `security_incidents` row plus a `DETECTED` playbook action and an
+outbox event, de-duplicated against any already-open incident for the
+same rule+group so repeated denials from one actor don't spawn a new
+incident past the threshold.
+
+Wired centrally into `bootstrap/app.php`'s existing `AccessDeniedHttpException`
+render callback (the same RT-002 choke point that already catches every
+`AuthorizationException` in the app), rather than touching every
+individual controller's own `$this->authorize()` call site. This
+surfaced a real, pre-existing fidelity gap: `Gate::define('permission', ...)`
+returned a bare boolean, so every denial fell through to Laravel's own
+generic "This action is unauthorized." message -- meaning the new
+handler's `/does not have (\S+) permission/` regex (ported from the
+source's own `recordAuthorizationDenial`) never matched anything real,
+silently recording every denial as a generic `ACCESS_DENIED`. Fixed by
+having the Gate deny with `lib/domain/access.ts`'s own exact message
+("Role ${user.role} does not have ${permission} permission."), ported
+verbatim rather than invented -- confirmed no existing test depended on
+the old generic string.
+
+**Security Operations Centre view** (`App\Domain\Security\SecurityValidator`
+/ `App\Services\Security\SecurityOperationsService` / `App\Http\Controllers\
+Security\SecurityOperationsViewController`, ported from `lib/domain/
+security.ts` and `lib/data/security-repository.ts`'s getSOCQueue/
+getIncidentDetail/createIncident/containIncident/revokeIncidentAccess/
+closeIncident): a Blade view at `/security`, filling `NavigationSeeder`'s
+own pre-existing `nav-security` item (`href: '/security'`, `required_permission:
+'security:read'`), which had no route behind it in this migration until
+now. Lists the incident queue (filterable by status/severity, most severe
+first) and recent security events; `security:manage` gates opening a
+manual incident, containing an OPEN one, revoking a subject user's active
+`identity_links` (reusing Module 1's own session-revocation mechanism
+rather than duplicating it -- independently callable on OPEN or
+CONTAINED, and itself advances OPEN to CONTAINED), and closing. Every
+write wears the `step-up` middleware, matching this migration's own
+established posture for every other privileged command, even though the
+source itself has no equivalent step-up gate here. No stock role in
+`Permissions.php`'s own `STATIC_ROLE_PERMISSIONS` holds `security:read`
+without also holding `security:manage`, so the view's own
+manage-actions-hidden branch has no built-in role to exercise it with
+(documented as a test-coverage gap in `SecurityOperationsViewTest`, not
+silently skipped).
+
+Not ported: `readBoundedJson`'s streaming JSON body-size limit (a
+Cloudflare-Workers-specific concern with a different Laravel equivalent,
+out of scope for this pass) and `emitStructuredSecurityLog` (a
+`console.log(JSON.stringify(...))` call with no real consumer in this
+deployment -- deprioritized as lower value than the enforcement and view
+work above).
+
+31 new PHPUnit tests (`tests/Feature/Security/RateLimitEnforcementTest.php`,
+`SecurityEventRecorderTest.php`, `SecurityOperationsViewTest.php`), real
+MySQL and real HTTP requests throughout -- including a genuine 429 over a
+real `rate-limit:identity` route after 31 requests, and a genuine
+detection-rule-fired incident after 5 repeated denials from the same real
+user, de-duplicated on a 6th. Full suite: 818 tests, 0 regressions.

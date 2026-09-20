@@ -88,11 +88,22 @@
         'EXPIRED' => 'text-bg-danger',
         'CANCELLED' => 'text-bg-secondary',
     ];
+    // Another separate map, same reason as $indicatorMap above: a
+    // security_incidents.status='OPEN' (needs attention, possibly
+    // actively exploited) is more severe than $statusMap's own generic
+    // 'OPEN' (a healthy default state for e.g. a VAT period), so it gets
+    // its own red rather than sharing $statusMap's green.
+    $incidentMap = [
+        'OPEN' => 'text-bg-danger',
+        'CONTAINED' => 'text-bg-warning',
+        'CLOSED' => 'text-bg-secondary',
+    ];
     $class = match ($type) {
         'risk' => $riskMap[$value] ?? 'text-bg-light',
         'indicator' => $indicatorMap[$value] ?? 'text-bg-light',
         'taxpayer' => $taxpayerMap[$value] ?? 'text-bg-light',
         'license' => $licenseMap[$value] ?? 'text-bg-light',
+        'incident' => $incidentMap[$value] ?? 'text-bg-light',
         default => $statusMap[$value] ?? 'text-bg-light',
     };
     $label = ucwords(strtolower(str_replace('_', ' ', (string) $value)));

@@ -484,3 +484,15 @@ organisation can supply -- real ITAS credentials, a mail provider, S3/R2
 bucket credentials, production host access for OPcache/load-testing
 verification, and a real legacy dataset -- and cannot be closed by
 further code changes alone.
+
+## Not originally a backlog item: multi-level rate limiting and the Security Operations view (closed 2026-09-20)
+
+This backlog's own scope is "what's left before launch," pulled from the
+sources named in the header above -- none of which had flagged rate
+limiting or a Security Operations view as missing, so it was never listed
+here as an item to close. It was found separately, by re-reading
+`IMPLEMENTATION.md`'s own claimed-capabilities list against the actual
+Laravel port rather than against this backlog. See `docs/MIGRATION_MATRIX.md`'s
+own dated section ("New feature: multi-level rate limiting and the
+Security Operations Centre view") for the full write-up -- noted here
+only so a future backlog refresh doesn't re-discover it as still open.
