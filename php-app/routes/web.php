@@ -19,6 +19,7 @@ use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Invoice\InvoiceController;
+use App\Http\Controllers\Invoice\InvoiceCorrectionViewController;
 use App\Http\Controllers\Invoice\InvoiceViewController;
 use App\Http\Middleware\PreventAuthenticatedPageCaching;
 use App\Http\Controllers\Business\AccountingController;
@@ -124,6 +125,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // ambiguity: this is a genuinely different URL (no api/v1 prefix).
     Route::get('/invoices', [InvoiceViewController::class, 'index'])->name('invoices.index');
     Route::get('/invoices/{id}', [InvoiceViewController::class, 'show'])->name('invoices.show');
+    // New Credit Note / New Debit Note are no longer $plannedRoute
+    // placeholders -- see InvoiceCorrectionViewController's own doc
+    // comment. Route names and invoices:read permission kept identical to
+    // the placeholders they replace so the sidebar's New Registration
+    // group needed no change; the write actions use invoices:submit,
+    // matching InvoiceController::store()'s own gate for this same
+    // underlying command.
+    Route::get('/new-registration/credit-note', [InvoiceCorrectionViewController::class, 'newCreditNote'])->name('new-registration.credit-note');
+    Route::post('/new-registration/credit-note', [InvoiceCorrectionViewController::class, 'storeCreditNote'])->name('new-registration.credit-note.store');
+    Route::get('/new-registration/debit-note', [InvoiceCorrectionViewController::class, 'newDebitNote'])->name('new-registration.debit-note');
+    Route::post('/new-registration/debit-note', [InvoiceCorrectionViewController::class, 'storeDebitNote'])->name('new-registration.debit-note.store');
 
     // Real Blade UI for the VAT returns lifecycle, alongside the JSON API
     // surface below -- see VatLifecycleViewController's own doc comment.
@@ -599,12 +611,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // sidebar link, which now points at business-parties.index with
     // ?relationship=SERVICE_PROVIDER, the same pattern the Customers/
     // Suppliers links already use.
-    $plannedRoute('/new-registration/credit-note', 'new-registration.credit-note', 'invoices:read', 'New Registration', 'New Credit Note',
-        'A controlled form to issue a credit note against an original tax invoice.',
-        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the credit, and the lines to reverse -- with amounts recorded as a reduction. Awaiting approval before the UI is built.');
-    $plannedRoute('/new-registration/debit-note', 'new-registration.debit-note', 'invoices:read', 'New Registration', 'New Debit Note',
-        'A controlled form to issue a debit note against an original tax invoice.',
-        'This form is not yet built, per the change-control rule that an unapproved form must be proposed before it is built. The proposed form is: original invoice reference (required), reason for the debit, and the additional lines/amounts. Awaiting approval before the UI is built.');
+    // New Credit Note / New Debit Note are no longer planned-module
+    // placeholders awaiting change-control approval -- the proposed form
+    // (original invoice reference, reason, and the lines to reverse/add)
+    // was reviewed and approved, then built; see the real routes
+    // registered alongside the other invoice routes above
+    // (InvoiceCorrectionViewController).
 
     // TOTP step-up parity (2026-09-15). No 'step-up' gate on any of these
     // routes themselves: enrolling/using your own second factor is the

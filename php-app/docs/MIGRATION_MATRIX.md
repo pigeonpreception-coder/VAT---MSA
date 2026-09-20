@@ -9167,3 +9167,112 @@ re-querying zero projects for the demo organisation and all three pages
 showing their empty states again.
 
 Verified: full suite 774 tests, 0 regressions.
+
+## New feature: New Credit Note / New Debit Note (2026-09-20)
+
+Closes the `new-registration.credit-note`/`.debit-note` `$plannedRoute`
+placeholders. Unlike every other placeholder closed this session, these
+two carried their own explicit change-control note ("an unapproved form
+must be proposed before it is built") rather than a stale-or-missing-
+model excuse. The form design below was proposed against the exact
+contract `App\Domain\Invoice\InvoiceCalculator`/`App\Services\Invoice\
+InvoiceService::resolveOriginalInvoice()` already enforce (read directly,
+not guessed) and approved before anything was built:
+
+- **Credit note**: pick an original invoice; its own lines are shown
+  read-only with an editable "quantity to credit" per line (capped at
+  that line's own quantity); reason code, reason, issue date.
+- **Debit note**: pick an original invoice; a free-form single line
+  (description, quantity, unit price) at the standard 15% rate, the same
+  single-line-at-creation shape `QuotationViewController`'s own create
+  form already uses; reason code, reason, issue date.
+
+The write path itself is not new: both submit the exact same
+`InvoiceService::submit()` with `document_type` `CREDIT_NOTE`/
+`DEBIT_NOTE` and an `original_document_reference` that
+`POST /api/v1/invoices` already accepts and
+`tests/Feature/Invoice/InvoiceLifecycleTest.php` already exercises --
+never a second write path.
+
+**`app/Http/Controllers/Invoice/InvoiceCorrectionViewController.php`**
+(new) -- `newCreditNote()`/`newDebitNote()` (`invoices:read`),
+`storeCreditNote()`/`storeDebitNote()` (`invoices:submit`, matching
+`InvoiceController::store()`'s own gate for this same command). Supplier
+and customer are never asked for: both are carried over verbatim from
+the original invoice's own stored `supplier_name`/`supplier_vat_number`/
+`customer_name`/`customer_vat_number`, because
+`resolveOriginalInvoice()` requires the correction to preserve the
+original's exact customer identity -- retyping it is the one way this
+could fail with a confusing error rather than never being wrong in the
+first place. For the credit note, each credited line's `unit_price`/
+`tax_rate_bps`/`tax_category` are likewise carried over from the
+original line, never retyped, with only the quantity-to-credit editable
+-- net/tax amounts are computed with the same half-up, sign-preserving
+integer arithmetic `InvoiceCalculator`'s own (private) `roundedDivide`
+uses, reimplemented here rather than widening that class's visibility
+for one caller.
+
+One disclosed limit: `eligibleOriginals()` excludes an original invoice
+whose customer was identified by TIN or another non-VAT identifier at
+creation time (only `customer_vat_number` is stored on the `invoices`
+table, so a non-VAT-number identifier can't be reconstructed here to
+re-resolve the same customer `Taxpayer` the way `resolveCapableTaxpayer`
+requires) -- confirmed by reading that resolution path directly. An
+invoice with no customer at all (`customer_taxpayer_id` null) is
+unaffected and remains eligible.
+
+A read-only "remaining creditable amount" (original total minus every
+prior active credit note's own total) is shown on the credit note page
+so the form doesn't ask for more than can actually be credited -- it
+mirrors, but does not replace, `resolveOriginalInvoice()`'s own
+cumulative-credit-cap check, which still independently re-enforces the
+cap on submit.
+
+**Routes**: `routes/web.php` -- the two `$plannedRoute` calls removed;
+`GET/POST /new-registration/{credit,debit}-note` registered alongside
+the other invoice routes with the identical route names and
+`invoices:read` permission the placeholders used, so the sidebar's New
+Registration group needed no change.
+
+**Views**: `resources/views/invoices/new-{credit,debit}-note.blade.php`
+(both new) -- an original-invoice picker (auto-submitting `<select>`,
+the same drill-down pattern `CashFlowViewController`'s own `?project_id=`
+already uses), a read-only summary, and the form itself.
+
+**Tests**: `tests/Feature/Invoice/InvoiceCorrectionViewTest.php` (new,
+10 tests) -- access gates on both pages, the picker scoped to the
+actor's own supplier taxpayer, selecting an invoice rendering its lines
+and remaining-creditable amount, a credit note issued against one line
+of a two-unit original (asserting the resulting `-575.00` correction
+invoice and its `ACTIVE` `invoice_corrections` row), crediting more than
+a line's own quantity rejected, a credit note with nothing credited
+rejected, `invoices:submit` denial, a debit note issued with a free-form
+line, and a debit note with a non-positive quantity rejected. One real
+bug caught by live verification, not by this test suite (fixed
+immediately, with a new test added for the exact path that missed it,
+`test_selecting_an_original_invoice_shows_its_lines_and_remaining_
+creditable_amount`): `remainingCreditableCents()`'s own `WHERE status =
+'ACTIVE'` was ambiguous once joined against `invoices` (both
+`invoice_corrections` and `invoices` have a `status` column), a MySQL
+error the JSON-API-only test suite never exercised because no existing
+test ever selected an original invoice on the GET page.
+
+Live-verified over real HTTP as the demo organisation's own owner
+login: created a real two-unit original invoice and a real customer
+taxpayer via the JSON API, then through the actual Blade forms issued a
+credit note against 1 of the 2 units (confirmed the resulting `-575.00`
+correction invoice, the original's own page listing it, and the
+remaining-creditable figure updating from `NAD 1,150.00` to
+`NAD 575.00`) and a debit note with a free-form surcharge line
+(confirmed the resulting `230.00` correction invoice on the original's
+own page). Removed all of it afterward (both correction invoices, the
+original invoice and all three invoices' lines/certificates/VAT
+transactions, the synthetic customer taxpayer/organisation) to restore
+the normal `DemoSeeder` baseline -- confirmed by re-querying zero
+invoices for the demo organisation and the credit note page showing its
+empty state again.
+
+Verified: full suite 784 tests, 0 regressions.
+
+This closes out every remaining `$plannedRoute` placeholder in
+`routes/web.php`.
