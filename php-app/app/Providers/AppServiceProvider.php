@@ -6,6 +6,8 @@ use App\Integrations\Etariff\EtariffPort;
 use App\Integrations\Etariff\UnavailableEtariffAdapter;
 use App\Integrations\Itas\ItasIdentityPort;
 use App\Integrations\Itas\UnavailableItasIdentityAdapter;
+use App\Integrations\Payment\PaymentConnectorPort;
+use App\Integrations\Payment\SandboxPaymentConnector;
 use App\Models\User;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\Gate;
@@ -20,6 +22,12 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(ItasIdentityPort::class, UnavailableItasIdentityAdapter::class);
         $this->app->bind(EtariffPort::class, UnavailableEtariffAdapter::class);
+        // Unlike Itas/Etariff's own "unconditionally unavailable" stand-in
+        // (no config could ever make those available), SandboxPaymentConnector
+        // is the one real, permanent implementation -- its own internal
+        // service_components guard is what varies, not the bound class. See
+        // App\Integrations\Payment\PaymentConnectorPort's own doc comment.
+        $this->app->bind(PaymentConnectorPort::class, SandboxPaymentConnector::class);
     }
 
     /**
