@@ -14,6 +14,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -190,5 +191,37 @@ class CashFlowViewTest extends TestCase
         $response->assertSee('Foundation work');
         $response->assertSee('Roofing');
         $response->assertSee('NAD 1,500.00'); // cumulative total after both lines
+    }
+
+    /**
+     * Backlog item #10's follow-up (docs/LAUNCH_READINESS_BACKLOG.md,
+     * 2026-09-20): this controller's own doc comment claims its revenue/
+     * cost/budget batching stays a fixed number of queries regardless of
+     * project count -- checked directly at a volume unmistakable enough
+     * that an unfixed N+1 (one extra query per project) can't be missed.
+     */
+    public function test_the_index_query_count_does_not_scale_with_project_count(): void
+    {
+        $org = $this->makeOrganisation('VAT-CFNPLUS1-0001');
+        for ($i = 0; $i < 40; $i++) {
+            $project = $this->makeProject($org['organisation'], $org['owner'], ['name' => "Project {$i}"]);
+            ProjectBudget::create([
+                'id' => (string) Str::uuid(), 'project_id' => $project->id, 'category' => 'TOTAL', 'amount_cents' => 1000000,
+                'approved_amount_cents' => 900000, 'status' => 'APPROVED', 'created_at' => now(),
+            ]);
+            ProjectCost::create([
+                'id' => (string) Str::uuid(), 'project_id' => $project->id, 'cost_type' => 'MANUAL', 'source_id' => "cost-{$i}",
+                'amount_cents' => 400000, 'currency' => 'NAD', 'occurred_at' => now()->toDateString(), 'created_at' => now(),
+            ]);
+            $this->postRevenue($org['organisation'], $project, $org['owner'], 700000);
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($org['owner'])->get('/accounting/cash-flow');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk();
+        $this->assertLessThan(15, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 projects -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

@@ -387,13 +387,32 @@ dependency left on this list are**:
 With that sweep done, **no further buildable-now, no-external-dependency
 item remains on this backlog.**
 
-One narrower item sits between "buildable now" and "needs
-infrastructure" rather than cleanly in either bucket: a real
-production-scale performance/N+1 check, flagged honestly by the
-Concurrent User Simulation pass as untestable against this dev
-environment's small seed data -- needs no external credentials, but does
-need either a much larger synthetic seed or a staging environment closer
-to production sizing to be meaningful.
+**Correction (2026-09-20, same refresh):** an earlier version of this
+section wrongly described the production-scale performance/N+1 check as
+still open. It was already closed on 2026-09-15 -- see item #10's own
+entry above and `docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md`'s
+item #12, both of which this refresh should have cross-checked the first
+time. `database/seeders/SyntheticLoadSeeder.php` (real, already built,
+run on demand) generated 5,000 invoices/2,000 expenses/500 audit
+cases/1,000 documents/200 fixed assets against real MySQL and found 4
+genuine N+1s, all fixed with regression tests. What that pass's own
+seeder did *not* cover -- because the pages didn't exist yet -- is the
+batched-query discipline this session's own new views rely on
+(`SupplierLedgerService`/`CustomerLedgerService`, `BudgetsView
+Controller`, `CashFlowViewController`, `ProjectManagementView
+Controller`, `QuotationService::crossReference()`), each of which
+explicitly claims to batch reads into a fixed number of queries
+regardless of row count but has never been run against real volume to
+confirm that claim. Closed by extending `SyntheticLoadSeeder` with
+quotations/projects/business-parties/purchase-order volume and
+re-running those specific pages against it -- see `docs/MIGRATION_MATRIX.md`'s
+own dated section for the result.
+
+The only remaining half of backlog item #7 (raw throughput/concurrency
+under genuine simultaneous load, as opposed to query-plan/N+1 at volume)
+stays blocked on real load-testing tooling (k6, Apache Bench, or
+similar) run against a non-local target -- neither exists in this
+sandbox, and data volume alone doesn't substitute for it.
 
 Everything else genuinely needs something only NamRA/the deploying
 organisation can supply -- real ITAS credentials, a mail provider, S3/R2

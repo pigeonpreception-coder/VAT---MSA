@@ -11,6 +11,7 @@ use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -214,5 +215,30 @@ class CustomerLedgerViewTest extends TestCase
         $response->assertOk();
         $response->assertSee('<option value="'.$activeCustomer->id.'"', false);
         $response->assertDontSee('<option value="'.$supplierOnly->id.'"', false);
+    }
+
+    /**
+     * Backlog item #10's follow-up (docs/LAUNCH_READINESS_BACKLOG.md,
+     * 2026-09-20): summary()'s own single GROUP BY query has no per-row
+     * query to begin with, but this checks that stays true at volume
+     * rather than assuming it from a code read alone.
+     */
+    public function test_the_index_query_count_does_not_scale_with_customer_or_quotation_count(): void
+    {
+        $org = $this->makeOrganisation('VAT-CLNPLUS1-0001');
+        for ($i = 0; $i < 40; $i++) {
+            $customer = $this->makeCustomer($org['organisation'], "Customer {$i}");
+            for ($q = 0; $q < 3; $q++) {
+                $this->makeQuotation($org['organisation'], $customer, $org['owner'], ['quotation_number' => "QUO-NPLUS1-{$i}-{$q}"]);
+            }
+        }
+
+        DB::enableQueryLog();
+        $response = $this->actingAs($org['owner'])->get('/accounting/customer-ledger');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk();
+        $this->assertLessThan(10, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 customers/120 quotations -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

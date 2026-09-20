@@ -9276,3 +9276,148 @@ Verified: full suite 784 tests, 0 regressions.
 
 This closes out every remaining `$plannedRoute` placeholder in
 `routes/web.php`.
+
+## N+1/query-plan volume testing extended to this session's own new pages (2026-09-20)
+
+Backlog item #10's own "Recommended next step" section (`docs/
+LAUNCH_READINESS_BACKLOG.md`) briefly and wrongly described real
+production-scale performance/N+1 testing as still open. It was already
+closed 2026-09-15 (see this file's own "Consolidated red-team punch
+list: item #12" section above) -- but that closure's own
+`database/seeders/SyntheticLoadSeeder.php` run never touched
+quotations, projects, business parties at volume, or chart-of-accounts/
+journal postings, because the pages reading those tables at list-view
+volume didn't exist yet. This session added several that explicitly
+claim to batch those same reads into a fixed number of queries
+regardless of row count (`SupplierLedgerService`/`CustomerLedgerService`,
+`BudgetsViewController`, `CashFlowViewController`,
+`ProjectManagementViewController`, `QuotationService::crossReference()`)
+-- a claim never checked against real volume until now.
+
+**`database/seeders/SyntheticLoadSeeder.php`** -- extended with a new
+`seedLedgerAndProjectVolume()` method, concentrated on one organisation
+(index 0) rather than spread across all 20: what makes an N+1 visible is
+row count *on one page*, not total rows in the database, and every one
+of these pages is itself organisation-scoped. Adds 200 business parties
+(customers/suppliers/service providers), 200 quotations (a mix of
+statuses, 133 landed `CONVERTED` with a real linked invoice, 20 of those
+further corrected with a real credit note), 200 projects across
+PLANNED/ACTIVE/COMPLETED each with a budget and several costs (half with
+a real REVENUE journal posting), and 200 supplier-tagged expenses. Same
+bulk `DB::table()->insert()` discipline as the rest of the file. Run
+against real MySQL in ~25s total (unchanged from the original run's own
+timing plus this addition).
+
+**Two-pronged verification, matching the 2026-09-15 pass's own
+methodology exactly:**
+
+1. **Query-count regression tests** (the precise, permanent check): 6
+   new tests across `BudgetsViewTest`, `CashFlowViewTest`,
+   `ProjectManagementViewTest`, `QuotationViewTest`,
+   `SupplierLedgerViewTest`, `CustomerLedgerViewTest` -- each seeds 40
+   rows inline (`DB::enableQueryLog()`/`getQueryLog()`, the same
+   mechanism `OperationsViewTest`/`BusinessPartyAndQuotationTest`
+   already established) and asserts the request's total query count
+   stays small and doesn't scale with row count. All passed on first
+   run: Budgets and Cash Flow at 4 queries for 40 projects each,
+   Project Management's Ongoing page likewise, the Converted Quotations
+   into Invoices cross-reference under its own ceiling for 40 converted
+   quotations (20% with a credit note), and Supplier/Customer Ledger
+   (whose `summary()` methods are a single `GROUP BY` query each, with
+   no per-row query to begin with) confirmed to stay that way at
+   volume rather than assumed from the code alone.
+2. **Live-HTTP timing against the real seeded volume** (the same
+   200-row scale, not the lighter 40-row in-test fixture): all seven
+   routes (`/accounting/supplier-ledger`, `/accounting/customer-ledger`,
+   `/accounting/budgets`, `/accounting/cash-flow`,
+   `/project-management/{ongoing,completed}`,
+   `/quotations/converted-invoices`) returned `200` in 20-55ms each as
+   the target organisation's own owner, with the rendered HTML confirmed
+   to contain the actual seeded rows (200 projects on Budgets, 100
+   active projects on Ongoing, 140/183 supplier/customer party mentions
+   on the two ledgers, 133 converted quotations on the cross-reference
+   page) -- not a silently-empty 200.
+
+No N+1 was found this time -- every one of these pages' own batching
+claim held at volume, unlike the 2026-09-15 pass which found 4 genuine
+bugs. That is itself the result, not a non-finding to gloss over: the
+claim was unverified until now, and confirming it holds is exactly what
+closes the gap.
+
+Database reset via `php artisan migrate:fresh --seed` afterward (the
+synthetic seed is on-demand tooling, not a permanent fixture, matching
+the 2026-09-15 precedent) -- confirmed zero `VAT-LOAD%` taxpayers, zero
+projects/quotations/business parties, and the normal 55-invoice
+`DemoSeeder`/`NemaPropertyDevelopersDemoSeeder` baseline restored.
+
+`docs/LAUNCH_READINESS_BACKLOG.md` corrected in the same pass: its
+"Recommended next step" section no longer describes this as open, and
+now says plainly that no further buildable-now, no-external-dependency
+item remains on the backlog.
+
+Verified: full suite 790 tests, 0 regressions.
+
+## N+1/volume stress pass re-run at 15x scale (2026-09-20, same day)
+
+At the user's own explicit request for a heavier stress pass than the
+section above's 200-per-table scale. The request itself named "hundreds
+of billions of transactions" and "global concurrent traffic" as the
+target -- both were pushed back on directly before doing any work,
+since neither is a coherent or achievable target for a bulk `INSERT`
+into a single local MySQL instance (the largest real card networks on
+Earth process on the order of 150-200 billion transactions per *year*,
+not concurrently; genuine high-concurrency support needs horizontal
+scaling, read replicas, caching, and queue-based writes -- an
+architecture initiative, not a seeder change, and already tracked as
+blocked on real load-testing tooling and a non-local target environment
+at backlog item #7). What was agreed instead: a 15x increase on the
+row-volume constants, still a single-tenant/organisation-scoped
+volume-and-N+1 stress test, not a concurrency or multi-tenant-traffic
+simulation.
+
+**`database/seeders/SyntheticLoadSeeder.php`** -- every row-volume
+constant scaled 15x: `INVOICES_TOTAL` 5,000->75,000, `EXPENSES_TOTAL`
+2,000->30,000, `AUDIT_CASES_TOTAL` 500->7,500 (30,000 evidence rows),
+`DOCUMENTS_TOTAL` 1,000->15,000, `FIXED_ASSETS_TOTAL` 200->3,000, and
+the target-organisation `TARGET_ORG_PARTIES`/`_QUOTATIONS`/`_PROJECTS`/
+`_LEDGER_EXPENSES` 200->3,000 each (insert chunk sizes for the
+target-org loops bumped 100->500 to match). Deliberately left
+unscaled: `TAXPAYER_COUNT`/`USERS_PER_TAXPAYER`/`NAMRA_STAFF_COUNT` --
+these control how many organisations exist, not how many rows land on
+any one organisation-scoped page, which is what every page this seed
+exercises actually reads.
+
+Run against real MySQL in 47s (vs. ~25s for the prior 1x-scale run --
+sublinear, consistent with the same fixed-per-chunk overhead spread
+across proportionally larger chunks). Confirmed via direct DB query:
+77,355 invoices (75,000 load + 55 baseline), 33,000 expenses, 7,500
+audit cases, 15,000 documents, 3,000 fixed assets, and on the target
+organisation 3,000 business parties/quotations/projects each (2,000
+quotations landed `CONVERTED`) and 1,500 `ACTIVE` projects.
+
+**Live-HTTP timing at the new 15x volume**, same seven routes as the
+section above: `/accounting/supplier-ledger` 110ms, `/accounting/
+customer-ledger` 76ms, `/accounting/budgets` 73ms, `/accounting/
+cash-flow` 51ms, `/project-management/ongoing` 58ms, `/project-
+management/completed` 55ms, `/quotations/converted-invoices` 58ms --
+roughly 2-3x slower than the 1x-scale run's own 20-55ms for 15x more
+rows on each page, i.e. sublinear growth, exactly what a genuinely
+fixed-query-count design should show (the extra time is larger
+result-set transfer/serialization, not more queries). The
+national-scope pages that read across all 20 taxpayers (`/invoices`,
+`/audit-cases`, `/documents`, `/operations`) were re-checked too, as
+the NamRA admin login, all returning `200` in 19-133ms against the full
+77k/33k/7.5k/15k row counts. All rendered their actual seeded rows
+(confirmed by grepping the response body), not a silently-empty `200`.
+
+No N+1 regression found at this heavier scale either -- the same
+positive result as the 1x-scale pass, now confirmed to hold an order of
+magnitude further out.
+
+Database reset via `php artisan migrate:fresh --seed` afterward, same
+as every prior use of this seeder -- confirmed zero `VAT-LOAD%`
+taxpayers and the normal 55-invoice baseline restored.
+
+Verified: full suite 790 tests, 0 regressions (unchanged from the
+section above -- this pass added no new code, only a heavier run of
+already-covered ground).
