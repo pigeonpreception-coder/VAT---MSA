@@ -9461,3 +9461,39 @@ by this change -- the exact failure mode the earlier attempt hit.
 Screenshots captured both states.
 
 Verified: full suite 790 tests, 0 regressions.
+
+## Credit note cumulative-credit-cap race fixed (2026-09-20)
+
+A focused red-team follow-up on this session's own newest code (the New
+Credit Note form and the Project Management transitions -- neither had a
+dedicated adversarial pass yet) found and fixed a genuine TOCTOU race in
+`InvoiceService::submit()`: the cumulative-credit-cap check (no credit
+note, or sequence of them, may cumulatively exceed the original invoice's
+own value/VAT) ran as a plain read *before* the method's own
+`DB::transaction()` opened, with no lock -- two concurrent credit notes
+against the same original, each individually within the cap, could both
+pass on a stale read and together exceed it. Unlike the idempotency-key
+and invoice-number races the same method already guards a few lines
+below, there is no `UNIQUE` constraint that can backstop an aggregate
+`SUM()`, so nothing would have caught this.
+
+Fixed by moving the check inside the transaction under
+`Invoice::lockForUpdate()` on the original invoice
+(`InvoiceService::enforceCumulativeCreditCap()`) -- a different shape of
+race than this codebase's usual guarded-UPDATE/affected-row-count
+convention (RT-020), which only fits a single row's own state transition,
+not a cap over a set of other rows. See
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-CORRECTION-RACE.md` for the full
+finding, live pre-fix/post-fix reproduction, and the one area checked
+with no finding (Project Management's own new transitions, already
+race-safe via the established pattern) plus one documented, deliberately
+unfixed limitation (per-line credit-quantity tracking across multiple
+credit notes, inherited from the original source's own aggregate-only cap
+design, not a migration-introduced gap).
+
+Permanent regression test:
+`tests/Feature/Invoice/InvoiceLifecycleTest.php`'s
+`test_a_credit_note_that_races_a_concurrent_credit_note_does_not_jointly_exceed_the_original_invoice_value`,
+confirmed to fail against the pre-fix code and pass against the fix.
+
+Verified: full suite 791 tests, 0 regressions.

@@ -308,11 +308,29 @@ section -- so further narrow, module-by-module sweeps remain buildable-
 now if even deeper assurance is wanted. But the phase-by-phase gap this
 item was tracking as of 2026-09-13 is closed.
 
-**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (14 files);
+**Follow-up (2026-09-20, user requested "a deeper security sweep"):**
+targeted the modules built this session that had no dedicated adversarial
+pass yet (they didn't exist when the 14 reports above ran) -- the New
+Credit Note/New Debit Note flow and the Project Management transitions.
+Found and fixed one genuine High-severity finding: `InvoiceService::submit()`'s
+credit-note cumulative-credit-cap check ran before its own `DB::transaction()`
+opened, with no lock -- a TOCTOU race with no `UNIQUE` constraint to
+backstop it (unlike the idempotency-key/invoice-number races the same
+method already guards), so two concurrent credit notes against the same
+original invoice could together exceed its certified value/VAT. Fixed
+with a `lockForUpdate()` inside the transaction; see
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-CORRECTION-RACE.md` for the full
+finding, live pre-fix/post-fix reproduction, the one area checked with no
+finding (Project Management's transitions, already race-safe), and one
+documented, deliberately-unfixed limitation (per-line credit-quantity
+tracking across multiple credit notes -- inherited from the original
+source's own aggregate-only cap design, not a migration-introduced gap).
+
+**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (15 files);
 `docs/MIGRATION_MATRIX.md`'s own dated sections for each pass; full suite
-645 tests, 0 regressions as of the latest security-review pass (2026-09-15;
-784 tests, 0 regressions as of 2026-09-20 after the unrelated
-`$plannedRoute` sweep in #2 above added further coverage).
+645 tests, 0 regressions as of the 2026-09-15 security-review pass; 784
+tests as of the 2026-09-20 `$plannedRoute` sweep in #2 above; 791 tests,
+0 regressions as of this follow-up.
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made

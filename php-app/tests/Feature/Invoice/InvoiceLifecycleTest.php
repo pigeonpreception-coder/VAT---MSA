@@ -201,6 +201,85 @@ class InvoiceLifecycleTest extends TestCase
         $this->assertDatabaseCount('ledger_entries', 2);
     }
 
+    /**
+     * Broader security-sweep follow-up (2026-09-20), on the InvoiceService
+     * this session's own New Credit Note form (InvoiceCorrectionViewController)
+     * reuses unchanged: resolveOriginalInvoice()'s cumulative-credit-cap
+     * check used to run *before* submit()'s own DB::transaction even
+     * opened -- a plain read with no lock. Two concurrent credit notes
+     * against the same original invoice, each individually within the cap,
+     * could both read the same pre-commit "prior credited" total, both
+     * pass, and together exceed the original invoice's value -- and unlike
+     * the idempotency-key/invoice-number races elsewhere in this method,
+     * there is no UNIQUE constraint backstopping an aggregate SUM, so nothing
+     * would have caught it. Fixed by moving the check into the transaction
+     * under `lockForUpdate()` on the original invoice
+     * (InvoiceService::enforceCumulativeCreditCap()). Reproduced the same
+     * way as this file's own cancellation-race test above: a `DB::listen()`
+     * hook inserts a real, fully-formed "concurrent" ACTIVE credit note for
+     * 690.00 the instant this request's own lock-acquiring SELECT fires --
+     * so by the time the fresh post-lock SUM query runs, a second 690.00
+     * credit note (combined: 1,380.00) already exists against a 1,150.00
+     * original, which the fix must now catch (pre-fix, the earlier,
+     * pre-transaction read would have missed it and let this request's own
+     * 690.00 land too).
+     */
+    public function test_a_credit_note_that_races_a_concurrent_credit_note_does_not_jointly_exceed_the_original_invoice_value(): void
+    {
+        $ctx = $this->certifyInvoice();
+
+        $raced = false;
+        DB::listen(function ($query) use (&$raced, $ctx) {
+            if ($raced || ! str_contains($query->sql, 'for update')) {
+                return;
+            }
+            $raced = true;
+            $concurrentInvoiceId = (string) Str::uuid();
+            DB::table('invoices')->insert([
+                'id' => $concurrentInvoiceId, 'invoice_number' => 'CN-RACE-'.Str::random(6), 'document_type' => 'CREDIT_NOTE',
+                'source_system' => 'erp-test', 'source_document_id' => 'doc-race-'.Str::random(8),
+                'supplier_taxpayer_id' => $ctx['supplier']['taxpayer']->id, 'supplier_name' => $ctx['supplier']['taxpayer']->legal_name,
+                'supplier_vat_number' => $ctx['supplier']['taxpayer']->vat_number, 'customer_taxpayer_id' => $ctx['customer']['taxpayer']->id,
+                'customer_name' => $ctx['customer']['taxpayer']->legal_name, 'customer_vat_number' => $ctx['customer']['taxpayer']->vat_number,
+                'issue_date' => '2026-09-05', 'currency' => 'NAD', 'line_net_cents' => -60000, 'tax_cents' => -9000, 'total_cents' => -69000,
+                'status' => 'MATCHED', 'risk_level' => 'LOW', 'payload_hash' => hash('sha256', 'race-'.$concurrentInvoiceId),
+                'transaction_id' => (string) Str::uuid(), 'certificate_id' => (string) Str::uuid(),
+                'verification_token' => 'vfy_'.str_replace('-', '', (string) Str::uuid()), 'created_at' => now(), 'certified_at' => now(),
+            ]);
+            DB::table('invoice_corrections')->insert([
+                'id' => (string) Str::uuid(), 'original_invoice_id' => $ctx['invoiceId'], 'correction_invoice_id' => $concurrentInvoiceId,
+                'correction_type' => 'CREDIT_NOTE', 'reason_code' => 'PRICING_ERROR', 'reason' => 'Concurrent credit note landing mid-request.',
+                'status' => 'ACTIVE', 'created_by' => $ctx['supplier']['owner']->id, 'created_at' => now(),
+            ]);
+        });
+
+        $originalInvoice = Invoice::findOrFail($ctx['invoiceId']);
+        $response = $this->actingAs($ctx['supplier']['owner'])->postJson('/api/v1/invoices', [
+            'schema_version' => '1.0.0', 'invoice_number' => 'CN-'.Str::random(8), 'document_type' => 'CREDIT_NOTE',
+            'source' => ['system_id' => 'erp-test', 'document_id' => 'doc-'.Str::random(8), 'submitted_at' => '2026-09-05T09:00:00Z'],
+            'supplier' => ['name' => $ctx['supplier']['taxpayer']->legal_name, 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => $ctx['supplier']['taxpayer']->vat_number]]],
+            'customer' => ['name' => $ctx['customer']['taxpayer']->legal_name, 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => $ctx['customer']['taxpayer']->vat_number]]],
+            'issue_date' => '2026-09-05', 'currency' => 'NAD',
+            'lines' => [['line_number' => 1, 'description' => 'Consulting services', 'quantity' => '0.6', 'unit_code' => 'EA', 'unit_price' => '-1000.00', 'net_amount' => '-600.00', 'tax' => ['category' => 'STANDARD', 'rate' => '15.00', 'taxable_amount' => '-600.00', 'tax_amount' => '-90.00']]],
+            'totals' => ['line_net_amount' => '-600.00', 'tax_exclusive_amount' => '-600.00', 'tax_amount' => '-90.00', 'tax_inclusive_amount' => '-690.00', 'payable_amount' => '-690.00'],
+            'original_document_reference' => ['vat_msa_invoice_id' => $ctx['invoiceId'], 'source_document_id' => $originalInvoice->source_document_id, 'reason_code' => 'PRICING_ERROR', 'reason' => 'Agreed pricing correction.'],
+        ], ['Idempotency-Key' => 'test-idem-race-'.Str::random(20)]);
+
+        // The sabotage insert lands inside this request's own DB::transaction (there is no
+        // `lockForUpdate` query -- and so no hook trigger, no sabotage, no rejection -- at all
+        // on the pre-fix code path, which is itself the regression this test is pinned to), so
+        // the RepositoryConflictException the fix throws rolls the sabotage row back out along
+        // with this request's own attempted one. What proves the fix is the 409 itself: the
+        // fresh, post-lock sum query inside enforceCumulativeCreditCap() saw the sabotage
+        // row's -690.00 and combined it with this request's own -690.00 to correctly compute
+        // -1,380.00 against a 1,150.00 original, rather than the pre-fix code's stale,
+        // pre-transaction read of "nothing credited yet" that would have missed it entirely.
+        $this->assertTrue($raced, 'The DB::listen() hook must have fired to simulate the race (it never fires at all on the pre-fix code path, which has no lockForUpdate query).');
+        $response->assertStatus(409);
+        $this->assertDatabaseCount('invoice_corrections', 0);
+        $this->assertSame(0, Invoice::where('document_type', 'CREDIT_NOTE')->count());
+    }
+
     public function test_cancellation_requires_permission_a_valid_reason_and_step_up_confirmation(): void
     {
         $ctx = $this->certifyInvoice();
