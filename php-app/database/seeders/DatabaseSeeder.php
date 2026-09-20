@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             IdentityProviderSeeder::class,
             AuthorityGovernanceSeeder::class,
+            SecurityDetectionRuleSeeder::class,
             VatRuleSeeder::class,
             TaxRuleSetSeeder::class,
             LicensePlanSeeder::class,

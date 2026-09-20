@@ -7,6 +7,7 @@ use App\Integrations\Etariff\UnavailableEtariffAdapter;
 use App\Integrations\Itas\ItasIdentityPort;
 use App\Integrations\Itas\UnavailableItasIdentityAdapter;
 use App\Models\User;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -37,9 +38,24 @@ class AppServiceProvider extends ServiceProvider
          * `User::hasAppPermission()` covers both halves of the source's own
          * `hasPermission` (static role grants and organisation-defined
          * custom-role dynamic grants) -- see that method's own doc comment.
+         *
+         * The denial message is ported verbatim from lib/domain/access.ts's
+         * own `requirePermission` ("Role ${user.role} does not have
+         * ${permission} permission.") rather than left as Laravel's generic
+         * "This action is unauthorized." default -- App\Support\Security\
+         * SecurityEventRecorder::recordAuthorizationDenial (reached via
+         * bootstrap/app.php's own AccessDeniedHttpException handler) regexes
+         * the denied permission back out of this exact wording, matching
+         * the source's own recordAuthorizationDenial in lib/security/
+         * request.ts. Without this fix that regex never matched anything
+         * real, silently recording every denial as a generic 'ACCESS_DENIED'.
          */
         Gate::define('permission', function (User $user, string $permission) {
-            return $user->isActive() && $user->hasAppPermission($permission);
+            if ($user->isActive() && $user->hasAppPermission($permission)) {
+                return true;
+            }
+
+            return Response::deny("Role {$user->role} does not have {$permission} permission.");
         });
     }
 }

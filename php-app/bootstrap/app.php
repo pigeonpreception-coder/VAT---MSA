@@ -1,6 +1,10 @@
 <?php
 
+use App\Exceptions\RateLimitExceededException;
+use App\Http\Middleware\EnforceRateLimit;
 use App\Http\Middleware\EnsureFreshStepUp;
+use App\Support\Security\RequestContext;
+use App\Support\Security\SecurityEventRecorder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -21,7 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // (Illuminate\Auth\Middleware\RequirePassword) with a real,
         // server-verified TOTP freshness check -- see
         // App\Http\Middleware\EnsureFreshStepUp's own doc comment.
-        $middleware->alias(['step-up' => EnsureFreshStepUp::class]);
+        $middleware->alias(['step-up' => EnsureFreshStepUp::class, 'rate-limit' => EnforceRateLimit::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Red team finding RT-002 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md):
@@ -51,6 +55,28 @@ return Application::configure(basePath: dirname(__DIR__))
         // (PlatformResourceException and friends), which already render
         // cleanly on their own.
         $exceptions->render(function (AccessDeniedHttpException $e, Request $request) {
+            // Ported from lib/security/request.ts's recordAuthorizationDenial
+            // (SECURITY_GAP_ASSESSMENT.md item #4), wired centrally here
+            // rather than at every individual controller's own $this->
+            // authorize() call site -- this handler already catches every
+            // AuthorizationException in the app (see this callback's own
+            // doc comment above for why it's type-hinted against
+            // AccessDeniedHttpException, not AuthorizationException
+            // itself), so it is the one place a single call reaches all of
+            // them. Extracts the denied permission from the message the
+            // same way the source's own regex does, matching Controller::
+            // authorize()'s Gate-generated "does not have X permission"
+            // wording.
+            $permissionMatch = [];
+            preg_match('/does not have (\S+) permission/', $e->getMessage(), $permissionMatch);
+            \App\Support\Security\SecurityEventRecorder::recordAuthorizationDenial(
+                $request->user()?->id,
+                \App\Support\Security\RequestContext::sourceToken($request),
+                \App\Support\Security\RequestContext::correlationId($request),
+                $permissionMatch[1] ?? 'ACCESS_DENIED',
+                403,
+            );
+
             if ($request->expectsJson()) {
                 return response()->json([
                     'code' => 'FORBIDDEN',
@@ -60,6 +86,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response()->view('errors.403', ['message' => $e->getMessage()], 403);
         });
+
+        // RateLimitExceededException needs no explicit registration here --
+        // like RepositoryConflictException/PlatformResourceException/etc.,
+        // it renders itself (Laravel calls an exception's own render()
+        // method automatically); App\Http\Middleware\EnforceRateLimit is
+        // what records the security event before rethrowing it.
 
         // Red-team finding RT-001 (VAT-MSA Resilience Audit, 2026-09-09):
         // ExpenseService::create() had a real DB-level unique constraint

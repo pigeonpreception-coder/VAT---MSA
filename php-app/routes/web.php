@@ -85,6 +85,7 @@ use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
+use App\Http\Controllers\Security\SecurityOperationsViewController;
 use App\Http\Controllers\VatRule\VatRuleController;
 use App\Http\Controllers\Workflow\WorkflowAuthoringViewController;
 use App\Http\Controllers\Workflow\WorkflowController;
@@ -638,15 +639,37 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/security/sessions/revoke-others', [MfaViewController::class, 'revokeOtherSessions'])->name('security.sessions.revoke-others');
     Route::post('/security/sessions/{sessionId}/revoke', [MfaViewController::class, 'revokeSession'])->name('security.sessions.revoke');
 
+    // Security Operations Centre view -- ported from lib/data/security-
+    // repository.ts's getSOCQueue/getIncidentDetail/createIncident/
+    // containIncident/revokeIncidentAccess/closeIncident (see
+    // App\Http\Controllers\Security\SecurityOperationsViewController's own
+    // doc comment). Fills NavigationSeeder's own pre-existing nav-security
+    // item (`href: '/security'`), which had no route behind it until now.
+    // Every incident-management write wears 'step-up', matching this
+    // migration's own established posture for every other privileged
+    // command (taxpayer suspension, VAT-rule approval, licensing state,
+    // workflow authoring, ...) even though the source itself has no
+    // equivalent step-up gate here.
+    Route::get('/security', [SecurityOperationsViewController::class, 'index'])->name('security.operations');
+    Route::post('/security/incidents', [SecurityOperationsViewController::class, 'create'])
+        ->name('security.incidents.store')->middleware('step-up');
+    Route::post('/security/incidents/{incident}/containment', [SecurityOperationsViewController::class, 'contain'])
+        ->name('security.incidents.contain')->middleware('step-up');
+    Route::post('/security/incidents/{incident}/access-revocation', [SecurityOperationsViewController::class, 'revokeAccess'])
+        ->name('security.incidents.revoke-access')->middleware('step-up');
+    Route::post('/security/incidents/{incident}/closure', [SecurityOperationsViewController::class, 'close'])
+        ->name('security.incidents.close')->middleware('step-up');
+
     // Phase 8: organisations, taxpayers, registration applications, branches,
     // memberships -- URL shapes kept 1:1 with the source's app/api/v1/**
     // routes for traceability, even though this is Blade/session-driven
     // rather than a separate token-authenticated API surface.
     Route::prefix('api/v1')->group(function () {
         Route::get('/registration-applications', [RegistrationApplicationController::class, 'index']);
-        Route::post('/registration-applications', [RegistrationApplicationController::class, 'store']);
+        Route::post('/registration-applications', [RegistrationApplicationController::class, 'store'])
+            ->middleware('rate-limit:registration');
         Route::post('/registration-applications/{id}/decision', [RegistrationApplicationController::class, 'decision'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:registration']);
 
         // getIdentityFoundationSnapshot -- Module 1's own dashboard
         // aggregate (organisations + registrations + identity providers +
@@ -668,9 +691,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // App\Http\Middleware\EnsureFreshStepUp), so this is the real,
         // unconditional step-up gate throughout the app now, not a
         // password-reconfirmation stand-in.
-        Route::post('/identity/mfa/totp', [MfaController::class, 'enroll']);
-        Route::post('/identity/mfa/totp/verification', [MfaController::class, 'verifyEnrollment']);
-        Route::post('/identity/step-up', [MfaController::class, 'confirmStepUp']);
+        Route::post('/identity/mfa/totp', [MfaController::class, 'enroll'])
+            ->middleware('rate-limit:identity');
+        Route::post('/identity/mfa/totp/verification', [MfaController::class, 'verifyEnrollment'])
+            ->middleware('rate-limit:identity');
+        Route::post('/identity/step-up', [MfaController::class, 'confirmStepUp'])
+            ->middleware('rate-limit:identity');
         Route::get('/identity/assurance', [MfaController::class, 'assurance']);
 
         Route::get('/organisations', [OrganisationController::class, 'index']);
@@ -688,24 +714,27 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/organisations/{id}', [OrganisationController::class, 'show']);
 
         Route::get('/organisations/{organisation}/branches', [BranchController::class, 'index']);
-        Route::post('/organisations/{organisation}/branches', [BranchController::class, 'store']);
-        Route::patch('/organisations/{organisation}/branches/{branch}', [BranchController::class, 'update']);
+        Route::post('/organisations/{organisation}/branches', [BranchController::class, 'store'])
+            ->middleware('rate-limit:identity');
+        Route::patch('/organisations/{organisation}/branches/{branch}', [BranchController::class, 'update'])
+            ->middleware('rate-limit:identity');
 
         Route::post('/organisations/{organisation}/memberships', [MembershipController::class, 'store'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:identity']);
 
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:identity']);
 
         // Phase 9: invoice certification and VAT. Kept 1:1 with the source's
         // app/api/v1/invoices/** shape -- see InvoiceController's own doc
         // comment; the standalone VAT-rule evaluate/propose/approve routes
         // remain deferred, tracked in docs/MIGRATION_MATRIX.md.
         Route::get('/invoices', [InvoiceController::class, 'index']);
-        Route::post('/invoices', [InvoiceController::class, 'store']);
+        Route::post('/invoices', [InvoiceController::class, 'store'])
+            ->middleware('rate-limit:invoice');
         Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
         Route::post('/invoices/{id}/cancellation', [InvoiceController::class, 'cancel'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:invoice']);
         Route::get('/invoices/{id}/vat-explanation', [InvoiceController::class, 'vatExplanation']);
         Route::get('/invoices/{id}/transaction-timeline', [InvoiceController::class, 'transactionTimeline']);
 
@@ -715,10 +744,10 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // are step-up gated exactly like invoice cancellation above.
         Route::get('/vat-rules', [VatRuleController::class, 'index']);
         Route::post('/vat-rules', [VatRuleController::class, 'store'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:vat-rule']);
         Route::get('/vat-rules/evaluate', [VatRuleController::class, 'evaluate']);
         Route::post('/vat-rules/{id}/approval', [VatRuleController::class, 'approve'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:vat-rule']);
 
         // Phase 10 (slice 1 of Accounting/commercial): business parties and
         // quotations. Kept 1:1 with the source's app/api/v1/business-parties/**
@@ -956,9 +985,9 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/licensing/usage', [LicensingController::class, 'usage']);
         Route::get('/licensing/license', [LicensingController::class, 'license']);
         Route::post('/licensing/state', [LicensingController::class, 'state'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/licensing/upgrade', [LicensingController::class, 'upgrade'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
 
         // Phase 12 slice 2: organisation administration/employees (also
         // closing out "the rest of Phase 8" -- employees, organisation-
@@ -971,22 +1000,22 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // rest of Access governance (certifyQuarterlyAccess and beyond)
         // remain deferred -- see docs/MIGRATION_MATRIX.md.
         Route::post('/organisations/employees', [OrganisationAdminController::class, 'storeEmployee'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/organisations/employees/{id}/activation', [OrganisationAdminController::class, 'activateEmployee'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/organisations/employees/{id}/termination', [OrganisationAdminController::class, 'terminateEmployee'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/organisations/administrators', [OrganisationAdminController::class, 'storeAdministrator'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/organisations/roles', [OrganisationAdminController::class, 'storeRole'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         // GET /organisations/capabilities is registered earlier, above the
         // /organisations/{id} wildcard -- see that route's comment.
         Route::post('/organisations/capabilities', [OrganisationAdminController::class, 'storeCapability'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::get('/access-reviews', [AccessGovernanceController::class, 'listAccessReviews']);
         Route::post('/access-reviews', [OrganisationAdminController::class, 'storeAccessReview'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
 
         // Phase 12 slice 3: portal navigation (getEffectiveNavigation/
         // getNavigationChildren/getNavigationItemActions/
@@ -1013,15 +1042,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // requireStepUp call); every decide/certify/revoke/offboard
         // command is.
         Route::get('/access-requests', [AccessGovernanceController::class, 'listAccessRequests']);
-        Route::post('/access-requests', [AccessGovernanceController::class, 'storeAccessRequest']);
+        Route::post('/access-requests', [AccessGovernanceController::class, 'storeAccessRequest'])
+            ->middleware('rate-limit:control-plane');
         Route::post('/access-requests/{id}/decision', [AccessGovernanceController::class, 'decideAccessRequest'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/access-reviews/{id}/certifications', [AccessGovernanceController::class, 'storeCertification'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/access-grants/revocation', [AccessGovernanceController::class, 'storeRevocation'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/organisations/offboarding', [AccessGovernanceController::class, 'storeOffboarding'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
 
         // Phase 12 slice 5: the workflow engine (Module 8 Phase C --
         // createWorkflowDraft/publishWorkflowVersion/assignWorkflow/
@@ -1031,19 +1061,20 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // dry-run has no side effects); every other write command is.
         Route::get('/workflows', [WorkflowController::class, 'listWorkflows']);
         Route::post('/workflows', [WorkflowController::class, 'storeWorkflow'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/workflows/versions/{id}/publication', [WorkflowController::class, 'publishVersion'])
-            ->middleware('step-up');
-        Route::post('/workflows/versions/{id}/test', [WorkflowController::class, 'testVersion']);
+            ->middleware(['step-up', 'rate-limit:control-plane']);
+        Route::post('/workflows/versions/{id}/test', [WorkflowController::class, 'testVersion'])
+            ->middleware('rate-limit:control-plane');
         Route::post('/workflows/instances', [WorkflowController::class, 'storeInstance'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/workflow-tasks/{id}/decision', [WorkflowController::class, 'decideTask'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::get('/workflows/delegations', [WorkflowController::class, 'delegations']);
         Route::post('/workflows/delegations', [WorkflowController::class, 'storeDelegation'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
         Route::post('/workflows/delegations/{id}/revocation', [WorkflowController::class, 'revokeDelegation'])
-            ->middleware('step-up');
+            ->middleware(['step-up', 'rate-limit:control-plane']);
 
         // getAdministrationSnapshot's own full, unsliced route -- the
         // fixed-list dashboard aggregate every other GET-list route
