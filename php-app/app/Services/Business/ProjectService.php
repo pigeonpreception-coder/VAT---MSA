@@ -64,6 +64,80 @@ class ProjectService
     }
 
     /**
+     * Not ported from the source (business-repository.ts's own createProject
+     * always leaves a project at 'PLANNED' with no further transition
+     * anywhere in that file or its own UI) -- a genuine gap, not a silent
+     * design change: 'PLANNED'/'ACTIVE'/'COMPLETED' are already read back
+     * as distinct statuses (App\Http\Controllers\Operations\
+     * ErpViewController's own activeProjects count already treats
+     * 'PLANNED' and 'ACTIVE' as two different, coexisting states), but
+     * nothing in the ported service ever moved a project between them, so
+     * every project already created here permanently reads 'PLANNED'.
+     * Mirrors PurchaseOrderService's own guarded single-step transition
+     * pattern (conditional UPDATE, zero affected rows means a concurrent
+     * change beat this one) rather than PurchaseOrderService's own
+     * validated payload for a transition that carries no fields.
+     *
+     * @return array<string, mixed>
+     */
+    public function activate(string $id, User $actor, string $idempotencyKey, string $correlationId, ?string $requestedOrganisationId): array
+    {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
+        $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
+        $project = $this->loadProject($id, $organisation->id);
+        $requestHash = CommandLedger::requestHash(['organisation_id' => $organisation->id, 'project_id' => $id, 'action' => 'ACTIVATE']);
+        $prior = CommandLedger::prior($actor->id, 'ACTIVATE_PROJECT', $idempotencyKey, $requestHash);
+        if ($prior) {
+            return $this->findOrFail($prior, $organisation->id);
+        }
+        if ($project->status !== 'PLANNED') {
+            throw new RepositoryConflictException("Only a planned project can be activated; {$id} is currently {$project->status}.");
+        }
+
+        $now = now();
+        DB::transaction(function () use ($id, $organisation, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
+            $updated = Project::where('id', $id)->where('status', 'PLANNED')->update(['status' => 'ACTIVE', 'updated_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Project {$id} was changed by another action; reload and try again.");
+            }
+            CommandLedger::record($actor->id, 'ACTIVATE_PROJECT', $idempotencyKey, $requestHash, 'PROJECT', $id, $now);
+            CommandLedger::outbox('PROJECT', $id, 'ProjectActivated', $organisation->id, ['project_id' => $id, 'organisation_id' => $organisation->id, 'correlation_id' => $correlationId], $now);
+            AuditService::append($actor, 'PROJECT_ACTIVATED', 'PROJECT', $id, ['organisationId' => $organisation->id, 'correlationId' => $correlationId], $now);
+        });
+
+        return $this->findOrFail($id, $organisation->id);
+    }
+
+    /** Same gap and same guarded single-step pattern as activate() above, for the project's final transition. @return array<string, mixed> */
+    public function complete(string $id, User $actor, string $idempotencyKey, string $correlationId, ?string $requestedOrganisationId): array
+    {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
+        $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
+        $project = $this->loadProject($id, $organisation->id);
+        $requestHash = CommandLedger::requestHash(['organisation_id' => $organisation->id, 'project_id' => $id, 'action' => 'COMPLETE']);
+        $prior = CommandLedger::prior($actor->id, 'COMPLETE_PROJECT', $idempotencyKey, $requestHash);
+        if ($prior) {
+            return $this->findOrFail($prior, $organisation->id);
+        }
+        if ($project->status !== 'ACTIVE') {
+            throw new RepositoryConflictException("Only an active project can be completed; {$id} is currently {$project->status}.");
+        }
+
+        $now = now();
+        DB::transaction(function () use ($id, $organisation, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
+            $updated = Project::where('id', $id)->where('status', 'ACTIVE')->update(['status' => 'COMPLETED', 'updated_at' => $now]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Project {$id} was changed by another action; reload and try again.");
+            }
+            CommandLedger::record($actor->id, 'COMPLETE_PROJECT', $idempotencyKey, $requestHash, 'PROJECT', $id, $now);
+            CommandLedger::outbox('PROJECT', $id, 'ProjectCompleted', $organisation->id, ['project_id' => $id, 'organisation_id' => $organisation->id, 'correlation_id' => $correlationId], $now);
+            AuditService::append($actor, 'PROJECT_COMPLETED', 'PROJECT', $id, ['organisationId' => $organisation->id, 'correlationId' => $correlationId], $now);
+        });
+
+        return $this->findOrFail($id, $organisation->id);
+    }
+
+    /**
      * Acts on the project's one 'TOTAL' budget row -- the only category
      * createProject ever inserts. Maker-checker: the project's own manager
      * (set to whoever called create()) cannot approve their own project's

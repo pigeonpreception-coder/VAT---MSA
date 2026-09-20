@@ -9068,3 +9068,102 @@ zero quotations/invoices/business parties for the demo organisation
 and the page showing the empty state again.
 
 Verified: full suite 758 tests, 0 regressions.
+
+## New feature: Project Management (Create New Project, Ongoing Project Reports, Completed Projects) (2026-09-20)
+
+Closes all three Project Management `$plannedRoute` placeholders in one
+pass. Each claimed "No dedicated project domain model exists in the
+platform today" -- stale, the same class of gap Budgets/Cash Flow Projects
+closed: `App\Models\Project`/`ProjectBudget`/`ProjectCost` and
+`App\Services\Business\ProjectService::create()` already exist, already
+validated by `BusinessValidator::project()`, already exercised end to end
+by `tests/Feature/Business/ProjectTest.php`, with no Blade UI reaching
+them. The Create New Project placeholder's own proposed field list
+("description, location, ... expected revenue, category, VAT treatment")
+is wider than the ported `projects` table actually carries (code, name,
+customer, currency, dates, budget, manager) -- the new form captures
+exactly what the real domain model supports, not the placeholder's
+aspirational superset, the same call `BudgetsViewController` made rather
+than inventing columns nothing else reads.
+
+One genuine gap, not just a missing view: `ProjectService::create()`
+always leaves a project at `PLANNED`, and nothing anywhere in the ported
+source (`lib/data/business-repository.ts`) ever moves it further --
+confirmed by a full-repo grep. `App\Http\Controllers\Operations\
+ErpViewController` already reads `PLANNED` and `ACTIVE` as two distinct,
+coexisting project states, so "Ongoing Project Reports" (active projects)
+and "Completed Projects" (finished projects) were structurally
+unreachable: every project ever created would stay `PLANNED` forever.
+Closing this needed two new, not-ported service methods:
+
+**`app/Services/Business/ProjectService.php`** -- new `activate(string
+$id, ...)` (`PLANNED` -> `ACTIVE`) and `complete(string $id, ...)`
+(`ACTIVE` -> `COMPLETED`), each mirroring `PurchaseOrderService`'s own
+guarded single-step transition pattern exactly (a conditional `UPDATE`
+scoped to the expected prior status; zero affected rows means a
+concurrent change beat this one and raises a conflict, not a silent
+no-op), with the same `CommandLedger`/audit/outbox recording every other
+mutation in this file already has. No self-review restriction (unlike
+`approveBudget`'s maker-checker guard) -- this is a plain lifecycle
+progression, not a financial approval.
+
+**`app/Http/Controllers/Business/ProjectController.php`** -- new
+`activate()`/`complete()` JSON actions (`projects:manage`), and
+**`routes/web.php`** -- two new routes (`POST /api/v1/projects/{id}
+/activation` and `.../completion`) added directly below the existing
+Phase 10 projects block, with a comment marking them as not part of that
+block's "kept 1:1 with the source" claim, so the JSON API stays testable
+and consistent with every other `ProjectService` method without
+misrepresenting what was actually ported.
+
+**`app/Http/Controllers/Business/ProjectManagementViewController.php`**
+(new) -- `newProject()` (planned-projects register + create form),
+`store()` (calls `ProjectService::create()`), `activate()` (calls
+`ProjectService::activate()`, redirects to Ongoing), `ongoing()`
+(active-projects list), `complete()` (calls `ProjectService::complete()`,
+redirects to Completed), `completed()` (read-only finished-projects
+list). `ongoing()`/`completed()` share a private `presentProjects()`
+that batches revenue (`REVENUE`-type `journal_lines` tagged to the
+project)/cost (`ProjectCost`)/budget (`ProjectBudget`) into three
+organisation-wide queries regardless of row count -- the exact
+N+1-avoidance shape `BudgetsViewController`/`CashFlowViewController`'s
+own index already established, never `ProjectService::profitability()`
+called once per row.
+
+**Views**: `resources/views/project-management/{new,ongoing,completed}
+.blade.php` (all new). `new.blade.php` lists planned projects with an
+Activate action and the create form; `ongoing.blade.php` lists active
+projects with approved budget/revenue/cost/profit and a Mark Completed
+action; `completed.blade.php` is a read-only summary with no actions.
+
+**Routes**: `routes/web.php` -- the three `$plannedRoute` calls removed;
+`GET /project-management/{new,ongoing,completed}`, `POST
+/project-management`, and `POST /project-management/{id}/{activation,
+completion}` registered with the identical route names and
+`projects:read` permission the placeholders used, so the sidebar's
+Project Management group needed no change.
+
+**Tests**: `tests/Feature/Business/ProjectTest.php` -- 3 new tests for
+`activate()`/`complete()` (a full `PLANNED` -> `ACTIVE` -> `COMPLETED`
+lifecycle with audit events, completing before activating rejected with
+409, activating twice rejected with 409). `tests/Feature/Business/
+ProjectManagementViewTest.php` (new, 13 tests) -- access gates on all
+three pages, the create form, `projects:manage` denial, activation
+moving a project off the Planned page and onto Ongoing, the
+budget/revenue/cost/profit computation on Ongoing, completion moving a
+project onto the read-only Completed page with no action buttons, and
+organisation scoping across all three pages. All 10 pre-existing tests
+in `ProjectTest.php` still pass unmodified.
+
+Live-verified over real HTTP as the demo organisation's own owner login:
+confirmed all three pages loaded; created a real project through the
+actual Blade form (appeared correctly under Planned); activated it
+through the real form action (moved to Ongoing, no longer listed under
+Planned); marked it completed through the real form action (moved to
+Completed, read-only, no longer listed under Ongoing). Removed the
+project (and its proposed budget, command-idempotency/audit/outbox rows)
+afterward to restore the normal `DemoSeeder` baseline -- confirmed by
+re-querying zero projects for the demo organisation and all three pages
+showing their empty states again.
+
+Verified: full suite 774 tests, 0 regressions.

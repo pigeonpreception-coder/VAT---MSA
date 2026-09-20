@@ -34,6 +34,7 @@ use App\Http\Controllers\Business\BudgetsViewController;
 use App\Http\Controllers\Business\CustomerLedgerViewController;
 use App\Http\Controllers\Business\CashFlowViewController;
 use App\Http\Controllers\Business\ProjectController;
+use App\Http\Controllers\Business\ProjectManagementViewController;
 use App\Http\Controllers\Business\PurchaseOrderViewController;
 use App\Http\Controllers\Business\QuotationController;
 use App\Http\Controllers\Business\QuotationViewController;
@@ -280,6 +281,18 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/quotations/{id}/rejection', [QuotationViewController::class, 'reject'])->name('quotations.reject');
     Route::post('/quotations/{id}/expiration', [QuotationViewController::class, 'expire'])->name('quotations.expire');
     Route::post('/quotations/{id}/convert', [QuotationViewController::class, 'convert'])->name('quotations.convert');
+
+    // The three Project Management sidebar links are no longer
+    // planned-module placeholders -- see ProjectManagementViewController's
+    // own doc comment. Route names and projects:read permission kept
+    // identical to the placeholders they replace so the sidebar's Project
+    // Management group needed no change.
+    Route::get('/project-management/new', [ProjectManagementViewController::class, 'newProject'])->name('project-management.new');
+    Route::post('/project-management', [ProjectManagementViewController::class, 'store'])->name('project-management.store');
+    Route::post('/project-management/{id}/activation', [ProjectManagementViewController::class, 'activate'])->name('project-management.activate');
+    Route::get('/project-management/ongoing', [ProjectManagementViewController::class, 'ongoing'])->name('project-management.ongoing');
+    Route::post('/project-management/{id}/completion', [ProjectManagementViewController::class, 'complete'])->name('project-management.complete');
+    Route::get('/project-management/completed', [ProjectManagementViewController::class, 'completed'])->name('project-management.completed');
 
     // Ported from the source's own app/accounting/page.tsx -- read-only,
     // matching the source exactly (its own closing note says interactive
@@ -566,15 +579,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // Invoice via converted_invoice_id -> InvoiceCorrection via
     // original_invoice_id) that did not exist anywhere else in the
     // codebase, not a UI-only gap over an existing filter.
-    $plannedRoute('/project-management/new', 'project-management.new', 'projects:read', 'Project Management', 'Create New Project',
-        'Capture project name, customer, description, location, dates, budget, expected revenue, category, VAT treatment and owner.',
-        'Not yet built. No dedicated project domain model exists in the platform today.');
-    $plannedRoute('/project-management/ongoing', 'project-management.ongoing', 'projects:read', 'Project Management', 'Ongoing Project Reports',
-        'Real-time/periodic progress reporting for active projects.',
-        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
-    $plannedRoute('/project-management/completed', 'project-management.completed', 'projects:read', 'Project Management', 'Completed Projects',
-        'Summary lists and reports for finished projects.',
-        'Not yet built. Depends on the same dedicated project domain model as Create New Project.');
+    // The three Project Management views are no longer planned-module
+    // placeholders -- see the real routes registered alongside the other
+    // business routes above (ProjectManagementViewController). Route names
+    // and projects:read permission kept identical to the placeholders they
+    // replace so the sidebar's Project Management group needed no change.
+    // All three scope notes ("No dedicated project domain model exists")
+    // were stale, the same class of gap Budgets/Cash Flow Projects closed;
+    // see ProjectManagementViewController's own doc comment for the one
+    // genuine gap this did have to close (a project could never move off
+    // 'PLANNED', which ProjectService::activate()/complete() now fix).
     // Service Providers is no longer a planned-module placeholder -- it is
     // now a third real PartyRelationship value (SERVICE_PROVIDER) on the
     // same business_parties/business-parties.index feature Customers and
@@ -759,6 +773,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/projects/{id}/budget-approval', [ProjectController::class, 'approveBudget']);
         Route::post('/projects/{id}/costs', [ProjectController::class, 'postCost']);
         Route::get('/projects/{id}/profitability', [ProjectController::class, 'profitability']);
+        // Not part of the source's own ported shape above -- see
+        // ProjectService::activate()/complete()'s own doc comments for why
+        // these two transitions were added (closing the Project Management
+        // $plannedRoute placeholders in routes/web.php needed a real way to
+        // move a project off 'PLANNED', which nothing in the source ever did).
+        Route::post('/projects/{id}/activation', [ProjectController::class, 'activate']);
+        Route::post('/projects/{id}/completion', [ProjectController::class, 'complete']);
 
         // Phase 11 (slice 1): audit cases + evidence/notes, obligations,
         // disputes, and risk. Kept 1:1 with the source's app/api/v1/{
