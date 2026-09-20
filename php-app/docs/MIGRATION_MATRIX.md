@@ -9356,3 +9356,68 @@ now says plainly that no further buildable-now, no-external-dependency
 item remains on the backlog.
 
 Verified: full suite 790 tests, 0 regressions.
+
+## N+1/volume stress pass re-run at 15x scale (2026-09-20, same day)
+
+At the user's own explicit request for a heavier stress pass than the
+section above's 200-per-table scale. The request itself named "hundreds
+of billions of transactions" and "global concurrent traffic" as the
+target -- both were pushed back on directly before doing any work,
+since neither is a coherent or achievable target for a bulk `INSERT`
+into a single local MySQL instance (the largest real card networks on
+Earth process on the order of 150-200 billion transactions per *year*,
+not concurrently; genuine high-concurrency support needs horizontal
+scaling, read replicas, caching, and queue-based writes -- an
+architecture initiative, not a seeder change, and already tracked as
+blocked on real load-testing tooling and a non-local target environment
+at backlog item #7). What was agreed instead: a 15x increase on the
+row-volume constants, still a single-tenant/organisation-scoped
+volume-and-N+1 stress test, not a concurrency or multi-tenant-traffic
+simulation.
+
+**`database/seeders/SyntheticLoadSeeder.php`** -- every row-volume
+constant scaled 15x: `INVOICES_TOTAL` 5,000->75,000, `EXPENSES_TOTAL`
+2,000->30,000, `AUDIT_CASES_TOTAL` 500->7,500 (30,000 evidence rows),
+`DOCUMENTS_TOTAL` 1,000->15,000, `FIXED_ASSETS_TOTAL` 200->3,000, and
+the target-organisation `TARGET_ORG_PARTIES`/`_QUOTATIONS`/`_PROJECTS`/
+`_LEDGER_EXPENSES` 200->3,000 each (insert chunk sizes for the
+target-org loops bumped 100->500 to match). Deliberately left
+unscaled: `TAXPAYER_COUNT`/`USERS_PER_TAXPAYER`/`NAMRA_STAFF_COUNT` --
+these control how many organisations exist, not how many rows land on
+any one organisation-scoped page, which is what every page this seed
+exercises actually reads.
+
+Run against real MySQL in 47s (vs. ~25s for the prior 1x-scale run --
+sublinear, consistent with the same fixed-per-chunk overhead spread
+across proportionally larger chunks). Confirmed via direct DB query:
+77,355 invoices (75,000 load + 55 baseline), 33,000 expenses, 7,500
+audit cases, 15,000 documents, 3,000 fixed assets, and on the target
+organisation 3,000 business parties/quotations/projects each (2,000
+quotations landed `CONVERTED`) and 1,500 `ACTIVE` projects.
+
+**Live-HTTP timing at the new 15x volume**, same seven routes as the
+section above: `/accounting/supplier-ledger` 110ms, `/accounting/
+customer-ledger` 76ms, `/accounting/budgets` 73ms, `/accounting/
+cash-flow` 51ms, `/project-management/ongoing` 58ms, `/project-
+management/completed` 55ms, `/quotations/converted-invoices` 58ms --
+roughly 2-3x slower than the 1x-scale run's own 20-55ms for 15x more
+rows on each page, i.e. sublinear growth, exactly what a genuinely
+fixed-query-count design should show (the extra time is larger
+result-set transfer/serialization, not more queries). The
+national-scope pages that read across all 20 taxpayers (`/invoices`,
+`/audit-cases`, `/documents`, `/operations`) were re-checked too, as
+the NamRA admin login, all returning `200` in 19-133ms against the full
+77k/33k/7.5k/15k row counts. All rendered their actual seeded rows
+(confirmed by grepping the response body), not a silently-empty `200`.
+
+No N+1 regression found at this heavier scale either -- the same
+positive result as the 1x-scale pass, now confirmed to hold an order of
+magnitude further out.
+
+Database reset via `php artisan migrate:fresh --seed` afterward, same
+as every prior use of this seeder -- confirmed zero `VAT-LOAD%`
+taxpayers and the normal 55-invoice baseline restored.
+
+Verified: full suite 790 tests, 0 regressions (unchanged from the
+section above -- this pass added no new code, only a heavier run of
+already-covered ground).
