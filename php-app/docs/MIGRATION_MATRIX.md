@@ -9847,3 +9847,72 @@ register creates DRAFT, approve without step-up redirects to MFA). Real
 MySQL, real HTTP requests throughout, plus a genuine browser round-trip
 through the Blade register form confirming the full DRAFT registration
 flow end to end. Full suite: 850 tests, 0 regressions.
+
+## New feature: SaaS provider onboarding (2026-09-20)
+
+User said "proceed" again after the Taxpayer Systems Framework PR merged.
+Of the two remaining candidate modules (self-serve signup, SaaS provider
+onboarding), SaaS provider onboarding was chosen: authenticated and
+`developer:manage`/`developer:read` gated, the same permissions already
+seeded and granted for the Developer portal, so it needed no new
+pre-auth infrastructure unlike self-serve signup. Module 10 Phase C: a
+SaaS/ERP/accounting integration provider registers itself and one named
+application, then takes that application through NamRA's fixed
+conformance test harness before it may operate against SANDBOX or
+PRODUCTION data. Ported in full from `lib/domain/saas.ts`,
+`lib/data/saas-repository.ts` and `lib/api/saas.ts`: provider/application
+registration validation, the conformance harness's four deterministic
+PASS/FAIL checks (capability scope, event-catalogue membership, restricted
+data classification, sandbox-precedes-production), and the per-actor load
+scoping (`App\Domain\Saas\SaasValidator`, `App\Services\Saas\SaasService`).
+
+**Unlike every other module this session, the schema was not a gap at
+all**: `saas_providers`/`saas_applications`/`saas_conformance_runs`/
+`saas_environment_approvals` were already migrated on 2026-09-03, each
+migration's own comment saying plainly "No command references this table
+yet in this migration" -- the same "schema exists, no command uses it
+yet" shape `payment_instructions` had before the Payment connector. This
+session's own first attempt at writing fresh migrations for these four
+tables hit `Base table already exists` immediately, which is what
+surfaced the pre-existing schema; the new migrations were deleted and the
+existing ones kept unmodified. What was actually missing was the
+command/validation/service/controller layer, confirmed by the same
+full-repo grep pattern used for every other module this session.
+
+Kept 1:1 with source's route shape (`app/api/v1/saas-providers`,
+`app/api/v1/saas-applications/[id]/conformance-runs`,
+`app/api/v1/saas-providers/[id]/usage`,
+`App\Http\Controllers\Saas\SaasController`) and its `rate-limit:saas`
+bucket, free to wire onto the new routes via `EnforceRateLimit`'s existing
+generic `enforceCommand` branch. No `step-up`: source's own
+`operationClass` for both `RegisterProvider` and `SubmitConformance` is
+`BUSINESS_WRITE`, not `COMPLIANCE_WRITE`. A PASSED PRODUCTION conformance
+run is deliberately recorded as `AWAITING_AUTHORITY`, never auto-granted
+-- the same "fail closed on an unconfirmed authority" posture ITAS/
+Payment/HSM/Taxpayer-Systems-approval already apply elsewhere in this
+codebase, reproduced here for the one place a purely automated pass could
+otherwise become a de facto production access grant.
+
+A Blade UI was added despite source being JSON-API-only (matching the
+Security Operations/Payment/Taxpayer Systems precedent): a register-and-
+browse list page (`/saas-providers`) carries `RegisterProvider`, and a
+per-provider detail page (`/saas-providers/{id}`) carries the `GetUsage`
+read (the application, its environment approvals, and real cross-tenant
+`integration_connections`/`sync_jobs` usage for that provider's
+`provider_key`) plus `SubmitConformance`. Source names no `ListProviders`
+command at all -- `SaasService::index()` was added purely to back the
+list page, scoped exactly like `GetUsage`'s own actor check: the
+registering actor only, or any national-scope actor.
+
+22 new PHPUnit tests (`tests/Feature/Saas/SaasProviderTest.php`):
+provider+application registration, duplicate provider_key conflict,
+invalid category/non-https endpoint validation, idempotency replay, all
+four conformance-harness outcomes (SANDBOX PASSED/GRANTED, unrequested-
+capability FAILED/DENIED, unknown-event FAILED, PRODUCTION-without-prior-
+SANDBOX FAILED/DENIED, PRODUCTION-after-passed-SANDBOX PASSED/
+AWAITING_AUTHORITY), cross-actor denial on both `SubmitConformance` and
+`GetUsage`, national-scope override, tenant/national list scoping, and
+Blade-view coverage (auth required, register/list/show/submit-conformance
+round trip). Real MySQL, real HTTP requests throughout, plus a genuine
+browser round-trip through the Blade register and conformance forms. Full
+suite: 872 tests, 0 regressions.

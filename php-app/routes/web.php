@@ -86,6 +86,8 @@ use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
+use App\Http\Controllers\Saas\SaasController;
+use App\Http\Controllers\Saas\SaasViewController;
 use App\Http\Controllers\Security\SecurityOperationsViewController;
 use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemController;
 use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemViewController;
@@ -275,6 +277,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         ->name('taxpayer-systems.approval.store')->middleware('step-up');
     Route::post('/taxpayer-systems/{id}/suspension', [TaxpayerSystemViewController::class, 'suspend'])
         ->name('taxpayer-systems.suspension.store');
+
+    // Real Blade UI for SaasService (Module 10 Phase C: SaaS provider
+    // onboarding), alongside the JSON API surface below -- see
+    // SaasViewController's own doc comment. No step-up: RegisterProvider/
+    // SubmitConformance are both BUSINESS_WRITE in source, not
+    // COMPLIANCE_WRITE, matching this migration's own established posture.
+    Route::get('/saas-providers', [SaasViewController::class, 'index'])->name('saas-providers.index');
+    Route::post('/saas-providers', [SaasViewController::class, 'store'])->name('saas-providers.store');
+    Route::get('/saas-providers/{id}', [SaasViewController::class, 'show'])->name('saas-providers.show');
+    Route::post('/saas-applications/{id}/conformance-runs', [SaasViewController::class, 'submitConformance'])
+        ->name('saas-applications.conformance-runs.store');
 
     // Real Blade UI for ComplianceSnapshotService, alongside the JSON API
     // surface below -- see ComplianceOverviewViewController's own doc
@@ -1035,6 +1048,20 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware('rate-limit:taxpayer-systems');
         Route::post('/taxpayer-systems/{id}/sync', [TaxpayerSystemController::class, 'sync'])
             ->middleware('rate-limit:taxpayer-systems');
+
+        // Module 10 Phase C: SaaS provider onboarding
+        // (RegisterProvider/SubmitConformance/GetUsage). Kept 1:1 with the
+        // source's own app/api/v1/saas-providers/**,
+        // app/api/v1/saas-applications/[id]/conformance-runs shape. Gated
+        // on developer:manage/developer:read; no step-up -- source's own
+        // operationClass for both write commands is BUSINESS_WRITE, not
+        // COMPLIANCE_WRITE.
+        Route::get('/saas-providers', [SaasController::class, 'index']);
+        Route::post('/saas-providers', [SaasController::class, 'store'])
+            ->middleware('rate-limit:saas');
+        Route::get('/saas-providers/{id}/usage', [SaasController::class, 'usage']);
+        Route::post('/saas-applications/{id}/conformance-runs', [SaasController::class, 'submitConformance'])
+            ->middleware('rate-limit:saas');
 
         // Phase 12 (portals/licensing/governance), slice 1: Licensing &
         // Entitlements (lib/data/control-plane-repository.ts's
