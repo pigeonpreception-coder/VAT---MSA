@@ -357,12 +357,27 @@ a misleading extra audit-trail entry, not a second real resource -- see
 `docs/RED_TEAM_ASSESSMENT_2026-09-20-OLDER-MODULE-SWEEP.md` for the full
 write-up and all three live pre-fix/post-fix reproductions.
 
-**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (16 files);
+**Third follow-up (2026-09-20, same day, user requested "another deep
+security sweep"):** deliberately different angles from the two above --
+a grep of every raw-SQL call site in the app for interpolated variables
+(SQL injection), and a direct read of the shared tenant-isolation
+chokepoints (`OrganisationResolver::resolve()`, `TenantScope::
+isNational()`, `Permissions::NATIONAL_SCOPE_ROLES`) nearly every
+controller depends on. Found nothing: every raw SQL string is a static
+literal, and all three chokepoints are correctly implemented. Also
+spot-checked this session's newest controllers for a missing
+`$this->authorize()` call (none found) and purchase-order amount
+validation for negative-value rejection (correctly rejects). See
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-SQL-INJECTION-AND-CHOKEPOINT-SWEEP.md`.
+No code changed, no regression possible -- full suite unchanged at 795
+tests.
+
+**Evidence**: `ls docs/RED_TEAM_ASSESSMENT_*.md` (17 files);
 `docs/MIGRATION_MATRIX.md`'s own dated sections for each pass; full suite
 645 tests, 0 regressions as of the 2026-09-15 security-review pass; 784
 tests as of the 2026-09-20 `$plannedRoute` sweep in #2 above; 792 tests as
 of the same day's first security-sweep follow-up; 795 tests, 0
-regressions as of this second follow-up.
+regressions as of the second and third follow-ups.
 
 ### 11. Legacy data cutover
 **Status: Blocked on the legacy system's actual data being made

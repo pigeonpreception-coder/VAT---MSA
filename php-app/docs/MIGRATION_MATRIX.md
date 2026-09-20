@@ -9578,3 +9578,21 @@ Permanent regression tests:
 Each confirmed to fail against the pre-fix code and pass against the fix.
 
 Verified: full suite 795 tests, 0 regressions.
+
+## Third same-day security sweep: SQL injection and tenant-isolation chokepoints (2026-09-20, no finding)
+
+User asked for another deep sweep after the two above; this pass
+deliberately took different angles rather than re-running the same
+correction-race search: a grep of every raw-SQL call site
+(`selectRaw`/`whereRaw`/`orderByRaw`/`DB::raw`/`DB::statement`) for
+interpolated variables, and a direct read of the small set of shared
+chokepoints (`OrganisationResolver::resolve()`, `TenantScope::
+isNational()`, `Permissions::NATIONAL_SCOPE_ROLES`) that nearly every
+controller depends on for tenant isolation. Found nothing -- every raw
+SQL string in the app is a static literal, and all three chokepoints are
+correctly implemented. Also spot-checked every action in this session's
+newest controllers for a missing `$this->authorize()` call (none found)
+and purchase-order amount validation for negative-value rejection
+(correctly rejects, min 0). See
+`docs/RED_TEAM_ASSESSMENT_2026-09-20-SQL-INJECTION-AND-CHOKEPOINT-SWEEP.md`
+for the full write-up. No code changed; no PR opened.
