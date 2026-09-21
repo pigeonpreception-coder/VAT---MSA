@@ -36,17 +36,41 @@ class AuditService
 {
     public static function append(User $actor, string $action, string $resourceType, string $resourceId, array $details, ?\DateTimeInterface $occurredAt = null): AuditEvent
     {
+        return self::write($actor->id, $actor->role, $action, $resourceType, $resourceId, $details, $occurredAt);
+    }
+
+    /**
+     * Ported from lib/data/signup-repository.ts's submitSelfServeSignup,
+     * which writes its own audit_events row inline with a synthetic
+     * `self-serve:${hash}` actorId rather than calling the source's own
+     * shared appendAuditEvent -- the one command in this codebase with no
+     * real, authenticated User at all. This port keeps the same one-writer
+     * rule this class's own doc comment states ("never insert into
+     * audit_events directly") by adding this second, explicit entry point
+     * instead of also writing inline: same hash-chain, an actor identity
+     * the caller supplies directly rather than a User model. $actorId is
+     * shaped as a UUID (unlike source's `self-serve:`-prefixed string) to
+     * fit this column's UUID type consistently with every other actor_id
+     * in this table.
+     */
+    public static function appendSynthetic(string $actorId, string $actorRole, string $action, string $resourceType, string $resourceId, array $details, ?\DateTimeInterface $occurredAt = null): AuditEvent
+    {
+        return self::write($actorId, $actorRole, $action, $resourceType, $resourceId, $details, $occurredAt);
+    }
+
+    private static function write(string $actorId, string $actorRole, string $action, string $resourceType, string $resourceId, array $details, ?\DateTimeInterface $occurredAt): AuditEvent
+    {
         $occurredAt ??= now();
         $id = (string) Str::orderedUuid();
 
         $prior = AuditEvent::orderByDesc('id')->first();
         $body = self::canonicalJson($details);
-        $hash = hash('sha256', ($prior?->event_hash ?? 'GENESIS')."|{$id}|{$actor->id}|{$body}|".self::isoMicro($occurredAt));
+        $hash = hash('sha256', ($prior?->event_hash ?? 'GENESIS')."|{$id}|{$actorId}|{$body}|".self::isoMicro($occurredAt));
 
         return AuditEvent::create([
             'id' => $id,
-            'actor_id' => $actor->id,
-            'actor_role' => $actor->role,
+            'actor_id' => $actorId,
+            'actor_role' => $actorRole,
             'action' => $action,
             'resource_type' => $resourceType,
             'resource_id' => $resourceId,
