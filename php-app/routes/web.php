@@ -86,6 +86,8 @@ use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
+use App\Http\Controllers\Reconciliation\ReconciliationController;
+use App\Http\Controllers\Reconciliation\ReconciliationViewController;
 use App\Http\Controllers\Saas\SaasController;
 use App\Http\Controllers\Saas\SaasViewController;
 use App\Http\Controllers\Security\SecurityOperationsViewController;
@@ -274,6 +276,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/business-parties', [BusinessPartyViewController::class, 'store'])->name('business-parties.store');
     Route::post('/business-parties/{id}/verification', [BusinessPartyViewController::class, 'storeVerification'])->name('business-parties.verification.store');
     Route::post('/business-parties/{id}/deactivation', [BusinessPartyViewController::class, 'storeDeactivation'])->name('business-parties.deactivation.store');
+
+    // Real Blade UI for ReconciliationService (Module 3 Phase A/B: the
+    // reconciliation matching engine's NamRA-officer work queue), alongside
+    // the JSON API surface below -- see ReconciliationViewController's own
+    // doc comment. Assign/resolve both wear 'step-up' (source's own
+    // COMPLIANCE_WRITE operation class); RunMatch stays JSON-API-only.
+    Route::get('/exceptions', [ReconciliationViewController::class, 'index'])->name('exceptions.index');
+    Route::post('/exceptions/{id}/assignment', [ReconciliationViewController::class, 'assign'])
+        ->name('exceptions.assignment.store')->middleware('step-up');
+    Route::post('/exceptions/{id}/resolution', [ReconciliationViewController::class, 'resolve'])
+        ->name('exceptions.resolution.store')->middleware('step-up');
 
     // Real Blade UI for TaxpayerSystemService (NamRA e-VAT MS Registered
     // Taxpayer Systems Framework), alongside the JSON API surface below --
@@ -778,6 +791,20 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware(['step-up', 'rate-limit:invoice']);
         Route::get('/invoices/{id}/vat-explanation', [InvoiceController::class, 'vatExplanation']);
         Route::get('/invoices/{id}/transaction-timeline', [InvoiceController::class, 'transactionTimeline']);
+
+        // Module 3 Phase A/B: the reconciliation matching engine and its
+        // NamRA-officer work queue. Kept 1:1 with source's own
+        // app/api/v1/invoices/[id]/match, app/api/v1/exceptions/** shape.
+        // RunMatch/Assign/Resolve all wear 'step-up' -- source's own
+        // operationClass for all three is COMPLIANCE_WRITE; GetWorkQueue
+        // is a plain read.
+        Route::post('/invoices/{id}/match', [ReconciliationController::class, 'match'])
+            ->middleware(['step-up', 'rate-limit:reconciliation']);
+        Route::get('/exceptions', [ReconciliationController::class, 'exceptions']);
+        Route::post('/exceptions/{id}/assignment', [ReconciliationController::class, 'assignException'])
+            ->middleware(['step-up', 'rate-limit:reconciliation']);
+        Route::post('/exceptions/{id}/resolution', [ReconciliationController::class, 'resolveException'])
+            ->middleware(['step-up', 'rate-limit:reconciliation']);
 
         // The standalone VAT-rule evaluate/propose/approve routes -- the
         // last narrow gap Phase 9 (invoices and VAT) deferred. Kept 1:1
