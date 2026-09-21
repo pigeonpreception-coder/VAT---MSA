@@ -22,7 +22,8 @@ class LicensePlanSeeder extends Seeder
     public function run(): void
     {
         LicensePlan::updateOrCreate(['id' => 'plan-pilot-professional-v1'], [
-            'code' => 'PILOT_PROFESSIONAL', 'name' => 'Professional Pilot', 'version' => 1, 'status' => 'ACTIVE',
+            'code' => 'PILOT_PROFESSIONAL', 'name' => 'Professional Pilot', 'version' => 1,
+            'plan_domain' => 'COMMERCIAL_SAAS', 'status' => 'ACTIVE',
             'effective_from' => '2026-08-01 00:00:00', 'effective_to' => null, 'created_at' => '2026-08-10 10:00:00',
         ]);
 

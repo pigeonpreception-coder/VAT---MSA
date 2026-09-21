@@ -89,6 +89,7 @@ use App\Http\Controllers\Portal\SuperAdminPortalController;
 use App\Http\Controllers\Saas\SaasController;
 use App\Http\Controllers\Saas\SaasViewController;
 use App\Http\Controllers\Security\SecurityOperationsViewController;
+use App\Http\Controllers\Signup\SignupViewController;
 use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemController;
 use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemViewController;
 use App\Http\Controllers\VatRule\VatRuleController;
@@ -114,6 +115,14 @@ Route::middleware('guest')->group(function () {
     Route::post('/forgot-password', [ForgotPasswordController::class, 'store'])->name('password.email');
     Route::get('/reset-password/{token}', [ResetPasswordController::class, 'create'])->name('password.reset');
     Route::post('/reset-password', [ResetPasswordController::class, 'store'])->name('password.update');
+
+    // Module: self-serve commercial SaaS signup (lib/domain/signup.ts,
+    // lib/data/signup-repository.ts) -- see SignupViewController's own doc
+    // comment for why this, unlike every other Blade UI added this
+    // session, genuinely is the public-facing equivalent of source's own
+    // JSON-only channel, not an addition beyond it.
+    Route::get('/signup', [SignupViewController::class, 'create'])->name('signup.create');
+    Route::post('/signup', [SignupViewController::class, 'store'])->name('signup.store');
 });
 
 // RT-001 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md): every authenticated

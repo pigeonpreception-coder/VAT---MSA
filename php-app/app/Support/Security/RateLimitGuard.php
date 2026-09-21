@@ -99,6 +99,29 @@ class RateLimitGuard
     }
 
     /**
+     * Ported from lib/security/request.ts's enforceSelfServeSignupSourceRateLimits
+     * -- the one bucket set with no authenticated $user at all (self-serve
+     * signup is genuinely unauthenticated), so it takes a raw source/device
+     * token pair instead of tenantKey()'s own User-derived key.
+     */
+    public static function enforceSelfServeSignup(string $sourceToken, string $deviceId): void
+    {
+        self::enforce([
+            ['key' => "self-serve-signup:source:{$sourceToken}", 'limit' => 10, 'windowSeconds' => 300],
+            ['key' => "self-serve-signup:device:{$deviceId}", 'limit' => 15, 'windowSeconds' => 300],
+            ['key' => 'self-serve-signup:global', 'limit' => 500, 'windowSeconds' => 300],
+        ]);
+    }
+
+    /** Ported from lib/security/request.ts's enforceSelfServeSignupEmailRateLimit -- a second, email-keyed limit alongside enforceSelfServeSignup, bounding repeated attempts against one contact email regardless of source/device. */
+    public static function enforceSelfServeSignupEmail(string $email): void
+    {
+        self::enforce([
+            ['key' => 'self-serve-signup:email:'.mb_strtolower(trim($email)), 'limit' => 5, 'windowSeconds' => 3_600],
+        ]);
+    }
+
+    /**
      * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8, ported
      * verbatim): the generic per-command actor/tenant/global bucket shape
      * the identity/control-plane/reconciliation/vat-rule route families

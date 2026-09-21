@@ -9916,3 +9916,91 @@ Blade-view coverage (auth required, register/list/show/submit-conformance
 round trip). Real MySQL, real HTTP requests throughout, plus a genuine
 browser round-trip through the Blade register and conformance forms. Full
 suite: 872 tests, 0 regressions.
+
+## New feature: self-serve commercial SaaS signup (2026-09-21)
+
+User said "proceed" again. This was the last of the three candidate
+modules identified two features ago (self-serve signup, Registered
+Taxpayer Systems Framework, SaaS provider onboarding) -- the other two
+are now merged. Ported `lib/domain/signup.ts`/`lib/data/
+signup-repository.ts`'s `SubmitSelfServeSignup`: the one genuinely
+unauthenticated command in this entire codebase. A real anonymous
+applicant, with no browser session and no taxpayer credential yet, names
+a commercial `COMMERCIAL_SAAS` licence plan and submits their own
+taxpayer identity for a controlled, held-for-verification application --
+no account, payment, subscription or licence is ever activated by this
+alone.
+
+**A genuine schema gap surfaced mid-build, not at the start this time**:
+source's `license_plans` table has always carried `plan_domain TEXT NOT
+NULL CHECK (plan_domain IN ('COMMERCIAL_SAAS','GOVERNMENT_TAX'))`, but
+this migration's own `license_plans` table (2026-09-01) never had that
+column at all -- `plan-pilot-professional-v1`, the one plan
+`LicensePlanSeeder` already seeds, is source's own literal
+`COMMERCIAL_SAAS` plan (confirmed against `db/runtime.ts`'s own seed
+statement), so the column was simply missing, not the plan. Closed with
+an additive migration (`$table->string('plan_domain')->default(...)`,
+not a `->change()` -- this vendor tree has no doctrine/dbal installed)
+backfilling every existing row as `COMMERCIAL_SAAS`, and updating
+`LicensePlanSeeder` to set it explicitly going forward.
+
+`self_serve_signup_applications` itself was a genuine, complete gap (no
+migration, model, or route referenced it at all) -- ported with its full
+column shape, including `promoted_registration_application_id` and the
+`UNDER_REVIEW`/`REJECTED`/`APPROVED_FOR_PROVISIONING` states source's own
+schema carries for a future review/promotion workflow that source itself
+never actually built (confirmed by a full-repo grep for "self_serve_
+signup"/"SelfServeSignup" finding only `SubmitSelfServeSignup` and the
+read-only, routeless `listSelfServeSignupApplications`) -- this port
+carries the same shape without inventing a command for it either.
+
+Source's own `identity` parameter (a "SITES_WORKSPACE" SSO claim from its
+ChatGPT Apps integration, never migrated to this port at all) has no
+equivalent here, so `identity` is always null: `identity_status` is
+always `VERIFICATION_REQUIRED`, and the actor hash always derives from
+`contact_email` -- a documented, deliberate deviation. The synthetic
+audit actor id is shaped as a UUID (unlike source's `self-serve:`-prefixed
+string) to fit `audit_events.actor_id`'s UUID column type; writing it
+required extending `App\Services\Audit\AuditService` with a second,
+explicit `appendSynthetic()` entry point (same hash-chain, an actor
+identity the caller supplies directly rather than a `User` model) rather
+than inserting into `audit_events` directly, honouring that class's own
+"single writer" rule even for the one command with no real actor.
+
+Unlike every other JSON route this session (all deliberately
+Blade/session-driven inside `routes/web.php`'s `api/v1/**` group -- see
+`routes/api.php`'s own doc comment), this command genuinely has no
+browser session to draw a CSRF token or actor identity from, so
+`SignupController` lives in `routes/api.php`'s stateless group
+(`POST /api/signup/v1/applications`) alongside `PosInvoiceController`,
+the one other unauthenticated route in this codebase.
+`RateLimitGuard::enforceSelfServeSignup`/`enforceSelfServeSignupEmail`
+(source/device/global and email-keyed buckets) are called directly from
+`SignupService`, matching source's own inline
+`enforceSelfServeSignupSourceRateLimits`/`EmailRateLimit` calls rather
+than a per-route middleware alias -- `App\Http\Middleware\
+EnforceRateLimit` itself is a no-op with no authenticated `$user`, so it
+could not have been reused here regardless.
+
+A Blade UI was added at `/signup`, inside the existing `guest` middleware
+group alongside `/login` -- unlike every other "Blade UI added despite
+source being JSON-API-only" precedent this session, this one genuinely
+is the public-facing equivalent of source's own channel, not an addition
+beyond it: a real anonymous applicant filling in a form is exactly who
+this page is for.
+
+16 new PHPUnit tests (`tests/Feature/Signup/SelfServeSignupTest.php`):
+a valid acceptance, the `COMPANY_ADMIN_AUTHORITY_REQUIRED` 403 (checked
+first and independently of every other field, matching source's own
+effective priority -- see `SignupAuthorityRequiredException`'s own doc
+comment for why this port checks it up front rather than reproducing
+source's compute-everything-then-prioritise shape), terms/plan/identifier
+validation, idempotency replay and a too-short key, a conflict against
+both an existing canonical taxpayer and a second pending application,
+the email-keyed rate limit tripping on a 6th attempt, an unexpected
+field, and Blade-view coverage (public reachability, an authenticated
+user redirected away, a full submit-and-confirm round trip, and the
+403 surfacing as a form error). Real MySQL, real HTTP requests
+throughout, plus a genuine unauthenticated browser round-trip through the
+Blade form confirming the full PENDING_VERIFICATION application flow end
+to end. Full suite: 888 tests, 0 regressions.

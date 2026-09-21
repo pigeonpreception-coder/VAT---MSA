@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Integration\PosInvoiceController;
+use App\Http\Controllers\Signup\SignupController;
 use App\Http\Middleware\AuthenticatePosApiClient;
 use Illuminate\Support\Facades\Route;
 
@@ -28,3 +29,18 @@ use Illuminate\Support\Facades\Route;
 Route::middleware(AuthenticatePosApiClient::class)->prefix('pos/v1')->group(function () {
     Route::post('/invoices', [PosInvoiceController::class, 'store']);
 });
+
+/**
+ * Ported from app/api/v1/signup-applications/route.ts -- the self-serve
+ * commercial SaaS signup channel (lib/data/signup-repository.ts's
+ * submitSelfServeSignup). The one other genuinely unauthenticated command
+ * in this codebase besides the POS credential-authenticated group above:
+ * a real anonymous applicant, with no browser session and no taxpayer
+ * credential yet, is exactly who this route is for. No middleware beyond
+ * this file's own stateless `api` group default (throttle:api +
+ * SubstituteBindings) -- SignupService itself calls RateLimitGuard's
+ * source/device/email-keyed buckets directly, matching source's own
+ * inline enforceSelfServeSignupSourceRateLimits/EmailRateLimit calls
+ * rather than a per-route middleware alias.
+ */
+Route::post('/signup/v1/applications', [SignupController::class, 'store']);
