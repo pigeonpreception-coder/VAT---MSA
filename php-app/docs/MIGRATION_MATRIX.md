@@ -10254,3 +10254,29 @@ emit an `AUDIT_CHAIN_BREAK` event.
   session's own accumulated dev-seed history -- it correctly reported the
   disclosed pre-fix historical break above and opened a real CRITICAL
   security incident, confirmed directly in the database.
+
+## Duplicate flash-banner cleanup across 41 Blade views (2026-09-22)
+
+Follow-up to the same bug first caught and fixed locally in `resources/
+views/portal/developer.blade.php` during the Developer Platform
+RotateCredential/RunConformance change: `resources/views/layouts/app.blade.php`
+already renders `session('status')` globally, right before `@yield('content')`,
+for every page using that layout (including guest pages -- the block sits
+outside the `@auth`/`@endauth` sidebar guard). A page-level copy of the same
+`@if (session('status'))...@endif` block therefore renders the identical
+success banner twice.
+
+A repo-wide grep found the exact same three-line block, byte-identical
+except for indentation, copy-pasted into 41 other Blade views -- evidently
+the original, once-legitimate pattern that predates the layout picking up
+its own global version, silently carried forward by each new view copying
+whichever existing one it was modelled on. Removed the redundant block from
+all 41 files via a single scripted pass (verified byte-identical shape
+first), keeping each page's own `$errors->any()` block untouched (that one
+is *not* rendered globally and must stay).
+
+- Full suite: 931 tests, 0 regressions -- no test asserted on the
+  duplicate banner's presence.
+- Manual browser verification: confirmed exactly one alert renders after a
+  real write action on `/exceptions` (one of the originally-reported
+  pages), where two would have rendered before this fix.

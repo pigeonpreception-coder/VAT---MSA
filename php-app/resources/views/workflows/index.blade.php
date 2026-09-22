@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">A draft is created, tested and published before it can route anything; a published version is immutable, and every decision is checked against segregation-of-duties (no self-approval).</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0">

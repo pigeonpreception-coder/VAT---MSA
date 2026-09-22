@@ -14,9 +14,6 @@
     <p class="text-muted mb-0">{{ $usage['provider']['provider_key'] }} &middot; {{ $usage['provider']['contact_email'] }} &middot; <x-status-badge :value="$usage['provider']['status']" type="status" /></p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0 ps-3">

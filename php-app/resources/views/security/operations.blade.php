@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Correlated security events, detection-rule findings and the incidents they open. A detection rule fires automatically once its threshold is met within its window; an analyst can also open an incident by hand.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <strong>This action needs attention.</strong>

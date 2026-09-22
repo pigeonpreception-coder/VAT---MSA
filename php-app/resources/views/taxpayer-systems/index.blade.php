@@ -13,9 +13,6 @@
     <p class="text-muted mb-0">NamRA e-VAT MS Registered Taxpayer Systems Framework -- a taxpayer's own ERP/POS/accounting/invoicing system, self-registered and approved by NamRA before it can integrate.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0 ps-3">

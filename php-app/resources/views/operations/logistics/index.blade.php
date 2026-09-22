@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Delivery, dispatch and fleet-adjacent logistics tracking. A delivery always references the tax invoice (or POS sale) it fulfils.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <strong>This action needs attention.</strong>
