@@ -11008,3 +11008,49 @@ commercial plans by name and features.
   confirmed the `<select>` renders exactly one real option ("Professional
   Pilot (PILOT_PROFESSIONAL)") with its ten included features listed
   underneath, replacing the old blind free-text field.
+
+## New feature: Fixed Assets JSON API (2026-09-22)
+
+Ports `app/api/v1/fixed-assets/{route,[id]/{route,valuation,maintenance,
+restoration,disposal}}/route.ts`, via `lib/api/fixed-asset.ts`'s
+`handleFixedAssetList`/`handleFixedAssetGet`/`handleFixedAssetCommand`
+dispatch. Found via a route-level (not function-level) source sweep: every
+`app/api/**/route.ts` file was cross-checked against `routes/web.php` by
+HTTP path/method rather than by grepping for repository function names,
+which caught this gap the earlier, exhausted function-level passes missed
+entirely -- Operations > Immovable/Movable Asset Management had shipped
+its Blade half (`FixedAssetViewController`, 2026-09-1x) but never its JSON
+half, unlike every one of the ~40 other business modules in this port
+(business-parties, quotations, expenses, etc.), which all ship JSON and
+Blade side by side.
+
+- New `App\Http\Controllers\Operations\FixedAssetController`
+  (`index`/`show`/`store`/`valuation`/`maintenance`/`restoration`/
+  `disposal`), reusing `App\Services\Operations\FixedAssetService` and
+  `App\Domain\Operations\FixedAssetValidator` exactly as
+  `FixedAssetViewController` already does -- no new service, validator,
+  model, or migration needed; this was purely a missing thin controller
+  layer over already-complete, already-tested business logic.
+- Closes a sub-gap `FixedAssetViewController`'s own Blade routes never
+  had either: a `GET` single-resource "show" endpoint. Source's own
+  `getFixedAsset` was previously unported in both surfaces.
+- Routes added under the existing `/api/v1` prefix: `GET /fixed-assets`,
+  `POST /fixed-assets`, `GET /fixed-assets/{id}`, `POST /fixed-assets/
+  {id}/valuation`, `.../maintenance`, `.../restoration`, `.../disposal`.
+  No rate-limit middleware, matching every other business-domain write
+  route in this port (unlike identity/audit/invoice, this class of
+  command was never put behind one in `routes/web.php`).
+- 8 new PHPUnit tests (`tests/Feature/Operations/FixedAssetApiTest.php`):
+  authentication required, register-then-read-back, index scoped to the
+  actor's own organisation with `asset_class` filtering, a duplicate
+  asset code conflicts (409), idempotent replay returns the identical
+  resource, a viewer without `fixed-assets:manage` is denied (403), the
+  full valuation/maintenance/restoration/disposal lifecycle (plus a
+  rejected re-flag of a disposed asset, 422), and cross-organisation
+  reads/writes both 404 (the same automatic `OrganisationScope`
+  backstop `FixedAssetViewTest` already exercises via the Blade surface).
+  Deliberately does not re-cover that file's own race-condition/
+  concurrency-simulation tests, since both surfaces share the identical
+  service-layer guards. Full suite: 1049 tests, 0 regressions. No new
+  Blade UI, so no manual browser verification for this module -- a pure
+  JSON API addition.

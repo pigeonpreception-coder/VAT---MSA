@@ -74,6 +74,7 @@ use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Licensing\LicensingViewController;
 use App\Http\Controllers\Navigation\NavigationController;
 use App\Http\Controllers\Operations\ErpViewController;
+use App\Http\Controllers\Operations\FixedAssetController;
 use App\Http\Controllers\Operations\FixedAssetViewController;
 use App\Http\Controllers\Operations\HumanResourcesViewController;
 use App\Http\Controllers\Operations\LogisticsViewController;
@@ -1021,6 +1022,21 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // move a project off 'PLANNED', which nothing in the source ever did).
         Route::post('/projects/{id}/activation', [ProjectController::class, 'activate']);
         Route::post('/projects/{id}/completion', [ProjectController::class, 'complete']);
+
+        // Fixed assets (Immovable/Movable Asset Management) -- Blade-only
+        // until now, closing a gap a route-level source sweep found: unlike
+        // every other business module in this port, this one never got its
+        // JSON API half. Kept 1:1 with source's own app/api/v1/fixed-assets/
+        // {route,[id]/{route,valuation,maintenance,restoration,disposal}}
+        // shape. Reuses the same App\Services\Operations\FixedAssetService
+        // FixedAssetViewController already calls.
+        Route::get('/fixed-assets', [FixedAssetController::class, 'index']);
+        Route::post('/fixed-assets', [FixedAssetController::class, 'store']);
+        Route::get('/fixed-assets/{id}', [FixedAssetController::class, 'show']);
+        Route::post('/fixed-assets/{id}/valuation', [FixedAssetController::class, 'valuation']);
+        Route::post('/fixed-assets/{id}/maintenance', [FixedAssetController::class, 'maintenance']);
+        Route::post('/fixed-assets/{id}/restoration', [FixedAssetController::class, 'restoration']);
+        Route::post('/fixed-assets/{id}/disposal', [FixedAssetController::class, 'disposal']);
 
         // Phase 11 (slice 1): audit cases + evidence/notes, obligations,
         // disputes, and risk. Kept 1:1 with the source's app/api/v1/{
