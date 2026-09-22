@@ -16,10 +16,6 @@
     <x-status-badge :value="$dispute->status" type="status" />
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card mb-3">

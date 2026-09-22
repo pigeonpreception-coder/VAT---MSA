@@ -9,10 +9,6 @@
     <p class="text-muted mb-0">Customers and suppliers trading with this organisation. A supplier can be verified against the national taxpayer register directly from its own page.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 <div class="card mb-3">
     <div class="card-body">
         <h2 class="h6">Register a party</h2>

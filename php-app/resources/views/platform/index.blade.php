@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Only the value of an existing definition is runtime-changeable, and only through a maker-checker gate: a proposed change is staged until a second, independent reviewer decides it.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0">

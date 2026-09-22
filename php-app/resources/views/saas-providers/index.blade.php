@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Register a SaaS/ERP/accounting integration provider and take it through NamRA's fixed conformance test harness before it may operate against SANDBOX or PRODUCTION data.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0 ps-3">

@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Grant a user one of the app's roles at a Local Office, Regional/Provincial, National or Global scope. Granting a role immediately updates the user's own role; scope level and office/region are recorded as governance context alongside it.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0">
