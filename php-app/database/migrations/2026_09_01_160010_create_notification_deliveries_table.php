@@ -14,7 +14,7 @@ return new class extends Migration
             $table->foreignUuid('notification_id')->constrained('notifications');
             $table->string('channel', 20);
             $table->string('status', 20);
-            $table->timestamp('attempted_at');
+            $table->timestamp('attempted_at')->useCurrent();
         });
     }
 

@@ -28,7 +28,7 @@ return new class extends Migration
             $table->text('data_categories');
             $table->string('legal_basis', 40);
             $table->string('status', 20);
-            $table->timestamp('valid_from');
+            $table->timestamp('valid_from')->useCurrent();
             $table->timestamp('valid_to')->nullable();
             $table->timestamp('revoked_at')->nullable();
             $table->timestamp('created_at')->useCurrent();

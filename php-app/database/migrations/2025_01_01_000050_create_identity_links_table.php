@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('email_at_link')->nullable();
             $table->string('assurance_level', 40);
             $table->string('status', 30);
-            $table->timestamp('linked_at');
+            $table->timestamp('linked_at')->useCurrent();
             $table->timestamp('last_authenticated_at')->nullable();
             $table->unique(['provider_id', 'subject']);
         });

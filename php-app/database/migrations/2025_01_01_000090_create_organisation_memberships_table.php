@@ -23,7 +23,7 @@ return new class extends Migration
             $table->foreign('role_code')->references('code')->on('access_roles');
             $table->foreignUuid('branch_id')->nullable()->constrained('branches');
             $table->string('status', 20);
-            $table->timestamp('valid_from');
+            $table->timestamp('valid_from')->useCurrent();
             $table->timestamp('valid_to')->nullable();
             $table->uuid('assigned_by')->nullable();
             $table->timestamp('created_at')->useCurrent();

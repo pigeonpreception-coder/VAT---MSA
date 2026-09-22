@@ -39,7 +39,7 @@ return new class extends Migration
             $table->string('external_reference')->nullable();
             $table->string('status', 20);
             $table->foreignUuid('actor_id')->constrained('users');
-            $table->timestamp('occurred_at', 6);
+            $table->timestamp('occurred_at', 6)->useCurrent();
         });
     }
 

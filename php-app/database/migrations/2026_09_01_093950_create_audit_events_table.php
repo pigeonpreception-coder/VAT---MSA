@@ -26,7 +26,7 @@ return new class extends Migration
             $table->longText('details');
             $table->string('previous_hash', 64)->nullable();
             $table->string('event_hash', 64);
-            $table->timestamp('occurred_at');
+            $table->timestamp('occurred_at')->useCurrent();
 
             $table->index(['resource_type', 'resource_id']);
             $table->index('actor_id');

@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('to_status', 30);
             $table->foreignUuid('actor_id')->constrained('users');
             $table->text('reason');
-            $table->timestamp('occurred_at');
+            $table->timestamp('occurred_at')->useCurrent();
         });
     }
 
