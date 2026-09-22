@@ -29,6 +29,24 @@ use Illuminate\Support\Str;
  * EXTERNALLY_ASSERTED, and the actor hash always derives from
  * contact_email rather than an asserted subject. A documented, deliberate
  * deviation, not an oversight.
+ *
+ * 2026-09-22 anti-enumeration fix: this used to throw a distinct
+ * RepositoryConflictException (HTTP 409, no row written) whenever
+ * vat_number/tin already matched an existing taxpayer, an in-progress
+ * registration application, or another pending self-serve application --
+ * letting an anonymous caller tell a real VAT number/TIN apart from an
+ * unused one purely from the response shape of an otherwise perfectly
+ * legitimate, correctly-rate-limited request. Every submission that passes
+ * validation now gets the identical 202 response and writes a real row
+ * either way; a detected conflict is recorded on the row itself
+ * (`identity_conflict_detected`) for whoever eventually reviews these
+ * applications, not echoed to the caller -- present() below never reads
+ * that column. Nothing about a self-serve row is auto-actioned regardless
+ * of this flag (no account, payment, subscription or licence is ever
+ * activated by one alone -- see present()'s own `next_action` text), so
+ * recording rather than rejecting a conflicting claim introduces no new
+ * privilege; it only makes a previously silently-dropped signal durable
+ * and admin-visible instead of anonymous-caller-visible.
  */
 class SignupService
 {
@@ -83,15 +101,15 @@ class SignupService
         $pending = ! $canonical && ! $controlled && SelfServeSignupApplication::where(function ($q) use ($signup) {
             $q->where('vat_number', $signup['vat_number'])->orWhere('tin', $signup['tin']);
         })->whereIn('status', self::ACTIVE_SIGNUP_STATES)->exists();
-        if ($canonical || $controlled || $pending) {
-            throw new RepositoryConflictException('A pending or existing application already covers the supplied taxpayer identity.');
-        }
+        // Not rejected here (that would be the enumeration channel this
+        // fix closes) -- recorded on the row instead, below.
+        $identityConflict = $canonical || $controlled || $pending;
 
         $id = (string) Str::uuid();
         $publicReference = 'VMS-'.$now->format('Y').'-'.mb_strtoupper(mb_substr(str_replace('-', '', (string) Str::uuid()), 0, 10));
         $actorId = $this->syntheticActorId($signup['contact_email']);
 
-        DB::transaction(function () use ($id, $publicReference, $signup, $plan, $idempotencyKey, $requestHash, $now, $actorId) {
+        DB::transaction(function () use ($id, $publicReference, $signup, $plan, $idempotencyKey, $requestHash, $now, $actorId, $identityConflict) {
             SelfServeSignupApplication::create([
                 'id' => $id, 'public_reference' => $publicReference, 'idempotency_key' => $idempotencyKey, 'request_hash' => $requestHash,
                 'applicant_name' => $signup['applicant_name'], 'applicant_role' => $signup['applicant_role'], 'contact_email' => $signup['contact_email'],
@@ -102,20 +120,20 @@ class SignupService
                 'address' => $signup['address'], 'terms_version' => self::TERMS_VERSION, 'privacy_notice_version' => self::PRIVACY_NOTICE_VERSION,
                 'authority_attested_at' => $now, 'terms_accepted_at' => $now, 'privacy_notice_accepted_at' => $now,
                 'status' => 'PENDING_VERIFICATION', 'identity_status' => 'VERIFICATION_REQUIRED',
-                'taxpayer_verification_status' => 'AWAITING_PROVIDER_CONTRACT', 'licence_status' => 'NOT_ACTIVATED',
-                'promoted_registration_application_id' => null, 'submitted_at' => $now,
+                'taxpayer_verification_status' => 'AWAITING_PROVIDER_CONTRACT', 'identity_conflict_detected' => $identityConflict,
+                'licence_status' => 'NOT_ACTIVATED', 'promoted_registration_application_id' => null, 'submitted_at' => $now,
             ]);
             OutboxEvent::create([
                 'id' => (string) Str::uuid(), 'aggregate_type' => 'SELF_SERVE_SIGNUP', 'aggregate_id' => $id,
                 'event_type' => 'SelfServeSignupSubmitted', 'event_version' => 1, 'partition_key' => $actorId,
                 'payload' => AuditService::canonicalJson([
                     'application_reference' => $publicReference, 'requested_plan_code' => $plan->code, 'status' => 'PENDING_VERIFICATION',
-                    'identity_status' => 'VERIFICATION_REQUIRED', 'activation_effect' => 'NONE',
+                    'identity_status' => 'VERIFICATION_REQUIRED', 'activation_effect' => 'NONE', 'identity_conflict_detected' => $identityConflict,
                 ]), 'status' => 'PENDING', 'publish_attempts' => 0, 'occurred_at' => $now, 'available_at' => $now,
             ]);
             AuditService::appendSynthetic($actorId, 'SELF_SERVE_APPLICANT', 'SELF_SERVE_SIGNUP_SUBMITTED', 'SELF_SERVE_SIGNUP', $id, [
                 'applicationReference' => $publicReference, 'identityStatus' => 'VERIFICATION_REQUIRED',
-                'requestedPlanCode' => $plan->code, 'activationEffect' => 'NONE',
+                'requestedPlanCode' => $plan->code, 'activationEffect' => 'NONE', 'identityConflictDetected' => $identityConflict,
             ], $now);
         });
 

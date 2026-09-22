@@ -122,7 +122,17 @@ class SelfServeSignupTest extends TestCase
         $response->assertStatus(422)->assertJsonPath('code', 'IDEMPOTENCY_KEY_INVALID');
     }
 
-    public function test_a_second_application_for_a_vat_number_with_an_active_canonical_taxpayer_is_a_conflict(): void
+    /**
+     * 2026-09-22 anti-enumeration fix: a submission colliding with an
+     * already-canonical taxpayer used to return a distinct 409, letting an
+     * anonymous caller tell a real VAT number/TIN apart from an unused one.
+     * It now gets the identical 202 every other accepted submission gets
+     * (see test_conflicting_and_non_conflicting_submissions_get_identical_responses
+     * for the direct proof of that), and a real row is written -- but the
+     * conflict is recorded on it (identity_conflict_detected), not hidden
+     * entirely: this codebase's own review process still needs to see it.
+     */
+    public function test_a_submission_colliding_with_an_active_canonical_taxpayer_is_accepted_but_flagged_internally(): void
     {
         $taxpayer = Taxpayer::create([
             'id' => (string) Str::uuid(), 'vat_number' => 'VAT-SU-EXISTING', 'tin' => 'TIN-SU-EXISTING',
@@ -133,17 +143,56 @@ class SelfServeSignupTest extends TestCase
 
         $response = $this->submit(['vat_number' => $taxpayer->vat_number, 'tin' => 'TIN-SU-DIFFERENT']);
 
-        $response->assertStatus(409);
+        $response->assertStatus(202);
+        $this->assertDatabaseHas('self_serve_signup_applications', [
+            'vat_number' => $taxpayer->vat_number, 'identity_conflict_detected' => true,
+        ]);
     }
 
-    public function test_a_second_pending_application_for_the_same_vat_number_is_a_conflict(): void
+    public function test_a_second_pending_application_for_the_same_vat_number_is_accepted_but_flagged_internally(): void
     {
         $shared = $this->payload();
-        $this->submit($shared)->assertStatus(202);
+        $first = $this->submit($shared);
+        $first->assertStatus(202);
+        $this->assertDatabaseHas('self_serve_signup_applications', ['vat_number' => $shared['vat_number'], 'identity_conflict_detected' => false]);
 
         $response = $this->submit(array_merge($shared, ['contact_email' => 'other-'.Str::lower(Str::random(8)).'@signuptest.test']));
 
-        $response->assertStatus(409);
+        $response->assertStatus(202);
+        $this->assertNotSame($first->json('application_reference'), $response->json('application_reference'));
+        $this->assertDatabaseCount('self_serve_signup_applications', 2);
+        $this->assertDatabaseHas('self_serve_signup_applications', [
+            'vat_number' => $shared['vat_number'], 'contact_email' => $shared['contact_email'], 'identity_conflict_detected' => true,
+        ]);
+    }
+
+    /**
+     * The direct proof this fix closes the enumeration channel: probing a
+     * VAT number that already belongs to a real taxpayer must be
+     * indistinguishable, from the caller's own side, from probing one
+     * nobody has ever used. Same status code, same response shape, same
+     * field values (only the naturally-unique reference/timestamp differ,
+     * which every accepted submission has regardless of conflict).
+     */
+    public function test_conflicting_and_non_conflicting_submissions_get_identical_responses(): void
+    {
+        $taxpayer = Taxpayer::create([
+            'id' => (string) Str::uuid(), 'vat_number' => 'VAT-SU-ENUM-CHECK', 'tin' => 'TIN-SU-ENUM-CHECK',
+            'legal_name' => 'Enum Check Co', 'taxpayer_type' => 'PRIVATE_COMPANY', 'vat_status' => 'ACTIVE',
+            'return_frequency' => 'MONTHLY', 'address' => '1 Enum Street', 'email' => 'enum-check@signuptest.test',
+        ]);
+        Organisation::create(['id' => (string) Str::uuid(), 'taxpayer_id' => $taxpayer->id, 'legal_name' => $taxpayer->legal_name, 'status' => 'ACTIVE']);
+
+        $conflicting = $this->submit(['vat_number' => $taxpayer->vat_number, 'tin' => 'TIN-SU-ENUM-DIFFERENT']);
+        $novel = $this->submit();
+
+        $conflicting->assertStatus(202);
+        $novel->assertStatus(202);
+        foreach (['status', 'identity_status', 'taxpayer_verification_status', 'licence_status'] as $field) {
+            $this->assertSame($novel->json($field), $conflicting->json($field), "field '{$field}' differs between a conflicting and a novel submission's response");
+        }
+        $this->assertSame(array_keys($novel->json()), array_keys($conflicting->json()));
+        $this->assertArrayNotHasKey('identity_conflict_detected', $conflicting->json());
     }
 
     public function test_repeated_submissions_from_the_same_email_are_rate_limited(): void
