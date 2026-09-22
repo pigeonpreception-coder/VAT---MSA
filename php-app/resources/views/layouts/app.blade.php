@@ -53,7 +53,7 @@
                     // which group starts expanded.
                     $groups = [
                         'dashboard' => ['dashboard', 'portals.*'],
-                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'disputes.*', 'obligations.*', 'compliance-overview.*', 'exceptions.*'],
+                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'audit-trail.*', 'disputes.*', 'obligations.*', 'compliance-overview.*', 'exceptions.*'],
                         'invoice-management' => ['invoice-management.*', 'invoices.*'],
                         'accounting-finance' => ['accounting.*'],
                         'operations' => ['operations.*'],
@@ -93,6 +93,7 @@
                             <li><a class="nav-link" href="{{ route('vat-management.adjustment-report') }}" @if (request()->routeIs('vat-management.adjustment-report')) aria-current="page" @endif>VAT Adjustment Report</a></li>
                             <li><a class="nav-link" href="{{ route('risk-indicators.index') }}" @if (request()->routeIs('risk-indicators.*')) aria-current="page" @endif>Risk Indicators</a></li>
                             <li><a class="nav-link" href="{{ route('audit-cases.index') }}" @if (request()->routeIs('audit-cases.*')) aria-current="page" @endif>Audit Cases &amp; Risk</a></li>
+                            <li><a class="nav-link" href="{{ route('audit-trail.index') }}" @if (request()->routeIs('audit-trail.*')) aria-current="page" @endif>Audit Trail</a></li>
                             <li><a class="nav-link" href="{{ route('disputes.index') }}" @if (request()->routeIs('disputes.*')) aria-current="page" @endif>Disputes</a></li>
                             <li><a class="nav-link" href="{{ route('obligations.index') }}" @if (request()->routeIs('obligations.*')) aria-current="page" @endif>Obligations</a></li>
                             <li><a class="nav-link" href="{{ route('compliance-overview.index') }}" @if (request()->routeIs('compliance-overview.*')) aria-current="page" @endif>Compliance Overview</a></li>

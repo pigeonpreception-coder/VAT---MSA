@@ -10172,3 +10172,85 @@ generic client-creation path this environment does not otherwise need.
   that one is not rendered globally. `exceptions/index.blade.php` itself
   still carries the same latent duplicate and was left alone as
   out-of-scope for this change.
+
+## New feature: audit trail search and hash-chain verification (2026-09-22)
+
+Ports Module 8 Phase D's `GetAuditTrail`/`VerifyAuditChain`
+(`lib/data/audit-repository.ts`, `lib/api/audit.ts`) -- the cleanest
+remaining "schema exists, command doesn't" gap: `audit_chain_verifications`
+had a migration but no Eloquent model and no writer anywhere in this port
+(its own migration comment named exactly this), and the
+`AUDIT_CHAIN_INTEGRITY_BREACH` detection rule (`secrule-audit-chain-breach`,
+threshold 1, severity CRITICAL) has sat seeded and dormant since the
+2026-09-20 Security Operations Centre feature, waiting for something to
+emit an `AUDIT_CHAIN_BREAK` event.
+
+- **A real, pre-existing defect found and fixed along the way**:
+  `audit_events.occurred_at` was created as a plain `TIMESTAMP` (whole-second
+  precision), but `App\Services\Audit\AuditService::write()`'s hash formula
+  embeds the timestamp formatted to microsecond precision. MySQL silently
+  truncated every stored value, so re-deriving any row's hash from what was
+  actually persisted could never reproduce the hash computed at write time
+  -- for every row, tampered or not, not just the ones this feature is
+  meant to catch. Verified empirically via `tinker` before writing a single
+  line of the verifier: a real row's hash never matched its own re-derived
+  value pre-fix, and matched exactly post-fix. Fixed by:
+  - `database/migrations/2026_09_22_000001_widen_audit_events_occurred_at_precision.php`
+    -- a raw `ALTER TABLE ... MODIFY occurred_at TIMESTAMP(6) NOT NULL`
+    (not `Schema::table()->change()`, since `doctrine/dbal` is not
+    installed in this vendor tree, as established in prior sessions).
+  - `App\Models\AuditEvent::$dateFormat = 'Y-m-d H:i:s.u'` -- Eloquent's
+    default MySQL date format truncates to whole seconds on save
+    regardless of the column's own precision, so widening the column
+    alone was not sufficient; the model must also be told to serialise
+    microseconds.
+  - **Disclosed, unrecoverable consequence**: this cannot fix rows written
+    before it. Their true microsecond timestamp was discarded at write
+    time and is gone; no schema or code change can reconstruct it. Manual
+    verification against this session's own accumulated dev-seed audit
+    trail (67 events going back to 2026-09-20) correctly and honestly
+    reports `FAILED`/`EVENT_HASH_MISMATCH` on the oldest surviving row --
+    proof the verifier works, not a false positive. A fresh chain built
+    entirely after this fix (this PR's own test suite) verifies `PASSED`
+    end to end. Any real deployment carrying audit history from before
+    this fix should expect the same first-run result and should not
+    interpret it as tampering.
+- `App\Models\AuditChainVerification` -- the missing model for the
+  pre-existing table.
+- `App\Services\Audit\AuditService` gains `searchTrail()` (filterable,
+  paginated read), `verifyChain()` (pure re-derive-and-compare, no
+  writes), `runChainVerification()` (persists the result, opens a
+  CRITICAL incident via `App\Support\Security\SecurityEventRecorder` on a
+  break -- reusing the SOC's own detection-rule pipeline rather than
+  inventing a second alerting path), and `listChainVerifications()`.
+  Kept in the same class as `append`/`appendSynthetic`, matching
+  source's own single-file convention.
+- Gated on `audit:read` only for all three JSON handlers, including the
+  verification trigger -- matching source's own `operationClass: "READ"`
+  for every one of them (verifying an already-append-only log mutates no
+  business data, so no `step-up`). No idempotency key: re-running
+  verification is naturally idempotent (it only reads and re-logs), and
+  source itself uses no `command_idempotency` row for this command.
+- JSON API kept 1:1 with source's route shape:
+  `GET /api/v1/audit/trail`, `GET`/`POST /api/v1/audit/chain-verifications`,
+  `rate-limit:audit` bucket on the trigger only.
+- Blade UI at `/audit-trail` (source has no page.tsx for this either --
+  `app/audit/page.tsx` is a separate, simpler unfiltered read via
+  `lib/data/repository.ts`'s own `listAuditEvents` -- matching this
+  migration's own established precedent of adding a Blade view anyway for
+  a genuinely human-facing internal-audit workflow): a filter form, the
+  matching event table, a "Run chain verification" button, and a history
+  table of past runs.
+- 10 new PHPUnit tests (`tests/Feature/Audit/AuditTrailTest.php`):
+  permission gate, filtered search (Blade and JSON), a clean chain
+  passing end to end (the real regression test for the precision fix
+  above -- only possible because it is in place), a directly-tampered
+  event detected via `EVENT_HASH_MISMATCH` and opening a CRITICAL
+  incident, a `PREVIOUS_HASH_MISMATCH` case, incident de-duplication
+  across repeated verification runs, verification history rendering, and
+  the JSON API mirror. Full suite: 930 tests, 0 regressions.
+- Manual browser verification: logged in as a NamRA auditor, filtered the
+  trail by resource type, and ran a real chain verification against this
+  session's own accumulated dev-seed history -- it correctly reported the
+  disclosed pre-fix historical break above and opened a real CRITICAL
+  security incident, confirmed directly in the database.
