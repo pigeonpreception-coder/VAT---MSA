@@ -46,16 +46,18 @@ use Illuminate\View\View;
  * this table's original read-only-by-source-fidelity boundary was
  * deliberately reversed rather than silently contradicted.
  *
- * One remaining confirmed, documented scope boundary against the source:
- *  - Receipt handling stays read-only: the source's own
- *    ExpenseReceiptActions.tsx calls `POST /api/v1/expenses/{id}/receipt`
- *    to link an already-uploaded, already-scanned-clean document, but that
- *    command was never ported to App\Services\Business\ExpenseService (no
- *    method, no route) -- and its own "Upload receipt" action depends on
- *    the Documents module's own upload UI, which likewise has no Blade
- *    screen yet. This view shows the linked receipt's real state
- *    (read-only, via App\Models\DocumentMetadata directly) but does not
- *    invent the missing link/upload commands.
+ * `linkReceipt()` closes the gap the doc comment above used to name here:
+ * `ExpenseService::linkReceipt()` (LinkExpenseReceipt) is now built, so
+ * this row-level action lets an already-uploaded, already-scanned-clean
+ * document be linked to a DRAFT expense by id -- the id is entered
+ * directly rather than picked from a list (this page has no query for
+ * "clean, unlinked documents for this expense" of its own, and adding one
+ * isn't this command's job), matching source's own two-step shape:
+ * the row's existing "Upload receipt" link already sends the actor to
+ * `documents.index` (owner_domain/owner_resource_id prefilled) to upload
+ * and await a clean scan first, then they return here to link it, the
+ * same two-step split `ExpenseReceiptActions.tsx`'s own sibling "Upload"/
+ * "Link" actions use.
  *
  * One deliberate, documented deviation from source, closing a confirmed
  * dead end the same way the quotations slice's "Send" action did: the
@@ -190,6 +192,14 @@ class OperationsViewController extends Controller
         $payload = ['schema_version' => '1.0.0', 'reason' => (string) $request->input('reason')];
 
         return $this->runTransition(fn () => $this->expenses->reject($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Expense rejected.');    }
+
+    public function linkReceipt(Request $request, string $id): RedirectResponse
+    {
+        $this->authorize('permission', 'expenses:manage');
+        $payload = ['schema_version' => '1.0.0', 'receipt_document_id' => (string) $request->input('receipt_document_id')];
+
+        return $this->runTransition(fn () => $this->expenses->linkReceipt($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), null), 'Receipt linked.');
+    }
 
     private function runTransition(\Closure $action, string $successMessage): RedirectResponse
     {

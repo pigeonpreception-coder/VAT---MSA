@@ -492,6 +492,19 @@ class BusinessValidator
         return ['schema_version' => '1.0.0', 'reason' => $reason];
     }
 
+    /** Ported from lib/domain/business.ts's normalizeAndValidateExpenseReceiptLink. @return array{schema_version: string, receipt_document_id: string} */
+    public static function expenseReceiptLink(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $receiptDocumentId = self::idField($input['receipt_document_id'] ?? null, '/receipt_document_id', 'Receipt document', $messages) ?? '';
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'receipt_document_id' => $receiptDocumentId];
+    }
+
     /**
      * @return array{schema_version: string, supplier_party_id: string, category_id: string, branch_id: ?string,
      *   po_number: string, currency: string, issue_date: string, valid_until: string, description: string,

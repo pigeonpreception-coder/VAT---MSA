@@ -405,16 +405,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
 
     // Ported from the source's own app/operations/page.tsx -- expenses,
     // inventory and projects. See OperationsViewController's own doc
-    // comment for its two confirmed scope boundaries (no import-VAT-
-    // evidence panel, receipt linking stays read-only) and its one
-    // deliberate deviation (a create-expense form + a "Submit" action,
-    // closing a confirmed dead end the same way quotations' own "Send"
-    // action did).
+    // comment for its one remaining confirmed scope boundary (no
+    // import-VAT-evidence panel) and its one deliberate deviation (a
+    // create-expense form + a "Submit" action, closing a confirmed dead
+    // end the same way quotations' own "Send" action did).
     Route::get('/operations', [OperationsViewController::class, 'index'])->name('operations.index');
     Route::post('/operations/expenses', [OperationsViewController::class, 'store'])->name('operations.store');
     Route::post('/operations/expenses/{id}/submission', [OperationsViewController::class, 'submit'])->name('operations.submit');
     Route::post('/operations/expenses/{id}/approval', [OperationsViewController::class, 'approve'])->name('operations.approve');
     Route::post('/operations/expenses/{id}/rejection', [OperationsViewController::class, 'reject'])->name('operations.reject');
+    Route::post('/operations/expenses/{id}/receipt', [OperationsViewController::class, 'linkReceipt'])->name('operations.link-receipt');
 
     // User's own explicit request: Foreign Invoices, autonomously
     // cross-authenticated against NamRA's E-Tariff border system --
@@ -965,6 +965,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/expenses/{id}/submission', [ExpenseController::class, 'submit']);
         Route::post('/expenses/{id}/approval', [ExpenseController::class, 'approve']);
         Route::post('/expenses/{id}/rejection', [ExpenseController::class, 'reject']);
+        Route::post('/expenses/{id}/receipt', [ExpenseController::class, 'linkReceipt']);
 
         // Phase 10 (slice 4): inventory -- products, warehouses, stock
         // movements/transfers, availability/valuation. Kept 1:1 with the

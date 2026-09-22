@@ -6,8 +6,10 @@ use App\Domain\Business\BusinessValidator;
 use App\Exceptions\BusinessResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\BusinessParty;
+use App\Models\DocumentMetadata;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
+use App\Models\ExpenseReceiptLink;
 use App\Models\User;
 use App\Services\Audit\AuditService;
 use App\Support\Business\CommandLedger;
@@ -111,6 +113,92 @@ class ExpenseService
         });
 
         return $this->findOrFail($id, $organisation->id);
+    }
+
+    /**
+     * Module 5 Phase E LinkExpenseReceipt. One immutable receipt per draft
+     * expense -- `expense_receipt_links`' own unique indexes on
+     * `expense_id`/`document_id` are the authoritative enforcement
+     * (source's own SQLite immutability triggers' equivalent), mirrored
+     * here with a clean/available gate so a bad link is rejected with a
+     * normal application error instead of a raw constraint-violation
+     * exception.
+     *
+     * Checks the receipt document's own `status` against `'ACTIVE'`, not
+     * source's literal `'AVAILABLE'` -- a real, discovered inconsistency
+     * in the original TypeScript source itself: `lib/data/
+     * business-repository.ts` (this command) and `lib/data/
+     * vat-lifecycle-repository.ts` both expect
+     * `document_metadata.status='AVAILABLE'` for a usable document, but
+     * the actual document-lifecycle owner, `lib/data/
+     * platform-repository.ts`'s own `completeDocumentScan`, only ever
+     * writes `status='ACTIVE'` for a clean scan -- no document in
+     * source's own database ever reaches `'AVAILABLE'` at all (confirmed
+     * via `grep -n "document_metadata.*status" lib/data/*.ts` across
+     * every module). This port's own `App\Services\Document\
+     * DocumentService::completeScan()` (already shipped) faithfully
+     * mirrors `platform-repository.ts` and writes `'ACTIVE'`, so checking
+     * for source's literal `'AVAILABLE'` here would make this command
+     * permanently, silently unusable against every document this port's
+     * own upload/scan pipeline could ever produce -- fixed rather than
+     * reproduced, the same "discovered defect, not blindly ported"
+     * judgment call this session has made for e.g. `audit_events.
+     * occurred_at`'s precision and `api_clients.status`'s column width.
+     *
+     * @return array<string, mixed>
+     */
+    public function linkReceipt(string $expenseId, array $payload, User $actor, string $idempotencyKey, string $correlationId, ?string $requestedOrganisationId): array
+    {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
+        $link = BusinessValidator::expenseReceiptLink($payload);
+        $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
+        $requestHash = CommandLedger::requestHash(['organisation_id' => $organisation->id, 'expense_id' => $expenseId, 'link' => $link]);
+        $prior = CommandLedger::prior($actor->id, 'LINK_EXPENSE_RECEIPT', $idempotencyKey, $requestHash);
+        if ($prior) {
+            return $this->findOrFail($prior, $organisation->id);
+        }
+        $expense = Expense::where('id', $expenseId)->where('organisation_id', $organisation->id)->first();
+        if (! $expense) {
+            throw new BusinessResourceException('Expense was not found in the authorised organisation.', 404);
+        }
+        if ($expense->status !== 'DRAFT' || $expense->receipt_document_id) {
+            throw new RepositoryConflictException('A receipt can only be linked once, while the expense is still in draft.');
+        }
+        $document = DocumentMetadata::where('id', $link['receipt_document_id'])->where('organisation_id', $organisation->id)
+            ->where('owner_domain', 'EXPENSE')->where('owner_resource_id', $expenseId)->first();
+        if (! $document) {
+            throw new BusinessResourceException('Receipt document was not found for this expense.', 404);
+        }
+        if ($document->scan_status !== 'CLEAN' || $document->status !== 'ACTIVE') {
+            throw new RepositoryConflictException('Only a clean, available receipt document may be linked.');
+        }
+
+        $now = now();
+        DB::transaction(function () use ($expenseId, $organisation, $document, $actor, $now, $idempotencyKey, $requestHash, $correlationId) {
+            // Affected-row guard: the DRAFT/no-receipt pre-check above ran
+            // before this transaction, unguarded against a concurrent link
+            // attempt on the same expense -- the same RT punch-list #8
+            // pattern every other expense transition in this class already
+            // carries.
+            $updated = Expense::where('id', $expenseId)->where('status', 'DRAFT')->whereNull('receipt_document_id')
+                ->update(['receipt_document_id' => $document->id]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Expense {$expenseId} was changed by another action; reload and try again.");
+            }
+            ExpenseReceiptLink::create([
+                'expense_id' => $expenseId, 'organisation_id' => $organisation->id, 'document_id' => $document->id,
+                'linked_by' => $actor->id, 'linked_at' => $now,
+            ]);
+            CommandLedger::record($actor->id, 'LINK_EXPENSE_RECEIPT', $idempotencyKey, $requestHash, 'EXPENSE', $expenseId, $now);
+            CommandLedger::outbox('EXPENSE', $expenseId, 'ExpenseReceiptLinked', $organisation->id, [
+                'expense_id' => $expenseId, 'organisation_id' => $organisation->id, 'document_id' => $document->id, 'correlation_id' => $correlationId,
+            ], $now);
+            AuditService::append($actor, 'EXPENSE_RECEIPT_LINKED', 'EXPENSE', $expenseId, [
+                'organisationId' => $organisation->id, 'documentId' => $document->id, 'correlationId' => $correlationId,
+            ], $now);
+        });
+
+        return $this->findOrFail($expenseId, $organisation->id);
     }
 
     /** DRAFT -> SUBMITTED, the maker-checker gate's starting line. @return array<string, mixed> */
