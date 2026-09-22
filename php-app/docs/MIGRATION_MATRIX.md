@@ -10627,3 +10627,79 @@ this port (its own migration comment named exactly this).
   submitted the form, landed back on `/login` with the confirmation
   status, and logged in with the freshly set password straight through to
   `/dashboard`.
+
+## New feature: Module 1 ResolveIdentity/LinkIdentity/RevokeSession (2026-09-22)
+
+Ports `lib/data/identity-repository.ts`'s `listIdentityLinks`/
+`linkIdentity`/`revokeIdentityLink` via a new `App\Services\Identity\
+IdentityLinkService`. `identity_links` previously had only readers
+(`IdentityFoundationSnapshotService`'s own dashboard counts,
+`SecurityOperationsService`'s incident-triggered bulk revoke) -- no
+standalone admin command to link an additional provider subject to a
+user or revoke one, confirmed via `grep -rn "IdentityLink::"
+php-app/app/` before writing any code. Not to be confused with
+`App\Http\Controllers\Identity\MfaViewController::revokeSession`/
+`revokeOtherSessions` (2026-09-15), a genuinely different, self-service-only
+feature scoped to Laravel's own framework `sessions` table.
+
+- **Honest, deliberate deviation, documented up front in the service's own
+  doc comment**: source's own `revokeIdentityLink` has a real effect there
+  -- `getCurrentUser()`'s join requires `identity_links.status='ACTIVE'`,
+  so a revoked link stops authenticating on its very next request, in
+  source's header-trust model. This port replaced that model entirely
+  with real Laravel session/password authentication
+  (`App\Http\Requests\Auth\LoginRequest`'s own doc comment) -- the auth
+  guard never consults `identity_links` at all, so linking/revoking one
+  here is administrative bookkeeping/audit only, not a real
+  session-invalidation command; the actual "lock this account out"
+  command in this port is `App\Services\Identity\UserService::suspend()`.
+  Kept anyway rather than silently dropped, the same posture this port
+  already takes for other source-side effects with no exact Laravel
+  analogue (e.g. `DeveloperConformanceEvaluator`'s own
+  `EXTERNAL_CREDENTIAL_PROVISIONED` check).
+- `App\Domain\Identity\IdentityLinkValidator::link()` -- ports
+  `normalizeIdentityLink` exactly: `user_id` required, `provider_key`
+  uppercased against a 2-40 char pattern, `subject` bounded 1-200 chars.
+- `IdentityLinkService::link()` -- the target user must exist and be
+  `ACTIVE`; a non-national actor may only link within their own
+  taxpayer's organisation (2026-08-27 source security fix, ported as-is:
+  `administration:manage` is tenant-grantable, so this scope check
+  prevents a tenant admin linking a platform subject to any user
+  platform-wide, including a national-scope account). The identity
+  provider must itself be `ACTIVE` + `CONFIGURED` -- today only
+  `SITES_WORKSPACE`; linking against `ITAS`/`VAT_MSA_STANDALONE`
+  correctly fails closed (`PROVIDER_NOT_CONFIGURED`) until their own
+  `configuration_status` changes, a security/regulatory decision this
+  command cannot grant itself. Always records
+  `assurance_level='ADMINISTRATIVE_LINK'`, never a caller-asserted
+  stronger level. `revoke()` carries the identical taxpayer-scope check
+  (the same 2026-08-27 fix applied there too) and is idempotent on an
+  already-`REVOKED` link (no duplicate audit/outbox row).
+- **A second, narrower instance of the same `$fillable`-drops-`id` defect
+  fixed earlier this session for `User::create()`**: `App\Models\
+  IdentityLink::$fillable` also omits `id` -- caught before it became a
+  live bug this time (rather than via a failing test) by checking the
+  model file first, since the `User::create()` incident was still fresh.
+  Worked around the same way `App\Models\UserInvitation`/most other
+  UUID-keyed models in this port already do it correctly: never pass
+  `id` into `create()` for a `$fillable`-guarded model; let `HasUuids`
+  generate it and read `$model->id` back afterward.
+- Gated `identity:read` for the list route (self by default; a different
+  `?user_id=` additionally requires `administration:manage`, checked at
+  the controller exactly like source's own route handler);
+  `administration:manage` + `step-up` for both write routes, the same
+  `rate-limit:identity` bucket every other Module 1 write command uses.
+- JSON API only, kept 1:1 with source's own route shape: `GET
+  /api/v1/identity/links`, `POST /api/v1/identity/links`, `POST
+  /api/v1/identity/links/{id}/revocation`
+  (`App\Http\Controllers\Identity\IdentityLinkController`). No Blade UI --
+  source has no page for this either.
+- 16 new PHPUnit tests (`tests/Feature/Identity/IdentityLinkTest.php`):
+  authentication, self-list vs. admin-list-for-another-user gating (both
+  directions), step-up enforcement on both write routes, a successful
+  link (case-insensitive `provider_key`), a national admin linking across
+  taxpayers, cross-tenant link denied, linking against the unconfigured
+  `ITAS` provider, a duplicate-subject conflict, linking to a suspended
+  user, a successful revoke, the idempotent-no-op path, cross-tenant
+  revoke denied, and revoking a nonexistent link. Full suite: 1008 tests,
+  0 regressions.

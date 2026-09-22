@@ -14,6 +14,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Developer\DeveloperPlatformController;
 use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
+use App\Http\Controllers\Identity\IdentityLinkController;
 use App\Http\Controllers\Identity\InvitationClaimController;
 use App\Http\Controllers\Identity\MfaController;
 use App\Http\Controllers\Identity\MfaViewController;
@@ -770,6 +771,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // Closes out Phase 8's own last deferred piece.
         Route::get('/identity', [IdentityFoundationController::class, 'show']);
 
+        // Module 1 ResolveIdentity/LinkIdentity -- kept 1:1 with source's
+        // own app/api/v1/identity/links route shape; see
+        // IdentityLinkController's own doc comment for GET's self-or-admin
+        // user_id gate.
+        Route::get('/identity/links', [IdentityLinkController::class, 'index']);
+
         // TOTP step-up parity (2026-09-15): a real, server-verified RFC
         // 6238 TOTP implementation, ported from app/api/v1/identity/mfa/
         // totp/{route.ts,verification/route.ts}, .../step-up/route.ts, and
@@ -787,6 +794,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/identity/step-up', [MfaController::class, 'confirmStepUp'])
             ->middleware('rate-limit:identity');
         Route::get('/identity/assurance', [MfaController::class, 'assurance']);
+
+        // Module 1 LinkIdentity/RevokeSession -- kept 1:1 with source's
+        // own app/api/v1/identity/links, .../links/[id]/revocation shape.
+        Route::post('/identity/links', [IdentityLinkController::class, 'store'])
+            ->middleware(['step-up', 'rate-limit:identity']);
+        Route::post('/identity/links/{id}/revocation', [IdentityLinkController::class, 'revoke'])
+            ->middleware(['step-up', 'rate-limit:identity']);
 
         Route::get('/organisations', [OrganisationController::class, 'index']);
         // Registered before the /organisations/{id} wildcard below --
