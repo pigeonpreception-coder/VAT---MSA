@@ -57,12 +57,11 @@ class SignupViewController extends Controller
         ];
 
         try {
-            $accepted = $this->signup->submit(
-                $payload,
-                RequestContext::sourceToken($request),
-                RequestContext::deviceId($request),
-                $this->formIdempotencyKey($request),
-            );
+            // Not sourceToken()/deviceId() -- see
+            // RequestContext::unauthenticatedRequestIp()'s own doc
+            // comment (same reasoning as SignupController's JSON twin).
+            $ip = RequestContext::unauthenticatedRequestIp($request);
+            $accepted = $this->signup->submit($payload, $ip, $ip, $this->formIdempotencyKey($request));
         } catch (SignupValidationException|SignupAuthorityRequiredException|RepositoryConflictException|RateLimitExceededException $e) {
             return back()->withErrors(['signup' => $e->getMessage()])->withInput();
         }

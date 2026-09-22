@@ -26,11 +26,15 @@ class SignupController extends Controller
     public function store(Request $request): JsonResponse
     {
         $payload = (array) $request->json()->all();
-        $sourceToken = RequestContext::sourceToken($request);
-        $deviceId = RequestContext::deviceId($request);
+        // Not sourceToken()/deviceId() -- this route is genuinely
+        // unauthenticated, so a caller-supplied header is the only signal
+        // a spoofed value would defeat, not a supplement to a real actor
+        // identity. See RequestContext::unauthenticatedRequestIp()'s own
+        // doc comment.
+        $ip = RequestContext::unauthenticatedRequestIp($request);
         $idempotencyKey = trim((string) $request->header('Idempotency-Key', ''));
 
-        $accepted = $this->signup->submit($payload, $sourceToken, $deviceId, $idempotencyKey);
+        $accepted = $this->signup->submit($payload, $ip, $ip, $idempotencyKey);
 
         return response()->json($accepted, Response::HTTP_ACCEPTED, [
             'x-correlation-id' => (string) Str::uuid(),

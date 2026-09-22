@@ -159,6 +159,39 @@ class SelfServeSignupTest extends TestCase
         $response->assertStatus(429);
     }
 
+    public function test_the_source_and_device_rate_limits_cannot_be_bypassed_by_spoofing_headers(): void
+    {
+        // RateLimitGuard::enforceSelfServeSignup()'s source bucket allows
+        // 10 requests per 5 minutes; each of these 10 carries a distinct,
+        // attacker-controlled X-Source-Token/X-Device-Id pair. If those
+        // headers were trusted (the bug this test guards against), each
+        // request would land in its own bucket and never trip the limit.
+        for ($i = 0; $i < 10; $i++) {
+            $this->postJson('/api/signup/v1/applications', $this->payload([
+                'contact_email' => 'spoof-'.$i.'-'.Str::lower(Str::random(6)).'@signuptest.test',
+                'vat_number' => "VAT-SPOOF-{$i}-".Str::random(4), 'tin' => "TIN-SPOOF-{$i}-".Str::random(4),
+            ]), [
+                'Idempotency-Key' => 'su-spoof-'.$i.'-'.Str::random(20),
+                'X-Source-Token' => 'attacker-controlled-source-'.$i,
+                'X-Device-Id' => 'attacker-controlled-device-'.$i,
+            ])->assertStatus(202);
+        }
+
+        // An 11th request, with yet another fresh spoofed header pair,
+        // still trips the real (server-derived, IP-keyed) source bucket --
+        // proving the headers are ignored, not merely one more bucket.
+        $response = $this->postJson('/api/signup/v1/applications', $this->payload([
+            'contact_email' => 'spoof-10-'.Str::lower(Str::random(6)).'@signuptest.test',
+            'vat_number' => 'VAT-SPOOF-10-'.Str::random(4), 'tin' => 'TIN-SPOOF-10-'.Str::random(4),
+        ]), [
+            'Idempotency-Key' => 'su-spoof-10-'.Str::random(20),
+            'X-Source-Token' => 'attacker-controlled-source-final',
+            'X-Device-Id' => 'attacker-controlled-device-final',
+        ]);
+
+        $response->assertStatus(429);
+    }
+
     public function test_an_unexpected_field_is_rejected(): void
     {
         $response = $this->submit(['not_a_real_field' => 'value']);
