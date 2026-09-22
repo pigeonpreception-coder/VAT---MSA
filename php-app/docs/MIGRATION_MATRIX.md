@@ -11054,3 +11054,30 @@ Blade side by side.
   service-layer guards. Full suite: 1049 tests, 0 regressions. No new
   Blade UI, so no manual browser verification for this module -- a pure
   JSON API addition.
+
+## New feature: Logistics Deliveries JSON API (2026-09-22)
+
+Same shape and same route-level source sweep as the Fixed Assets JSON API
+above: Operations > Logistics Module had shipped its Blade half
+(`LogisticsViewController`) but never `app/api/v1/logistics-deliveries/
+{route,[id]/{route,dispatch,delivery,cancellation}}/route.ts`'s JSON
+half. New `App\Http\Controllers\Operations\LogisticsController`
+(`index`/`show`/`store`/`dispatch`/`deliver`/`cancel`), reusing the
+existing `App\Services\Operations\LogisticsService` and
+`App\Domain\Operations\LogisticsValidator` exactly as
+`LogisticsViewController` already does -- no new service, validator,
+model, or migration. Also closes the same GET-single-resource sub-gap
+Fixed Assets had: `getLogisticsDelivery` was previously unported in both
+surfaces. Routes: `GET/POST /logistics-deliveries`, `GET /logistics-
+deliveries/{id}`, `POST .../dispatch`, `.../delivery`, `.../cancellation`
+-- no rate-limit middleware, same precedent as Fixed Assets.
+
+9 new PHPUnit tests (`tests/Feature/Operations/LogisticsApiTest.php`):
+authentication required, create-then-read-back, index scoped to the
+actor's own organisation, a duplicate delivery number conflicts (409), a
+non-`OTHER` reference type without a `reference_id` is rejected (422,
+`REFERENCE_ID_REQUIRED`), a viewer without `logistics:manage` is denied
+(403), the full dispatch/deliver lifecycle (plus a rejected cancellation
+of an already-delivered delivery, 422), cancelling a still-pending
+delivery, and cross-organisation reads/writes both 404. Full suite: 1058
+tests, 0 regressions. No new Blade UI, so no manual browser verification.

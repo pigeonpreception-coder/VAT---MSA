@@ -77,6 +77,7 @@ use App\Http\Controllers\Operations\ErpViewController;
 use App\Http\Controllers\Operations\FixedAssetController;
 use App\Http\Controllers\Operations\FixedAssetViewController;
 use App\Http\Controllers\Operations\HumanResourcesViewController;
+use App\Http\Controllers\Operations\LogisticsController;
 use App\Http\Controllers\Operations\LogisticsViewController;
 use App\Http\Controllers\Operations\PosViewController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
@@ -1037,6 +1038,19 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/fixed-assets/{id}/maintenance', [FixedAssetController::class, 'maintenance']);
         Route::post('/fixed-assets/{id}/restoration', [FixedAssetController::class, 'restoration']);
         Route::post('/fixed-assets/{id}/disposal', [FixedAssetController::class, 'disposal']);
+
+        // Logistics deliveries -- same route-level sweep, same gap shape as
+        // fixed assets above: Blade-only until now. Kept 1:1 with source's
+        // own app/api/v1/logistics-deliveries/{route,[id]/{route,dispatch,
+        // delivery,cancellation}} shape. Reuses the same
+        // App\Services\Operations\LogisticsService LogisticsViewController
+        // already calls.
+        Route::get('/logistics-deliveries', [LogisticsController::class, 'index']);
+        Route::post('/logistics-deliveries', [LogisticsController::class, 'store']);
+        Route::get('/logistics-deliveries/{id}', [LogisticsController::class, 'show']);
+        Route::post('/logistics-deliveries/{id}/dispatch', [LogisticsController::class, 'dispatch']);
+        Route::post('/logistics-deliveries/{id}/delivery', [LogisticsController::class, 'deliver']);
+        Route::post('/logistics-deliveries/{id}/cancellation', [LogisticsController::class, 'cancel']);
 
         // Phase 11 (slice 1): audit cases + evidence/notes, obligations,
         // disputes, and risk. Kept 1:1 with the source's app/api/v1/{
