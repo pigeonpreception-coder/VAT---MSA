@@ -21,6 +21,7 @@ use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
+use App\Http\Controllers\Identity\UserController;
 use App\Http\Controllers\Integration\IntegrationConnectionController;
 use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Invoice\InvoiceCorrectionViewController;
@@ -801,6 +802,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware(['step-up', 'rate-limit:identity']);
 
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
+            ->middleware(['step-up', 'rate-limit:identity']);
+
+        // Module 1 Identity SuspendUser/its reverse: a standalone,
+        // reversible account lockout -- kept 1:1 with source's own
+        // app/api/v1/users/[id]/suspension, .../reactivation shape. See
+        // App\Services\Identity\UserService's own doc comment for how this
+        // differs from TaxpayerController::suspend (tenant-wide) and
+        // OrganisationAdminController::terminateEmployee (one-way).
+        Route::post('/users/{id}/suspension', [UserController::class, 'suspend'])
+            ->middleware(['step-up', 'rate-limit:identity']);
+        Route::post('/users/{id}/reactivation', [UserController::class, 'reactivate'])
             ->middleware(['step-up', 'rate-limit:identity']);
 
         // Phase 9: invoice certification and VAT. Kept 1:1 with the source's
