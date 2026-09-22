@@ -18,6 +18,7 @@ class SelfServeSignupApplication extends Model
     protected $casts = [
         'authority_attested_at' => 'datetime', 'terms_accepted_at' => 'datetime',
         'privacy_notice_accepted_at' => 'datetime', 'submitted_at' => 'datetime',
+        'identity_conflict_detected' => 'boolean',
     ];
 
     public function requestedPlan(): BelongsTo
