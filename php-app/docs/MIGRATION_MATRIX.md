@@ -10004,3 +10004,76 @@ user redirected away, a full submit-and-confirm round trip, and the
 throughout, plus a genuine unauthenticated browser round-trip through the
 Blade form confirming the full PENDING_VERIFICATION application flow end
 to end. Full suite: 888 tests, 0 regressions.
+
+## New feature: the reconciliation matching engine and its NamRA work queue (2026-09-21)
+
+User said "proceed" again after PR #58 merged. All three modules from the
+original gap analysis (self-serve signup, Taxpayer Systems, SaaS
+onboarding) were now done, so this cycle opened with a fresh scan for
+what else remained genuinely unported. Module 3 Phase A/B surfaced: the
+independent ledger-consistency verification pass a 2026-08-25 source code
+assessment found missing entirely (source's own doc comment: "MATCHED"/
+"EXCEPTION" was just an inline risk score set at invoice submission time,
+`reconciliation_matches` was seed-only, never written by application
+code) plus its Phase B work queue for NamRA officers.
+
+**`reconciliation_matches`/`reconciliation_exceptions` were already
+schema-ported** (2026-09-01), each migration's own comment explicitly
+naming this exact gap: "the source has no application write path for it
+either (its own reconciliation-repository.ts is a separate, still-
+unmigrated module... tracked as a further gap, not silently dropped)."
+Every table `RunMatch` reads from -- `invoices`, `ledger_entries`,
+`vat_transactions` (including its `CANCELLATION` transaction_type,
+already widened by an earlier session fixing a genuine narrowing bug) --
+was also already in place, and both permission codes
+(`reconciliation:manage`, `exceptions:read`) were already seeded and
+granted to every NamRA role that needs them. This was the cleanest gap
+closed all session: no schema work, no permission work, purely the
+validator/service/controller/routes/view layer.
+
+Ported `lib/domain/reconciliation.ts`/`lib/data/reconciliation-
+repository.ts` in full: `RunMatch`'s three independent ledger checks
+(OUTPUT_VAT posting equals declared tax; an identified buyer has a
+matching INPUT_VAT posting and an unidentified one has none, re-verifying
+Module 2's unidentified-buyer guarantee as an ongoing control; a
+CANCELLED invoice has a reversing OUTPUT_VAT posting), `AssignException`/
+`ResolveException`, and `GetWorkQueue`'s filter/severity/officer/age
+predicates with real pagination designed in from the start (source's own
+watch-out note against retrofitting it later).
+
+Kept 1:1 with source's route shape (`app/api/v1/invoices/[id]/match`,
+`app/api/v1/exceptions/**`, `App\Http\Controllers\Reconciliation\
+ReconciliationController`) and its `rate-limit:reconciliation` bucket,
+free to wire via `EnforceRateLimit`'s existing generic branch. All three
+write commands (`RunMatch`/`Assign`/`Resolve`) wear `step-up`, matching
+source's own `COMPLIANCE_WRITE` operation class for all three;
+`GetWorkQueue` is a plain read. Unlike this migration's usual
+single-error-at-a-time convention applied uniformly, source's own
+"not found" cases (invoice/organisation/exception/officer) render as 422
+validation failures rather than 404s here too -- reproduced exactly,
+not normalized to this port's more common 404-for-missing-resource shape.
+
+A Blade UI was added at `/exceptions` despite source being JSON-API-only
+(a full-repo grep found no page.tsx referencing any of the four routes
+at all) -- a work queue table with status/severity/assignment/age
+filters and per-row Assign/Resolve forms, both step-up gated. `RunMatch`
+stays JSON-API-only: source's own doc comment frames it as "the correct
+per-invoice building block a [future scheduled] job would call," not an
+officer's own manual per-invoice action, the same reasoning this
+migration already applied to `RecordSynchronization` staying JSON-only
+for the Taxpayer Systems Framework.
+
+20 new PHPUnit tests (`tests/Feature/Reconciliation/ReconciliationTest.php`):
+a clean match via a real certified invoice, a genuinely tampered
+OUTPUT_VAT ledger entry producing an EXCEPTION and a queue row (the exact
+"drift a bug or manual tampering could introduce" scenario this module
+exists to catch), match-without-step-up (423), idempotency replay both
+by key and by the underlying unique-match constraint, cross-tenant denial,
+unknown-invoice 422, work-queue listing/filtering/conflicting-filter
+rejection, assign/resolve success, conflict, and validation paths, and
+Blade-view coverage (auth required, queue renders, resolve without
+step-up redirects to MFA, resolve with step-up succeeds). Real MySQL,
+real HTTP requests throughout -- including certifying a real invoice via
+the existing invoice API to get genuine `ledger_entries` rows, then
+directly corrupting one to prove the engine actually catches drift rather
+than re-trusting its own write path. Full suite: 908 tests, 0 regressions.

@@ -53,7 +53,7 @@
                     // which group starts expanded.
                     $groups = [
                         'dashboard' => ['dashboard', 'portals.*'],
-                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'disputes.*', 'obligations.*', 'compliance-overview.*'],
+                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'disputes.*', 'obligations.*', 'compliance-overview.*', 'exceptions.*'],
                         'invoice-management' => ['invoice-management.*', 'invoices.*'],
                         'accounting-finance' => ['accounting.*'],
                         'operations' => ['operations.*'],
@@ -87,6 +87,7 @@
                         <ul class="collapse sidebar-subnav @if ($activeGroup === 'vat-management') show @endif" id="group-vat-management" data-bs-parent="#sidebar-accordion">
                             <li><a class="nav-link" href="{{ route('vat-management.audit-report') }}" @if (request()->routeIs('vat-management.audit-report')) aria-current="page" @endif>VAT Audit Report</a></li>
                             <li><a class="nav-link" href="{{ route('vat-management.reconciliation') }}" @if (request()->routeIs('vat-management.reconciliation')) aria-current="page" @endif>Invoice Reconciliation</a></li>
+                            <li><a class="nav-link" href="{{ route('exceptions.index') }}" @if (request()->routeIs('exceptions.*')) aria-current="page" @endif>Reconciliation Exceptions</a></li>
                             <li><a class="nav-link" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT Returns</a></li>
                             <li><a class="nav-link" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>VAT Refund Report</a></li>
                             <li><a class="nav-link" href="{{ route('vat-management.adjustment-report') }}" @if (request()->routeIs('vat-management.adjustment-report')) aria-current="page" @endif>VAT Adjustment Report</a></li>
