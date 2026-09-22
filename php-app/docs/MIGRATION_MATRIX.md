@@ -10515,3 +10515,115 @@ app` returned nothing.
   commands' idempotent-no-op paths, the suspended-user's-next-request
   regression test, and the suspended-user-cannot-log-in regression test.
   Full suite: 978 tests, 0 regressions.
+
+## New feature: Module 1 Identity ProvisionUser -- invite/claim (2026-09-22)
+
+Ports `lib/data/identity-repository.ts`'s `inviteUser`/`claimInvitation`
+(`lib/domain/identity.ts`'s `normalizeUserInvitation`) -- an explicit
+invite-and-claim flow genuinely distinct from Phase 12 slice 2's
+`inviteEmployee`/`activateEmployee` (that pair links an *already-
+registered* Laravel account to an organisation's own employee roster;
+this one provisions the account itself). `user_invitations` had a
+migration but no Eloquent model and no command writing to it anywhere in
+this port (its own migration comment named exactly this).
+
+- **A real architectural fork, raised to the user before writing any
+  code**: source's own `claimInvitation` trusted a platform-asserted
+  identity (`subject`/`email`/`displayName` from its own ChatGPT Apps
+  integration, `app/chatgpt-auth.ts`'s `getChatGPTUser`) with no password
+  at all -- the exact header-trust authentication mechanism this port's
+  entire session has deliberately rejected (`App\Http\Requests\Auth\
+  LoginRequest`'s own doc comment: "do NOT authenticate users by trusting
+  arbitrary HTTP headers"). Every account-creation path built so far in
+  this port works around that gap differently (self-serve signup takes
+  real credentials up front; `inviteEmployee`/`activateEmployee` requires
+  an already-registered account; `App\Services\Platform\
+  PlatformChangeService::provisionStaff` -- Module 8 Phase A's
+  `provisionPlatformStaff`, found already fully ported under a different
+  method name while scoping this module, contrary to an earlier research
+  pass's report that it was unported -- sets a random, never-communicated
+  password with "a documented follow-up" for the account to ever get a
+  real one). Asked the user how the claim half should work here; chose
+  "password-based claim": the invited person visits the claim link, sets
+  their own credentials, and that creates their real Laravel account.
+- `App\Services\Identity\UserInvitationService::invite()` -- reuses
+  `App\Services\Identity\OrganisationService::requireInScope()` (the same
+  organisation-scope check `MembershipService::assign()` already uses) and
+  `App\Http\Requests\Identity\AssignMembershipRequest::ASSIGNABLE_ROLES`
+  (rather than a third copy of that privilege-escalation ceiling) for the
+  role whitelist. Conflicts (409) on an email that already has a real
+  account or an existing PENDING invitation in the same organisation,
+  matching source exactly. Nothing actually delivers the claim link
+  anywhere -- this repo has no outbound email integration, matching
+  `inviteEmployee`'s own `DISABLED_LOCAL_STAGING` delivery -- so the token
+  is returned directly to the inviting admin to relay out of band.
+- `UserInvitationService::claim()` -- looks up the invitation by
+  `claim_token`, collapses every failure reason (not found, already
+  claimed, expired, or the email now belongs to a real account) into one
+  generic "This invitation link is invalid or has expired" message: this
+  is now a fully public, unauthenticated endpoint (source's own claim
+  route at least required a valid platform login first), so distinct
+  error codes here would make it an enumeration oracle, the same class of
+  gap RT-005/RT-003 already fixed for password reset/login. An expired
+  invitation is marked `EXPIRED` before the generic error is raised, same
+  as source. On success, creates the `users` row, an `organisation_
+  memberships` row, and marks the invitation `CLAIMED`, all in one
+  transaction; the guarded `UPDATE ... WHERE status='PENDING'` on the
+  invitation runs *after* the user/membership rows exist (rather than
+  before, matching source's own statement order) specifically because
+  `claimed_by_user_id` is a real foreign key -- ordering it first was
+  tried, failed with an FK violation on the very first, non-racing claim,
+  and was caught by this module's own feature test suite, not by
+  inspection. Hardening beyond source: the guarded update's affected-row
+  check rejects a raced second claim of the same token with a clean
+  rollback (this session's own RT punch-list precedent for affected-row
+  guards on non-idempotent state transitions -- source's own unguarded
+  `db.batch()` has no equivalent protection). `USER_PROVISIONED` is
+  attributed to the newly created user itself, not the inviting admin
+  (already attributed on the earlier `USER_INVITED` event) -- a genuine
+  self-service claim, matching source exactly.
+- **A second real, pre-existing-pattern defect found via this module's own
+  test suite**: `App\Models\User::$fillable` does not include `id` (a
+  deliberate mass-assignment boundary), so `User::create(['id' => ...,
+  ...])` silently drops the supplied id and lets `HasUuids` generate a
+  different one -- invisible everywhere else in this codebase because
+  every other call site immediately reads `$user->id` back rather than
+  relying on a pre-generated id for a same-transaction foreign key, the
+  way this command's `organisation_memberships.user_id` needed to.
+  Confirmed via a scratch reproduction script isolating `User::create()`
+  from the rest of the command before fixing it. Fixed the same way
+  `PlatformChangeService::provisionStaff` already had to: inserting via
+  `DB::table('users')->insert()` directly rather than the Eloquent model,
+  then loading the model back by id for `AuditService::append()`.
+- Gated `organisations:manage` + `step-up` for the invite half (matching
+  source's own `ADMIN_WRITE` operationClass exactly, the same
+  `rate-limit:identity` bucket `MembershipController::store` already
+  uses); the claim half is `guest`-gated (routes/web.php) -- the whole
+  point is that the claimant has no `app_users` row, and therefore no
+  session, yet.
+- JSON API: `POST /api/v1/organisations/{id}/invitations`
+  (`App\Http\Controllers\Identity\UserInvitationController`), kept 1:1
+  with source's own route shape. The claim half is deliberately **not**
+  JSON: `App\Http\Controllers\Identity\InvitationClaimController` exposes
+  `GET`/`POST /invitations/claim` instead, mirroring `ForgotPasswordController`/
+  `ResetPasswordController`'s own Blade-only shape (also a command with no
+  faithful source-route shape to preserve, for the same reason -- TS never
+  had local passwords at all).
+- 14 new PHPUnit tests (`tests/Feature/Identity/UserInvitationTest.php`):
+  authentication and permission gates on the invite route, step-up
+  enforcement, a successful invite (claim token returned, `PENDING` row
+  persisted), both invite-side conflict cases, a non-assignable role
+  (`SUPER_ADMIN`) rejected, cross-tenant invite denied, the claim form's
+  own reachability, a full successful claim (account created with the
+  right role/taxpayer, membership assigned, invitation marked `CLAIMED`,
+  and the claimed account can genuinely log in with the password it set),
+  an unknown token, a second claim of an already-claimed token, an
+  expired token (and its `EXPIRED` marking), and a too-weak password --
+  each of the last four asserting no stray account was created. Full
+  suite: 992 tests, 0 regressions.
+- Manual browser verification (Playwright): created a real invitation
+  against the dev-seed `owner@demo-trading.test` organisation via the
+  service directly, then drove the actual claim page end to end --
+  submitted the form, landed back on `/login` with the confirmation
+  status, and logged in with the freshly set password straight through to
+  `/dashboard`.
