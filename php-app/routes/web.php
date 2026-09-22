@@ -94,6 +94,7 @@ use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\Portal\PortalViewController;
 use App\Http\Controllers\Portal\SellerPortalController;
 use App\Http\Controllers\Portal\SuperAdminPortalController;
+use App\Http\Controllers\PublicVerificationController;
 use App\Http\Controllers\Reconciliation\ReconciliationController;
 use App\Http\Controllers\Reconciliation\ReconciliationViewController;
 use App\Http\Controllers\Saas\SaasController;
@@ -109,6 +110,15 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
+
+// Module 2 Phase C/B: GetPublicVerification -- deliberately outside every
+// auth-gated group below (both the 'guest' group, which locks out an
+// already-authenticated visitor, and the 'auth' group the api/v1 prefix
+// sits inside): the whole point of a certificate QR/verification link is
+// that anyone holding the token can check it, authenticated or not. See
+// PublicVerificationController's own doc comment.
+Route::get('/api/v1/verify/{token}', [PublicVerificationController::class, 'show']);
+Route::get('/verify/{token}', [PublicVerificationController::class, 'page'])->name('verify.show');
 
 // Phase 6: local Laravel session authentication, replacing the source's
 // platform-header trust entirely (see LoginRequest's own doc comment).

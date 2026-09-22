@@ -10873,3 +10873,61 @@ ported, differently-named method as a gap.
   verification, a national admin verifying any taxpayer, cross-tenant
   verification denied, and an unknown taxpayer id. Full suite: 1029
   tests, 0 regressions.
+
+## New feature: Module 2 Phase C/B GetPublicVerification (2026-09-22)
+
+Ports `lib/data/repository.ts`'s `getPublicVerification` and both of its
+source surfaces: the JSON route (`app/api/v1/verify/[token]/route.ts`) and
+the Blade equivalent of the public HTML page
+(`app/verify/[token]/page.tsx`). Deliberately outside every auth-gated
+route group in `routes/web.php` -- neither the `guest` group (which locks
+out an already-authenticated visitor) nor the `auth` group the
+`api/v1` prefix otherwise sits inside: the whole point of a certificate
+QR/verification link is that anyone holding the token can check it,
+authenticated or not, confirmed with its own regression test
+(`test_an_already_authenticated_user_can_also_reach_the_public_endpoint`).
+No new tables -- `certificates`/`Certificate`, `invoices`/`Invoice`,
+`invoice_corrections`/`InvoiceCorrection` were already fully built and
+written by the already-shipped invoice-certification module.
+
+- `App\Services\Invoice\PublicVerificationService::verify()` -- a pure,
+  unauthenticated read by `certificates.verification_token`: certificate
+  status/issued-at/hash/signature-profile, the invoice's own
+  status/supplier/number/total/currency, whether it is itself a
+  correction (and of which invoice), and the list of any corrections
+  issued against it. No actor, no audit trail, matching source exactly --
+  this command has no side effects.
+- `App\Http\Controllers\PublicVerificationController::show()` -- the JSON
+  route, `GET /api/v1/verify/{token}`, reproducing source's own
+  route-level mapping/masking exactly (not the raw service shape):
+  `invoice_number`/`corrects_invoice_number` are masked via the new
+  `App\Support\Invoice\InvoiceNumberMask` (ported from `lib/format.ts`'s
+  `maskInvoiceNumber`), correction reason text is never included, and an
+  unknown token returns source's literal 404 problem body verbatim
+  (`{"type": "...problems/not-found", "title": "Certificate not found",
+  "status": 404}`).
+- `PublicVerificationController::page()` -- `GET /verify/{token}`
+  (named `verify.show`), rendering `resources/views/verify/show.blade.php`
+  against `layouts.app` (already `@auth`-safe, confirmed by the same
+  precedent `auth/claim-invitation.blade.php` set). Mirrors source's own
+  page.tsx layout and copy (valid/attention seal, supplier name shown in
+  the clear, masked invoice number, invoice fingerprint hash, the
+  pilot-certificate disclaimer) plus the correction-lineage table the
+  JSON route also carries, which source's own page.tsx does not render --
+  a small, deliberate addition kept consistent with the JSON surface
+  rather than a silent gap between the two.
+- 6 new PHPUnit tests
+  (`tests/Feature/Invoice/PublicVerificationTest.php`), all running with
+  no `actingAs()` except the setup calls that certify fixture invoices: an
+  unknown token 404s, a certified invoice verifies with correct masking
+  and totals, an already-authenticated user can still reach the endpoint,
+  a credit note appears on both sides of the correction lineage (the
+  original's `corrections` array and the credit note's own
+  `is_correction`/`corrects_invoice_number_masked`), and the Blade page
+  renders/404s to match. Full suite: 1035 tests, 0 regressions. Manually
+  verified via a real browser session (Playwright against `php artisan
+  serve`, a fresh browser context with no cookies at all): certified a
+  real invoice via `InvoiceService::submit()`, visited `/verify/{token}`
+  unauthenticated, confirmed the "Valid pilot certificate" seal, the
+  unmasked supplier name, the masked invoice number, and the 404 case for
+  an unknown token; demo rows cleaned up afterward.
