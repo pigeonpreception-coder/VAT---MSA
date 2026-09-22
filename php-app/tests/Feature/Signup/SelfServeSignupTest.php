@@ -156,13 +156,14 @@ class SelfServeSignupTest extends TestCase
         $first->assertStatus(202);
         $this->assertDatabaseHas('self_serve_signup_applications', ['vat_number' => $shared['vat_number'], 'identity_conflict_detected' => false]);
 
-        $response = $this->submit(array_merge($shared, ['contact_email' => 'other-'.Str::lower(Str::random(8)).'@signuptest.test']));
+        $secondEmail = 'other-'.Str::lower(Str::random(8)).'@signuptest.test';
+        $response = $this->submit(array_merge($shared, ['contact_email' => $secondEmail]));
 
         $response->assertStatus(202);
         $this->assertNotSame($first->json('application_reference'), $response->json('application_reference'));
         $this->assertDatabaseCount('self_serve_signup_applications', 2);
         $this->assertDatabaseHas('self_serve_signup_applications', [
-            'vat_number' => $shared['vat_number'], 'contact_email' => $shared['contact_email'], 'identity_conflict_detected' => true,
+            'vat_number' => $shared['vat_number'], 'contact_email' => $secondEmail, 'identity_conflict_detected' => true,
         ]);
     }
 
