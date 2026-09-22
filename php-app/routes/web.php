@@ -834,6 +834,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
             ->middleware(['step-up', 'rate-limit:identity']);
 
+        // Module 1 Taxpayer IdentifierVersion / correction + VerifyIdentifiers:
+        // see TaxpayerController's own doc comment for why correction reuses
+        // the suspension route's permission/step-up ceiling while
+        // verification (an external-call retry, never a value change) does
+        // not.
+        Route::post('/taxpayers/{id}/identifiers/{identifierId}/correction', [TaxpayerController::class, 'correctIdentifier'])
+            ->middleware(['step-up', 'rate-limit:identity']);
+        Route::post('/taxpayers/{id}/identifiers/verification', [TaxpayerController::class, 'verifyIdentifiers'])
+            ->middleware('rate-limit:identity');
+
         // Module 1 Identity SuspendUser/its reverse: a standalone,
         // reversible account lockout -- kept 1:1 with source's own
         // app/api/v1/users/[id]/suspension, .../reactivation shape. See
