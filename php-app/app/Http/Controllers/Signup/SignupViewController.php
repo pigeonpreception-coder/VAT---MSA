@@ -30,6 +30,15 @@ use Illuminate\View\View;
  * every other Blade write form in this app -- both work with no
  * dependency on an authenticated session, only a started one, which every
  * web request already has.
+ *
+ * `create()` now also passes `SignupService::listPublicPlans()` (ported
+ * from lib/data/signup-repository.ts's listPublicSignupPlans, source's
+ * own real public/unauthenticated read for exactly this page) to the
+ * view -- previously the plan field was a free-text input defaulting to
+ * 'PILOT_PROFESSIONAL', forcing a real applicant to already know the
+ * exact plan code by heart rather than choosing from the currently-open
+ * commercial plans by name/features, the same lookup submit() itself
+ * validates a submitted plan_code against.
  */
 class SignupViewController extends Controller
 {
@@ -37,7 +46,7 @@ class SignupViewController extends Controller
 
     public function create(): View
     {
-        return view('signup.create');
+        return view('signup.create', ['plans' => $this->signup->listPublicPlans()]);
     }
 
     public function store(Request $request): RedirectResponse

@@ -10964,3 +10964,47 @@ purpose.
   with no `actingAs()` anywhere in the file. Full suite: 1039 tests, 0
   regressions. No manual browser verification -- a pure JSON probe
   endpoint with no UI.
+
+## New feature: ListPublicSignupPlans (2026-09-22)
+
+Ports `lib/data/signup-repository.ts`'s `listPublicSignupPlans` -- the one
+genuinely public/unauthenticated read in the whole codebase besides
+`getPublicVerification`, powering source's own plan picker on
+`app/signup/company/page.tsx` (the TS page `App\Http\Controllers\Signup\
+SignupViewController`/`resources/views/signup/create.blade.php` was
+already ported from). Confirmed unported via `docs/MIGRATION_MATRIX.md`
+having zero hits for the function name, and by reading the Blade form
+itself: `plan_code` was a **free-text `<input>` defaulting to
+'PILOT_PROFESSIONAL'**, forcing a real applicant to already know the
+exact plan code by heart rather than choosing from the currently-open
+commercial plans by name and features.
+
+- `App\Services\Signup\SignupService::listPublicPlans()` -- every
+  `ACTIVE`, `plan_domain='COMMERCIAL_SAAS'` `LicensePlan` inside its
+  effective window, with the names of its `enabled=true`
+  `LicensePlanEntitlement` rows' features. Deliberately kept as its own
+  query rather than factored into a shared helper with `submit()`'s
+  existing single-plan-by-code lookup (both read the identical WHERE
+  shape, by design) -- one needs a specific plan by code, the other every
+  currently-open one. No new tables, models, or migrations: `LicensePlan`/
+  `LicensePlanEntitlement`/`LicenseFeature` and the `plan_domain` column
+  (added 2026-09-20 for `submit()`'s own lookup) already existed.
+- `SignupViewController::create()` now passes `listPublicPlans()` to the
+  view; `resources/views/signup/create.blade.php`'s plan field became a
+  `<select>` populated from real data (falling back to a disabled,
+  clearly-labelled state if no commercial plan is currently open),
+  listing each open plan's included features underneath -- the closest
+  static-Blade equivalent of source's own plan-picker component, given
+  this port has exactly one seeded commercial plan today
+  (`LicensePlanSeeder`'s `PILOT_PROFESSIONAL`).
+- 2 new PHPUnit tests added to the existing
+  `tests/Feature/Signup/SelfServeSignupTest.php`: the form shows the open
+  plan by name/code and lists its features, and shows the "no commercial
+  plan is currently open" fallback when the seeded plan is retired. All
+  18 pre-existing tests in that file still pass unchanged (the POST
+  submission tests supply `plan_code` directly and never touch the GET
+  view). Full suite: 1041 tests, 0 regressions. Manually verified via a
+  real browser session (Playwright against `php artisan serve`):
+  confirmed the `<select>` renders exactly one real option ("Professional
+  Pilot (PILOT_PROFESSIONAL)") with its ten included features listed
+  underneath, replacing the old blind free-text field.

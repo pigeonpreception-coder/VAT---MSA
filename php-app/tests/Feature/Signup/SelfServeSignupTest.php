@@ -257,6 +257,30 @@ class SelfServeSignupTest extends TestCase
         $response->assertSee('Apply for a commercial VAT-MSA subscription');
     }
 
+    /**
+     * Ported from lib/data/signup-repository.ts's listPublicSignupPlans --
+     * the plan field used to be a free-text input defaulting to
+     * 'PILOT_PROFESSIONAL'; it's now populated from the same currently-
+     * open-commercial-plan lookup submit() itself validates against.
+     */
+    public function test_the_blade_form_shows_the_open_commercial_plan_by_name_and_features(): void
+    {
+        $response = $this->get('/signup');
+
+        $response->assertOk()
+            ->assertSee('Professional Pilot (PILOT_PROFESSIONAL)')
+            ->assertSee('Core VAT management');
+    }
+
+    public function test_the_blade_form_shows_a_message_when_no_commercial_plan_is_currently_open(): void
+    {
+        \App\Models\LicensePlan::where('code', 'PILOT_PROFESSIONAL')->update(['status' => 'RETIRED']);
+
+        $response = $this->get('/signup');
+
+        $response->assertOk()->assertSee('No commercial licence plan is currently open for signup.');
+    }
+
     public function test_an_authenticated_user_is_redirected_away_from_the_signup_form(): void
     {
         $user = User::create([
