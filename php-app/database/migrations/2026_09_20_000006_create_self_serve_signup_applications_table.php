@@ -47,9 +47,9 @@ return new class extends Migration
             $table->text('address');
             $table->string('terms_version', 20);
             $table->string('privacy_notice_version', 20);
-            $table->timestamp('authority_attested_at');
-            $table->timestamp('terms_accepted_at');
-            $table->timestamp('privacy_notice_accepted_at');
+            $table->timestamp('authority_attested_at')->useCurrent();
+            $table->timestamp('terms_accepted_at')->useCurrent();
+            $table->timestamp('privacy_notice_accepted_at')->useCurrent();
             $table->string('status', 30);
             $table->string('identity_status', 30);
             $table->string('taxpayer_verification_status', 30);
@@ -57,7 +57,7 @@ return new class extends Migration
             $table->uuid('promoted_registration_application_id')->nullable();
             $table->foreign('promoted_registration_application_id', 'self_serve_signup_promoted_reg_app_foreign')
                 ->references('id')->on('registration_applications');
-            $table->timestamp('submitted_at');
+            $table->timestamp('submitted_at')->useCurrent();
 
             $table->unique(['contact_email', 'idempotency_key'], 'self_serve_signup_applications_email_idempotency_unique');
             $table->index(['status', 'submitted_at']);

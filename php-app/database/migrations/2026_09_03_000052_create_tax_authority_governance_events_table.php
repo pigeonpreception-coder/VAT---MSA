@@ -27,7 +27,7 @@ return new class extends Migration
             $table->string('reason_code', 60);
             $table->string('evidence_hash')->nullable();
             $table->foreignUuid('actor_id')->constrained('users');
-            $table->timestamp('occurred_at');
+            $table->timestamp('occurred_at')->useCurrent();
         });
     }
 

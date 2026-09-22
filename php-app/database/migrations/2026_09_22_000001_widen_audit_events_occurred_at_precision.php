@@ -23,16 +23,22 @@ use Illuminate\Support\Facades\DB;
  *
  * Uses a raw ALTER TABLE rather than Schema::table()->change(), since
  * doctrine/dbal is not installed in this vendor tree.
+ *
+ * Carries an explicit DEFAULT CURRENT_TIMESTAMP(6): a bare MODIFY here
+ * would otherwise drop the column back to no default at all, which
+ * fails under this app's own enforced strict sql_mode (config/
+ * database.php's 'strict' => true) the same way the original bare
+ * `timestamp('occurred_at')` in create_audit_events_table did.
  */
 return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement('ALTER TABLE audit_events MODIFY occurred_at TIMESTAMP(6) NOT NULL');
+        DB::statement('ALTER TABLE audit_events MODIFY occurred_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)');
     }
 
     public function down(): void
     {
-        DB::statement('ALTER TABLE audit_events MODIFY occurred_at TIMESTAMP NOT NULL');
+        DB::statement('ALTER TABLE audit_events MODIFY occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
     }
 };

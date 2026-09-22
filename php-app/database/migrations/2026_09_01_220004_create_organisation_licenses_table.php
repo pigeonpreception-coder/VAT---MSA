@@ -26,7 +26,7 @@ return new class extends Migration
             $table->foreignUuid('license_plan_id')->constrained('license_plans');
             $table->string('state', 20);
             $table->unsignedInteger('state_version')->default(1);
-            $table->timestamp('effective_from');
+            $table->timestamp('effective_from')->useCurrent();
             $table->timestamp('effective_to')->nullable();
             $table->timestamp('grace_ends_at')->nullable();
             $table->string('retention_policy', 60);

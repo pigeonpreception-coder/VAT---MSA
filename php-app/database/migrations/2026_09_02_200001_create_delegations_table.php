@@ -28,7 +28,7 @@ return new class extends Migration
             $table->foreignUuid('delegate_user_id')->constrained('users');
             $table->text('scopes');
             $table->string('status', 20);
-            $table->timestamp('valid_from');
+            $table->timestamp('valid_from')->useCurrent();
             $table->timestamp('valid_to')->nullable();
             $table->foreignUuid('approved_by')->nullable()->constrained('users');
             $table->timestamp('approved_at')->nullable();

@@ -20,7 +20,7 @@ return new class extends Migration
             $table->string('reference_type', 40);
             $table->uuid('reference_id');
             $table->text('reason');
-            $table->timestamp('occurred_at');
+            $table->timestamp('occurred_at')->useCurrent();
             $table->foreignUuid('actor_id')->constrained('users');
 
             $table->unique(['organisation_id', 'reference_type', 'reference_id'], 'stock_movements_org_ref_unique');

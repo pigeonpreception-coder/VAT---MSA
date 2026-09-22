@@ -25,7 +25,7 @@ return new class extends Migration
             $table->foreign('role_code')->references('code')->on('tax_authority_role_definitions');
             $table->text('scope');
             $table->enum('status', ['ACTIVE', 'SUSPENDED', 'REVOKED', 'EXPIRED']);
-            $table->timestamp('effective_from');
+            $table->timestamp('effective_from')->useCurrent();
             $table->timestamp('effective_to')->nullable();
             $table->foreignUuid('requested_by')->constrained('users');
             $table->foreignUuid('approved_by')->constrained('users');

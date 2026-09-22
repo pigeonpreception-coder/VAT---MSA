@@ -16,7 +16,7 @@ return new class extends Migration
             $table->text('body');
             $table->uuid('supersedes_note_id')->nullable();
             $table->foreign('supersedes_note_id')->references('id')->on('audit_case_notes');
-            $table->timestamp('created_at');
+            $table->timestamp('created_at')->useCurrent();
         });
     }
 

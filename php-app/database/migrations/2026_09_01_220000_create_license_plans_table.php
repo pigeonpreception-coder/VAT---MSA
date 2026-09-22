@@ -24,7 +24,7 @@ return new class extends Migration
             $table->string('name');
             $table->unsignedInteger('version');
             $table->string('status', 20);
-            $table->timestamp('effective_from');
+            $table->timestamp('effective_from')->useCurrent();
             $table->timestamp('effective_to')->nullable();
             $table->timestamp('created_at')->useCurrent();
 

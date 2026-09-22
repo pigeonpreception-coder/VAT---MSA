@@ -27,7 +27,7 @@ return new class extends Migration
             $table->foreignUuid('tax_authority_id')->constrained('tax_authorities');
             $table->foreignUuid('user_id')->constrained('users');
             $table->string('status', 20);
-            $table->timestamp('effective_from');
+            $table->timestamp('effective_from')->useCurrent();
             $table->timestamp('effective_to')->nullable();
             $table->string('appointed_by');
             $table->string('approval_reference');
