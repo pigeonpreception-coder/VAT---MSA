@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Autonomously pulled from NamRA's E-Tariff border system and cross-authenticated against the duty-paid record captured at import/export, so a foreign invoice's VAT audit rests on independent evidence, not the taxpayer's own submission alone.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-warning" role="alert">
         <ul class="mb-0">

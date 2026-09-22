@@ -9,10 +9,6 @@
     <p class="text-muted mb-0">NamRA-imposed obligations against a taxpayer -- a filing, payment, or other duty with a due date, tracked to satisfaction.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 @can('permission', 'obligations:manage')
     <div class="card mb-3">
         <div class="card-body">

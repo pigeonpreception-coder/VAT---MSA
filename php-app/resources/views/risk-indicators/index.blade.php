@@ -17,10 +17,6 @@
     <a href="{{ route('risk-indicators.report') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">View summary report</a>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 @can('permission', 'risk:review')
     <div class="card mb-3">
         <div class="card-body">

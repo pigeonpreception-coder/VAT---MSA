@@ -16,9 +16,6 @@
     <a href="{{ route('project-management.new') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Planned projects</a>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <ul class="mb-0">
