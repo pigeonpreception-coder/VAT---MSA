@@ -21,6 +21,7 @@ use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
+use App\Http\Controllers\Integration\IntegrationConnectionController;
 use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Invoice\InvoiceCorrectionViewController;
 use App\Http\Controllers\Invoice\InvoiceViewController;
@@ -841,6 +842,21 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::get('/audit/chain-verifications', [AuditTrailController::class, 'chainVerifications']);
         Route::post('/audit/chain-verifications', [AuditTrailController::class, 'verifyChain'])
             ->middleware('rate-limit:audit');
+
+        // Module 10 Phase A: RegisterIntegration/ApproveIntegration/
+        // SuspendIntegration/StartSync/GetHealth. Kept 1:1 with source's
+        // own app/api/v1/integrations/** shape. No 'step-up': source's own
+        // operationClass for all four write commands is BUSINESS_WRITE,
+        // not COMPLIANCE_WRITE.
+        Route::post('/integrations', [IntegrationConnectionController::class, 'register'])
+            ->middleware('rate-limit:integrations');
+        Route::post('/integrations/{id}/approval', [IntegrationConnectionController::class, 'approve'])
+            ->middleware('rate-limit:integrations');
+        Route::post('/integrations/{id}/suspension', [IntegrationConnectionController::class, 'suspend'])
+            ->middleware('rate-limit:integrations');
+        Route::post('/integrations/{id}/sync', [IntegrationConnectionController::class, 'startSync'])
+            ->middleware('rate-limit:integrations');
+        Route::get('/integrations/{id}/health', [IntegrationConnectionController::class, 'health']);
 
         // The standalone VAT-rule evaluate/propose/approve routes -- the
         // last narrow gap Phase 9 (invoices and VAT) deferred. Kept 1:1
