@@ -10280,3 +10280,73 @@ is *not* rendered globally and must stay).
 - Manual browser verification: confirmed exactly one alert renders after a
   real write action on `/exceptions` (one of the originally-reported
   pages), where two would have rendered before this fix.
+
+## New feature: Integration Connections lifecycle (2026-09-22)
+
+Ports Module 10 Phase A's `RegisterIntegration`/`ApproveIntegration`/
+`SuspendIntegration`/`StartSync`/`GetHealth`
+(`lib/data/integration-repository.ts`, `lib/domain/integration.ts`,
+`lib/api/integration.ts`) -- the generic, provider-agnostic connector
+model behind `integration_connections`/`sync_jobs`. Both tables were
+schema-only (each migration's own comment: "No command references this
+table yet"); the platform snapshot and Super Administration portal
+already display their rows read-only, but nothing wrote to them.
+
+- New `App\Models\IntegrationConnection`/`App\Models\SyncJob`,
+  `App\Domain\Integration\IntegrationValidator` (payload validation plus
+  the DRAFT/CONFIGURED/SUSPENDED transition state machine), and
+  `App\Services\Integration\IntegrationConnectionService` -- genuinely
+  distinct from the pre-existing `App\Services\Integration\
+  PosApiClientService` despite sharing a namespace: that service manages
+  taxpayer POS invoice-submission credentials (`api_clients`/
+  `credential_refs`), a different aggregate entirely.
+- `organisation_id` NULL means a platform-wide connection. Deliberately
+  checks `$actor->taxpayer_id === null` directly (not
+  `TenantScope::isNational()`) to decide platform-wide vs
+  tenant-scoped registration and to enforce the ownership boundary on
+  every other command -- `TenantScope::isNational()` additionally
+  requires the role to be in its own national-role list, which would
+  wrongly deny `SUPER_ADMIN`/`INFRASTRUCTURE_ADMIN` (platform-technical
+  roles with no taxpayer of their own, but not tax-administration roles)
+  a platform-wide registration source's own rule grants them.
+- The four pre-seeded government/banking/treasury connections (ITAS,
+  BIPA, bank-org1, treasury) carry free-text `REQUIRES_*_CONTRACT`
+  `configuration_status` values that fall outside this phase's closed
+  enum -- `assertTransition()` finds no rule for an unrecognised current
+  status and refuses, so `ApproveIntegration` can structurally never
+  touch those four rows. Covered by its own test seeding an ITAS-shaped
+  row directly and confirming the approval attempt fails closed.
+- All four write commands gated on `integrations:manage` (BUSINESS_WRITE,
+  no `step-up`); `GetHealth` on the lighter `integrations:read`, matching
+  source exactly. `StartSync` honestly records a `FAILED` `sync_jobs` row
+  with a typed reason rather than a fabricated success -- this pilot has
+  no live per-provider connector implementation for any provider, and
+  source's own doc comment is explicit that this proves the command's
+  full shape (idempotent, audited, tenant/platform-scoped, CONFIGURED-only)
+  rather than faking a working data pipe.
+- **No Blade UI, deliberately**: source itself has no page.tsx for any of
+  these five commands -- `GetHealth`'s own doc comment reasons that
+  connection discovery/listing is "already covered by the existing
+  GET /api/v1/platform snapshot's own `integrations` array", and this
+  port's `/platform` route and the Super Administration portal's own
+  summary tile already surface that same read data. Building a
+  register/approve/suspend/sync console would be new UI scope source
+  never designed, not a gap in this port.
+- JSON API kept 1:1 with source's route shape:
+  `POST /api/v1/integrations`, `POST /api/v1/integrations/{id}/approval`,
+  `POST /api/v1/integrations/{id}/suspension`,
+  `POST /api/v1/integrations/{id}/sync`,
+  `GET /api/v1/integrations/{id}/health`, `rate-limit:integrations` on
+  the four write routes.
+- 22 new PHPUnit tests (`tests/Feature/Integration/
+  IntegrationConnectionTest.php`): permission gates, tenant-scoped and
+  platform-wide registration, same-scope provider-key conflict, two
+  different organisations registering the same provider key
+  independently, registration idempotency replay, validation error
+  codes, the full DRAFT→CONFIGURED→SUSPENDED→CONFIGURED transition path,
+  the invalid-transition rejection, cross-organisation and
+  tenant-vs-platform boundary denials in both directions, StartSync's
+  CONFIGURED-only guard and its honest FAILED-job recording, sync
+  idempotency replay, GetHealth's connection+recent-jobs projection, and
+  the pre-seeded-government-connection fail-closed case. Full suite: 953
+  tests, 0 regressions.
