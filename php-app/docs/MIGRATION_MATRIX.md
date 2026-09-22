@@ -10448,3 +10448,70 @@ Developer\DeveloperPlatformService`'s command set.
   was too narrow at `btn-sm` and wrapped its own label onto two lines --
   widened to `col-md-2` (rebalancing the name/scopes columns to
   `col-md-3`/`col-md-4`).
+
+## New feature: Module 1 Identity SuspendUser/its reverse (2026-09-22)
+
+Ports `lib/data/identity-repository.ts`'s `suspendUser`/`reactivateUser`
+(`lib/domain/identity.ts`'s `normalizeUserSuspension`) -- a standalone,
+reversible account lockout for e.g. a security incident or a
+suspected-compromised account ("lock them out now, decide later"),
+genuinely distinct from two commands this port already has: `App\Services\
+Identity\TaxpayerService::suspend` (flips a whole taxpayer's `vat_status`,
+tenant-wide) and `App\Services\OrganisationAdmin\
+OrganisationAdminService::terminateEmployee` (a one-way offboarding that
+also decrements a licence seat). Found via the same "cross-reference
+`lib/data/*.ts` command functions against Laravel controllers" gap-finding
+pass used for every other module this session -- `grep -rl "suspendUser"
+app` returned nothing.
+
+- `App\Services\Identity\UserService::suspend()`/`reactivate()` -- ports
+  `requireUserInScope`'s own two checks (user exists, `USER_NOT_FOUND` as
+  a 422 validation error exactly like source's `IdentityValidationError`,
+  not a 404 -- source treats "does this id resolve" as validation, not a
+  resource lookup; then a non-national actor confined to their own
+  `taxpayer_id`, `AuthorizationException` otherwise) and `suspendUser`'s
+  own self-suspension guard (`SELF_SUSPENSION_DENIED`, checked before the
+  scope lookup, matching source's own ordering exactly). Both commands are
+  idempotent no-ops when the target is already in the requested state (no
+  second audit/outbox row). `App\Exceptions\IdentityValidationException`
+  (already built for the TOTP/MFA work) carries the typed `{code, path,
+  message}` shape rather than reintroducing `App\Http\Requests\Identity\
+  SuspendTaxpayerRequest`'s plain-Laravel-validation shortcut -- source's
+  own error codes (`USER_NOT_FOUND`/`SELF_SUSPENSION_DENIED`/
+  `FIELD_LENGTH_INVALID`) are preserved exactly rather than collapsed into
+  Laravel's generic validation-error shape.
+- **No new enforcement point needed, only the command**: source's own doc
+  comment stresses this has a real, immediate effect ("a suspended user is
+  rejected on their very next request"). In this port,
+  `App\Providers\AppServiceProvider`'s `'permission'` Gate already requires
+  `User::isActive()` before any `hasAppPermission()` check, and
+  `App\Http\Requests\Auth\LoginRequest::authenticate()` already refuses a
+  suspended user's next login -- both built for `TaxpayerService::suspend`
+  already reuse unchanged here, and a dedicated regression test proves a
+  suspended `TAXPAYER_STAFF` actor is denied `GET /api/v1/invoices` (a
+  permission that role genuinely holds while `ACTIVE`) on its very next
+  request, plus a second test proving the suspended account can no longer
+  log in.
+- Gated `administration:manage` (`ORGANISATION_CONTROL`'s own permission
+  set -- `TAXPAYER_OWNER`/`TAXPAYER_ADMIN`/`NAMRA_SYSTEM_SUPPORT`/
+  `NAMRA_SYSTEM_ADMIN`) plus `step-up`, matching source's own
+  `ADMIN_WRITE` operationClass exactly -- the same `rate-limit:identity`
+  bucket `TaxpayerController::suspend` already uses.
+- JSON API: `POST /api/v1/users/{id}/suspension`,
+  `POST /api/v1/users/{id}/reactivation`
+  (`App\Http\Controllers\Identity\UserController`), kept 1:1 with source's
+  own route shape.
+- **No Blade UI**: source has no dedicated user-management page for this
+  command either (an admin-console action, not a self-service one) --
+  consistent with how this port has left every other admin-only,
+  no-page.tsx command JSON-only (Integration Connections' five commands,
+  most recently).
+- 13 new PHPUnit tests (`tests/Feature/Identity/UserSuspensionTest.php`):
+  authentication and permission gates, step-up enforcement (423 without a
+  fresh confirmation), a taxpayer admin suspending and reactivating a user
+  in their own organisation end to end, a national admin suspending a user
+  in any taxpayer, cross-tenant suspension denied, self-suspension denied,
+  suspending a nonexistent user, a too-short reason rejected, both
+  commands' idempotent-no-op paths, the suspended-user's-next-request
+  regression test, and the suspended-user-cannot-log-in regression test.
+  Full suite: 978 tests, 0 regressions.
