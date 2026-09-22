@@ -109,7 +109,18 @@ class SignupService
         $publicReference = 'VMS-'.$now->format('Y').'-'.mb_strtoupper(mb_substr(str_replace('-', '', (string) Str::uuid()), 0, 10));
         $actorId = $this->syntheticActorId($signup['contact_email']);
 
-        DB::transaction(function () use ($id, $publicReference, $signup, $plan, $idempotencyKey, $requestHash, $now, $actorId, $identityConflict) {
+        DB::transaction(function () use ($id, $publicReference, $signup, $plan, $idempotencyKey, $requestHash, $now, $actorId, $identityConflict, $pending) {
+            if ($pending) {
+                // The conflict is symmetric: an earlier pending application
+                // sharing this vat_number/tin is just as much "in conflict"
+                // as the one being written below, so a reviewer scanning
+                // for identity_conflict_detected sees both sides, not just
+                // whichever application happened to be submitted second.
+                SelfServeSignupApplication::where(function ($q) use ($signup) {
+                    $q->where('vat_number', $signup['vat_number'])->orWhere('tin', $signup['tin']);
+                })->whereIn('status', self::ACTIVE_SIGNUP_STATES)->update(['identity_conflict_detected' => true]);
+            }
+
             SelfServeSignupApplication::create([
                 'id' => $id, 'public_reference' => $publicReference, 'idempotency_key' => $idempotencyKey, 'request_hash' => $requestHash,
                 'applicant_name' => $signup['applicant_name'], 'applicant_role' => $signup['applicant_role'], 'contact_email' => $signup['contact_email'],
