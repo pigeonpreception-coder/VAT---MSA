@@ -19,7 +19,7 @@ return new class extends Migration
             $table->date('effective_from');
             $table->date('effective_to')->nullable();
             $table->string('proposed_by');
-            $table->timestamp('proposed_at');
+            $table->timestamp('proposed_at')->useCurrent();
             $table->string('approved_by')->nullable();
             $table->timestamp('approved_at')->nullable();
             $table->text('approval_reason')->nullable();

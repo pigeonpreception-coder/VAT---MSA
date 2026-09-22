@@ -26,7 +26,7 @@ return new class extends Migration
             $table->foreignUuid('tax_authority_id')->constrained('tax_authorities');
             $table->string('review_type', 20)->default('QUARTERLY');
             $table->date('period_start');
-            $table->timestamp('due_at');
+            $table->timestamp('due_at')->useCurrent();
             $table->enum('status', ['OPEN', 'COMPLETED', 'OVERDUE']);
             $table->foreignUuid('owner_id')->constrained('users');
             $table->foreignUuid('completed_by')->nullable()->constrained('users');

@@ -26,7 +26,7 @@ return new class extends Migration
             $table->string('evidence_bundle_hash')->nullable();
             $table->string('readiness_reference')->nullable();
             $table->foreignUuid('requested_by')->constrained('users');
-            $table->timestamp('submitted_at');
+            $table->timestamp('submitted_at')->useCurrent();
             $table->timestamp('approved_at')->nullable();
             $table->timestamp('activated_at')->nullable();
             $table->timestamp('created_at')->useCurrent();

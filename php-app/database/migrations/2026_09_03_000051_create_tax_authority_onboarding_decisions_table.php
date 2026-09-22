@@ -33,7 +33,7 @@ return new class extends Migration
             $table->foreignUuid('decided_by')->constrained('users');
             $table->string('evidence_hash');
             $table->string('step_up_evidence_reference');
-            $table->timestamp('occurred_at');
+            $table->timestamp('occurred_at')->useCurrent();
 
             $table->unique(['onboarding_case_id', 'decision_type'], 'ta_onboarding_decisions_unique');
         });

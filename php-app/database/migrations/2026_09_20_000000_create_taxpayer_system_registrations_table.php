@@ -32,8 +32,8 @@ return new class extends Migration
             $table->string('security_status', 20);
             $table->timestamp('last_synchronization_at')->nullable();
             $table->foreignUuid('created_by')->constrained('users');
-            $table->timestamp('created_at');
-            $table->timestamp('updated_at');
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent();
 
             $table->unique(['organisation_id', 'system_name', 'system_vendor'], 'taxpayer_system_registrations_org_name_vendor_unique');
             $table->index(['organisation_id', 'registration_status'], 'taxpayer_system_registrations_org_status_index');

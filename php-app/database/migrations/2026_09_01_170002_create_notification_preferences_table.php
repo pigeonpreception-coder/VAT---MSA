@@ -14,7 +14,7 @@ return new class extends Migration
             $table->foreignUuid('user_id')->constrained('users');
             $table->string('channel', 20);
             $table->boolean('enabled');
-            $table->timestamp('updated_at');
+            $table->timestamp('updated_at')->useCurrent();
 
             $table->unique(['user_id', 'channel']);
         });
