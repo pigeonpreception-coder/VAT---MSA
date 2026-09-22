@@ -10792,3 +10792,84 @@ is what the register and every other reader actually display.
   the row's evidence column switching from "Upload receipt" to
   `receipt.pdf` / `CLEAN` / `ACTIVE`; demo rows cleaned up afterward.
   Full suite: 1017 tests, 0 regressions.
+
+## New feature: Module 1 Taxpayer IdentifierVersion (correction) + VerifyIdentifiers (2026-09-22)
+
+Ports `lib/data/identity-repository.ts`'s `correctTaxpayerIdentifier` and
+`verifyTaxpayerIdentifiers` onto the existing `App\Services\Identity\
+TaxpayerService` (alongside its already-shipped `suspend()`). Both are
+standalone commands, re-triggerable any time after registration --
+`RegistrationService::submit()` already records one `AWAITING_PROVIDER_
+CONTRACT` verification attempt at intake and `taxpayer_identifiers`/
+`App\Models\TaxpayerIdentifier`/`App\Integrations\Itas\ItasIdentityPort`
+were already fully built and written by that same service, so this needed
+no new tables, models or integration -- confirmed via a background research
+pass (grepping `app/Services`/`app/Http/Controllers` for any existing
+correction/re-verification method under any name, not just the TS
+function's literal name, and cross-checking `docs/MIGRATION_MATRIX.md`)
+before writing any code, the same "don't trust a bare grep" discipline
+this session adopted after an earlier round falsely reported an already-
+ported, differently-named method as a gap.
+
+- `App\Domain\Identity\TaxpayerIdentifierValidator::correction()` --
+  ports `normalizeIdentifierCorrection` exactly: `identifier_value`
+  uppercased against the shared 3-40 char identifier pattern, `reason`
+  bounded 5-240 chars.
+- `TaxpayerService::correctIdentifier()` -- statutory identity records are
+  never overwritten in place: supersedes the current `taxpayer_
+  identifiers` row (`status='SUPERSEDED'`, `effective_to` set) and
+  inserts a new versioned row linked back via `previous_version_id`,
+  keeping the denormalized `taxpayers.vat_number`/`tin` column in sync
+  (what counterparty resolution and duplicate checks elsewhere actually
+  read). Scoped to `VAT_NUMBER`/`TIN` only, the only identifier types this
+  codebase issues. Rejects: an unknown identifier id, a non-`ACTIVE`
+  identifier, a non-correctable identifier type, an unchanged value, a
+  value another active identifier already holds, or a value already used
+  as another taxpayer's canonical `vat_number`/`tin`. **One honest,
+  documented addition beyond source**: source's own `db.batch()` has no
+  race guard between its pre-transaction `ACTIVE` check and its writes; a
+  concurrent correction on the same identifier would supersede-and-insert
+  twice, corrupting the version chain. This port adds the same RT punch
+  list #8 affected-row guard (a conditional `->update()` inside the
+  transaction, re-verifying `status='ACTIVE'`) every other versioned state
+  transition in this codebase already carries.
+- Reuses `taxpayers:suspend` as its permission ceiling plus `step-up`,
+  matching source's own route doc comment: correcting a canonical VAT
+  number or TIN is at least as consequential as suspending the taxpayer
+  outright. No scope check beyond that permission gate -- matches source
+  exactly, since `taxpayers:suspend` is held only by national-scope roles
+  (`PILOT_ADMIN`/`NAMRA_SYSTEM_ADMIN` equivalents), so no tenant-scoped
+  actor could ever reach this command regardless.
+- `TaxpayerService::verifyIdentifiers()` -- calls the same
+  `ItasIdentityPort::verifyTaxpayer()` `RegistrationService` already
+  calls; today that always throws `ItasIntegrationUnavailableException`
+  (see that port's own doc comment), caught here and reported honestly as
+  `AWAITING_PROVIDER_CONTRACT`, never silently swallowed or faked into a
+  success. On the (currently unreachable) success path, refreshes
+  `verified_at` on the taxpayer's active `VAT_NUMBER`/`TIN` rows and
+  records a `TaxpayerVerified` outbox event. Gated on `taxpayers:read`
+  (broadly granted, including `TAXPAYER_OWNER`) plus
+  `App\Support\Access\TenantScope::requireTaxpayer()` -- unlike
+  correction, this route's permission alone doesn't restrict it to
+  national scope, so the explicit tenant-scope check (ported from
+  source's own `requireTaxpayerScope` call, present here but absent from
+  `correctTaxpayerIdentifier` in source for the reason above) is what
+  stops a taxpayer from probing another taxpayer's verification state. No
+  step-up: an external-call retry that, at most, refreshes a timestamp,
+  never changes an identifier value.
+- Both new JSON routes on the existing `TaxpayerController`, matching
+  source's route shape 1:1: `POST /api/v1/taxpayers/{id}/identifiers/
+  {identifierId}/correction` (`step-up` + `rate-limit:identity`), `POST
+  /api/v1/taxpayers/{id}/identifiers/verification` (`rate-limit:identity`
+  only). No Blade UI -- source has none either.
+- 12 new PHPUnit tests
+  (`tests/Feature/Identity/TaxpayerIdentifierTest.php`): a successful
+  correction (case-insensitive input, version bump, superseded/new-row
+  chain), correcting a superseded identifier rejected, a non-correctable
+  identifier type rejected, an unchanged value rejected, a conflicting
+  value from another taxpayer's active identifier rejected, step-up
+  enforcement, a `TAXPAYER_OWNER` without `taxpayers:suspend` denied, an
+  unknown identifier id, a taxpayer owner re-triggering their own
+  verification, a national admin verifying any taxpayer, cross-tenant
+  verification denied, and an unknown taxpayer id. Full suite: 1029
+  tests, 0 regressions.
