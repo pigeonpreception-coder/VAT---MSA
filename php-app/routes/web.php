@@ -102,6 +102,7 @@ use App\Http\Controllers\Reconciliation\ReconciliationController;
 use App\Http\Controllers\Reconciliation\ReconciliationViewController;
 use App\Http\Controllers\Saas\SaasController;
 use App\Http\Controllers\Saas\SaasViewController;
+use App\Http\Controllers\Security\SecurityOperationsController;
 use App\Http\Controllers\Security\SecurityOperationsViewController;
 use App\Http\Controllers\Signup\SignupViewController;
 use App\Http\Controllers\TaxpayerSystem\TaxpayerSystemController;
@@ -1051,6 +1052,24 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/logistics-deliveries/{id}/dispatch', [LogisticsController::class, 'dispatch']);
         Route::post('/logistics-deliveries/{id}/delivery', [LogisticsController::class, 'deliver']);
         Route::post('/logistics-deliveries/{id}/cancellation', [LogisticsController::class, 'cancel']);
+
+        // Security incidents -- same route-level sweep as fixed assets and
+        // logistics above, but SecurityOperationsViewController's own doc
+        // comment previously argued against a JSON surface here (see that
+        // controller's updated doc comment for why that reasoning is now
+        // stale, and SecurityOperationsController's own doc comment for
+        // this module's own step-up posture). Kept 1:1 with source's own
+        // app/api/v1/security/incidents/{route,[id]/{route,containment,
+        // revocation,closure}} shape. Every write wears 'step-up', matching
+        // the Blade routes' own already-established posture for this exact
+        // module (every incident-management write, not just source's own
+        // narrower revocation-only gate).
+        Route::get('/security/incidents', [SecurityOperationsController::class, 'index']);
+        Route::post('/security/incidents', [SecurityOperationsController::class, 'store'])->middleware('step-up');
+        Route::get('/security/incidents/{incident}', [SecurityOperationsController::class, 'show']);
+        Route::post('/security/incidents/{incident}/containment', [SecurityOperationsController::class, 'containment'])->middleware('step-up');
+        Route::post('/security/incidents/{incident}/revocation', [SecurityOperationsController::class, 'revocation'])->middleware('step-up');
+        Route::post('/security/incidents/{incident}/closure', [SecurityOperationsController::class, 'closure'])->middleware('step-up');
 
         // Phase 11 (slice 1): audit cases + evidence/notes, obligations,
         // disputes, and risk. Kept 1:1 with the source's app/api/v1/{

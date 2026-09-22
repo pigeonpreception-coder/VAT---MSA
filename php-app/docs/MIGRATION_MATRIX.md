@@ -11081,3 +11081,56 @@ non-`OTHER` reference type without a `reference_id` is rejected (422,
 of an already-delivered delivery, 422), cancelling a still-pending
 delivery, and cross-organisation reads/writes both 404. Full suite: 1058
 tests, 0 regressions. No new Blade UI, so no manual browser verification.
+
+## New feature: Security Incidents JSON API (2026-09-22)
+
+Third and last module from the route-level source sweep, and the one
+genuine judgment call among the three: `App\Http\Controllers\Security\
+SecurityOperationsViewController`'s own doc comment previously argued
+*against* a JSON surface here, reasoning that no other Blade-driven admin
+page in this port had one either -- citing Fixed Assets and Logistics by
+name as the same-precedent siblings. Both of those shipped their own
+JSON APIs earlier this same session (the two entries directly above),
+which left that stated rationale stale rather than still true. Asked the
+user whether to complete the sweep here too, given this module's own
+higher sensitivity (one action revokes a user's active sessions) could
+plausibly have been an intentional, still-current security tradeoff
+rather than a plain oversight; user confirmed building it.
+
+- New `App\Http\Controllers\Security\SecurityOperationsController`
+  (`index`/`show`/`store`/`containment`/`revocation`/`closure`), ported
+  from `app/api/v1/security/incidents/{route,[id]/{route,containment,
+  revocation,closure}}/route.ts` via `lib/api/security.ts`'s
+  `handleSOCQueue`/`handleIncidentDetail`/`handleIncidentCreate`/
+  `handleIncidentContainment`/`handleIncidentRevocation`/
+  `handleIncidentClosure` dispatch. Reuses the existing `App\Services\
+  Security\SecurityOperationsService` exactly as
+  `SecurityOperationsViewController` already does -- no new service,
+  validator, model, or migration.
+- **Step-up posture kept as this exact module's own already-established
+  Blade precedent, not reverted to source's narrower gate**: source's own
+  TS only step-up-gates `revokeIncidentAccess`; this port's Blade routes
+  already wear `step-up` on every incident-management write (create,
+  contain, revoke, close alike) -- a deliberate, previously-documented
+  deviation beyond source for this module specifically. The new JSON
+  routes mirror that same all-writes-step-up posture, not the no-step-up
+  precedent Fixed Assets/Logistics established for their own, less
+  sensitive command class.
+- `SecurityOperationsViewController`'s own doc comment updated to stop
+  claiming this port has no JSON surface for admin pages like this one.
+- 13 new PHPUnit tests
+  (`tests/Feature/Security/SecurityOperationsApiTest.php`): authentication
+  required, a role without `security:read` denied, the queue lists an
+  open incident and a single incident reads back correctly, opening an
+  incident requires `security:manage` (403) and a fresh step-up (423),
+  a fresh step-up creates it OPEN, containing an OPEN incident moves it
+  to CONTAINED (and re-containing is a 409), revoking access revokes the
+  subject's active `identity_links` and advances OPEN to CONTAINED (and
+  is itself step-up-locked without one), closing records the resolution
+  and closer (and re-closing is a 409), and an unknown incident 404s.
+  Full suite: 1071 tests, 0 regressions. No new Blade UI, so no manual
+  browser verification for this module.
+
+This closes the route-level source sweep's full candidate list (Fixed
+Assets, Logistics Deliveries, Security Incidents) that a fresh research
+pass found after the earlier function-level sweeps had been exhausted.
