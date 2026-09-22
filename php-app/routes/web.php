@@ -9,6 +9,7 @@ use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Developer\DeveloperPlatformController;
 use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
 use App\Http\Controllers\Identity\MfaController;
@@ -547,6 +548,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
     Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
 
+    // Module 10 Phase D: RotateCredential/RunConformance's Blade surface --
+    // see DeveloperPortalController's own doc comment. No 'step-up': source's
+    // own operationClass for both is BUSINESS_WRITE.
+    Route::post('/portal/developer/clients/{id}/rotation', [DeveloperPortalController::class, 'rotateCredential'])
+        ->name('portal.developer.rotate')->middleware('rate-limit:developer');
+    Route::post('/portal/developer/clients/{id}/conformance-runs', [DeveloperPortalController::class, 'runConformance'])
+        ->name('portal.developer.conformance')->middleware('rate-limit:developer');
+
     // Sidebar restructuring (master prompt sections 16-21): reserved
     // navigation/architecture placeholders for subfolders the new 9-group
     // sidebar names but that have no backing feature yet -- mirrors the
@@ -805,6 +814,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware(['step-up', 'rate-limit:reconciliation']);
         Route::post('/exceptions/{id}/resolution', [ReconciliationController::class, 'resolveException'])
             ->middleware(['step-up', 'rate-limit:reconciliation']);
+
+        // Module 10 Phase D: RotateCredential/RunConformance. Kept 1:1 with
+        // source's own app/api/v1/developer/clients/[id]/rotation,
+        // .../conformance-runs shape. No 'step-up': source's own
+        // operationClass for both is BUSINESS_WRITE, not COMPLIANCE_WRITE.
+        Route::post('/developer/clients/{id}/rotation', [DeveloperPlatformController::class, 'rotate'])
+            ->middleware('rate-limit:developer');
+        Route::post('/developer/clients/{id}/conformance-runs', [DeveloperPlatformController::class, 'runConformance'])
+            ->middleware('rate-limit:developer');
 
         // The standalone VAT-rule evaluate/propose/approve routes -- the
         // last narrow gap Phase 9 (invoices and VAT) deferred. Kept 1:1

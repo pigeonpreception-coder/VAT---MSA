@@ -4,6 +4,8 @@
 
 @php
     $activeCredentials = collect($snapshot['clients'])->where('status', 'ACTIVE')->count();
+    $ranClients = collect($snapshot['clients'])->whereNotNull('conformance_outcome');
+    $passedClients = $ranClients->where('conformance_outcome', 'PASSED')->count();
 @endphp
 
 @section('content')
@@ -38,11 +40,26 @@
     <div class="col">
         <div class="card h-100"><div class="card-body">
             <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Conformance</span><span>C</span></div>
-            <div class="fs-2 fw-semibold">Pending</div>
-            <div class="small text-warning">Sandbox certification not configured</div>
+            @if ($ranClients->isEmpty())
+                <div class="fs-2 fw-semibold">Pending</div>
+                <div class="small text-warning">No conformance run has been recorded yet</div>
+            @else
+                <div class="fs-2 fw-semibold">{{ $passedClients }}/{{ $ranClients->count() }}</div>
+                <div class="small {{ $passedClients === $ranClients->count() ? 'text-success' : 'text-warning' }}">Applications passing their latest conformance run</div>
+            @endif
         </div></div>
     </div>
 </div>
+
+@if ($errors->any())
+    <div class="alert alert-danger" role="alert">
+        <ul class="mb-0 ps-3">
+            @foreach ($errors->all() as $error)
+                <li>{{ $error }}</li>
+            @endforeach
+        </ul>
+    </div>
+@endif
 
 <div class="card">
     <div class="card-header">
@@ -54,7 +71,12 @@
             <table class="table table-hover mb-0 align-middle">
                 <caption class="visually-hidden">Registered API client applications, their scopes and status</caption>
                 <thead>
-                    <tr><th scope="col">Application</th><th scope="col">Client key</th><th scope="col">Scopes</th><th scope="col">Rate profile</th><th scope="col">Status</th></tr>
+                    <tr>
+                        <th scope="col">Application</th><th scope="col">Client key</th><th scope="col">Scopes</th><th scope="col">Rate profile</th><th scope="col">Status</th><th scope="col">Conformance</th>
+                        @if ($canManage)
+                            <th scope="col">Actions</th>
+                        @endif
+                    </tr>
                 </thead>
                 <tbody>
                     @foreach ($snapshot['clients'] as $item)
@@ -64,6 +86,29 @@
                             <td class="font-monospace">{{ $item['scopes'] }}</td>
                             <td>{{ $item['rate_limit_profile'] }}</td>
                             <td><x-status-badge :value="$item['status']" type="status" /></td>
+                            <td>
+                                @if ($item['conformance_outcome'])
+                                    <x-status-badge :value="$item['conformance_outcome']" type="status" />
+                                @else
+                                    <span class="text-muted small">Not run</span>
+                                @endif
+                            </td>
+                            @if ($canManage)
+                                <td>
+                                    <div class="d-flex flex-column gap-1">
+                                        <form method="POST" action="{{ route('portal.developer.rotate', $item['id']) }}">
+                                            @csrf
+                                            <x-idempotency-key />
+                                            <button type="submit" class="btn btn-outline-secondary btn-sm w-100" {{ $item['status'] === 'REVOKED' ? 'disabled' : '' }}>Rotate credential</button>
+                                        </form>
+                                        <form method="POST" action="{{ route('portal.developer.conformance', $item['id']) }}">
+                                            @csrf
+                                            <x-idempotency-key />
+                                            <button type="submit" class="btn btn-outline-primary btn-sm w-100">Run conformance</button>
+                                        </form>
+                                    </div>
+                                </td>
+                            @endif
                         </tr>
                     @endforeach
                 </tbody>

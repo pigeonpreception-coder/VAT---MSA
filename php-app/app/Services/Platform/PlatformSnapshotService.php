@@ -200,6 +200,18 @@ class PlatformSnapshotService
             ->where('c.organisation_id', $organisation->id)->orderByDesc('w.created_at')
             ->get(['w.id', 'w.api_client_id', 'w.event_types', 'w.endpoint_url', 'w.status', 'w.created_at']);
 
+        $clientIds = $clients->pluck('id')->all();
+        $latestRuns = $clientIds === [] ? collect() : DB::table('test_runs')->whereIn('api_client_id', $clientIds)
+            ->orderByDesc('run_at')->get(['api_client_id', 'outcome', 'run_at'])
+            ->unique('api_client_id')->keyBy('api_client_id');
+        $clients = $clients->map(function ($client) use ($latestRuns) {
+            $latest = $latestRuns->get($client->id);
+            $client->conformance_outcome = $latest->outcome ?? null;
+            $client->conformance_run_at = $latest->run_at ?? null;
+
+            return $client;
+        });
+
         return ['clients' => $this->rows($clients), 'webhooks' => $this->rows($webhooks), 'provisioning' => 'ORGANISED_SCOPE'];
     }
 
