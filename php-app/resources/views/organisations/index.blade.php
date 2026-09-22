@@ -9,10 +9,6 @@
     <p class="text-muted mb-0">Module 1's own identity foundation -- taxpayer organisations, identity providers, and platform-wide access counts.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 <div class="row g-3 mb-3">
     <div class="col-md-8">
         <div class="card h-100">

@@ -9,10 +9,6 @@
     <p class="text-muted mb-0">A fully governed audit lifecycle -- every status change, finding, evidence citation and note is recorded, never edited or deleted in place.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 @can('permission', 'cases:manage')
     <div class="card mb-3">
         <div class="card-body">

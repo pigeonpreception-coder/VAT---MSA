@@ -9,10 +9,6 @@
     <p class="text-muted mb-0">Generate, review and submit VAT returns from certified invoice activity, with maker-checker approval at every controlled step.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card">

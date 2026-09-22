@@ -9,9 +9,6 @@
     <p class="text-muted mb-0">Register, valuation and disposal tracking. Immovable and Movable Asset Management share one register, filtered here to {{ strtolower($assetClass) }} assets only.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
 @if ($errors->any())
     <div class="alert alert-danger" role="alert">
         <strong>This action needs attention.</strong>

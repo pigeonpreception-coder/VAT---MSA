@@ -10,10 +10,6 @@
                 <h1 class="h4 mb-3 text-center">Forgot your password?</h1>
                 <p class="text-muted text-center small mb-4">Enter your account email and we'll send you a link to reset your password.</p>
 
-                @if (session('status'))
-                    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-                @endif
-
                 @if ($errors->any())
                     <div class="alert alert-danger">
                         <ul class="mb-0 ps-3">

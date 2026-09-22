@@ -9,10 +9,6 @@
     <p class="text-muted mb-0">A taxpayer may file a dispute against an audit finding, VAT return, refund decision, or obligation -- reviewed independently of the resource being disputed.</p>
 </div>
 
-@if (session('status'))
-    <div class="alert alert-success" role="status">{{ session('status') }}</div>
-@endif
-
 @can('permission', 'disputes:manage')
     <div class="card mb-3">
         <div class="card-body">
