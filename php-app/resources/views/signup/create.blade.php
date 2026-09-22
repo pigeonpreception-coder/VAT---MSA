@@ -54,8 +54,22 @@
                         <input type="email" id="contact_email" name="contact_email" value="{{ old('contact_email') }}" class="form-control form-control-sm" required>
                     </div>
                     <div class="col-md-4">
-                        <label for="plan_code" class="form-label small mb-0">Licence plan code</label>
-                        <input type="text" id="plan_code" name="plan_code" value="{{ old('plan_code', 'PILOT_PROFESSIONAL') }}" class="form-control form-control-sm" required>
+                        <label for="plan_code" class="form-label small mb-0">Licence plan</label>
+                        @if (count($plans) > 0)
+                            <select id="plan_code" name="plan_code" class="form-select form-select-sm" required>
+                                @foreach ($plans as $plan)
+                                    <option value="{{ $plan['code'] }}" @selected(old('plan_code', $plans[0]['code']) === $plan['code'])>{{ $plan['name'] }} ({{ $plan['code'] }})</option>
+                                @endforeach
+                            </select>
+                            <div class="form-text">
+                                @foreach ($plans as $plan)
+                                    <div><strong>{{ $plan['name'] }}:</strong> {{ $plan['features'] ? implode(', ', $plan['features']) : 'No included features listed.' }}</div>
+                                @endforeach
+                            </div>
+                        @else
+                            <input type="text" class="form-control form-control-sm" value="No commercial plans are currently available." disabled>
+                            <div class="form-text text-danger">No commercial licence plan is currently open for signup. Please try again later.</div>
+                        @endif
                     </div>
 
                     <div class="col-12 mt-3"><h2 class="h6 mb-0">Company</h2></div>

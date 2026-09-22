@@ -6,6 +6,7 @@ use App\Domain\Signup\SignupValidator;
 use App\Exceptions\RepositoryConflictException;
 use App\Exceptions\SignupValidationException;
 use App\Models\LicensePlan;
+use App\Models\LicensePlanEntitlement;
 use App\Models\OutboxEvent;
 use App\Models\RegistrationApplication;
 use App\Models\SelfServeSignupApplication;
@@ -54,6 +55,41 @@ class SignupService
     public const PRIVACY_NOTICE_VERSION = '2026-08-23';
 
     private const ACTIVE_SIGNUP_STATES = ['PENDING_VERIFICATION', 'UNDER_REVIEW', 'APPROVED_FOR_PROVISIONING'];
+
+    /**
+     * Ported from lib/data/signup-repository.ts's listPublicSignupPlans --
+     * a genuinely public, unauthenticated read that lets an applicant see
+     * plan names/features before submitting, rather than having to already
+     * know an exact plan code by heart. Same effective-window/status/
+     * plan_domain filter submit() itself uses to validate a submitted
+     * plan_code, kept in sync deliberately (both read the identical
+     * WHERE shape) rather than factored into a shared private helper,
+     * since submit()'s needs a single plan by code+ordered-by-version
+     * while this needs every currently-open plan.
+     *
+     * @return list<array{code: string, name: string, version: int, features: list<string>}>
+     */
+    public function listPublicPlans(): array
+    {
+        $now = now();
+        $plans = LicensePlan::where('plan_domain', 'COMMERCIAL_SAAS')->where('status', 'ACTIVE')
+            ->where('effective_from', '<=', $now)
+            ->where(fn ($q) => $q->whereNull('effective_to')->orWhere('effective_to', '>', $now))
+            ->orderBy('name')->orderByDesc('version')->get();
+        if ($plans->isEmpty()) {
+            return [];
+        }
+
+        $featureNamesByPlan = LicensePlanEntitlement::whereIn('license_plan_id', $plans->pluck('id'))
+            ->where('enabled', true)->with('feature')->get()
+            ->groupBy('license_plan_id')
+            ->map(fn ($entitlements) => $entitlements->pluck('feature.name')->filter()->values()->all());
+
+        return $plans->map(fn (LicensePlan $plan) => [
+            'code' => $plan->code, 'name' => $plan->name, 'version' => (int) $plan->version,
+            'features' => $featureNamesByPlan->get($plan->id, []),
+        ])->values()->all();
+    }
 
     /** @return array{application_reference: string, status: string, identity_status: string, taxpayer_verification_status: string, licence_status: string, submitted_at: string, next_action: string} */
     public function submit(array $payload, string $sourceToken, string $deviceId, string $idempotencyKey): array
