@@ -6,6 +6,8 @@ use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
 use App\Http\Controllers\Administration\AdministrationViewController;
 use App\Http\Controllers\Auth\ForgotPasswordController;
+use App\Http\Controllers\Audit\AuditTrailController;
+use App\Http\Controllers\Audit\AuditTrailViewController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\DashboardController;
@@ -233,6 +235,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/audit-cases/{id}/evidence', [AuditCaseViewController::class, 'storeEvidence'])->name('audit-cases.evidence.store');
     Route::post('/audit-evidence/{id}/custody-events', [AuditCaseViewController::class, 'storeEvidenceCustodyEvent'])->name('audit-evidence.custody-events.store');
     Route::post('/audit-cases/{id}/notes', [AuditCaseViewController::class, 'storeNote'])->name('audit-cases.notes.store');
+
+    // Module 8 Phase D: GetAuditTrail/VerifyAuditChain's Blade surface --
+    // see AuditTrailViewController's own doc comment. No 'step-up': source's
+    // own operationClass for the verification trigger is READ, not WRITE.
+    Route::get('/audit-trail', [AuditTrailViewController::class, 'index'])->name('audit-trail.index');
+    Route::post('/audit-trail/verification', [AuditTrailViewController::class, 'verifyChain'])
+        ->name('audit-trail.verify')->middleware('rate-limit:audit');
 
     // Real Blade UI for disputes, alongside the JSON API surface below --
     // see DisputeViewController's own doc comment. Unlike every other
@@ -823,6 +832,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware('rate-limit:developer');
         Route::post('/developer/clients/{id}/conformance-runs', [DeveloperPlatformController::class, 'runConformance'])
             ->middleware('rate-limit:developer');
+
+        // Module 8 Phase D: GetAuditTrail/VerifyAuditChain. Kept 1:1 with
+        // source's own app/api/v1/audit/trail, .../chain-verifications
+        // shape. No 'step-up': source's own operationClass for all three,
+        // including the verification trigger, is READ, not WRITE.
+        Route::get('/audit/trail', [AuditTrailController::class, 'search']);
+        Route::get('/audit/chain-verifications', [AuditTrailController::class, 'chainVerifications']);
+        Route::post('/audit/chain-verifications', [AuditTrailController::class, 'verifyChain'])
+            ->middleware('rate-limit:audit');
 
         // The standalone VAT-rule evaluate/propose/approve routes -- the
         // last narrow gap Phase 9 (invoices and VAT) deferred. Kept 1:1

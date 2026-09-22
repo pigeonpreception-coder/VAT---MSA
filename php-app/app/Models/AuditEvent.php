@@ -18,6 +18,16 @@ class AuditEvent extends Model
         'occurred_at' => 'datetime',
     ];
 
+    // Eloquent's default MySQL date format ('Y-m-d H:i:s') truncates to
+    // whole seconds on save regardless of the column's own precision --
+    // widened to TIMESTAMP(6) by the 2026-09-22 migration specifically so
+    // this model's own microsecond-precision writes round-trip exactly,
+    // matching what App\Services\Audit\AuditService::write() hashes. See
+    // that migration's own doc comment for the discovered defect this
+    // fixes and its disclosed, unrecoverable effect on rows written
+    // before it.
+    protected $dateFormat = 'Y-m-d H:i:s.u';
+
     // `details` is deliberately NOT cast to 'array' -- it must stay exactly
     // the canonical JSON string App\Services\Audit\AuditService hashed at
     // write time (Eloquent's array cast would re-encode it with PHP's own

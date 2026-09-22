@@ -2,8 +2,10 @@
 
 namespace App\Services\Audit;
 
+use App\Models\AuditChainVerification;
 use App\Models\AuditEvent;
 use App\Models\User;
+use App\Support\Security\SecurityEventRecorder;
 use Illuminate\Support\Str;
 
 /**
@@ -86,6 +88,113 @@ class AuditService
     public static function decodeDetails(AuditEvent $event): array
     {
         return json_decode($event->details, true) ?? [];
+    }
+
+    /**
+     * Ported from lib/data/audit-repository.ts's searchAuditTrail --
+     * Module 8 Phase D GetAuditTrail: a filterable, paginated, restricted
+     * read, the API counterpart to the simpler unfiltered top-N read
+     * App\Services\Dashboard\DashboardSnapshotService already does for
+     * its own recent-activity widget.
+     *
+     * @param  array{resource_type?: ?string, resource_id?: ?string, action?: ?string, actor_id?: ?string, limit?: ?int, offset?: ?int}  $filter
+     * @return array{items: \Illuminate\Support\Collection<int, AuditEvent>, total_count: int, limit: int, offset: int}
+     */
+    public static function searchTrail(array $filter): array
+    {
+        $query = AuditEvent::query();
+        foreach (['resource_type', 'resource_id', 'action', 'actor_id'] as $column) {
+            if (! empty($filter[$column])) {
+                $query->where($column, $filter[$column]);
+            }
+        }
+        $limit = min(max((int) ($filter['limit'] ?? 50), 1), 200);
+        $offset = max((int) ($filter['offset'] ?? 0), 0);
+        $totalCount = (clone $query)->count();
+        $items = $query->orderByDesc('occurred_at')->limit($limit)->offset($offset)->get();
+
+        return ['items' => $items, 'total_count' => $totalCount, 'limit' => $limit, 'offset' => $offset];
+    }
+
+    /**
+     * Ported from lib/data/audit-repository.ts's verifyAuditChain --
+     * re-derives every row's event_hash in occurred_at order and confirms
+     * both the previous_hash linkage and the hash itself still match what
+     * the row claims. A genuine tamper/corruption check, not a simulated
+     * one; pure read, no writes. runChainVerification() below is what
+     * persists the result and raises an incident on a break.
+     *
+     * @return array{valid: bool, verified_count: int, first_break_id: ?string, first_break_reason: ?string}
+     */
+    public static function verifyChain(): array
+    {
+        $priorHash = null;
+        $verifiedCount = 0;
+        foreach (AuditEvent::orderBy('occurred_at')->orderBy('id')->cursor() as $row) {
+            if (($row->previous_hash ?? null) !== $priorHash) {
+                return ['valid' => false, 'verified_count' => $verifiedCount, 'first_break_id' => $row->id, 'first_break_reason' => 'PREVIOUS_HASH_MISMATCH'];
+            }
+            $expectedHash = hash('sha256', ($priorHash ?? 'GENESIS')."|{$row->id}|{$row->actor_id}|{$row->details}|".self::isoMicro($row->occurred_at));
+            if ($expectedHash !== $row->event_hash) {
+                return ['valid' => false, 'verified_count' => $verifiedCount, 'first_break_id' => $row->id, 'first_break_reason' => 'EVENT_HASH_MISMATCH'];
+            }
+            $priorHash = $row->event_hash;
+            $verifiedCount++;
+        }
+
+        return ['valid' => true, 'verified_count' => $verifiedCount, 'first_break_id' => null, 'first_break_reason' => null];
+    }
+
+    /**
+     * Ported from lib/data/audit-repository.ts's runAuditChainVerification
+     * (Module 8 Phase D VerifyAuditChain -- "the chain-verification job
+     * with alerting on breaks" the playbook names). This deployment has
+     * no cron/queue infrastructure to run it on a schedule -- the same
+     * recurring gap this migration's Reconciliation RunMatch already had
+     * to document -- so it is a genuine, on-demand, actor-triggered
+     * command instead, with its own result persisted as a real row (not a
+     * fire-and-forget log line) so "was the chain last verified, and did
+     * it pass" is itself an answerable, auditable question. A failed
+     * verification opens a CRITICAL security incident through
+     * App\Support\Security\SecurityEventRecorder's own detection pipeline
+     * (`AUDIT_CHAIN_INTEGRITY_BREACH`, threshold 1, already seeded by
+     * database/seeders/SecurityDetectionRuleSeeder -- even a single break
+     * is worth an incident) -- real alerting, reusing infrastructure this
+     * migration already built rather than inventing a second one.
+     */
+    public static function runChainVerification(User $actor, string $correlationId): AuditChainVerification
+    {
+        $startedAt = now();
+        $result = self::verifyChain();
+        $completedAt = now();
+
+        $verification = AuditChainVerification::create([
+            'id' => (string) Str::uuid(), 'requested_by' => $actor->id,
+            'status' => $result['valid'] ? 'PASSED' : 'FAILED', 'verified_count' => $result['verified_count'],
+            'first_break_id' => $result['first_break_id'], 'first_break_reason' => $result['first_break_reason'],
+            'started_at' => $startedAt, 'completed_at' => $completedAt,
+        ]);
+
+        if (! $result['valid']) {
+            SecurityEventRecorder::record(
+                'AUDIT_CHAIN_BREAK', 'CRITICAL', $actor->id, 'sha256:audit-chain-verification', $correlationId,
+                'VERIFY_AUDIT_CHAIN', 'FAILED',
+                [
+                    'verification_id' => $verification->id, 'verified_count' => $result['verified_count'],
+                    'first_break_id' => $result['first_break_id'] ?? '', 'first_break_reason' => $result['first_break_reason'] ?? '',
+                ],
+            );
+        }
+
+        return $verification;
+    }
+
+    /** @return \Illuminate\Support\Collection<int, AuditChainVerification> */
+    public static function listChainVerifications(int $limit = 50): \Illuminate\Support\Collection
+    {
+        $bounded = min(max($limit, 1), 200);
+
+        return AuditChainVerification::orderByDesc('started_at')->limit($bounded)->get();
     }
 
     /**
