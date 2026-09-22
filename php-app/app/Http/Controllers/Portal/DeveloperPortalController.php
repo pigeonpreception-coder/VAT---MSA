@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Portal;
 
 use App\Exceptions\BusinessResourceException;
+use App\Exceptions\DeveloperValidationException;
 use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Services\Developer\DeveloperPlatformService;
@@ -22,17 +23,15 @@ use Illuminate\View\View;
  * developerPortalSnapshot()` already returns (`clients`/`webhooks`, now
  * with each client's latest conformance outcome folded in).
  *
- * `rotateCredential()`/`runConformance()` are this port's Blade surface
- * for Module 10 Phase D's RotateCredential/RunConformance (`App\Services\
- * Developer\DeveloperPlatformService`'s own doc comment explains why
- * CreateClient/RevokeCredential are not re-ported here) -- gated
- * `developer:manage`, matching source's actual permission model for
- * these two commands (distinct from `App\Http\Controllers\Business\
- * LocalInvoiceViewController`'s `integrations:manage` gate on issuing/
- * revoking a POS credential in the first place). Source's own
- * operationClass for both is BUSINESS_WRITE, not COMPLIANCE_WRITE, so
- * neither wears `step-up` -- see routes/web.php's own comment at the
- * matching JSON API routes.
+ * `createClient()`/`rotateCredential()`/`revokeCredential()`/
+ * `runConformance()` are this port's Blade surface for Module 10 Phase D's
+ * full command set -- gated `developer:manage`, matching source's actual
+ * permission model for all four (distinct from `App\Http\Controllers\
+ * Business\LocalInvoiceViewController`'s `integrations:manage` gate on
+ * issuing/revoking a POS credential in the first place). Source's own
+ * operationClass for all four is BUSINESS_WRITE, not COMPLIANCE_WRITE, so
+ * none wears `step-up` -- see routes/web.php's own comment at the matching
+ * JSON API routes.
  *
  * Gate is `developer:read`, not `dashboard:read` -- see
  * `App\Http\Controllers\Portal\SuperAdminPortalController`'s own doc
@@ -66,6 +65,50 @@ class DeveloperPortalController extends Controller
             'snapshot' => $this->snapshot->developerPortalSnapshot($user),
             'canManage' => $user->hasAppPermission('developer:manage'),
         ]);
+    }
+
+    public function createClient(Request $request): RedirectResponse
+    {
+        $this->authorize('permission', 'developer:manage');
+        $user = $request->user();
+
+        $scopes = array_values(array_filter(array_map('trim', explode(',', (string) $request->input('scopes', '')))));
+        $payload = [
+            'schema_version' => '1.0.0',
+            'name' => $request->input('name'),
+            'scopes' => $scopes,
+            'rate_limit_profile' => $request->input('rate_limit_profile'),
+        ];
+
+        try {
+            $this->developer->createClient($user, $payload, $this->formIdempotencyKey($request), (string) Str::uuid());
+        } catch (DeveloperValidationException $e) {
+            return back()->withErrors(['client' => collect($e->errors())->pluck('message')->implode(' ')]);
+        } catch (AuthorizationException $e) {
+            return back()->withErrors(['client' => $e->getMessage()]);
+        }
+
+        return redirect()->route('portal.developer')->with('status', 'Application registered. Its credential is pending provisioning.');
+    }
+
+    public function revokeCredential(Request $request, string $id): RedirectResponse
+    {
+        $this->authorize('permission', 'developer:manage');
+        $user = $request->user();
+        $organisation = $this->organisations->resolve($user, $request->query('organisation_id'));
+
+        try {
+            $this->developer->revokeCredential($organisation, $id, [
+                'schema_version' => '1.0.0',
+                'reason' => $request->input('reason'),
+            ], $user, $this->formIdempotencyKey($request), (string) Str::uuid());
+        } catch (DeveloperValidationException $e) {
+            return back()->withErrors(['revocation' => collect($e->errors())->pluck('message')->implode(' ')]);
+        } catch (BusinessResourceException|RepositoryConflictException $e) {
+            return back()->withErrors(['revocation' => $e->getMessage()]);
+        }
+
+        return redirect()->route('portal.developer')->with('status', 'Credential revoked. This application can no longer authenticate.');
     }
 
     public function rotateCredential(Request $request, string $id): RedirectResponse

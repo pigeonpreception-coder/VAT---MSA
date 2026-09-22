@@ -10,11 +10,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
- * Ported from app/api/v1/developer/clients/[id]/rotation/route.ts and
+ * Ported from app/api/v1/developer/clients/route.ts and
+ * .../clients/[id]/rotation/route.ts, .../revocation/route.ts,
  * .../conformance-runs/route.ts (lib/data/developer-repository.ts's
- * rotateCredential/runConformance) -- see App\Services\Developer\
- * DeveloperPlatformService's own doc comment for what this deliberately
- * does not re-port (CreateClient/RevokeCredential).
+ * createClient/rotateCredential/revokeCredential/runConformance).
  */
 class DeveloperPlatformController extends Controller
 {
@@ -22,6 +21,27 @@ class DeveloperPlatformController extends Controller
         private readonly DeveloperPlatformService $developer,
         private readonly OrganisationResolver $organisations,
     ) {}
+
+    public function create(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'developer:manage');
+        $user = $request->user();
+
+        $client = $this->developer->createClient($user, (array) $request->input(), $this->idempotencyKey($request), $this->correlationId());
+
+        return response()->json(['client' => $client], 201);
+    }
+
+    public function revoke(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'developer:manage');
+        $user = $request->user();
+        $organisation = $this->organisations->resolve($user, $request->query('organisation_id'));
+
+        $client = $this->developer->revokeCredential($organisation, $id, (array) $request->input(), $user, $this->idempotencyKey($request), $this->correlationId());
+
+        return response()->json(['client' => $client]);
+    }
 
     public function rotate(Request $request, string $id): JsonResponse
     {

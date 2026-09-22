@@ -10087,12 +10087,12 @@ migration but no Eloquent model and no command writing to it anywhere in
 this port, and `api_clients`/`credential_refs` had exactly one real write
 path (`App\Services\Integration\PosApiClientService`, a prior,
 user-requested feature scoped narrowly to POS invoice-submission
-credentials). `CreateClient`/`RevokeCredential` are deliberately not
-re-ported: `App\Services\Developer\DeveloperPlatformService`'s own doc
-comment explains why RotateCredential/RunConformance are written to
-operate on any `api_clients` row an actor's organisation owns, regardless
-of which command created it, rather than duplicating a second, more
-generic client-creation path this environment does not otherwise need.
+credentials). `CreateClient`/`RevokeCredential` were written to operate on
+any `api_clients` row an actor's organisation owns, regardless of which
+command created it, rather than duplicating a second, more generic
+client-creation path -- see the later "Developer Platform CreateClient/
+RevokeCredential" section below for where that second path was in fact
+added, once the user asked for another module.
 
 - `App\Models\TestRun` -- the missing Eloquent model for the pre-existing
   `test_runs` table.
@@ -10123,10 +10123,10 @@ generic client-creation path this environment does not otherwise need.
   this port's POS-credential issuance (hard-coded `invoices:submit`
   scope) as genuinely different commands. Most roles holding
   `developer:manage` also hold `integrations:manage` (`TAXPAYER_ADMIN`,
-  `NAMRA_SYSTEM_SUPPORT`, etc.); `DEVELOPER_PARTNER` is the one exception
-  -- it can rotate/run-conformance on a client another role in its
-  organisation already issued, but cannot issue one itself, an accepted
-  asymmetry given `CreateClient` is out of this port's scope.
+  `NAMRA_SYSTEM_SUPPORT`, etc.); `DEVELOPER_PARTNER` was the one exception
+  at the time this section was written -- see the later "Developer
+  Platform CreateClient/RevokeCredential" section for CreateClient closing
+  that asymmetry.
 - **Honest, discoverable consequence of that same divergence**: the
   `SCOPES_DECLARED` check enforces source's own dot-separated
   `resource.action` scope pattern, but `PosApiClientService::
@@ -10350,3 +10350,101 @@ already display their rows read-only, but nothing wrote to them.
   idempotency replay, GetHealth's connection+recent-jobs projection, and
   the pre-seeded-government-connection fail-closed case. Full suite: 953
   tests, 0 regressions.
+
+## New feature: Developer Platform CreateClient/RevokeCredential (2026-09-22)
+
+Ports Module 10 Phase D's `createClient`/`revokeCredential`
+(`lib/data/developer-repository.ts`, `lib/domain/developer.ts`) -- the
+two commands the earlier RotateCredential/RunConformance section
+deliberately deferred, on the reasoning that `App\Services\Integration\
+PosApiClientService` already issued/revoked `api_clients` rows for POS
+invoice-submission credentials. Revisited once the user asked to continue
+with another module: source's own Developer Portal genuinely needs its
+own arbitrary-scope client-issuance path (not hard-coded to
+`invoices:submit`), and closes the last real gap in `App\Services\
+Developer\DeveloperPlatformService`'s command set.
+
+- `App\Domain\Developer\DeveloperCommandValidator::clientCreation()`/
+  `credentialRevocation()` -- ports `validateClientCreation`/
+  `validateCredentialRevocation` exactly: `name` bounded 3-150 chars, at
+  least one scope required, each scope lowercased and checked against the
+  same dot-separated `resource.action` pattern
+  `DeveloperConformanceEvaluator::SCOPES_DECLARED` already enforces,
+  `rate_limit_profile` uppercased and checked against
+  `DeveloperConformanceEvaluator::RATE_LIMIT_PROFILES` (reused rather than
+  duplicating that enum a second time); `reason` bounded 10-500 chars.
+- `App\Services\Developer\DeveloperPlatformService::createClient()` --
+  resolves the organisation from the actor's own taxpayer directly
+  (`resolveOrganisationForCreation()`), deliberately **not** via
+  `App\Support\Business\OrganisationResolver`: that helper lets a
+  national-scope actor pick any active organisation, but source's own
+  `resolveOrganisation` rejects such an actor outright (`api_clients.
+  organisation_id` is NOT NULL and a national/platform-scope actor has no
+  taxpayer of their own to create a client under) and accepts no
+  `organisation_id` override -- covered by its own test using a
+  `SUPER_ADMIN` actor. Get-or-creates a `DeveloperAccount` (one per
+  organisation+actor pair, matching `PosApiClientService`'s own get-or-
+  create of the same table) via `getOrCreateDeveloperAccount()`, then
+  issues `client_key` as `{slugify(name)}_{first 8 chars of the new
+  UUID}` (`slugify()` ports source's own lowercase/underscore/40-char-
+  truncate/`"client"`-fallback logic verbatim) and
+  `credential_reference` as `secret-manager://pending/{clientId}` --
+  never a live secret, matching `RotateCredential`'s own pointer-string
+  convention; `status` stays `PENDING_CREDENTIAL_PROVISIONING` since no
+  secret manager is integrated in this environment.
+  `revokeCredential()` is terminal: marks the current ACTIVE
+  `credential_refs` row REVOKED and the client itself REVOKED (409 if
+  already REVOKED, matching `RepositoryConflictError`); no un-revoke verb
+  is named by source, so none exists here. Both use `CommandLedger`'s
+  idempotency/outbox pattern and `AuditService::append`
+  (`API_CLIENT_CREATED`/`API_CLIENT_CREDENTIAL_REVOKED`), matching every
+  other command in this service.
+- **A real, pre-existing schema defect found and fixed along the way**:
+  `api_clients.status` was created as `VARCHAR(20)` -- wide enough for
+  every status `PosApiClientService` ever wrote (`ACTIVE`/`REVOKED`), but
+  too narrow for `PENDING_CREDENTIAL_PROVISIONING` (31 characters), the
+  status every freshly-created client starts in. MySQL's strict
+  `sql_mode` turned this into a hard `Data too long for column 'status'`
+  error on the very first `CreateClient` call, caught empirically by this
+  port's own feature test suite rather than by inspection -- the same
+  pattern as the `audit_events.occurred_at` precision defect earlier in
+  this session. Fixed via a new migration
+  (`2026_09_22_000004_widen_api_clients_status.php`, raw `ALTER TABLE`
+  since `doctrine/dbal` is not installed) widening the column to
+  `VARCHAR(40)`.
+- Same gating as RotateCredential/RunConformance: `developer:manage`
+  (BUSINESS_WRITE, no `step-up`) -- `DEVELOPER_PARTNER` can now issue its
+  own client rather than only rotating/running-conformance on one another
+  role already issued, closing the asymmetry the earlier section noted.
+- JSON API: `POST /api/v1/developer/clients`,
+  `POST /api/v1/developer/clients/{id}/revocation`
+  (`App\Http\Controllers\Developer\DeveloperPlatformController::create()`/
+  `revoke()`), kept 1:1 with source's own route shape, `rate-limit:
+  developer` bucket, no `step-up`.
+- Blade: extends the same `/portal/developer` page with a "Register
+  application" form (name, comma-separated scopes, rate-limit-profile
+  select) above the registry table, and a per-row revocation-reason field
+  plus "Revoke credential" button (hidden once a row is already REVOKED)
+  -- `App\Http\Controllers\Portal\DeveloperPortalController::
+  createClient()`/`revokeCredential()`.
+- 12 new PHPUnit tests added to the existing
+  `tests/Feature/Developer/DeveloperPlatformTest.php`: authentication and
+  permission gates on both new routes, a successful create (developer
+  account created, credential pending, scopes/rate-limit persisted), a
+  second client from the same actor reusing the same developer account,
+  validation-error rejection, the national-scope-actor rejection, create
+  idempotency replay, a successful revoke, revoking an already-revoked
+  credential rejected, a too-short revocation reason rejected,
+  cross-organisation revocation denied, revocation idempotency replay,
+  and the JSON API mirror creating then revoking a client end to end.
+  Full suite: 965 tests, 0 regressions.
+- Manual browser verification (Playwright, `developer-partner@vat-msa.test`
+  demo login): registered a new application through the Blade form,
+  confirmed the flash message, the new row's `PENDING_CREDENTIAL_
+  PROVISIONING` badge, and its `client_key`; then revoked its credential
+  through the per-row form and confirmed the `REVOKED` badge and the
+  revoke form disappearing from that row. Caught and fixed a cosmetic
+  layout bug in the process: the "Register" button's `col-md-1` column
+  was too narrow at `btn-sm` and wrapped its own label onto two lines --
+  widened to `col-md-2` (rebalancing the name/scopes columns to
+  `col-md-3`/`col-md-4`).
