@@ -10077,3 +10077,98 @@ real HTTP requests throughout -- including certifying a real invoice via
 the existing invoice API to get genuine `ledger_entries` rows, then
 directly corrupting one to prove the engine actually catches drift rather
 than re-trusting its own write path. Full suite: 908 tests, 0 regressions.
+
+## New feature: Developer Platform RotateCredential/RunConformance (2026-09-22)
+
+Ports Module 10 Phase D's `rotateCredential`/`runConformance`
+(`lib/data/developer-repository.ts`, `lib/domain/developer.ts`) -- the
+gap flagged after the reconciliation-engine PR: `test_runs` had a
+migration but no Eloquent model and no command writing to it anywhere in
+this port, and `api_clients`/`credential_refs` had exactly one real write
+path (`App\Services\Integration\PosApiClientService`, a prior,
+user-requested feature scoped narrowly to POS invoice-submission
+credentials). `CreateClient`/`RevokeCredential` are deliberately not
+re-ported: `App\Services\Developer\DeveloperPlatformService`'s own doc
+comment explains why RotateCredential/RunConformance are written to
+operate on any `api_clients` row an actor's organisation owns, regardless
+of which command created it, rather than duplicating a second, more
+generic client-creation path this environment does not otherwise need.
+
+- `App\Models\TestRun` -- the missing Eloquent model for the pre-existing
+  `test_runs` table.
+- `App\Domain\Developer\DeveloperConformanceEvaluator` -- ports
+  `evaluateClientConformance`/`conformanceOutcome`/`TEST_SUITE_VERSION`
+  exactly: five checks (`SCOPES_DECLARED`, `RATE_LIMIT_PROFILE_KNOWN`,
+  `CLIENT_OPERATIONAL`, `CREDENTIAL_ISSUED` -- PASS/FAIL, plus
+  `EXTERNAL_CREDENTIAL_PROVISIONED`, always `NOT_CONFIGURED` and
+  non-blocking since no secret manager is integrated in this
+  environment), `conformanceOutcome` FAILED if any check FAILs.
+- `App\Services\Developer\DeveloperPlatformService::rotateCredential()` --
+  marks the current ACTIVE `credential_refs` row ROTATED, issues a fresh
+  ACTIVE one, updates `api_clients.credential_reference`/
+  `last_rotated_at`; rejects (409) rotating a REVOKED client's credential,
+  matching source's own `RepositoryConflictError` exactly. `runConformance()`
+  evaluates the harness against the client's live state and persists a
+  `TestRun`. Both use `CommandLedger`'s idempotency/outbox pattern and
+  `AuditService::append` (`API_CLIENT_CREDENTIAL_ROTATED`/
+  `API_CLIENT_CONFORMANCE_RUN`), matching every other command in this
+  migration.
+- **Gating divergence, deliberate and documented**: source gates both
+  commands on `developer:manage` (operationClass BUSINESS_WRITE, no
+  `step-up`), distinct from `PosApiClientService`'s own
+  `integrations:manage` + SELLER-capability gate on issuing/revoking a
+  credential in the first place. The same `api_clients` table now has two
+  independently-gated write surfaces in this port -- matching how source
+  itself treats `CreateClient` (Developer Portal, arbitrary scopes) and
+  this port's POS-credential issuance (hard-coded `invoices:submit`
+  scope) as genuinely different commands. Most roles holding
+  `developer:manage` also hold `integrations:manage` (`TAXPAYER_ADMIN`,
+  `NAMRA_SYSTEM_SUPPORT`, etc.); `DEVELOPER_PARTNER` is the one exception
+  -- it can rotate/run-conformance on a client another role in its
+  organisation already issued, but cannot issue one itself, an accepted
+  asymmetry given `CreateClient` is out of this port's scope.
+- **Honest, discoverable consequence of that same divergence**: the
+  `SCOPES_DECLARED` check enforces source's own dot-separated
+  `resource.action` scope pattern, but `PosApiClientService::
+  SCOPE_INVOICE_SUBMIT` ('invoices:submit') uses this port's own
+  colon-separated permission-code convention instead -- load-bearing,
+  since `App\Http\Middleware\AuthenticatePosApiClient` checks that exact
+  string, so it cannot be reformatted without breaking real POS
+  authentication. A POS-issued credential's own conformance run therefore
+  always fails `SCOPES_DECLARED` honestly; the pattern is ported
+  faithfully rather than loosened, since weakening it would silently
+  accept scope strings source's own `validateClientCreation` would
+  reject.
+- JSON API: `POST /api/v1/developer/clients/{id}/rotation`,
+  `POST /api/v1/developer/clients/{id}/conformance-runs`
+  (`App\Http\Controllers\Developer\DeveloperPlatformController`), kept
+  1:1 with source's own route shape, `rate-limit:developer` bucket, no
+  `step-up`.
+- Blade: extends the pre-existing read-only `/portal/developer` page
+  (`App\Http\Controllers\Portal\DeveloperPortalController`) with
+  Rotate/Run-conformance forms per application row and a real
+  Conformance stat tile (previously a hard-coded "Pending / Sandbox
+  certification not configured" placeholder) -- both wired through
+  `App\Services\Platform\PlatformSnapshotService::developerPortalSnapshot()`,
+  which now folds each client's latest `test_runs` outcome into its row.
+- 12 new PHPUnit tests (`tests/Feature/Developer/DeveloperPlatformTest.php`):
+  permission gate, successful rotation (old ref ROTATED, new ACTIVE),
+  rotating a REVOKED client rejected, rotation idempotency replay,
+  cross-organisation rotation denied, a POS-issued credential's
+  conformance run failing `SCOPES_DECLARED` honestly, a directly-seeded
+  dot-scoped client's conformance run passing, conformance failing for a
+  REVOKED client (`CLIENT_OPERATIONAL`), conformance idempotency replay,
+  the portal's own conformance column/stat-tile rendering, and the JSON
+  API mirror. Full suite: 920 tests, 0 regressions.
+- Manual browser verification: issued a POS credential, ran conformance
+  (correctly FAILED on `SCOPES_DECLARED`), rotated the credential, and
+  confirmed both actions redirect with the correct flash message and the
+  registry table updates live. Caught and fixed a duplicate flash-message
+  bug in the process: `resources/views/layouts/app.blade.php` already
+  renders `session('status')` globally, so the page-level block this
+  view initially added (copied from `exceptions/index.blade.php`'s own
+  established pattern) rendered the same banner twice -- removed the
+  page-level status block, kept the page-level `$errors` block since
+  that one is not rendered globally. `exceptions/index.blade.php` itself
+  still carries the same latent duplicate and was left alone as
+  out-of-scope for this change.
