@@ -10931,3 +10931,36 @@ written by the already-shipped invoice-certification module.
   unauthenticated, confirmed the "Valid pilot certificate" seal, the
   unmasked supplier name, the masked invoice number, and the 404 case for
   an unknown token; demo rows cleaned up afterward.
+
+## New feature: liveness/readiness health-check probes (2026-09-22)
+
+Ports `app/api/health/{live,ready}/route.ts` -- a load balancer/
+orchestrator probe pair, not a business command, that had no Laravel
+equivalent at all (`grep -rn health routes/*.php` only matched the
+unrelated `/integrations/{id}/health`). New `App\Http\Controllers\
+HealthController`, placed outside every auth-gated route group in
+`routes/web.php` alongside `PublicVerificationController` -- for the
+identical reason: a probe that depended on a session would defeat its own
+purpose.
+
+- `GET /api/health/live` -- a static `{status: "UP", service:
+  "vat-msa-web", version, timestamp}`, no database touch, `Cache-Control:
+  no-store`.
+- `GET /api/health/ready` -- runs `SELECT 1` against the real database
+  connection; `{status: "READY", ...}` on success, `503 {status:
+  "NOT_READY", ...}` with `Retry-After: 5` on any failure, matching
+  source's own fail-closed shape exactly.
+- **One small, documented simplification**: source echoes a caller-
+  supplied `X-Correlation-Id` header back if it's a valid UUID, else
+  generates one (`correlationIdFor`). This port always generates a fresh
+  one instead, matching every other controller in this codebase (e.g.
+  `ExpenseController`), none of which honour a caller-supplied
+  correlation id either -- consistency with this port's own established
+  convention, not a source-fidelity regression specific to this endpoint.
+- 4 new PHPUnit tests (`tests/Feature/HealthCheckTest.php`): liveness
+  returns UP without a database call, readiness returns READY against the
+  real test database, readiness returns 503/NOT_READY/Retry-After when
+  the database call is mocked to throw, and both probes are reachable
+  with no `actingAs()` anywhere in the file. Full suite: 1039 tests, 0
+  regressions. No manual browser verification -- a pure JSON probe
+  endpoint with no UI.

@@ -11,6 +11,7 @@ use App\Http\Controllers\Audit\AuditTrailViewController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\HealthController;
 use App\Http\Controllers\Developer\DeveloperPlatformController;
 use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
@@ -119,6 +120,11 @@ Route::get('/', fn () => redirect()->route('dashboard'));
 // PublicVerificationController's own doc comment.
 Route::get('/api/v1/verify/{token}', [PublicVerificationController::class, 'show']);
 Route::get('/verify/{token}', [PublicVerificationController::class, 'page'])->name('verify.show');
+
+// Liveness/readiness probes -- same public placement, same reasoning: a
+// load balancer's health check must never depend on a session.
+Route::get('/api/health/live', [HealthController::class, 'live']);
+Route::get('/api/health/ready', [HealthController::class, 'ready']);
 
 // Phase 6: local Laravel session authentication, replacing the source's
 // platform-header trust entirely (see LoginRequest's own doc comment).
