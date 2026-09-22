@@ -10703,3 +10703,92 @@ feature scoped to Laravel's own framework `sessions` table.
   user, a successful revoke, the idempotent-no-op path, cross-tenant
   revoke denied, and revoking a nonexistent link. Full suite: 1008 tests,
   0 regressions.
+
+## New feature: Module 5 LinkExpenseReceipt (2026-09-22)
+
+Ports `lib/data/business-repository.ts`'s `linkExpenseReceipt` via a new
+`ExpenseService::linkReceipt()`. `App\Http\Controllers\Business\
+OperationsViewController`'s own doc comment used to name this exact gap:
+the register's row-level "Upload receipt" action only ever sent an actor
+to `documents.index` to upload evidence, with no command anywhere to then
+attach that document's id back onto the expense it belongs to -- a
+confirmed dead end, closed by this command. New table
+`expense_receipt_links` (migration
+`2026_09_22_175105_create_expense_receipt_links_table`, model
+`App\Models\ExpenseReceiptLink`) records an append-only audit trail of
+each link (unique on both `expense_id` and `document_id`, so a document
+can never be attached to two expenses and an expense never gets a second
+receipt row), separate from `expenses.receipt_document_id` itself, which
+is what the register and every other reader actually display.
+
+- **Discovered-and-fixed cross-module inconsistency in the TypeScript
+  source itself**, not a blind port: `business-repository.ts` (this
+  command) and `lib/data/vat-lifecycle-repository.ts` both expect
+  `document_metadata.status='AVAILABLE'` for a usable document, but the
+  actual document-lifecycle owner, `lib/data/platform-repository.ts`'s
+  own `completeDocumentScan`, only ever writes `status='ACTIVE'` for a
+  clean scan -- no document in source's own database ever reaches
+  `'AVAILABLE'` at all (confirmed via `grep -rn "document_metadata|
+  documentMetadata" lib/data/*.ts | grep -i status` across every module,
+  cross-checked against the SQLite trigger bodies in `drizzle/
+  0011_melted_weapon_omega.sql`, which independently agree with the
+  broken `'AVAILABLE'` expectation, not with what's actually written).
+  This port's own already-shipped `App\Services\Document\
+  DocumentService::completeScan()` faithfully mirrors the real
+  (`ACTIVE`-writing) source function, so `linkReceipt()` checks
+  `status === 'ACTIVE'`, not source's literal `'AVAILABLE'` string --
+  porting the literal string would have made this command permanently,
+  silently unusable against every document this port's own upload/scan
+  pipeline could ever produce.
+- `App\Domain\Business\BusinessValidator::expenseReceiptLink()` --
+  `schema_version` + a required `receipt_document_id`.
+- `ExpenseService::linkReceipt()` -- the expense must be `DRAFT` with no
+  receipt already linked; the document must belong to the same
+  organisation, be owned by this exact expense
+  (`owner_domain='EXPENSE'`/`owner_resource_id=$expenseId`), and be
+  `scan_status='CLEAN'` + `status='ACTIVE'` (see the source-defect note
+  above). Same RT punch-list #8 affected-row guard as every other expense
+  transition in this class: the pre-transaction DRAFT/no-receipt check is
+  re-verified as a conditional `->update()` inside the `DB::transaction`,
+  rejecting a concurrent link race on the same expense. Idempotent replay
+  via the standard `CommandLedger` key/hash pair; records both an outbox
+  event (`ExpenseReceiptLinked`) and an audit entry
+  (`EXPENSE_RECEIPT_LINKED`).
+- **`App\Models\ExpenseReceiptLink` checked proactively for the
+  `$fillable`-drops-`id` defect** (the class of bug hit twice already
+  this session, on `User::create()` and `IdentityLink::create()`) before
+  writing any code this time -- uses `protected $guarded = []`, so it's
+  unaffected; documented in the model's own doc comment as the intended
+  precedent for any future append-only link table.
+- `App\Http\Controllers\Business\ExpenseController::linkReceipt()` --
+  `POST /api/v1/expenses/{id}/receipt`, `expenses:manage`, JSON, matching
+  every sibling action in this controller.
+  `OperationsViewController::linkReceipt()` -- the Blade counterpart,
+  `POST /operations/expenses/{id}/receipt`, reusing the existing
+  `runTransition()` helper every other row action in that controller
+  already shares. `resources/views/operations/index.blade.php` gained a
+  "Link" form (a `receipt_document_id` text input, since this page has no
+  query of its own for "clean unlinked documents for this expense" and
+  adding one isn't this command's job) shown only for a `DRAFT` expense
+  with `expenses:manage`, immediately beside the pre-existing "Upload
+  receipt" link -- the same two-step split `ExpenseReceiptActions.tsx`'s
+  own sibling "Upload"/"Link" actions use in source.
+  `OperationsViewController`'s class doc comment updated to remove the
+  now-stale "receipt linking stays read-only" language and correct an
+  earlier inaccurate claim (caught before finalizing) that document
+  upload had no Blade screen of its own -- `documents/index.blade.php`
+  already has a complete upload form.
+- 9 new PHPUnit tests
+  (`tests/Feature/Business/ExpenseReceiptLinkTest.php`): a clean receipt
+  linked to a draft expense (JSON), pending-scan rejected,
+  infected-scan rejected, non-draft-expense rejected, a second receipt
+  once already linked rejected, a document belonging to a different
+  expense 404s, a viewer without `expenses:manage` gets 403, idempotent
+  replay, and the Blade `operations.link-receipt` action end to end.
+  Manually verified via a real browser session (Playwright against
+  `php artisan serve`): logged in as the demo taxpayer owner, submitted
+  the new "Link" form on `/operations` for a real DRAFT expense against a
+  real clean-scanned document, confirmed the "Receipt linked." flash and
+  the row's evidence column switching from "Upload receipt" to
+  `receipt.pdf` / `CLEAN` / `ACTIVE`; demo rows cleaned up afterward.
+  Full suite: 1017 tests, 0 regressions.

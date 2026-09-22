@@ -80,6 +80,15 @@ class ExpenseController extends Controller
         return response()->json(['resource' => $expense], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
     }
 
+    public function linkReceipt(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'expenses:manage');
+        $correlationId = (string) Str::uuid();
+        $expense = $this->expenses->linkReceipt($id, (array) $request->json()->all(), $request->user(), (string) $request->header('Idempotency-Key', ''), $correlationId, $request->query('organisation_id'));
+
+        return response()->json(['resource' => $expense], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
+    }
+
     public function report(Request $request): JsonResponse
     {
         $this->authorize('permission', 'expenses:read');

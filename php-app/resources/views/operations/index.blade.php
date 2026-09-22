@@ -102,6 +102,14 @@
                                         @if (Route::has('documents.index'))
                                             <a href="{{ route('documents.index', ['owner_domain' => 'EXPENSE', 'owner_resource_id' => $expense['id']]) }}" class="small">Upload receipt</a>
                                         @endif
+                                        @if ($expense['status'] === 'DRAFT' && $canManageExpenses)
+                                            <form method="POST" action="{{ route('operations.link-receipt', $expense['id']) }}" class="mt-1 d-flex gap-1">
+                                                @csrf
+                                                <x-idempotency-key />
+                                                <input type="text" name="receipt_document_id" class="form-control form-control-sm" placeholder="Receipt document ID" required>
+                                                <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap">Link</button>
+                                            </form>
+                                        @endif
                                     @endif
                                 </td>
                                 <td>
