@@ -558,11 +558,16 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/portal/super-admin', [SuperAdminPortalController::class, 'index'])->name('portal.super-admin');
     Route::get('/portal/developer', [DeveloperPortalController::class, 'index'])->name('portal.developer');
 
-    // Module 10 Phase D: RotateCredential/RunConformance's Blade surface --
-    // see DeveloperPortalController's own doc comment. No 'step-up': source's
-    // own operationClass for both is BUSINESS_WRITE.
+    // Module 10 Phase D: CreateClient/RotateCredential/RevokeCredential/
+    // RunConformance's Blade surface -- see DeveloperPortalController's own
+    // doc comment. No 'step-up': source's own operationClass for all four
+    // is BUSINESS_WRITE.
+    Route::post('/portal/developer/clients', [DeveloperPortalController::class, 'createClient'])
+        ->name('portal.developer.create')->middleware('rate-limit:developer');
     Route::post('/portal/developer/clients/{id}/rotation', [DeveloperPortalController::class, 'rotateCredential'])
         ->name('portal.developer.rotate')->middleware('rate-limit:developer');
+    Route::post('/portal/developer/clients/{id}/revocation', [DeveloperPortalController::class, 'revokeCredential'])
+        ->name('portal.developer.revoke')->middleware('rate-limit:developer');
     Route::post('/portal/developer/clients/{id}/conformance-runs', [DeveloperPortalController::class, 'runConformance'])
         ->name('portal.developer.conformance')->middleware('rate-limit:developer');
 
@@ -825,11 +830,17 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/exceptions/{id}/resolution', [ReconciliationController::class, 'resolveException'])
             ->middleware(['step-up', 'rate-limit:reconciliation']);
 
-        // Module 10 Phase D: RotateCredential/RunConformance. Kept 1:1 with
-        // source's own app/api/v1/developer/clients/[id]/rotation,
-        // .../conformance-runs shape. No 'step-up': source's own
-        // operationClass for both is BUSINESS_WRITE, not COMPLIANCE_WRITE.
+        // Module 10 Phase D: CreateClient/RotateCredential/RevokeCredential/
+        // RunConformance. Kept 1:1 with source's own
+        // app/api/v1/developer/clients, .../clients/[id]/rotation,
+        // .../revocation, .../conformance-runs shape. No 'step-up': source's
+        // own operationClass for all four is BUSINESS_WRITE, not
+        // COMPLIANCE_WRITE.
+        Route::post('/developer/clients', [DeveloperPlatformController::class, 'create'])
+            ->middleware('rate-limit:developer');
         Route::post('/developer/clients/{id}/rotation', [DeveloperPlatformController::class, 'rotate'])
+            ->middleware('rate-limit:developer');
+        Route::post('/developer/clients/{id}/revocation', [DeveloperPlatformController::class, 'revoke'])
             ->middleware('rate-limit:developer');
         Route::post('/developer/clients/{id}/conformance-runs', [DeveloperPlatformController::class, 'runConformance'])
             ->middleware('rate-limit:developer');

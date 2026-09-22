@@ -8,13 +8,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * The Developer Portal's `developer_accounts` table (Module 10) had no
- * Eloquent model and no command writing to it -- get-or-created by
- * CreateClient "rather than a separate command", per that migration's own
- * doc comment. App\Services\Integration\PosApiClientService is the first
- * real command reaching this table: a taxpayer's own private
- * Point-of-Sale integration needs a real, working API credential, and an
- * api_clients row requires a developer_accounts row to belong to.
+ * The Developer Portal's `developer_accounts` table (Module 10) --
+ * get-or-created "rather than a separate command", per that migration's own
+ * doc comment. Two independent commands reach this table: this port's own
+ * App\Services\Integration\PosApiClientService (a taxpayer's private
+ * Point-of-Sale integration credential) and, faithfully to source,
+ * App\Services\Developer\DeveloperPlatformService::createClient (the
+ * Developer Portal's own arbitrary-scope client). Both get-or-create the
+ * same one-per-organisation+owner-user row; an api_clients row always needs
+ * a developer_accounts row to belong to.
  */
 class DeveloperAccount extends Model
 {
