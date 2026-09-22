@@ -14,6 +14,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Developer\DeveloperPlatformController;
 use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
+use App\Http\Controllers\Identity\InvitationClaimController;
 use App\Http\Controllers\Identity\MfaController;
 use App\Http\Controllers\Identity\MfaViewController;
 use App\Http\Controllers\Identity\MembershipController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Identity\UserController;
+use App\Http\Controllers\Identity\UserInvitationController;
 use App\Http\Controllers\Integration\IntegrationConnectionController;
 use App\Http\Controllers\Invoice\InvoiceController;
 use App\Http\Controllers\Invoice\InvoiceCorrectionViewController;
@@ -130,6 +132,14 @@ Route::middleware('guest')->group(function () {
     // JSON-only channel, not an addition beyond it.
     Route::get('/signup', [SignupViewController::class, 'create'])->name('signup.create');
     Route::post('/signup', [SignupViewController::class, 'store'])->name('signup.store');
+
+    // Module 1 Identity ProvisionUser, claim half -- see
+    // App\Services\Identity\UserInvitationService::claim()'s own doc
+    // comment for why this is a password-setting Blade flow rather than
+    // source's own JSON route. `guest`-gated: the claimant has no
+    // app_users row, and therefore no session, yet.
+    Route::get('/invitations/claim', [InvitationClaimController::class, 'create'])->name('invitations.claim');
+    Route::post('/invitations/claim', [InvitationClaimController::class, 'store'])->name('invitations.claim.store');
 });
 
 // RT-001 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md): every authenticated
@@ -799,6 +809,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware('rate-limit:identity');
 
         Route::post('/organisations/{organisation}/memberships', [MembershipController::class, 'store'])
+            ->middleware(['step-up', 'rate-limit:identity']);
+
+        // Module 1 Identity ProvisionUser, invite half -- see
+        // App\Services\Identity\UserInvitationService's own doc comment
+        // for the claim half (Blade-only, routes/web.php's 'guest' group).
+        Route::post('/organisations/{organisation}/invitations', [UserInvitationController::class, 'store'])
             ->middleware(['step-up', 'rate-limit:identity']);
 
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
