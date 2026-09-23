@@ -467,6 +467,9 @@ class BusinessValidator
         if ($netCents + $taxCents !== $totalCents) {
             $messages[] = ['code' => 'TOTAL_MISMATCH', 'path' => '/total_cents', 'message' => 'Total cents must equal net cents plus tax cents.'];
         }
+        if ($taxCents > 0 && ! $supplierPartyId) {
+            $messages[] = ['code' => 'TAXED_EXPENSE_SUPPLIER_REQUIRED', 'path' => '/supplier_party_id', 'message' => 'A tax-bearing expense requires a trusted supplier.'];
+        }
         if (count($messages) > 0) {
             throw new BusinessValidationException($messages);
         }

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\BusinessParty;
 use App\Models\Organisation;
+use App\Models\PartyRelationship;
 use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
@@ -57,6 +59,21 @@ class ProjectTest extends TestCase
         ]);
 
         return array_merge(compact('taxpayer', 'organisation', 'owner'), ['accountant' => $accountant, 'admin' => $admin]);
+    }
+
+    /** A tax-bearing expense requires a trusted, active supplier (TAXED_EXPENSE_SUPPLIER_REQUIRED). */
+    private function createSupplier(Organisation $organisation, string $displayName = 'Project Test Supplier'): string
+    {
+        $party = BusinessParty::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => $displayName,
+            'source_system' => 'test', 'source_party_id' => Str::random(8), 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        PartyRelationship::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
+            'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
+        ]);
+
+        return $party->id;
     }
 
     private function createProject(User $owner, string $code = 'PROJ-0001', array $overrides = []): string
@@ -183,8 +200,9 @@ class ProjectTest extends TestCase
         $category = $this->actingAs($org['owner'])->postJson('/api/v1/expenses/categories', [
             'schema_version' => '1.0.0', 'code' => 'MATERIALS', 'name' => 'Materials', 'default_tax_category' => 'STANDARD',
         ], ['Idempotency-Key' => 'test-idem-proj-cat-0001'])->json('resource.id');
+        $supplierId = $this->createSupplier($org['organisation']);
         $expenseId = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', [
-            'schema_version' => '1.0.0', 'category_id' => $category, 'project_id' => $projectId, 'expense_number' => 'EXP-PROJ-0001',
+            'schema_version' => '1.0.0', 'category_id' => $category, 'supplier_party_id' => $supplierId, 'project_id' => $projectId, 'expense_number' => 'EXP-PROJ-0001',
             'expense_date' => '2026-09-05', 'description' => 'Materials for the project.', 'currency' => 'NAD',
             'net_cents' => 40000, 'tax_cents' => 6000, 'total_cents' => 46000,
         ], ['Idempotency-Key' => 'test-idem-proj-exp-0001'])->json('resource.id');

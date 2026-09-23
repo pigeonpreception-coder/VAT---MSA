@@ -9,6 +9,7 @@ use App\Models\ImportRecord;
 use App\Models\InventoryBalance;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
+use App\Models\PartyRelationship;
 use App\Models\Product;
 use App\Models\Project;
 use App\Models\ProjectBudget;
@@ -81,6 +82,21 @@ class OperationsViewTest extends TestCase
             'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'code' => $code, 'name' => "Category {$code}",
             'default_tax_category' => 'STANDARD', 'requires_receipt' => true, 'status' => 'ACTIVE', 'created_at' => now(),
         ]);
+    }
+
+    /** A tax-bearing expense requires a trusted, active supplier (TAXED_EXPENSE_SUPPLIER_REQUIRED). */
+    private function createSupplier(Organisation $organisation, string $displayName = 'Operations Test Supplier'): string
+    {
+        $party = BusinessParty::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => $displayName,
+            'source_system' => 'test', 'source_party_id' => Str::random(8), 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        PartyRelationship::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
+            'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
+        ]);
+
+        return $party->id;
     }
 
     public function test_the_operations_page_requires_authentication(): void
@@ -172,9 +188,10 @@ class OperationsViewTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-SELLER-0002');
         $category = $this->makeCategory($org['organisation']);
+        $supplierId = $this->createSupplier($org['organisation']);
 
         $response = $this->actingAs($org['owner'])->post('/operations/expenses', [
-            'expense_number' => 'EXP-FORM-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'expense_number' => 'EXP-FORM-0001', 'category_id' => $category->id, 'supplier_party_id' => $supplierId, 'expense_date' => now()->toDateString(),
             'description' => 'Client lunch meeting', 'net_cents' => 20000, 'tax_cents' => 3000,
         ]);
 
@@ -225,8 +242,9 @@ class OperationsViewTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-SELLER-0004');
         $category = $this->makeCategory($org['organisation']);
+        $supplierId = $this->createSupplier($org['organisation']);
         $this->actingAs($org['owner'])->post('/operations/expenses', [
-            'expense_number' => 'EXP-FLOW-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'expense_number' => 'EXP-FLOW-0001', 'category_id' => $category->id, 'supplier_party_id' => $supplierId, 'expense_date' => now()->toDateString(),
             'description' => 'Office supplies', 'net_cents' => 40000, 'tax_cents' => 6000,
         ]);
         $expenseId = Expense::where('expense_number', 'EXP-FLOW-0001')->firstOrFail()->id;
@@ -244,8 +262,9 @@ class OperationsViewTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-SELLER-0005');
         $category = $this->makeCategory($org['organisation']);
+        $supplierId = $this->createSupplier($org['organisation']);
         $this->actingAs($org['owner'])->post('/operations/expenses', [
-            'expense_number' => 'EXP-SELF-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'expense_number' => 'EXP-SELF-0001', 'category_id' => $category->id, 'supplier_party_id' => $supplierId, 'expense_date' => now()->toDateString(),
             'description' => 'Self review attempt', 'net_cents' => 10000, 'tax_cents' => 1500,
         ]);
         $expenseId = Expense::where('expense_number', 'EXP-SELF-0001')->firstOrFail()->id;
@@ -259,8 +278,9 @@ class OperationsViewTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-SELLER-0006');
         $category = $this->makeCategory($org['organisation']);
+        $supplierId = $this->createSupplier($org['organisation']);
         $this->actingAs($org['owner'])->post('/operations/expenses', [
-            'expense_number' => 'EXP-REJ-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'expense_number' => 'EXP-REJ-0001', 'category_id' => $category->id, 'supplier_party_id' => $supplierId, 'expense_date' => now()->toDateString(),
             'description' => 'Questionable claim', 'net_cents' => 10000, 'tax_cents' => 1500,
         ]);
         $expenseId = Expense::where('expense_number', 'EXP-REJ-0001')->firstOrFail()->id;
@@ -288,8 +308,9 @@ class OperationsViewTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-SELLER-0007');
         $category = $this->makeCategory($org['organisation']);
+        $supplierId = $this->createSupplier($org['organisation']);
         $payload = [
-            'expense_number' => 'EXP-DUP-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'expense_number' => 'EXP-DUP-0001', 'category_id' => $category->id, 'supplier_party_id' => $supplierId, 'expense_date' => now()->toDateString(),
             'description' => 'First submission', 'net_cents' => 10000, 'tax_cents' => 1500,
         ];
         $this->actingAs($org['owner'])->post('/operations/expenses', $payload)
@@ -316,8 +337,9 @@ class OperationsViewTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-SELLER-0008');
         $category = $this->makeCategory($org['organisation']);
+        $supplierId = $this->createSupplier($org['organisation']);
         $payload = [
-            'expense_number' => 'EXP-REPLAY-0001', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'expense_number' => 'EXP-REPLAY-0001', 'category_id' => $category->id, 'supplier_party_id' => $supplierId, 'expense_date' => now()->toDateString(),
             'description' => 'Double-click replay test', 'net_cents' => 10000, 'tax_cents' => 1500,
             'idempotency_key' => (string) Str::uuid(),
         ];
