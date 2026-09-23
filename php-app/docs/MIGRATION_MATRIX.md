@@ -11613,3 +11613,49 @@ render even if it had tried.
   against real demo data: all four tiles rendered with real non-zero
   counts (11 canonical organisations, 1 active branch), and the registry
   table's Capabilities column showed real `Buyer`/`Seller` badges.
+
+## New view: top-level Developer page (2026-09-23)
+
+A third missing page in the same category as Offline Continuity and
+Integrations: `app/developer/page.tsx` (API client registry and webhook
+subscriptions) had no Laravel Blade equivalent at all, distinct from
+`app/portal/developer/page.tsx` (`App\Http\Controllers\Portal\DeveloperPortalController`,
+already ported -- the Developer Portal switchboard destination, with its
+own client-creation/credential-rotation write actions and its own
+`PlatformSnapshotService::developerPortalSnapshot()`). Confirmed by
+reading both pages in full and by a repo-wide search finding no
+`/developer` GET route anywhere in `routes/web.php`. Purely read-only
+(confirmed by reading the source page in full -- no write action
+anywhere on it), reusing `PlatformSnapshotService::getSnapshot()`'s
+`clients`/`webhooks`/`outbox` fields directly, the same aggregate
+`PlatformSnapshotController::show` and the Offline/Integrations pages
+already reuse.
+
+- New `App\Http\Controllers\Platform\DeveloperViewController::index()`
+  -- `permission:developer:read`, renders a 4-tile metric-grid (API
+  clients, Active clients, Webhooks, Outbox pending) plus an API client
+  registry table and a webhook subscriptions table, matching
+  `app/developer/page.tsx` field-for-field.
+  `api_clients.credential_reference`/`webhook_subscriptions.signing_key_reference`
+  are both `NOT NULL` columns in this port's own schema, so the source's
+  own `item.credential_reference ? "EXTERNAL_REFERENCE" : "MISSING"`
+  ternary is reproduced faithfully rather than simplified away -- it is
+  defensive parity with the source, not dead code, since the column
+  being always-populated is a schema invariant, not a language guarantee.
+- Route added at `GET /developer` (`routes/web.php`), nav link added to
+  the sidebar.
+- New test `DeveloperViewTest` (4 tests: auth gate, permission gate,
+  metric tiles + registers with real seeded `api_clients`/
+  `webhook_subscriptions`/`outbox_events` rows, and a clean-empty-state
+  render) -- `TAXPAYER_ADMIN` used as the positive fixture rather than
+  `TAXPAYER_OWNER`, since `Permissions::ROLE_PERMISSIONS`'s own comment
+  confirms `TAXPAYER_OWNER` was deliberately excluded from
+  `developer:read`/`developer:manage` to keep it off the Developer
+  Portal and its raw JSON mirror. Full suite: 1102 tests, 0 regressions.
+- Manually verified via a logged-in `infra-admin@vat-msa.test` session
+  against real demo data: page renders without error; the "Outbox
+  pending" tile showed a real non-zero count (57), the same live
+  aggregate already proven reachable by the Integrations page (API
+  clients/webhooks are legitimately zero -- no seeder populates those
+  tables in this demo dataset; the new test covers the non-zero case
+  with real fixtures).

@@ -82,6 +82,7 @@ use App\Http\Controllers\Operations\LogisticsViewController;
 use App\Http\Controllers\Operations\PosViewController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
+use App\Http\Controllers\Platform\DeveloperViewController;
 use App\Http\Controllers\Platform\OfflineSyncController;
 use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformConfigViewController;
@@ -500,6 +501,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // upload route (no step-up there either).
     Route::get('/documents', [DocumentViewController::class, 'index'])->name('documents.index');
     Route::post('/documents', [DocumentViewController::class, 'store'])->name('documents.store');
+
+    // Ported from the source's own app/developer/page.tsx -- see
+    // DeveloperViewController's own doc comment for why this is a
+    // distinct page from /portal/developer (App\Http\Controllers\Portal\
+    // DeveloperPortalController).
+    Route::get('/developer', [DeveloperViewController::class, 'index'])->name('developer.index');
 
     // Frontend UI build-out: the Reports & Analytics console, reusing
     // ReportExportService/DataProductService directly (see
