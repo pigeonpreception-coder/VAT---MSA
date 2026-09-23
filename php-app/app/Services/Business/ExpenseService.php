@@ -9,6 +9,7 @@ use App\Models\BusinessParty;
 use App\Models\DocumentMetadata;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
+use App\Models\ExpenseDecision;
 use App\Models\ExpenseReceiptLink;
 use App\Models\User;
 use App\Services\Audit\AuditService;
@@ -196,6 +197,79 @@ class ExpenseService
             ], $now);
             AuditService::append($actor, 'EXPENSE_RECEIPT_LINKED', 'EXPENSE', $expenseId, [
                 'organisationId' => $organisation->id, 'documentId' => $document->id, 'correlationId' => $correlationId,
+            ], $now);
+        });
+
+        return $this->findOrFail($expenseId, $organisation->id);
+    }
+
+    /**
+     * DecideExpense: a newer, consolidated maker-checker decision that
+     * replaces the older two-step SUBMIT->APPROVE/REJECT flow above with a
+     * single receipt-gated decision straight from DRAFT. Both flows are
+     * real, unchanged, parallel commands in source -- this is additive,
+     * not a replacement.
+     *
+     * @return array<string, mixed>
+     */
+    public function decide(string $expenseId, array $payload, User $actor, string $idempotencyKey, string $correlationId, ?string $requestedOrganisationId): array
+    {
+        CommandLedger::validateIdempotencyKey($idempotencyKey);
+        $decision = BusinessValidator::expenseDecision($payload);
+        $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
+        $requestHash = CommandLedger::requestHash(['organisation_id' => $organisation->id, 'expense_id' => $expenseId, 'decision' => $decision]);
+        $prior = CommandLedger::prior($actor->id, 'DECIDE_EXPENSE', $idempotencyKey, $requestHash);
+        if ($prior) {
+            return $this->findOrFail($prior, $organisation->id);
+        }
+        $expense = Expense::with('category')->where('id', $expenseId)->where('organisation_id', $organisation->id)->first();
+        if (! $expense) {
+            throw new BusinessResourceException('Expense was not found in the authorised organisation.', 404);
+        }
+        $this->assertNotSelfReview($actor, $expense->created_by, 'deciding');
+        $document = $expense->receipt_document_id ? DocumentMetadata::find($expense->receipt_document_id) : null;
+        $evaluation = BusinessValidator::evaluateExpenseDecision(
+            $expense->status, $expense->created_by, $actor->id, $decision['decision'], (bool) $expense->category->requires_receipt,
+            $expense->receipt_document_id, optional($document)->scan_status, optional($document)->status,
+        );
+        if (! $evaluation['allowed']) {
+            throw new RepositoryConflictException($evaluation['reason']);
+        }
+
+        $now = now();
+        DB::transaction(function () use ($expenseId, $evaluation, $organisation, $actor, $now, $idempotencyKey, $requestHash, $correlationId, $decision) {
+            // Affected-row guard: the DRAFT-status pre-check above ran
+            // before this transaction, unguarded against a concurrent
+            // decide (or a concurrent submit) on the same expense -- the
+            // same RT punch-list #8 pattern every other expense transition
+            // in this class already carries.
+            //
+            // Mirrors drizzle/0010_curvy_zaran.sql's `apply_expense_decision`
+            // trigger exactly: approved_by/approved_at are set on APPROVE
+            // and cleared (not left over from a prior action) on REJECT,
+            // and rejection_reason is never touched here -- the decision's
+            // own reason lives only in expense_decisions.reason, unlike the
+            // older REJECT_EXPENSE flow which does set expenses.
+            // rejection_reason directly.
+            $updated = Expense::where('id', $expenseId)->where('status', 'DRAFT')->update([
+                'status' => $evaluation['targetStatus'],
+                'approved_by' => $decision['decision'] === 'APPROVE' ? $actor->id : null,
+                'approved_at' => $decision['decision'] === 'APPROVE' ? $now : null,
+            ]);
+            if ($updated === 0) {
+                throw new RepositoryConflictException("Expense {$expenseId} was changed by another action; reload and try again.");
+            }
+            ExpenseDecision::create([
+                'id' => (string) Str::uuid(), 'expense_id' => $expenseId, 'organisation_id' => $organisation->id,
+                'decision' => $decision['decision'], 'reason' => $decision['reason'], 'decided_by' => $actor->id, 'decided_at' => $now,
+            ]);
+            $action = $decision['decision'] === 'APPROVE' ? 'EXPENSE_APPROVED' : 'EXPENSE_REJECTED';
+            CommandLedger::record($actor->id, 'DECIDE_EXPENSE', $idempotencyKey, $requestHash, 'EXPENSE', $expenseId, $now);
+            CommandLedger::outbox('EXPENSE', $expenseId, $action === 'EXPENSE_APPROVED' ? 'ExpenseApproved' : 'ExpenseRejected', $organisation->id, [
+                'expense_id' => $expenseId, 'organisation_id' => $organisation->id, 'reason' => $decision['reason'], 'correlation_id' => $correlationId,
+            ], $now);
+            AuditService::append($actor, $action, 'EXPENSE', $expenseId, [
+                'organisationId' => $organisation->id, 'decision' => $decision['decision'], 'reason' => $decision['reason'], 'correlationId' => $correlationId,
             ], $now);
         });
 
