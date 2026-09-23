@@ -11755,3 +11755,40 @@ directory at all.
   query (this demo account's own organisation has no seeded
   invoices/employees to match against -- the new test covers the
   real-results case with controlled fixtures).
+
+## New view: Canonical taxpayer registry page (2026-09-23)
+
+A deeper gap than the prior four this pass: `app/taxpayers/page.tsx`
+had no Laravel equivalent at all -- and unlike Workspace Search, not
+even the underlying read existed yet. `lib/data/repository.ts`'s
+`listTaxpayers()` had no Laravel `TaxpayerService` counterpart, and (as
+in source itself) no JSON API route existed for it either -- confirmed
+by a repo-wide search finding no `/taxpayers` route anywhere in
+`routes/web.php` and no `list()`-style method on `TaxpayerService`.
+
+- New `TaxpayerService::list()` -- a direct port of `listTaxpayers()`'s
+  own query (per-taxpayer active organisation id, active-and-date-
+  effective capabilities via a correlated `GROUP_CONCAT` matching the
+  same pattern `OrganisationService::list()` already established,
+  transaction count across `invoices`, and OUTPUT_VAT/INPUT_VAT sums
+  from `ledger_entries`). Deliberately unscoped, matching the source's
+  own query exactly: confirmed against `Permissions::ROLE_PERMISSIONS`
+  that `taxpayers:read` (the page's only gate) is held broadly,
+  including by `TAXPAYER_OWNER`/`ADMIN`/`ACCOUNTANT`, not NAMRA-only --
+  this is the source's own design (a shared canonical directory of VAT
+  numbers/TINs/aggregate counts), not an oversight to "fix" with
+  invented scoping the source never applies.
+- New `App\Http\Controllers\Identity\TaxpayerViewController::index()`
+  renders the registry table field-for-field against
+  `app/taxpayers/page.tsx`. Also added `TaxpayerController::index()` as
+  the matching `GET /api/v1/taxpayers` JSON endpoint -- source itself
+  has none, but this migration's own established "every repository
+  function gets a JSON endpoint" convention adds one anyway.
+- Route added at `GET /taxpayers`, nav link added to the sidebar.
+- New test `TaxpayerViewTest` (3 tests: auth gate, permission gate, and
+  a real render proving a seeded capability badge and VAT totals
+  computed from real `invoices`/`ledger_entries` rows actually reach
+  the page). Full suite: 1119 tests, 0 regressions.
+- Manually verified via a logged-in `namra-auditor@vat-msa.test`
+  session against real demo data: page renders without error with real
+  taxpayer rows (VAT numbers/TINs for the full demo taxpayer set).

@@ -196,6 +196,7 @@
                     <li class="nav-item"><a class="nav-link" href="{{ route('offline.index') }}" @if (request()->routeIs('offline.*')) aria-current="page" @endif>Offline Continuity</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('integrations.index') }}" @if (request()->routeIs('integrations.*')) aria-current="page" @endif>Integrations</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('workspace-search.index') }}" @if (request()->routeIs('workspace-search.*')) aria-current="page" @endif>Workspace Search</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ route('taxpayers.index') }}" @if (request()->routeIs('taxpayers.*')) aria-current="page" @endif>Taxpayer Registry</a></li>
 
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-administration" aria-expanded="{{ $activeGroup === 'administration' ? 'true' : 'false' }}">
