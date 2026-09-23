@@ -2,11 +2,56 @@
 
 @section('title', 'Security operations')
 
+@php
+    $openIncidents = collect($incidents)->where('status', '!==', 'CLOSED')->count();
+    $highCriticalEvents = collect($metrics['event_counts'])->whereIn('severity', ['HIGH', 'CRITICAL'])->sum('count');
+    $pendingOutbox = collect($metrics['outbox_counts'])->firstWhere('status', 'PENDING')['count'] ?? 0;
+@endphp
+
 @section('content')
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Security domain</div>
     <h1 class="h3 mb-1">Security operations</h1>
     <p class="text-muted mb-0">Correlated security events, detection-rule findings and the incidents they open. A detection rule fires automatically once its threshold is met within its window; an analyst can also open an incident by hand.</p>
+</div>
+
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open incidents</span><span>!</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($openIncidents) }}</div>
+                <div class="small text-warning">Human review required for high-impact containment</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>High / critical events</span><span>S</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($highCriticalEvents) }}</div>
+                <div class="small text-muted">Correlated application security evidence</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending outbox</span><span>Q</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($pendingOutbox) }}</div>
+                <div class="small text-muted">Replay-safe events awaiting publication</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Data integrity</span><span>DB</span></div>
+                <div class="fs-2 fw-semibold">Healthy</div>
+                <div class="small text-success">{{ number_format($metrics['invoice_count']) }} invoices &middot; {{ number_format($metrics['audit_event_count']) }} audit events</div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @if ($errors->any())

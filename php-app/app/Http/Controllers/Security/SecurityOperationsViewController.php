@@ -42,6 +42,7 @@ class SecurityOperationsViewController extends Controller
         return view('security.operations', [
             'incidents' => $this->service->getSOCQueue($request->query('status'), $request->query('severity')),
             'events' => $this->service->getRecentEvents(),
+            'metrics' => $this->service->getOperationsMetrics(),
             'statusFilter' => $request->query('status'),
             'severityFilter' => $request->query('severity'),
             'canManage' => $user->hasAppPermission('security:manage'),
