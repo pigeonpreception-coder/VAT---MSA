@@ -73,6 +73,7 @@ use App\Http\Controllers\VatLifecycle\VatLifecycleViewController;
 use App\Http\Controllers\Licensing\LicensingController;
 use App\Http\Controllers\Licensing\LicensingViewController;
 use App\Http\Controllers\Navigation\NavigationController;
+use App\Http\Controllers\Navigation\WorkspaceSearchViewController;
 use App\Http\Controllers\Operations\ErpViewController;
 use App\Http\Controllers\Operations\FixedAssetController;
 use App\Http\Controllers\Operations\FixedAssetViewController;
@@ -518,6 +519,12 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // GET /api/v1/platform); neither source page has a write action.
     Route::get('/offline', [OfflineViewController::class, 'index'])->name('offline.index');
     Route::get('/integrations', [IntegrationsViewController::class, 'index'])->name('integrations.index');
+
+    // Ported from the source's own app/workspace-search/page.tsx -- see
+    // WorkspaceSearchViewController's own doc comment. Reuses
+    // NavigationService::searchWorkspace directly, the same read
+    // NavigationController::search already serves as JSON at GET /search.
+    Route::get('/workspace-search', [WorkspaceSearchViewController::class, 'index'])->name('workspace-search.index');
 
     // Frontend UI build-out: the Reports & Analytics console, reusing
     // ReportExportService/DataProductService directly (see

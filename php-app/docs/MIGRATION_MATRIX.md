@@ -11721,3 +11721,37 @@ already reuse.
   clients/webhooks are legitimately zero -- no seeder populates those
   tables in this demo dataset; the new test covers the non-zero case
   with real fixtures).
+
+## New view: Workspace search page (2026-09-23)
+
+A different shape of gap found via a doc-comment/route-inventory sweep
+after the metric-tile-drift angle (which had by now found five gaps in a
+row) ran dry: `app/workspace-search/page.tsx` had no Laravel Blade
+equivalent, but unlike the three pages above, the underlying search
+logic itself was already fully ported --
+`App\Services\Navigation\NavigationService::searchWorkspace` already
+existed and was already exercised via the JSON `GET /search` route
+(`App\Http\Controllers\Navigation\NavigationController::search`). No
+Blade page anywhere reached it, confirmed by a repo-wide search finding
+no `/workspace-search` route and no `resources/views/workspace-search`
+directory at all.
+
+- New `App\Http\Controllers\Navigation\WorkspaceSearchViewController::index()`
+  -- `permission:search:read`, calls `NavigationService::searchWorkspace()`
+  unconditionally for every request (matching
+  `NavigationController::search`'s own unconditional call, not a second,
+  duplicate "under 2 characters" guard that could drift from the
+  service's own short-circuit), and renders the tenant-filtered,
+  permission-aware results (Employee/Invoice/Role, each linking back to
+  its own owning page) or the source's own two empty states (too-short
+  query vs. genuinely no matches).
+- Route added at `GET /workspace-search`, nav link added to the sidebar.
+- New test `WorkspaceSearchViewTest` (5 tests: auth gate, permission
+  gate, the short-query guard, a real matching search against a seeded
+  invoice proving tenant-scoped results actually render, and the
+  no-matches empty state). Full suite: 1116 tests, 0 regressions.
+- Manually verified via a logged-in `owner@demo-trading.test` session:
+  page renders without error for both a short query and a no-match
+  query (this demo account's own organisation has no seeded
+  invoices/employees to match against -- the new test covers the
+  real-results case with controlled fixtures).
