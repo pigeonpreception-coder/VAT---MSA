@@ -11853,3 +11853,36 @@ always was in source's own reachable command surface).
 - Manually verified via a logged-in `admin@vat-msa.test` session: the
   page renders at 200 with both the self-serve queue and registration
   application sections visible (national-scope actor).
+
+## Reconciliation exceptions page: metric-tile gap (2026-09-23)
+
+Back to the metric-grid field-level-drift angle: `app/reconciliation/
+page.tsx`'s own 4-tile metric grid (open count, critical-severity count,
+aggregate exception value, and a static "Dual" resolution-policy tile)
+had no Laravel equivalent -- the existing `ReconciliationViewController`/
+`exceptions.index` Blade view (built earlier for `ReconciliationService`'s
+own NamRA-officer work queue) rendered only the filterable work-queue
+table. Its own doc comment claimed source had no page.tsx for this
+domain at all; that was true only in the narrow sense that no page calls
+`ReconciliationService`'s four command routes directly -- `app/
+reconciliation/page.tsx` does exist and renders the same
+`reconciliation_exceptions` data via a separate, simpler, unfiltered read
+(`lib/data/repository.ts`'s `listExceptions`). The doc comment is
+corrected in place.
+
+- New `ReconciliationService::getSummaryTotals()` -- computed over the
+  full tenant-scoped exception set (matching `listExceptions`'s own
+  `isNationalScope` gate), deliberately independent of the work queue's
+  own optional filters (status/severity/assigned_officer_id/
+  unassigned_only/min_age_days/max_age_days): those filters only ever
+  affect the table below, matching source, which has no filters at all
+  and always summarises the complete list.
+- `ReconciliationViewController::index()` now also passes `summary` to
+  the view; `exceptions/index.blade.php` gained the 4-tile metric grid
+  ahead of the filter form, matching source's own tile labels/order.
+- New test `ReconciliationTest::test_the_blade_view_renders_its_metric_tiles_over_the_full_exception_set`
+  -- proves the tiles total the full exception set even when the
+  work-queue filter (`?status=RESOLVED`) would show a different subset
+  in the table below. Full suite: 1127 tests, 0 regressions.
+- Manually verified via a logged-in `admin@vat-msa.test` session: all
+  four tiles render at `/exceptions` with real labels/values.

@@ -328,6 +328,47 @@ class ReconciliationTest extends TestCase
         $response->assertSee('Reconciliation exceptions');
     }
 
+    /**
+     * Gap-finding pass (2026-09-23): app/reconciliation/page.tsx's own
+     * metric-grid (open count, critical count, aggregate exception value)
+     * had no Laravel equivalent -- the Blade view rendered only the
+     * filtered work-queue table. Proves the tiles total the *full*
+     * tenant-scoped exception set, not whatever the (unrelated) work-queue
+     * filters happen to be showing.
+     */
+    public function test_the_blade_view_renders_its_metric_tiles_over_the_full_exception_set(): void
+    {
+        $ctx = $this->certifyInvoice();
+        $openHighInvoiceId = $ctx['invoiceId'];
+        ReconciliationException::create([
+            'id' => (string) Str::uuid(), 'invoice_id' => $openHighInvoiceId, 'taxpayer_id' => null,
+            'exception_type' => 'LEDGER_MISMATCH', 'severity' => 'HIGH', 'status' => 'OPEN', 'summary' => 'High severity.', 'created_at' => now(),
+        ]);
+
+        $second = $this->actingAs($ctx['supplier']['owner'])->postJson('/api/v1/invoices', $this->invoicePayload([
+            'invoice_number' => 'INV-REC-0002',
+            'source' => ['document_id' => 'doc-rec-0002'],
+        ]), ['Idempotency-Key' => 'rec-cert-second-'.Str::random(20)]);
+        $second->assertStatus(201);
+        $criticalResolvedInvoiceId = $second->json('invoice_id');
+        ReconciliationException::create([
+            'id' => (string) Str::uuid(), 'invoice_id' => $criticalResolvedInvoiceId, 'taxpayer_id' => null,
+            'exception_type' => 'LEDGER_MISMATCH', 'severity' => 'CRITICAL', 'status' => 'RESOLVED', 'summary' => 'Critical, already resolved.', 'created_at' => now(),
+        ]);
+        $totalValueCents = \App\Models\Invoice::find($openHighInvoiceId)->total_cents + \App\Models\Invoice::find($criticalResolvedInvoiceId)->total_cents;
+        $officer = $this->makeNamraOfficer();
+
+        // Filtering the work queue to RESOLVED only should not change the tiles above it.
+        $response = $this->actingAs($officer)->get('/exceptions?status=RESOLVED');
+
+        $response->assertOk();
+        $response->assertSee('Open exceptions');
+        $response->assertSee('Critical severity');
+        $response->assertSee('N$ '.number_format($totalValueCents / 100, 2));
+        $this->assertSame(1, $response->viewData('summary')['open_count']);
+        $this->assertSame(1, $response->viewData('summary')['critical_count']);
+    }
+
     public function test_resolving_through_the_blade_view_without_a_fresh_step_up_redirects_to_password_confirmation(): void
     {
         $exception = ReconciliationException::create([
