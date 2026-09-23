@@ -83,9 +83,16 @@ class OrganisationViewController extends Controller
         $this->authorize('permission', 'identity:read');
         $actor = $request->user();
 
+        // Source's own getIdentityFoundationSnapshot fetches organisations
+        // once (via listOrganisations) and reuses it for both the metric
+        // count and the registry table -- the snapshot's own 'organisations'
+        // key already is that same OrganisationService::list() call, so the
+        // view reuses it too rather than querying it a second time.
+        $snapshot = $this->snapshot->getSnapshot($actor);
+
         return view('organisations.index', [
-            'organisations' => $this->organisations->list($actor),
-            'snapshot' => $this->snapshot->getSnapshot($actor),
+            'organisations' => $snapshot['organisations'],
+            'snapshot' => $snapshot,
         ]);
     }
 
