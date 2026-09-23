@@ -2,11 +2,56 @@
 
 @section('title', 'VAT returns')
 
+@php
+    $outputTaxCents = collect($snapshot['periods'])->sum('output_tax_cents');
+    $inputTaxCents = collect($snapshot['periods'])->sum('input_tax_cents');
+    $pendingApprovalCount = collect($snapshot['approvals'])->where('status', 'PENDING')->count();
+@endphp
+
 @section('content')
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">VAT return lifecycle</div>
     <h1 class="h3 mb-1">VAT periods &amp; returns</h1>
     <p class="text-muted mb-0">Generate, review and submit VAT returns from certified invoice activity, with maker-checker approval at every controlled step.</p>
+</div>
+
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Output VAT</span><span>O</span></div>
+                <div class="fs-2 fw-semibold">N$ {{ number_format($outputTaxCents / 100, 2) }}</div>
+                <div class="small text-muted">Certificate-backed seller liability</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Eligible input</span><span>I</span></div>
+                <div class="fs-2 fw-semibold">N$ {{ number_format($inputTaxCents / 100, 2) }}</div>
+                <div class="small text-muted">Matched buyer evidence only</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Net position</span><span>&Sigma;</span></div>
+                <div class="fs-2 fw-semibold">N$ {{ number_format(($outputTaxCents - $inputTaxCents) / 100, 2) }}</div>
+                <div class="small text-muted">Across latest controlled versions</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Approval queue</span><span>M/C</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($pendingApprovalCount) }}</div>
+                <div class="small text-warning">Independent maker-checker decisions</div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="row g-3">

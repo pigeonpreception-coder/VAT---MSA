@@ -190,6 +190,31 @@ class RefundViewTest extends TestCase
         $response->assertSee(route('refunds.show', $claim->id), false);
     }
 
+    /**
+     * Gap-finding pass (2026-09-23): app/refunds/page.tsx renders a
+     * metric-grid (request count, requested value, configuration blocks)
+     * this view had no equivalent tiles for -- source's own fourth tile
+     * ("Approved for payment") is not ported since RefundClaimStatus no
+     * longer has that value at all (dead code upstream too).
+     */
+    public function test_the_refunds_list_renders_its_metric_tiles(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2009');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-2009');
+        $version = $this->makeRefundableReturn($supplier, $customer);
+        $this->actingAs($customer['owner'])->post(route('vat-returns.refund-request.store', $version->id));
+        $claim = RefundClaim::where('vat_return_version_id', $version->id)->firstOrFail();
+        $this->assertSame('BLOCKED_RETURN_NOT_FILED', $claim->status);
+
+        $response = $this->actingAs($customer['owner'])->get('/refunds');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Refund requests', '1']);
+        $response->assertSeeInOrder(['Requested value', 'NAD 150.00']);
+        $response->assertSeeInOrder(['Configuration blocks', '1']);
+        $response->assertDontSee('Approved for payment');
+    }
+
     public function test_the_refund_detail_page_404s_for_a_claim_outside_the_actors_taxpayer_scope(): void
     {
         $supplier = $this->makeTradingParty('VAT-VIEW-SUP-2003');
