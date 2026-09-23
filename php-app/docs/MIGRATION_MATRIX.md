@@ -11936,3 +11936,28 @@ deployment's security posture.
 - Manually verified via a logged-in `admin@vat-msa.test` session: all six
   Control posture rows render, and `curl -i` against `/security` shows
   all five headers on a real response.
+
+## Reports & analytics page: metric-tile gap (2026-09-23)
+
+Continuing the metric-grid field-level-drift sweep: `app/reports/page.tsx`'s
+own 4-tile metric grid (Definitions, Completed inline, Failed, Export
+worker) had no Laravel equivalent. Unlike source's own simpler page, the
+Laravel `reports.index` view was already deliberately built as a much
+larger reporting/analytics console (report catalogue, my runs, my
+exports, pending approvals, data products, certified metrics, anomalies,
+published runs, publishable model runs -- see `ReportViewController`'s
+own doc comment), so this genuinely was just a top-of-page tile gap, not
+a missing-page gap.
+
+- `ReportViewController::index()` now also passes a `reportsSummary`
+  array (definitions count, completed-inline count, failed count)
+  computed from the same `$definitions`/`$myRuns` the page already
+  fetches -- no second query path. "Export worker" stays a static "Off"
+  tile, matching source exactly (it is hardcoded there too, not a
+  computed value).
+- `reports/index.blade.php` gained the 4-tile metric grid ahead of the
+  report catalogue table.
+- New test `ReportViewTest::test_the_reports_page_renders_its_metric_tiles`.
+  Full suite: 1129 tests, 0 regressions.
+- Manually verified via a logged-in `admin@vat-msa.test` session: all
+  four tiles render at `/reports`.

@@ -104,6 +104,15 @@ class ReportViewController extends Controller
             'pendingApprovals' => $pendingApprovals, 'dataProducts' => $dataProducts, 'metrics' => $metrics,
             'anomalies' => $anomalies, 'publishedRuns' => $publishedRuns, 'publishableModelRuns' => $publishableModelRuns,
             'isNational' => $isNational, 'canRun' => $user->hasAppPermission('reports:run'),
+            // Ported from app/reports/page.tsx's own metric-grid, computed
+            // over the same $definitions/$myRuns this page already fetches
+            // (no second query path). "Export worker" is a static "Off"
+            // in source too -- not a computed value there either.
+            'reportsSummary' => [
+                'definitions_count' => $definitions->count(),
+                'completed_count' => $myRuns->where('status', 'COMPLETED_INLINE')->count(),
+                'failed_count' => $myRuns->where('status', 'FAILED')->count(),
+            ],
         ]);
     }
 
