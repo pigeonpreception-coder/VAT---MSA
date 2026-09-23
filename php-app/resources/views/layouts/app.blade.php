@@ -191,6 +191,7 @@
                     </li>
 
                     <li class="nav-item"><a class="nav-link" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents &amp; Records</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ route('developer.index') }}" @if (request()->routeIs('developer.index')) aria-current="page" @endif>Developer</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('reports.index') }}" @if (request()->routeIs('reports.*')) aria-current="page" @endif>Reporting &amp; Analytics</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('offline.index') }}" @if (request()->routeIs('offline.*')) aria-current="page" @endif>Offline Continuity</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('integrations.index') }}" @if (request()->routeIs('integrations.*')) aria-current="page" @endif>Integrations</a></li>
