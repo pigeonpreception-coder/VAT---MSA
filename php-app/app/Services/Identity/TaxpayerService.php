@@ -30,6 +30,57 @@ class TaxpayerService
 
     public function __construct(private readonly ItasIdentityPort $itas) {}
 
+    /**
+     * Ported from lib/data/repository.ts's listTaxpayers -- the source's
+     * own "Canonical taxpayer registry" page (app/taxpayers/page.tsx),
+     * which existed in source with no JSON API route at all (no
+     * `app/api/v1/taxpayers/route.ts`), matching a handful of other
+     * page-only snapshot reads already ported this way elsewhere in this
+     * migration.
+     *
+     * Deliberately unscoped, matching the source's own query exactly: no
+     * `TenantScope` filter here, even though the page's own gate is just
+     * `taxpayers:read` -- confirmed against Permissions::ROLE_PERMISSIONS
+     * that this permission is held broadly, including by
+     * TAXPAYER_OWNER/ADMIN/ACCOUNTANT, not NAMRA-only. This is the
+     * source's own design (a shared canonical directory of VAT numbers/
+     * TINs/aggregate counts, not per-taxpayer financial detail), not an
+     * oversight to "fix" with invented scoping the source never applies.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function list(): array
+    {
+        $capabilities = DB::table('organisation_capabilities as c')
+            ->join('organisations as o', 'o.id', '=', 'c.organisation_id')
+            ->selectRaw("GROUP_CONCAT(c.capability ORDER BY c.capability SEPARATOR ',')")
+            ->whereColumn('o.taxpayer_id', 'taxpayers.id')
+            ->where('o.status', 'ACTIVE')->where('c.status', 'ACTIVE')
+            ->where('c.effective_from', '<=', now())
+            ->where(fn ($q) => $q->whereNull('c.effective_to')->orWhere('c.effective_to', '>', now()));
+
+        $organisationId = DB::table('organisations')->select('id')
+            ->whereColumn('taxpayer_id', 'taxpayers.id')->where('status', 'ACTIVE')->limit(1);
+
+        $transactionCount = DB::table('invoices')->selectRaw('COUNT(*)')
+            ->where(fn ($q) => $q->whereColumn('supplier_taxpayer_id', 'taxpayers.id')->orWhereColumn('customer_taxpayer_id', 'taxpayers.id'));
+
+        $outputTax = DB::table('ledger_entries')->selectRaw('COALESCE(SUM(amount_cents),0)')
+            ->whereColumn('taxpayer_id', 'taxpayers.id')->where('entry_type', 'OUTPUT_VAT');
+
+        $inputTax = DB::table('ledger_entries')->selectRaw('COALESCE(SUM(amount_cents),0)')
+            ->whereColumn('taxpayer_id', 'taxpayers.id')->where('entry_type', 'INPUT_VAT');
+
+        return DB::table('taxpayers')
+            ->select('taxpayers.*')
+            ->addSelect(['organisation_id' => $organisationId, 'capabilities' => $capabilities])
+            ->addSelect(['transaction_count' => $transactionCount, 'output_tax_cents' => $outputTax, 'input_tax_cents' => $inputTax])
+            ->orderBy('legal_name')
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->all();
+    }
+
     /** @return array{taxpayerId: string, vatStatus: string} */
     public function suspend(User $actor, string $taxpayerId, string $reason, string $correlationId): array
     {

@@ -19,6 +19,20 @@ class TaxpayerController extends Controller
 {
     public function __construct(private readonly TaxpayerService $taxpayers) {}
 
+    /**
+     * Ported from lib/data/repository.ts's listTaxpayers -- the source's
+     * own page-only read (no `app/api/v1/taxpayers/route.ts` exists),
+     * exposed as a JSON endpoint here anyway, matching this migration's
+     * own established "every repository function gets a JSON endpoint"
+     * convention.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $this->authorize('permission', 'taxpayers:read');
+
+        return response()->json(['taxpayers' => $this->taxpayers->list()]);
+    }
+
     public function suspend(SuspendTaxpayerRequest $request, string $id): JsonResponse
     {
         $this->authorize('permission', 'taxpayers:suspend');

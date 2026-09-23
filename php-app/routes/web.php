@@ -24,6 +24,7 @@ use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\TaxpayerController;
+use App\Http\Controllers\Identity\TaxpayerViewController;
 use App\Http\Controllers\Identity\UserController;
 use App\Http\Controllers\Identity\UserInvitationController;
 use App\Http\Controllers\Integration\IntegrationConnectionController;
@@ -526,6 +527,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // NavigationController::search already serves as JSON at GET /search.
     Route::get('/workspace-search', [WorkspaceSearchViewController::class, 'index'])->name('workspace-search.index');
 
+    // Ported from the source's own app/taxpayers/page.tsx -- see
+    // TaxpayerViewController/TaxpayerService::list's own doc comments.
+    // No JSON API route existed for this in source either; this migration
+    // adds one anyway (TaxpayerController::index) matching its own
+    // "every repository function gets a JSON endpoint" convention.
+    Route::get('/taxpayers', [TaxpayerViewController::class, 'index'])->name('taxpayers.index');
+
     // Frontend UI build-out: the Reports & Analytics console, reusing
     // ReportExportService/DataProductService directly (see
     // App\Http\Controllers\Platform\ReportViewController's own doc
@@ -875,6 +883,8 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         // for the claim half (Blade-only, routes/web.php's 'guest' group).
         Route::post('/organisations/{organisation}/invitations', [UserInvitationController::class, 'store'])
             ->middleware(['step-up', 'rate-limit:identity']);
+
+        Route::get('/taxpayers', [TaxpayerController::class, 'index']);
 
         Route::post('/taxpayers/{id}/suspension', [TaxpayerController::class, 'suspend'])
             ->middleware(['step-up', 'rate-limit:identity']);
