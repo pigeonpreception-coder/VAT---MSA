@@ -3,6 +3,7 @@
 use App\Exceptions\RateLimitExceededException;
 use App\Http\Middleware\EnforceRateLimit;
 use App\Http\Middleware\EnsureFreshStepUp;
+use App\Http\Middleware\SecurityHeaders;
 use App\Support\Security\RequestContext;
 use App\Support\Security\SecurityEventRecorder;
 use Illuminate\Database\QueryException;
@@ -26,6 +27,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // server-verified TOTP freshness check -- see
         // App\Http\Middleware\EnsureFreshStepUp's own doc comment.
         $middleware->alias(['step-up' => EnsureFreshStepUp::class, 'rate-limit' => EnforceRateLimit::class]);
+
+        // Ported from the source's own "Browser defence" control posture
+        // claim -- see SecurityHeaders' own doc comment. Appended (not
+        // prepended) so it runs on every response, web and API alike,
+        // regardless of how early another middleware short-circuits.
+        $middleware->append(SecurityHeaders::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Red team finding RT-002 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md):

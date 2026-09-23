@@ -87,6 +87,36 @@ class SecurityOperationsViewTest extends TestCase
     }
 
     /**
+     * Gap-finding pass (2026-09-23): app/security/page.tsx's own "Control
+     * posture" panel (a static 6-item runtime-controls list) had no
+     * Laravel equivalent -- the Blade view jumped straight from the
+     * incident queue to "Recent security events". Also proves the
+     * "Browser defence" row's claim is no longer false for this
+     * deployment: SecurityHeaders now actually sets the response headers
+     * it names.
+     */
+    public function test_the_page_renders_its_control_posture_panel_and_security_headers(): void
+    {
+        $viewer = $this->makeUser('posture@secops.test', 'SECURITY_ANALYST');
+
+        $response = $this->actingAs($viewer)->get('/security');
+
+        $response->assertOk();
+        $response->assertSee('Control posture');
+        $response->assertSee('Tenant isolation');
+        $response->assertSee('API abuse control');
+        $response->assertSee('Payload defence');
+        $response->assertSee('Evidence integrity');
+        $response->assertSee('Failure containment');
+        $response->assertSee('Browser defence');
+        $response->assertHeader('Content-Security-Policy');
+        $response->assertHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+        $response->assertHeader('X-Frame-Options', 'DENY');
+        $response->assertHeader('X-Content-Type-Options', 'nosniff');
+        $response->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    }
+
+    /**
      * Gap-finding pass (2026-09-23): lib/data/repository.ts's
      * getSecurityOperationsSnapshot -- the dashboard-metrics half of this
      * page app/security/page.tsx actually renders (open incidents,

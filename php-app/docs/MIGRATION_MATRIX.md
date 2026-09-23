@@ -11886,3 +11886,53 @@ corrected in place.
   in the table below. Full suite: 1127 tests, 0 regressions.
 - Manually verified via a logged-in `admin@vat-msa.test` session: all
   four tiles render at `/exceptions` with real labels/values.
+
+## Security operations page: missing "Control posture" panel and real security headers (2026-09-23)
+
+`app/security/page.tsx`'s own static "Control posture" panel (a 6-item
+runtime-controls list -- Tenant isolation, API abuse control, Payload
+defence, Evidence integrity, Failure containment, Browser defence, each
+shown ACTIVE) had no Laravel equivalent; the existing `security.operations`
+Blade view jumped straight from the incident queue to "Recent security
+events". Porting the panel's copy verbatim surfaced a real, separate gap:
+"Browser defence" (CSP/HSTS/frame/MIME/privacy headers) and "Payload
+defence" (a 1 MiB JSON hard limit, source's own `readBoundedJson`) name
+concrete technical controls this Laravel port genuinely did not
+implement anywhere -- confirmed by a repo-wide grep finding no
+Content-Security-Policy/Strict-Transport-Security/X-Frame-Options/
+X-Content-Type-Options header anywhere in `app/`, and no payload-size
+guard anywhere either. Shipping the static "ACTIVE" copy without also
+making it true would have made this port's own UI lie about its
+deployment's security posture.
+
+- New `App\Http\Middleware\SecurityHeaders` -- sets
+  Content-Security-Policy, Strict-Transport-Security (1 year,
+  includeSubDomains), X-Frame-Options: DENY, X-Content-Type-Options:
+  nosniff, and Referrer-Policy: strict-origin-when-cross-origin on every
+  response (registered globally in `bootstrap/app.php`). `script-src`/
+  `style-src` deliberately keep `'unsafe-inline'`: a repo-wide grep found
+  26 Blade views using inline `onchange`/`onclick`/`onsubmit` handlers
+  (including this migration's own auto-submitting filter `<select>`s)
+  plus several inline `<script>` blocks -- a nonce-free strict CSP would
+  have silently broken real, working functionality that no PHPUnit
+  feature test can catch (tests never execute CSP in a real browser).
+  Tightening this to drop `'unsafe-inline'` needs a nonce or moving every
+  inline handler/script external -- real, separate frontend work, not
+  attempted here; a follow-up task has been queued for it.
+- "Payload defence" (the 1 MiB JSON body cap) is **not yet implemented**
+  -- unlike the CSP/header gap, adding a blanket request-size guard
+  across every JSON write route without auditing each one's actual
+  payload shape (multipart document uploads, POS batch pushes, etc. all
+  share route groups with plain JSON commands) risked breaking existing,
+  passing tests and real upload flows if rushed; a follow-up task has
+  been queued for it instead. The panel still shows this row (matching
+  source's own copy) -- tracked here as a known, deliberate fidelity gap
+  rather than silently dropped.
+- `security/operations.blade.php` gained the "Control posture" panel and
+  an "Incident queue" heading (source's own panel title, previously
+  implicit) above the incident table.
+- New test `SecurityOperationsViewTest::test_the_page_renders_its_control_posture_panel_and_security_headers`
+  -- covers both the panel copy and the five real response headers.
+- Manually verified via a logged-in `admin@vat-msa.test` session: all six
+  Control posture rows render, and `curl -i` against `/security` shows
+  all five headers on a real response.
