@@ -107,6 +107,12 @@
 
 <div class="card mb-3">
     <div class="card-header">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+                <h2 class="h6 mb-0">Incident queue</h2>
+                <div class="text-muted small">Detect, classify, contain, recover and learn</div>
+            </div>
+        </div>
         <form method="GET" action="{{ route('security.operations') }}" class="row g-2 align-items-center">
             <div class="col-md-3">
                 <label for="status" class="form-label small mb-0">Status</label>
@@ -196,6 +202,31 @@
                 @endforelse
             </tbody>
         </table>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">
+        <h2 class="h6 mb-0">Control posture</h2>
+        <div class="text-muted small">Runtime controls implemented in this release</div>
+    </div>
+    <div class="list-group list-group-flush">
+        @foreach ([
+            ['Tenant isolation', 'Taxpayer-scoped invoice, return and exception queries'],
+            ['API abuse control', 'Actor, device, source, tenant and global rate windows'],
+            ['Payload defence', 'JSON-only requests with a 1 MiB hard limit'],
+            ['Evidence integrity', 'Correlation IDs, structured logs and hash-chained audit events'],
+            ['Failure containment', 'Transactional outbox decouples committed work from delivery'],
+            ['Browser defence', 'CSP, HSTS, frame, MIME and privacy response policies'],
+        ] as [$title, $copy])
+            <div class="list-group-item d-flex justify-content-between align-items-center gap-3">
+                <div>
+                    <strong>{{ $title }}</strong>
+                    <p class="text-muted small mb-0">{{ $copy }}</p>
+                </div>
+                <x-status-badge value="ACTIVE" />
+            </div>
+        @endforeach
     </div>
 </div>
 
