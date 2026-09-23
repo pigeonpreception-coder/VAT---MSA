@@ -3,6 +3,7 @@
 namespace Tests\Feature\Business;
 
 use App\Models\BusinessParty;
+use App\Models\CounterpartyTrustProfile;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\Organisation;
@@ -74,6 +75,17 @@ class PurchaseOrderViewTest extends TestCase
         return compact('taxpayer', 'organisation', 'owner', 'accountant');
     }
 
+    /**
+     * Purchase orders themselves are not gated by
+     * App\Support\Business\CounterpartyTrustGate (the source's own
+     * requirePartyRelationship is not called from createPurchaseOrder
+     * either -- see 05-security/issue3-counterparty-trust-boundary.md's
+     * four call sites), but converting one to a supplier expense goes
+     * through App\Services\Business\ExpenseService::create(), which is
+     * gated -- so this fixture still needs a trusted supplier. See
+     * tests/Feature/Business/ExpenseTest.php's own trustParty() doc
+     * comment.
+     */
     private function makeSupplier(Organisation $organisation, string $name): BusinessParty
     {
         $party = BusinessParty::create([
@@ -83,6 +95,14 @@ class PurchaseOrderViewTest extends TestCase
         PartyRelationship::create([
             'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
             'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now()->subDay(), 'created_at' => now()->subDay(),
+        ]);
+        CounterpartyTrustProfile::create([
+            'id' => (string) Str::uuid(), 'business_party_id' => $party->id, 'provider' => 'SYNTHETIC_AUTHORITY',
+            'provider_environment' => 'SYNTHETIC_TEST', 'trust_status' => 'AUTHORITY_VERIFIED', 'tax_registration_status' => 'ACTIVE',
+            'vat_verification_status' => 'NOT_PROVIDED', 'tin_verification_status' => 'NOT_PROVIDED', 'company_verification_status' => 'NOT_PROVIDED',
+            'confidence_bps' => 10000, 'evidence_hash' => null, 'source_reference' => null,
+            'requested_by' => User::where('taxpayer_id', $organisation->taxpayer_id)->value('id'), 'reviewed_by' => null,
+            'checked_at' => now(), 'expires_at' => now()->addYear(), 'created_at' => now(), 'updated_at' => now(),
         ]);
 
         return $party;

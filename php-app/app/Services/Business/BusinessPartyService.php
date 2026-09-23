@@ -6,6 +6,8 @@ use App\Domain\Business\BusinessValidator;
 use App\Exceptions\BusinessResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\BusinessParty;
+use App\Models\CounterpartyTrustEvent;
+use App\Models\CounterpartyTrustProfile;
 use App\Models\PartyRelationship;
 use App\Models\User;
 use App\Services\Audit\AuditService;
@@ -38,12 +40,14 @@ class BusinessPartyService
         $this->assertIdentifiersAvailable($organisation->id, $party);
 
         $id = (string) Str::uuid();
+        $trustProfileId = (string) Str::uuid();
         $now = now();
 
-        DB::transaction(function () use ($party, $organisation, $actor, $id, $now, $idempotencyKey, $requestHash, $correlationId) {
+        DB::transaction(function () use ($party, $organisation, $actor, $id, $trustProfileId, $now, $idempotencyKey, $requestHash, $correlationId) {
             BusinessParty::create([
                 'id' => $id, 'organisation_id' => $organisation->id, 'display_name' => $party['display_name'],
                 'legal_name' => $party['legal_name'], 'vat_number' => $party['vat_number'], 'tin' => $party['tin'],
+                'company_registration_number' => $party['company_registration_number'],
                 'email' => $party['email'], 'phone' => $party['phone'], 'address' => $party['address'],
                 'source_system' => 'LOCAL', 'source_party_id' => null, 'status' => 'ACTIVE',
                 'created_at' => $now, 'updated_at' => $now,
@@ -55,9 +59,35 @@ class BusinessPartyService
                     'effective_to' => null, 'created_at' => $now,
                 ]);
             }
+            // Ported from createBusinessParty's own counterparty_trust_profiles
+            // INSERT -- creation is intake only, never transaction-eligible: the
+            // party is not trusted for new business until it clears
+            // App\Support\Business\CounterpartyTrustGate, which every new
+            // party starts out failing (PENDING_PROVIDER). See
+            // 05-security/issue3-counterparty-trust-boundary.md.
+            CounterpartyTrustProfile::create([
+                'id' => $trustProfileId, 'business_party_id' => $id, 'provider' => 'ITAS_BIPA',
+                'provider_environment' => 'CONTRACT_PENDING', 'trust_status' => 'PENDING_PROVIDER',
+                'tax_registration_status' => 'UNKNOWN',
+                'vat_verification_status' => $party['vat_number'] ? 'PENDING' : 'NOT_PROVIDED',
+                'tin_verification_status' => $party['tin'] ? 'PENDING' : 'NOT_PROVIDED',
+                'company_verification_status' => $party['company_registration_number'] ? 'PENDING' : 'NOT_PROVIDED',
+                'confidence_bps' => 0, 'evidence_hash' => null, 'source_reference' => null,
+                'requested_by' => $actor->id, 'reviewed_by' => null, 'checked_at' => null, 'expires_at' => null,
+                'created_at' => $now, 'updated_at' => $now,
+            ]);
+            CounterpartyTrustEvent::create([
+                'id' => (string) Str::uuid(), 'trust_profile_id' => $trustProfileId, 'event_type' => 'CounterpartyVerificationRequested',
+                'from_status' => null, 'to_status' => 'PENDING_PROVIDER', 'reason_code' => 'AUTHORITY_PROVIDER_CONTRACT_REQUIRED',
+                'evidence_hash' => null, 'actor_id' => $actor->id, 'occurred_at' => $now,
+            ]);
             CommandLedger::record($actor->id, 'CREATE_BUSINESS_PARTY', $idempotencyKey, $requestHash, 'BUSINESS_PARTY', $id, $now);
             CommandLedger::outbox('BUSINESS_PARTY', $id, 'BusinessPartyCreated', $organisation->id, [
                 'party_id' => $id, 'organisation_id' => $organisation->id, 'relationships' => $party['relationships'], 'correlation_id' => $correlationId,
+            ], $now);
+            CommandLedger::outbox('COUNTERPARTY_TRUST', $trustProfileId, 'CounterpartyVerificationRequested', $organisation->id, [
+                'business_party_id' => $id, 'trust_profile_id' => $trustProfileId, 'status' => 'PENDING_PROVIDER',
+                'provider_environment' => 'CONTRACT_PENDING', 'correlation_id' => $correlationId,
             ], $now);
             AuditService::append($actor, 'BUSINESS_PARTY_CREATED', 'BUSINESS_PARTY', $id, [
                 'organisationId' => $organisation->id, 'relationships' => $party['relationships'], 'correlationId' => $correlationId,
@@ -86,15 +116,48 @@ class BusinessPartyService
             throw new RepositoryConflictException('An inactive business party cannot be edited. Create a new active relationship record if trading resumes.');
         }
         $this->assertIdentifiersAvailable($organisation->id, $party, $id);
+        $identityChanged = ($existing->legal_name ?? '') !== ($party['legal_name'] ?? '')
+            || ($existing->vat_number ?? '') !== ($party['vat_number'] ?? '')
+            || ($existing->tin ?? '') !== ($party['tin'] ?? '')
+            || ($existing->company_registration_number ?? '') !== ($party['company_registration_number'] ?? '');
+        $trustProfile = CounterpartyTrustProfile::where('business_party_id', $id)->first();
 
         $now = now();
 
-        DB::transaction(function () use ($party, $organisation, $actor, $id, $now, $idempotencyKey, $requestHash, $correlationId) {
+        DB::transaction(function () use ($party, $organisation, $actor, $id, $now, $idempotencyKey, $requestHash, $correlationId, $identityChanged, $trustProfile) {
             BusinessParty::where('id', $id)->where('organisation_id', $organisation->id)->where('status', 'ACTIVE')->update([
                 'display_name' => $party['display_name'], 'legal_name' => $party['legal_name'], 'vat_number' => $party['vat_number'],
-                'tin' => $party['tin'], 'email' => $party['email'], 'phone' => $party['phone'], 'address' => $party['address'],
+                'tin' => $party['tin'], 'company_registration_number' => $party['company_registration_number'],
+                'email' => $party['email'], 'phone' => $party['phone'], 'address' => $party['address'],
                 'updated_at' => $now,
             ]);
+            // Ported from updateBusinessParty's own identity-change branch: any
+            // legal_name/vat_number/tin/company_registration_number change
+            // returns the trust profile to PENDING_PROVIDER and records a
+            // CounterpartyIdentityChanged event -- the party record can change,
+            // but its prior trust evidence no longer speaks to the new
+            // identity, so it must be earned again.
+            if ($identityChanged && $trustProfile) {
+                $fromStatus = $trustProfile->trust_status;
+                $trustProfile->update([
+                    'provider' => 'ITAS_BIPA', 'provider_environment' => 'CONTRACT_PENDING', 'trust_status' => 'PENDING_PROVIDER',
+                    'tax_registration_status' => 'UNKNOWN',
+                    'vat_verification_status' => $party['vat_number'] ? 'PENDING' : 'NOT_PROVIDED',
+                    'tin_verification_status' => $party['tin'] ? 'PENDING' : 'NOT_PROVIDED',
+                    'company_verification_status' => $party['company_registration_number'] ? 'PENDING' : 'NOT_PROVIDED',
+                    'confidence_bps' => 0, 'evidence_hash' => null, 'source_reference' => null, 'reviewed_by' => null,
+                    'checked_at' => null, 'expires_at' => null, 'updated_at' => $now,
+                ]);
+                CounterpartyTrustEvent::create([
+                    'id' => (string) Str::uuid(), 'trust_profile_id' => $trustProfile->id, 'event_type' => 'CounterpartyIdentityChanged',
+                    'from_status' => $fromStatus, 'to_status' => 'PENDING_PROVIDER', 'reason_code' => 'IDENTITY_CHANGE_REQUIRES_REVERIFICATION',
+                    'evidence_hash' => null, 'actor_id' => $actor->id, 'occurred_at' => $now,
+                ]);
+                CommandLedger::outbox('COUNTERPARTY_TRUST', $trustProfile->id, 'CounterpartyVerificationRequested', $organisation->id, [
+                    'business_party_id' => $id, 'trust_profile_id' => $trustProfile->id, 'status' => 'PENDING_PROVIDER',
+                    'reason' => 'IDENTITY_CHANGED', 'correlation_id' => $correlationId,
+                ], $now);
+            }
             foreach (['CUSTOMER', 'SUPPLIER', 'SERVICE_PROVIDER'] as $relationship) {
                 if (in_array($relationship, $party['relationships'], true)) {
                     // Mirrors the source's own ON CONFLICT upsert: reactivating an existing
@@ -204,8 +267,21 @@ class BusinessPartyService
         $partyIds = $parties->pluck('id');
         $relationshipsByParty = $partyIds->isEmpty() ? collect() : PartyRelationship::whereIn('party_id', $partyIds)
             ->where('status', 'ACTIVE')->orderBy('relationship')->get()->groupBy('party_id');
+        // Same N+1 fix as relationshipsByParty above, now for trust profiles too.
+        $trustByParty = $partyIds->isEmpty() ? collect() : CounterpartyTrustProfile::whereIn('business_party_id', $partyIds)
+            ->get()->keyBy('business_party_id');
         $presented = $parties
-            ->map(fn (BusinessParty $party) => $this->present($party, ($relationshipsByParty->get($party->id) ?? collect())->pluck('relationship')->values()->all()))
+            ->map(fn (BusinessParty $party) => $this->present(
+                $party,
+                ($relationshipsByParty->get($party->id) ?? collect())->pluck('relationship')->values()->all(),
+                // Not `?: false`: a party genuinely without a trust profile
+                // must present as the resolved `null`, not fall through to
+                // present()'s own "not batched, look it up" sentinel -- that
+                // bug reintroduced exactly the N+1 this batching exists to
+                // avoid (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_2026-09-15.md's
+                // #12), for every party this batch didn't find a profile for.
+                $trustByParty->get($party->id),
+            ))
             ->values()->all();
 
         return ['organisation_id' => $organisation->id, 'parties' => $presented, 'total_count' => $totalCount, 'limit' => $query['limit'], 'offset' => $query['offset']];
@@ -228,15 +304,33 @@ class BusinessPartyService
      * this) -- omitted (the findOrFail() single-record case), this runs
      * that same query itself, scoped to just this one party.
      *
-     * @param ?list<string> $relationships
+     * `$trust` follows the same already-batched-or-not convention as
+     * `$relationships`: `false` (the default) means "not batched by the
+     * caller, look it up here" (findOrFail()'s single-record case);
+     * `null` or a CounterpartyTrustProfile means the caller (search())
+     * already resolved it, including the "no profile" case, so this
+     * should not query again. A party created before this feature (there
+     * should be none in practice -- every create() call writes one in the
+     * same transaction) presents as null fields rather than throwing,
+     * matching the source's own LEFT JOIN counterparty_trust_profiles.
+     *
+     * @param  ?list<string>  $relationships
      * @return array<string, mixed>
      */
-    private function present(BusinessParty $party, ?array $relationships = null): array
+    private function present(BusinessParty $party, ?array $relationships = null, CounterpartyTrustProfile|null|false $trust = false): array
     {
+        if ($trust === false) {
+            $trust = CounterpartyTrustProfile::where('business_party_id', $party->id)->first();
+        }
+
         return [
             'id' => $party->id, 'organisation_id' => $party->organisation_id, 'display_name' => $party->display_name,
             'legal_name' => $party->legal_name, 'vat_number' => $party->vat_number, 'tin' => $party->tin,
+            'company_registration_number' => $party->company_registration_number,
             'email' => $party->email, 'phone' => $party->phone, 'address' => $party->address, 'status' => $party->status,
+            'trust_status' => $trust?->trust_status, 'tax_registration_status' => $trust?->tax_registration_status,
+            'confidence_bps' => $trust?->confidence_bps, 'provider_environment' => $trust?->provider_environment,
+            'checked_at' => optional($trust?->checked_at)->toISOString(), 'expires_at' => optional($trust?->expires_at)->toISOString(),
             // Explicit orderBy: without one, MySQL's row order for this
             // unindexed-on-relationship read is unspecified (the source's
             // own GROUP_CONCAT carries the same lack of a guarantee), which
@@ -252,14 +346,15 @@ class BusinessPartyService
 
     private function assertIdentifiersAvailable(string $organisationId, array $party, ?string $excludedId = null): void
     {
-        if (! $party['vat_number'] && ! $party['tin']) {
+        if (! $party['vat_number'] && ! $party['tin'] && ! $party['company_registration_number']) {
             return;
         }
         $duplicate = BusinessParty::where('organisation_id', $organisationId)->where('status', 'ACTIVE')
             ->when($excludedId, fn ($q) => $q->where('id', '<>', $excludedId))
             ->where(function ($q) use ($party) {
                 $q->when($party['vat_number'], fn ($qq) => $qq->orWhere('vat_number', $party['vat_number']))
-                    ->when($party['tin'], fn ($qq) => $qq->orWhere('tin', $party['tin']));
+                    ->when($party['tin'], fn ($qq) => $qq->orWhere('tin', $party['tin']))
+                    ->when($party['company_registration_number'], fn ($qq) => $qq->orWhere('company_registration_number', $party['company_registration_number']));
             })
             ->first();
         if ($duplicate) {

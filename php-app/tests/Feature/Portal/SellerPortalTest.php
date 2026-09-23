@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Portal;
 
+use App\Models\CounterpartyTrustProfile;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\Taxpayer;
@@ -100,10 +101,26 @@ class SellerPortalTest extends TestCase
         ], $overrides);
     }
 
+    /**
+     * Issue 3 counterparty trust boundary (05-security/
+     * issue3-counterparty-trust-boundary.md): a party created through the
+     * real command chain starts PENDING_PROVIDER, not transaction-eligible
+     * -- this test's quotations need a trusted customer, so the trust
+     * profile is upgraded directly via Eloquent afterwards (the same
+     * "insert prerequisite state directly, not through the command chain"
+     * convention the rest of this test suite's own fixture helpers use),
+     * rather than exercising the synthetic-verification command itself.
+     */
     private function createCustomerParty(User $owner, string $vatNumber): string
     {
-        return $this->actingAs($owner)->postJson('/api/v1/business-parties', $this->partyPayload(['vat_number' => $vatNumber]), ['Idempotency-Key' => 'test-idem-sellerportal-cust-'.$vatNumber])
+        $id = $this->actingAs($owner)->postJson('/api/v1/business-parties', $this->partyPayload(['vat_number' => $vatNumber]), ['Idempotency-Key' => 'test-idem-sellerportal-cust-'.$vatNumber])
             ->assertStatus(201)->json('resource.id');
+        CounterpartyTrustProfile::where('business_party_id', $id)->update([
+            'trust_status' => 'AUTHORITY_VERIFIED', 'tax_registration_status' => 'ACTIVE',
+            'checked_at' => now(), 'expires_at' => now()->addYear(), 'updated_at' => now(),
+        ]);
+
+        return $id;
     }
 
     private function quotationPayload(string $customerPartyId, array $overrides = []): array

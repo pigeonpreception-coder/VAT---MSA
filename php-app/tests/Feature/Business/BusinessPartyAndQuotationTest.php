@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\CounterpartyTrustProfile;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\Taxpayer;
@@ -143,11 +144,17 @@ class BusinessPartyAndQuotationTest extends TestCase
         ], $overrides);
     }
 
+    /** See tests/Feature/Portal/SellerPortalTest.php's own createCustomerParty() doc comment. */
     private function createCustomerParty(User $owner, string $vatNumber = 'VAT-CUST-0001'): string
     {
         $response = $this->actingAs($owner)->postJson('/api/v1/business-parties', $this->partyPayload(['vat_number' => $vatNumber, 'relationships' => ['CUSTOMER']]), ['Idempotency-Key' => 'test-idem-cust-'.$vatNumber]);
+        $id = $response->json('resource.id');
+        CounterpartyTrustProfile::where('business_party_id', $id)->update([
+            'trust_status' => 'AUTHORITY_VERIFIED', 'tax_registration_status' => 'ACTIVE',
+            'checked_at' => now(), 'expires_at' => now()->addYear(), 'updated_at' => now(),
+        ]);
 
-        return $response->json('resource.id');
+        return $id;
     }
 
     public function test_a_quotation_can_be_created_sent_accepted_and_converted_to_a_real_invoice(): void

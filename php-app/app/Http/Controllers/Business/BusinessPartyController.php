@@ -4,18 +4,24 @@ namespace App\Http\Controllers\Business;
 
 use App\Http\Controllers\Controller;
 use App\Services\Business\BusinessPartyService;
+use App\Services\Business\CounterpartyTrustService;
 use App\Services\Business\SupplierVerificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
-/** Ported from app/api/v1/business-parties/route.ts and its [id], [id]/deactivation and [id]/verification siblings (Module 5 Phase A, in full). */
+/**
+ * Ported from app/api/v1/business-parties/route.ts and its [id],
+ * [id]/deactivation, [id]/verification and [id]/synthetic-verification
+ * siblings (Module 5 Phase A, in full).
+ */
 class BusinessPartyController extends Controller
 {
     public function __construct(
         private readonly BusinessPartyService $parties,
         private readonly SupplierVerificationService $verification,
+        private readonly CounterpartyTrustService $trust,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -68,5 +74,21 @@ class BusinessPartyController extends Controller
         $snapshot = $this->verification->verify($id, $request->user(), (string) $request->header('Idempotency-Key', ''), $correlationId, $request->query('organisation_id'));
 
         return response()->json(['resource' => $snapshot], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
+    }
+
+    /**
+     * Ported from app/api/v1/business-parties/[id]/synthetic-verification/
+     * route.ts -- Issue 3's counterparty trust boundary
+     * (05-security/issue3-counterparty-trust-boundary.md). Test-only:
+     * throws a 403 outside local/testing/staging-with-flag, see
+     * App\Support\Business\CounterpartyTrustGate::syntheticEnabled.
+     */
+    public function syntheticVerify(Request $request, string $id): JsonResponse
+    {
+        $this->authorize('permission', 'parties:manage');
+        $correlationId = (string) Str::uuid();
+        $party = $this->trust->syntheticallyVerify($id, (array) $request->json()->all(), $request->user(), (string) $request->header('Idempotency-Key', ''), $correlationId, $request->query('organisation_id'));
+
+        return response()->json(['resource' => $party], Response::HTTP_OK, ['x-correlation-id' => $correlationId]);
     }
 }

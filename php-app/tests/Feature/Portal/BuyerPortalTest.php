@@ -3,6 +3,7 @@
 namespace Tests\Feature\Portal;
 
 use App\Models\BusinessParty;
+use App\Models\CounterpartyTrustProfile;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\PartyRelationship;
@@ -84,8 +85,22 @@ class BuyerPortalTest extends TestCase
             'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
             'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
         ]);
+        $this->trustParty($party, $organisation);
 
         return $party->id;
+    }
+
+    /** See tests/Feature/Business/ExpenseTest.php's own trustParty() doc comment. */
+    private function trustParty(BusinessParty $party, Organisation $organisation): void
+    {
+        CounterpartyTrustProfile::create([
+            'id' => (string) Str::uuid(), 'business_party_id' => $party->id, 'provider' => 'SYNTHETIC_AUTHORITY',
+            'provider_environment' => 'SYNTHETIC_TEST', 'trust_status' => 'AUTHORITY_VERIFIED', 'tax_registration_status' => 'ACTIVE',
+            'vat_verification_status' => 'NOT_PROVIDED', 'tin_verification_status' => 'NOT_PROVIDED', 'company_verification_status' => 'NOT_PROVIDED',
+            'confidence_bps' => 10000, 'evidence_hash' => null, 'source_reference' => null,
+            'requested_by' => User::where('taxpayer_id', $organisation->taxpayer_id)->value('id'), 'reviewed_by' => null,
+            'checked_at' => now(), 'expires_at' => now()->addYear(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
     }
 
     private function createAndApproveExpense(User $owner, User $approver, string $categoryId, string $supplierPartyId, array $overrides = []): string

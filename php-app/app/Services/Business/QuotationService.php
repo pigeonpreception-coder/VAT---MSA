@@ -17,6 +17,7 @@ use App\Domain\Invoice\InvoiceCalculator;
 use App\Services\Audit\AuditService;
 use App\Services\Invoice\InvoiceService;
 use App\Support\Business\CommandLedger;
+use App\Support\Business\CounterpartyTrustGate;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -455,6 +456,11 @@ class QuotationService
         if (! $row) {
             throw new BusinessResourceException("{$label} is not an active ".mb_strtolower($relationship)." in the authorised organisation.", 422);
         }
+        // Issue 3 counterparty trust boundary (05-security/
+        // issue3-counterparty-trust-boundary.md): an active relationship
+        // alone no longer makes a party transaction-eligible -- it must also
+        // carry a current trust profile.
+        CounterpartyTrustGate::require($row, $label);
     }
 
     private function requireOwnedBranch(?string $branchId, string $organisationId): void
