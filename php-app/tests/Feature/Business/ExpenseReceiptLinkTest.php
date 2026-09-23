@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\BusinessParty;
 use App\Models\Organisation;
+use App\Models\PartyRelationship;
 use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
@@ -82,10 +84,25 @@ class ExpenseReceiptLinkTest extends TestCase
         ], ['Idempotency-Key' => 'test-idem-cat-'.$code.'-'.Str::random(6)])->json('resource.id');
     }
 
-    private function createExpense(User $owner, string $categoryId, string $expenseNumber = 'EXP-RCPT-0001'): string
+    /** A tax-bearing expense requires a trusted, active supplier (TAXED_EXPENSE_SUPPLIER_REQUIRED). */
+    private function createSupplier(Organisation $organisation, string $displayName = 'Receipt Test Supplier'): string
+    {
+        $party = BusinessParty::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => $displayName,
+            'source_system' => 'test', 'source_party_id' => Str::random(8), 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        PartyRelationship::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
+            'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
+        ]);
+
+        return $party->id;
+    }
+
+    private function createExpense(User $owner, Organisation $organisation, string $categoryId, string $expenseNumber = 'EXP-RCPT-0001'): string
     {
         return $this->actingAs($owner)->postJson('/api/v1/expenses', [
-            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'expense_number' => $expenseNumber,
+            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'supplier_party_id' => $this->createSupplier($organisation), 'expense_number' => $expenseNumber,
             'expense_date' => '2026-09-01', 'description' => 'Client travel expense', 'currency' => 'NAD',
             'net_cents' => 100000, 'tax_cents' => 15000, 'total_cents' => 115000,
         ], ['Idempotency-Key' => 'test-idem-exp-create-'.Str::random(6)])->json('resource.id');
@@ -112,7 +129,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0001');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId);
 
         $response = $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/receipt", [
@@ -129,7 +146,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0002');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId, scanClean: false);
 
         $response = $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/receipt", [
@@ -144,7 +161,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0003');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId, scanClean: false);
         $this->actingAs($this->systemAdmin())->postJson("/api/v1/documents/{$documentId}/scan-result", [
             'schema_version' => '1.0.0', 'outcome' => 'INFECTED',
@@ -161,7 +178,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0004');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId);
         $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/submission", [], ['Idempotency-Key' => 'test-idem-submit-0001']);
 
@@ -176,7 +193,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0005');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $firstDocumentId = $this->uploadReceipt($org['owner'], $expenseId);
         $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/receipt", [
             'schema_version' => '1.0.0', 'receipt_document_id' => $firstDocumentId,
@@ -195,8 +212,8 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0006');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseA = $this->createExpense($org['owner'], $categoryId, 'EXP-RCPT-A');
-        $expenseB = $this->createExpense($org['owner'], $categoryId, 'EXP-RCPT-B');
+        $expenseA = $this->createExpense($org['owner'], $org['organisation'], $categoryId, 'EXP-RCPT-A');
+        $expenseB = $this->createExpense($org['owner'], $org['organisation'], $categoryId, 'EXP-RCPT-B');
         $documentForA = $this->uploadReceipt($org['owner'], $expenseA);
 
         $response = $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseB}/receipt", [
@@ -210,7 +227,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0007');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId);
         $viewer = User::create([
             'id' => (string) Str::uuid(), 'name' => 'Viewer', 'email' => 'viewer-rcpt@rcpttest.test',
@@ -228,7 +245,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0008');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId);
         $key = 'test-idem-link-replay-0001';
 
@@ -247,7 +264,7 @@ class ExpenseReceiptLinkTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-RCPT-0009');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->createExpense($org['owner'], $categoryId);
+        $expenseId = $this->createExpense($org['owner'], $org['organisation'], $categoryId);
         $documentId = $this->uploadReceipt($org['owner'], $expenseId);
 
         $response = $this->actingAs($org['owner'])->post("/operations/expenses/{$expenseId}/receipt", ['receipt_document_id' => $documentId]);

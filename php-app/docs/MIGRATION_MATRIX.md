@@ -11160,3 +11160,39 @@ and no existing test exercised a non-`NAD` currency.
   a well-formed but non-`NAD` currency (`USD`) is rejected with
   `CURRENCY_JURISDICTION_MISMATCH` and writes no invoice row.
 - Full suite: 1072 tests, 0 regressions.
+
+## Bug fix: tax-bearing expenses could be recorded with no supplier (2026-09-23)
+
+Found via a broader continuation of the same validator-strictness pass
+(the invoice-currency fix above was the first hit; this is the second,
+found by comparing every remaining `lib/domain/*.ts` file against its
+Laravel counterpart): `lib/domain/business.ts`'s
+`normalizeAndValidateExpense` rejects a tax-bearing expense
+(`tax_cents > 0`) that has no `supplier_party_id` with
+`TAXED_EXPENSE_SUPPLIER_REQUIRED` ("A tax-bearing expense requires a
+trusted supplier"). `App\Domain\Business\BusinessValidator::expense()`
+ported every other check in that same TS function (schema version, all
+the field-level checks, `TOTAL_MISMATCH`) but dropped this cross-field
+rule entirely. A tax-bearing expense with no supplier attached could be
+recorded, submitted, and approved through both the JSON API and the
+Blade UI, breaking the invariant this rule exists to protect: input-tax
+reclaim requires a trusted, active supplier on record.
+
+- Added the missing check to `BusinessValidator::expense()`, mirroring
+  the source exactly, right after the existing `TOTAL_MISMATCH` check.
+- New regression test in `tests/Feature/Business/ExpenseTest.php`: a
+  tax-bearing expense with no `supplier_party_id` is rejected with
+  `TAXED_EXPENSE_SUPPLIER_REQUIRED` and writes no expense row.
+- This rule is now actually reachable in normal use, so every existing
+  test that created a tax-bearing expense through `/api/v1/expenses` or
+  `/operations/expenses` without a supplier needed a real, active
+  `SUPPLIER` `party_relationships` row added to its fixture:
+  `tests/Feature/Business/ExpenseTest.php`,
+  `tests/Feature/Business/OperationsViewTest.php`,
+  `tests/Feature/Business/ExpenseReceiptLinkTest.php`,
+  `tests/Feature/Business/ProjectTest.php`, and
+  `tests/Feature/Portal/BuyerPortalTest.php` (whose own "Unassigned
+  supplier" assertion was rendering a state the source system's own
+  validator would never have allowed to exist -- updated to assert the
+  now-required supplier's name instead).
+- Full suite: 1073 tests, 0 regressions.

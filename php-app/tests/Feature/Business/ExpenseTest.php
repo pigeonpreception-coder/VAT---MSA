@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\BusinessParty;
 use App\Models\Organisation;
+use App\Models\PartyRelationship;
 use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
@@ -60,10 +62,25 @@ class ExpenseTest extends TestCase
         return $response->json('resource.id');
     }
 
-    private function expensePayload(string $categoryId, array $overrides = []): array
+    /** A tax-bearing expense requires a trusted, active supplier (TAXED_EXPENSE_SUPPLIER_REQUIRED). */
+    private function createSupplier(Organisation $organisation, string $code = 'SUP0001'): string
+    {
+        $party = BusinessParty::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => "Supplier {$code}",
+            'source_system' => 'test', 'source_party_id' => $code, 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        PartyRelationship::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
+            'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
+        ]);
+
+        return $party->id;
+    }
+
+    private function expensePayload(string $categoryId, string $supplierPartyId, array $overrides = []): array
     {
         return array_replace_recursive([
-            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'expense_number' => 'EXP-TEST-0001',
+            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'supplier_party_id' => $supplierPartyId, 'expense_number' => 'EXP-TEST-0001',
             'expense_date' => '2026-09-01', 'description' => 'Client travel expense', 'currency' => 'NAD',
             'net_cents' => 100000, 'tax_cents' => 15000, 'total_cents' => 115000,
         ], $overrides);
@@ -88,18 +105,39 @@ class ExpenseTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-EXP-0002');
         $categoryId = $this->createCategory($org['owner']);
+        $supplierId = $this->createSupplier($org['organisation']);
 
-        $response = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, ['total_cents' => 999999]), ['Idempotency-Key' => 'test-idem-exp-badtotal-0001']);
+        $response = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, $supplierId, ['total_cents' => 999999]), ['Idempotency-Key' => 'test-idem-exp-badtotal-0001']);
 
         $response->assertStatus(422)->assertJsonPath('errors.0.code', 'TOTAL_MISMATCH');
+    }
+
+    /**
+     * Gap-finding pass (2026-09-23): lib/domain/business.ts's own
+     * normalizeAndValidateExpense rejects a tax-bearing expense
+     * (tax_cents > 0) with no supplier_party_id
+     * (TAXED_EXPENSE_SUPPLIER_REQUIRED) -- BusinessValidator::expense()
+     * previously had no equivalent check, silently accepting a taxed
+     * expense with no supplier attached at all.
+     */
+    public function test_a_tax_bearing_expense_without_a_supplier_is_rejected(): void
+    {
+        $org = $this->makeOrganisation('VAT-EXP-0007');
+        $categoryId = $this->createCategory($org['owner']);
+
+        $response = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, '', ['supplier_party_id' => null]), ['Idempotency-Key' => 'test-idem-exp-nosupplier-0001']);
+
+        $response->assertStatus(422)->assertJsonPath('errors.0.code', 'TAXED_EXPENSE_SUPPLIER_REQUIRED');
+        $this->assertDatabaseMissing('expenses', ['expense_number' => 'EXP-TEST-0001']);
     }
 
     public function test_the_full_draft_submit_approve_lifecycle_requires_a_different_reviewer(): void
     {
         $org = $this->makeOrganisation('VAT-EXP-0003');
         $categoryId = $this->createCategory($org['owner']);
+        $supplierId = $this->createSupplier($org['organisation']);
 
-        $create = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId), ['Idempotency-Key' => 'test-idem-exp-create-0001']);
+        $create = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, $supplierId), ['Idempotency-Key' => 'test-idem-exp-create-0001']);
         $create->assertStatus(201)->assertJsonPath('resource.status', 'DRAFT');
         $expenseId = $create->json('resource.id');
 
@@ -124,7 +162,8 @@ class ExpenseTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-EXP-0004');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId), ['Idempotency-Key' => 'test-idem-exp-create-0002'])->json('resource.id');
+        $supplierId = $this->createSupplier($org['organisation']);
+        $expenseId = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, $supplierId), ['Idempotency-Key' => 'test-idem-exp-create-0002'])->json('resource.id');
         $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/submission", [], ['Idempotency-Key' => 'test-idem-exp-submit-0002'])->assertStatus(200);
 
         $selfReject = $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/rejection", ['schema_version' => '1.0.0', 'reason' => 'Trying to reject my own expense.'], ['Idempotency-Key' => 'test-idem-exp-selfreject-0001']);
@@ -144,7 +183,8 @@ class ExpenseTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-EXP-RACE-0001');
         $categoryId = $this->createCategory($org['owner']);
-        $expenseId = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId), ['Idempotency-Key' => 'test-idem-exp-race-create-0001'])->json('resource.id');
+        $supplierId = $this->createSupplier($org['organisation']);
+        $expenseId = $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, $supplierId), ['Idempotency-Key' => 'test-idem-exp-race-create-0001'])->json('resource.id');
         $this->actingAs($org['owner'])->postJson("/api/v1/expenses/{$expenseId}/submission", [], ['Idempotency-Key' => 'test-idem-exp-race-submit-0001'])->assertStatus(200);
 
         $sabotaged = false;
@@ -167,7 +207,8 @@ class ExpenseTest extends TestCase
     {
         $org = $this->makeOrganisation('VAT-EXP-0005');
         $categoryId = $this->createCategory($org['owner']);
-        $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId), ['Idempotency-Key' => 'test-idem-exp-report-0001'])->assertStatus(201);
+        $supplierId = $this->createSupplier($org['organisation']);
+        $this->actingAs($org['owner'])->postJson('/api/v1/expenses', $this->expensePayload($categoryId, $supplierId), ['Idempotency-Key' => 'test-idem-exp-report-0001'])->assertStatus(201);
 
         $response = $this->actingAs($org['owner'])->getJson('/api/v1/expenses/report?from=2026-09-01&to=2026-09-30');
 

@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Portal;
 
+use App\Models\BusinessParty;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
+use App\Models\PartyRelationship;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Models\VatPeriod;
@@ -71,10 +73,25 @@ class BuyerPortalTest extends TestCase
         return $response->json('resource.id');
     }
 
-    private function createAndApproveExpense(User $owner, User $approver, string $categoryId, array $overrides = []): string
+    /** A tax-bearing expense requires a trusted, active supplier (TAXED_EXPENSE_SUPPLIER_REQUIRED). */
+    private function createSupplier(Organisation $organisation, string $displayName = 'Buyer Portal Supplier'): string
+    {
+        $party = BusinessParty::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'display_name' => $displayName,
+            'source_system' => 'test', 'source_party_id' => Str::random(8), 'status' => 'ACTIVE', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        PartyRelationship::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
+            'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
+        ]);
+
+        return $party->id;
+    }
+
+    private function createAndApproveExpense(User $owner, User $approver, string $categoryId, string $supplierPartyId, array $overrides = []): string
     {
         $payload = array_replace_recursive([
-            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'expense_number' => 'EXP-BUYERPORTAL-0001',
+            'schema_version' => '1.0.0', 'category_id' => $categoryId, 'supplier_party_id' => $supplierPartyId, 'expense_number' => 'EXP-BUYERPORTAL-0001',
             'expense_date' => '2026-09-01', 'description' => 'Client travel expense', 'currency' => 'NAD',
             'net_cents' => 100000, 'tax_cents' => 15000, 'total_cents' => 115000,
         ], $overrides);
@@ -116,7 +133,8 @@ class BuyerPortalTest extends TestCase
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_ACCOUNTANT', 'taxpayer_id' => $party['taxpayer']->id, 'status' => 'ACTIVE',
         ]);
         $categoryId = $this->createCategory($party['owner']);
-        $this->createAndApproveExpense($party['owner'], $accountant, $categoryId);
+        $supplierId = $this->createSupplier($party['organisation']);
+        $this->createAndApproveExpense($party['owner'], $accountant, $categoryId, $supplierId);
 
         $periodId = (string) Str::uuid();
         VatPeriod::create([
@@ -136,7 +154,7 @@ class BuyerPortalTest extends TestCase
         $response->assertOk()->assertViewIs('portal.buyer');
         $response->assertSee('Purchases, input VAT and evidence requiring action');
         $response->assertSee('EXP-BUYERPORTAL-0001');
-        $response->assertSee('Unassigned'); // no supplier_party_id set
+        $response->assertSee('Buyer Portal Supplier'); // supplier_name resolved from supplier_party_id
         $response->assertSee('Category TRAVEL');
         $response->assertSee('NAD 150.00'); // tax_cents column
         $response->assertSee('NAD 1,150.00'); // total_cents column
@@ -157,7 +175,8 @@ class BuyerPortalTest extends TestCase
             'password' => bcrypt('password'), 'role' => 'TAXPAYER_ACCOUNTANT', 'taxpayer_id' => $partyA['taxpayer']->id, 'status' => 'ACTIVE',
         ]);
         $categoryA = $this->createCategory($partyA['owner']);
-        $this->createAndApproveExpense($partyA['owner'], $accountantA, $categoryA, ['expense_number' => 'EXP-BUYERPORTAL-SCOPE-A']);
+        $supplierA = $this->createSupplier($partyA['organisation']);
+        $this->createAndApproveExpense($partyA['owner'], $accountantA, $categoryA, $supplierA, ['expense_number' => 'EXP-BUYERPORTAL-SCOPE-A']);
 
         $response = $this->actingAs($partyB['owner'])->get('/portal/buyer');
 
