@@ -19,6 +19,45 @@
     </div>
 @endif
 
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open exceptions</span><span>!</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($summary['open_count']) }}</div>
+                <div class="small text-muted">Awaiting controlled review</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Critical severity</span><span>C</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($summary['critical_count']) }}</div>
+                <div class="small text-warning">Prioritised for officer attention</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Exception value</span><span>N$</span></div>
+                <div class="fs-2 fw-semibold">N$ {{ number_format($summary['total_value_cents'] / 100, 2) }}</div>
+                <div class="small text-muted">Gross value under exception control</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Resolution policy</span><span>2</span></div>
+                <div class="fs-2 fw-semibold">Dual</div>
+                <div class="small text-muted">High-impact closure requires approval</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card mb-3">
     <div class="card-body">
         <form method="GET" action="{{ route('exceptions.index') }}" class="row g-2">

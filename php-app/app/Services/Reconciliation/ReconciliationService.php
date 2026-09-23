@@ -246,6 +246,33 @@ class ReconciliationService
         ];
     }
 
+    /**
+     * Ported from lib/data/repository.ts's listExceptions -- specifically
+     * app/reconciliation/page.tsx's own metric-grid totals (open count,
+     * critical-severity count, and aggregate exception value), computed
+     * over the full tenant-scoped exception set regardless of
+     * getWorkQueue()'s own optional filters (status/severity/assigned/
+     * age): those filters only ever affect the work-queue table below,
+     * matching source, which has no filters at all and always summarises
+     * the complete list.
+     *
+     * @return array{open_count: int, critical_count: int, total_value_cents: int}
+     */
+    public function getSummaryTotals(User $actor): array
+    {
+        $base = DB::table('reconciliation_exceptions as e')->join('invoices as i', 'i.id', '=', 'e.invoice_id');
+        if (! TenantScope::isNational($actor)) {
+            $taxpayerId = $actor->taxpayer_id ?? '__none__';
+            $base->where(fn ($w) => $w->where('i.supplier_taxpayer_id', $taxpayerId)->orWhere('i.customer_taxpayer_id', $taxpayerId));
+        }
+
+        return [
+            'open_count' => (clone $base)->where('e.status', 'OPEN')->count(),
+            'critical_count' => (clone $base)->where('e.severity', 'CRITICAL')->count(),
+            'total_value_cents' => (int) (clone $base)->sum('i.total_cents'),
+        ];
+    }
+
     private function applyFilters(Builder $q, array $query, User $actor): void
     {
         if (! TenantScope::isNational($actor)) {
