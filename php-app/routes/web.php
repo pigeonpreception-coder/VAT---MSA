@@ -83,7 +83,9 @@ use App\Http\Controllers\Operations\PosViewController;
 use App\Http\Controllers\OrganisationAdmin\OrganisationAdminController;
 use App\Http\Controllers\Platform\DataProductController;
 use App\Http\Controllers\Platform\DeveloperViewController;
+use App\Http\Controllers\Platform\IntegrationsViewController;
 use App\Http\Controllers\Platform\OfflineSyncController;
+use App\Http\Controllers\Platform\OfflineViewController;
 use App\Http\Controllers\Platform\PlatformConfigController;
 use App\Http\Controllers\Platform\PlatformConfigViewController;
 use App\Http\Controllers\Platform\PlatformSnapshotController;
@@ -507,6 +509,15 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // distinct page from /portal/developer (App\Http\Controllers\Portal\
     // DeveloperPortalController).
     Route::get('/developer', [DeveloperViewController::class, 'index'])->name('developer.index');
+
+    // Ported from the source's own app/offline/page.tsx and
+    // app/integrations/page.tsx -- see OfflineViewController/
+    // IntegrationsViewController's own doc comments. Both purely
+    // read-only, reusing PlatformSnapshotService directly (the exact
+    // aggregate PlatformSnapshotController::show already serves at
+    // GET /api/v1/platform); neither source page has a write action.
+    Route::get('/offline', [OfflineViewController::class, 'index'])->name('offline.index');
+    Route::get('/integrations', [IntegrationsViewController::class, 'index'])->name('integrations.index');
 
     // Frontend UI build-out: the Reports & Analytics console, reusing
     // ReportExportService/DataProductService directly (see

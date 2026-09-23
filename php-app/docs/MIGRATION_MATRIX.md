@@ -11568,7 +11568,6 @@ a template-only gap, not a missing service method.
   page renders without error, all four tiles present (values legitimately
   zero for that account's own case history; the new test covers the
   non-zero case with real fixtures).
-
 ## Bug fix: Organisations page was missing its metric tiles and its Capabilities column (2026-09-23)
 
 A fifth hit from the same field-level drift pass, with a second, related
@@ -11613,6 +11612,69 @@ render even if it had tried.
   against real demo data: all four tiles rendered with real non-zero
   counts (11 canonical organisations, 1 active branch), and the registry
   table's Capabilities column showed real `Buyer`/`Seller` badges.
+
+## New views: Offline continuity and Integrations pages (2026-09-23)
+
+Continuing the same gap-finding pass, but a different shape of gap this
+time: `app/offline/page.tsx` and `app/integrations/page.tsx` had no
+Laravel Blade equivalent *at all* -- only their JSON API surface
+(`PlatformSnapshotController`, `OfflineSyncController`,
+`IntegrationConnectionController`) existed, confirmed by a repo-wide
+search finding no `*OfflineView*`/`*IntegrationsView*` controller and no
+`/offline` or `/integrations` GET route anywhere in `routes/web.php`.
+Unlike the metric-tile-only gaps found earlier in this same pass, this is two entire missing
+read-only pages -- but low-risk to close, since both source pages have no
+write action anywhere on them (confirmed by reading each in full; the
+Offline page's own copy even says "Batch validation is available through
+the versioned API") and both reuse
+`App\Services\Platform\PlatformSnapshotService` methods that already
+exist and are already exercised by the JSON API and by
+`DocumentViewController`/`documents.index` for the same aggregate's
+`documents` field.
+
+- New `App\Http\Controllers\Platform\OfflineViewController::index()` --
+  `permission:offline:read`, renders `PlatformSnapshotService::getSnapshot()`'s
+  `devices`/`numberRanges`/`batches`/`conflicts` fields as a 4-tile
+  metric-grid (Devices, Active ranges, Rejected batches, Open conflicts)
+  plus a device registry, number-range table and batch-intake table,
+  matching `app/offline/page.tsx` field-for-field.
+- New `App\Http\Controllers\Platform\IntegrationsViewController::index()`
+  -- `permission:integrations:read`, dispatches to
+  `getTechnicalSnapshot()` for `SUPER_ADMIN`/`INFRASTRUCTURE_ADMIN` and
+  `getSnapshot()` otherwise, exactly like
+  `PlatformSnapshotController::show` already does (reusing the same
+  `TECHNICAL_ONLY_ROLES` role-list precedent, not a fresh copy of it).
+  Renders a 4-tile metric-grid (Connections, Configured, Blocked jobs,
+  Outbox pending) plus the integration registry and service component
+  posture tables.
+- Routes added at `GET /offline` and `GET /integrations`
+  (`routes/web.php`), nav links added under the existing Documents/Reports
+  section of the sidebar.
+- A real bug caught before merge, not just in review: the service
+  component posture table's loop variable was originally named
+  `$component`, which collides with the PHP variable name Blade's own
+  compiled `<x-status-badge>` component tags use internally
+  (`Illuminate\View\AnonymousComponent`) -- every status badge inside that
+  loop 500'd with "Cannot use object of type
+  Illuminate\View\AnonymousComponent as array" until renamed to
+  `$serviceComponent`. Caught by this PR's own new test, not by manual
+  verification alone.
+- New tests: `OfflineViewTest` (4 tests: auth gate, permission gate,
+  metric tiles + registers with seeded `offline_devices`/
+  `offline_number_ranges`/`offline_sync_batches`/`offline_conflicts` rows,
+  and a clean-empty-state render) and `IntegrationsViewTest` (5 tests:
+  auth gate, permission gate, metric tiles + registers for a scoped
+  actor, the technical-admin unscoped-snapshot branch, and a
+  clean-empty-state render). Full suite: 1107 tests, 0 regressions.
+- Manually verified both pages via a logged-in `owner@demo-trading.test`
+  (`TAXPAYER_OWNER`) session and, for the technical-snapshot branch, an
+  `infra-admin@vat-msa.test` (`INFRASTRUCTURE_ADMIN`) session: both
+  render without error; Integrations' own "Outbox pending" tile showed a
+  real non-zero count (57) against actual demo data, proving the
+  aggregate's own live data reaches the page (Offline's own tiles are
+  legitimately zero -- no seeder populates `offline_devices` in this
+  demo dataset; the new tests cover the non-zero case with real
+  fixtures).
 
 ## New view: top-level Developer page (2026-09-23)
 
