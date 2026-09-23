@@ -88,6 +88,8 @@ class InvoiceCalculator
         }
         if (! preg_match('/^[A-Z]{3}$/', (string) ($payload['currency'] ?? ''))) {
             $errors[] = ['code' => 'CURRENCY_INVALID', 'path' => '/currency', 'message' => 'Currency must be a three-letter ISO code.'];
+        } elseif (($payload['currency'] ?? '') !== 'NAD') {
+            $errors[] = ['code' => 'CURRENCY_JURISDICTION_MISMATCH', 'path' => '/currency', 'message' => 'Namibia VAT certification requires NAD currency.'];
         }
 
         // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_

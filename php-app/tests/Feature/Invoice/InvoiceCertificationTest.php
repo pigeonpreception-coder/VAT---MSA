@@ -117,6 +117,29 @@ class InvoiceCertificationTest extends TestCase
         $this->assertDatabaseMissing('ledger_entries', ['taxpayer_id' => $party['taxpayer']->id]);
     }
 
+    /**
+     * Gap-finding pass (2026-09-23): lib/domain/invoice.ts's own currency
+     * check rejects any well-formed, non-NAD ISO currency code with
+     * CURRENCY_JURISDICTION_MISMATCH ("Namibia VAT certification requires
+     * NAD currency") -- InvoiceCalculator::calculateAndValidate previously
+     * only checked the code's shape (three uppercase letters), so a USD/EUR/
+     * ZAR invoice would pass validation and be certified.
+     */
+    public function test_a_well_formed_non_nad_currency_is_rejected_as_a_jurisdiction_mismatch(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-SUP-0002');
+        $this->makeTradingParty('VAT-CUS-0002');
+
+        $response = $this->actingAs($supplier['owner'])->postJson('/api/v1/invoices', $this->invoicePayload([
+            'supplier' => ['identifiers' => [['value' => 'VAT-SUP-0002']]],
+            'customer' => ['identifiers' => [['value' => 'VAT-CUS-0002']]],
+            'currency' => 'USD',
+        ]), ['Idempotency-Key' => 'test-idem-key-badcurrency-0001']);
+
+        $response->assertStatus(422)->assertJsonPath('errors.0.code', 'CURRENCY_JURISDICTION_MISMATCH');
+        $this->assertDatabaseMissing('invoices', ['invoice_number' => 'INV-TEST-0001']);
+    }
+
     public function test_an_invoice_to_an_unregistered_buyer_is_still_certified_but_flagged(): void
     {
         $this->makeTradingParty('VAT-SUP-0001');

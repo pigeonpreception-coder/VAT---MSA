@@ -11134,3 +11134,29 @@ rather than a plain oversight; user confirmed building it.
 This closes the route-level source sweep's full candidate list (Fixed
 Assets, Logistics Deliveries, Security Incidents) that a fresh research
 pass found after the earlier function-level sweeps had been exhausted.
+
+## Bug fix: invoice currency jurisdiction check was missing (2026-09-23)
+
+Found via a third gap-finding pass (validator strictness drift), run
+after the function-level and route-level sweeps above were both
+exhausted: `lib/domain/invoice.ts`'s `calculateAndValidateInvoice`
+rejects any well-formed, non-`NAD` ISO currency code with
+`CURRENCY_JURISDICTION_MISMATCH` ("Namibia VAT certification requires
+NAD currency"), but `App\Domain\Invoice\InvoiceCalculator::
+calculateAndValidate` -- documented elsewhere in the same file as "a
+direct, line-for-line port" -- only checked the code's *shape* (three
+uppercase letters). A `USD`/`EUR`/`ZAR`/any-other-currency invoice would
+pass validation and be certified in the Laravel port, where the source
+system would reject it outright. This is a genuine compliance
+correctness bug for a Namibian VAT certification system, not a
+cosmetic gap: no compensating check exists anywhere else in the
+certification path (`InvoiceService::calculateAndValidate` calls
+`InvoiceCalculator::calculateAndValidate` directly with nothing extra),
+and no existing test exercised a non-`NAD` currency.
+
+- Added the missing `elseif` branch to `InvoiceCalculator::
+  calculateAndValidate`, mirroring the source exactly.
+- New regression test in `tests/Feature/Invoice/InvoiceCertificationTest.php`:
+  a well-formed but non-`NAD` currency (`USD`) is rejected with
+  `CURRENCY_JURISDICTION_MISMATCH` and writes no invoice row.
+- Full suite: 1072 tests, 0 regressions.
