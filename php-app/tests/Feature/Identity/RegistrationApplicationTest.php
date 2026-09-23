@@ -198,6 +198,26 @@ class RegistrationApplicationTest extends TestCase
         $response->assertStatus(403);
     }
 
+    public function test_identity_proofing_cases_are_listed_as_json(): void
+    {
+        $admin = $this->pilotAdmin();
+        $submit = $this->actingAs($admin)->postJson('/api/v1/registration-applications', $this->submissionPayload(['vat_number' => 'VAT-PROOF-0001', 'tin' => 'TIN-PROOF-0001']), [
+            'Idempotency-Key' => 'test-idempotency-key-proof-0001',
+        ]);
+        $registrationId = $submit->json('registration_id');
+        \App\Models\IdentityProofingCase::create([
+            'id' => (string) Str::uuid(), 'subject_type' => 'TAXPAYER_REGISTRATION', 'subject_reference' => 'VAT-PROOF-0001',
+            'registration_application_id' => $registrationId, 'provider' => 'ITAS', 'provider_environment' => 'PRODUCTION_EQUIVALENT',
+            'status' => 'MANUAL_REVIEW', 'confidence_bps' => 4500, 'reason_code' => 'PARTIAL_MATCH',
+            'requested_by' => $admin->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->getJson('/api/v1/identity-proofing-cases');
+
+        $response->assertOk()->assertJsonPath('identity_proofing_cases.0.status', 'MANUAL_REVIEW');
+        $response->assertJsonPath('identity_proofing_cases.0.registration_application_id', $registrationId);
+    }
+
     public function test_decision_without_a_fresh_password_confirmation_is_blocked(): void
     {
         $owner = $this->taxpayerOwner();

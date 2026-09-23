@@ -6,6 +6,7 @@ use App\Exceptions\RepositoryConflictException;
 use App\Integrations\Itas\ItasIdentityPort;
 use App\Integrations\Itas\ItasIntegrationUnavailableException;
 use App\Models\Branch;
+use App\Models\IdentityProofingCase;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\OrganisationMembership;
@@ -44,7 +45,7 @@ class RegistrationService
      */
     public function list(User $user): array
     {
-        $query = RegistrationApplication::query()->with('verifications');
+        $query = RegistrationApplication::query()->with(['verifications', 'proofingCase.mismatchCase']);
         if (! TenantScope::isNational($user)) {
             $query->where('submitted_by', $user->id);
         }
@@ -64,6 +65,49 @@ class RegistrationService
             'verification_status' => $application->verifications->sortByDesc('checked_at')->first()?->status,
             'submitted_by' => $application->submitted_by,
             'submitted_at' => $application->submitted_at,
+            'proofing_case_id' => $application->proofingCase?->id,
+            'proofing_status' => $application->proofingCase?->status,
+            'proofing_confidence_bps' => $application->proofingCase?->confidence_bps,
+            'proofing_reason_code' => $application->proofingCase?->reason_code,
+            'mismatch_status' => $application->proofingCase?->mismatchCase?->status,
+        ])->values()->all();
+    }
+
+    /**
+     * Ported from lib/data/identity-repository.ts's listIdentityProofingCases
+     * -- used by App\Http\Controllers\Identity\IdentityProofingCaseController,
+     * matching source's own separate `/api/v1/identity-proofing-cases` route
+     * (no Blade page reads this directly; it exists purely for JSON-API
+     * parity, this migration's established "every repository function gets
+     * a JSON endpoint" convention).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listProofingCases(User $user): array
+    {
+        $query = IdentityProofingCase::query()->with('mismatchCase');
+        if (! TenantScope::isNational($user)) {
+            $query->where('requested_by', $user->id);
+        }
+
+        return $query->orderByDesc('created_at')->limit(100)->get()->map(fn (IdentityProofingCase $case) => [
+            'id' => $case->id,
+            'subject_type' => $case->subject_type,
+            'subject_reference' => $case->subject_reference,
+            'registration_application_id' => $case->registration_application_id,
+            'provider' => $case->provider,
+            'provider_environment' => $case->provider_environment,
+            'status' => $case->status,
+            'confidence_bps' => $case->confidence_bps,
+            'matched_taxpayer_id' => $case->matched_taxpayer_id,
+            'reason_code' => $case->reason_code,
+            'requested_by' => $case->requested_by,
+            'reviewed_by' => $case->reviewed_by,
+            'created_at' => $case->created_at,
+            'updated_at' => $case->updated_at,
+            'reviewed_at' => $case->reviewed_at,
+            'mismatch_status' => $case->mismatchCase?->status,
+            'conflicting_fields' => $case->mismatchCase?->conflicting_fields,
         ])->values()->all();
     }
 

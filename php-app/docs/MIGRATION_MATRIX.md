@@ -11792,3 +11792,64 @@ by a repo-wide search finding no `/taxpayers` route anywhere in
 - Manually verified via a logged-in `namra-auditor@vat-msa.test`
   session against real demo data: page renders without error with real
   taxpayer rows (VAT numbers/TINs for the full demo taxpayer set).
+
+## New view: Taxpayer registration intake page (2026-09-23)
+
+The deepest gap found this pass: `app/registrations/page.tsx` had no
+Laravel route at all, and unlike the taxpayer registry gap, closing it
+required porting a whole domain that had never been touched anywhere in
+this migration -- `identity_proofing_cases`/`identity_mismatch_cases`
+(the external identity-provider reconciliation record behind a
+registration application's "proofing"/"mismatch" columns). A repo-wide
+search confirmed neither table nor any `Proofing`/`Mismatch` model,
+controller or migration existed. Nothing in source's own
+`submitRegistrationApplication` (nor this port's `RegistrationService::submit()`)
+ever writes a row to either table -- both leave that for a separate
+reconciliation process -- so the new tables exist purely to support the
+same read-only `LEFT JOIN` source's own `listRegistrationApplications`/
+`listIdentityProofingCases` already perform; they stay empty until that
+reconciliation process is itself ported (out of scope here, same as it
+always was in source's own reachable command surface).
+
+- New migrations/models: `identity_proofing_cases`, `identity_mismatch_cases`
+  (`IdentityProofingCase`, `IdentityMismatchCase`), schema ported field-
+  for-field from `db/runtime.ts`. `RegistrationApplication::proofingCase()`
+  and `IdentityProofingCase::mismatchCase()` relations added.
+- `RegistrationService::list()` extended with the `proofing_case_id`/
+  `proofing_status`/`proofing_confidence_bps`/`proofing_reason_code`/
+  `mismatch_status` columns source's own query always carried, previously
+  silently dropped by this port's version of the query.
+- New `RegistrationService::listProofingCases()` -- a direct port of
+  `listIdentityProofingCases`, exposed as `GET /api/v1/identity-proofing-cases`
+  (`IdentityProofingCaseController`) matching source's own separate route
+  and this migration's "every repository function gets a JSON endpoint"
+  convention. No Blade page reads it directly (source's own page doesn't
+  either).
+- New `SignupService::listSelfServeSignupApplications()` -- a direct port
+  of `listSelfServeSignupApplications`, gated on `TenantScope::isNational()`
+  internally exactly like source's own `isNationalScope(user)` (a
+  non-national actor gets an empty list, not a 403 -- the page uses that
+  to decide whether to render the section at all).
+- New `App\Http\Controllers\Identity\RegistrationsViewController` --
+  `index()` renders both read sections (self-serve queue + controlled
+  application register) field-for-field against
+  `app/registrations/page.tsx`; `store()` reuses `RegistrationService::submit()`
+  directly as a classic form POST (the same write
+  `RegistrationApplicationController::store()` already exposes as JSON),
+  matching source's own `app/registrations/new/RegistrationForm.tsx`
+  fields and this migration's own `BusinessPartyViewController` precedent
+  for pairing a JSON controller with a Blade-form one, folded onto the
+  index page rather than a separate `/registrations/new` route.
+- Routes added at `GET/POST /registrations`, nav link added to the
+  sidebar ("Registration Intake").
+- New tests: `RegistrationsViewTest` (6 tests: auth gate, permission
+  gate, proofing/mismatch columns rendering from a real seeded
+  `IdentityProofingCase`, the self-serve queue's national-scope
+  visibility gate proven both ways, a real form submission creating a
+  `registration_applications` row, and the submit-permission denial), plus
+  one new test on `RegistrationApplicationTest` covering the
+  `GET /api/v1/identity-proofing-cases` JSON endpoint. Full suite: 1126
+  tests, 0 regressions.
+- Manually verified via a logged-in `admin@vat-msa.test` session: the
+  page renders at 200 with both the self-serve queue and registration
+  application sections visible (national-scope actor).

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class RegistrationApplication extends Model
 {
@@ -28,6 +29,11 @@ class RegistrationApplication extends Model
     public function verifications(): HasMany
     {
         return $this->hasMany(RegistrationVerification::class);
+    }
+
+    public function proofingCase(): HasOne
+    {
+        return $this->hasOne(IdentityProofingCase::class);
     }
 
     public function latestVerification(): ?RegistrationVerification
