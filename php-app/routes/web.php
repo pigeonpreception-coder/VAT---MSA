@@ -16,6 +16,7 @@ use App\Http\Controllers\Developer\DeveloperPlatformController;
 use App\Http\Controllers\Identity\BranchController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
 use App\Http\Controllers\Identity\IdentityLinkController;
+use App\Http\Controllers\Identity\IdentityProofingCaseController;
 use App\Http\Controllers\Identity\InvitationClaimController;
 use App\Http\Controllers\Identity\MfaController;
 use App\Http\Controllers\Identity\MfaViewController;
@@ -23,6 +24,7 @@ use App\Http\Controllers\Identity\MembershipController;
 use App\Http\Controllers\Identity\OrganisationController;
 use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
+use App\Http\Controllers\Identity\RegistrationsViewController;
 use App\Http\Controllers\Identity\TaxpayerController;
 use App\Http\Controllers\Identity\TaxpayerViewController;
 use App\Http\Controllers\Identity\UserController;
@@ -534,6 +536,13 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     // "every repository function gets a JSON endpoint" convention.
     Route::get('/taxpayers', [TaxpayerViewController::class, 'index'])->name('taxpayers.index');
 
+    // Ported from the source's own app/registrations/page.tsx and
+    // app/registrations/new/RegistrationForm.tsx -- see
+    // RegistrationsViewController's own doc comment.
+    Route::get('/registrations', [RegistrationsViewController::class, 'index'])->name('registrations.index');
+    Route::post('/registrations', [RegistrationsViewController::class, 'store'])
+        ->name('registrations.store')->middleware('rate-limit:registration');
+
     // Frontend UI build-out: the Reports & Analytics console, reusing
     // ReportExportService/DataProductService directly (see
     // App\Http\Controllers\Platform\ReportViewController's own doc
@@ -813,6 +822,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
             ->middleware('rate-limit:registration');
         Route::post('/registration-applications/{id}/decision', [RegistrationApplicationController::class, 'decision'])
             ->middleware(['step-up', 'rate-limit:registration']);
+        Route::get('/identity-proofing-cases', [IdentityProofingCaseController::class, 'index']);
 
         // getIdentityFoundationSnapshot -- Module 1's own dashboard
         // aggregate (organisations + registrations + identity providers +

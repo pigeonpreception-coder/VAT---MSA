@@ -12,7 +12,9 @@ use App\Models\RegistrationApplication;
 use App\Models\SelfServeSignupApplication;
 use App\Models\Taxpayer;
 use App\Models\TaxpayerIdentifier;
+use App\Models\User;
 use App\Services\Audit\AuditService;
+use App\Support\Access\TenantScope;
 use App\Support\Security\RateLimitGuard;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -89,6 +91,42 @@ class SignupService
             'code' => $plan->code, 'name' => $plan->name, 'version' => (int) $plan->version,
             'features' => $featureNamesByPlan->get($plan->id, []),
         ])->values()->all();
+    }
+
+    /**
+     * Ported from lib/data/signup-repository.ts's listSelfServeSignupApplications
+     * -- national-scope-only, matching source's own isNationalScope(user) gate
+     * exactly (a non-national actor gets an empty list, not a 403; this page's
+     * `/registrations` Blade view uses that to decide whether to render the
+     * section at all, same as source).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listSelfServeSignupApplications(User $user): array
+    {
+        if (! TenantScope::isNational($user)) {
+            return [];
+        }
+
+        return SelfServeSignupApplication::query()->with('requestedPlan')
+            ->orderByDesc('submitted_at')->limit(100)->get()
+            ->map(fn (SelfServeSignupApplication $application) => [
+                'id' => $application->id,
+                'public_reference' => $application->public_reference,
+                'applicant_name' => $application->applicant_name,
+                'applicant_role' => $application->applicant_role,
+                'contact_email' => $application->contact_email,
+                'legal_name' => $application->legal_name,
+                'vat_number' => $application->vat_number,
+                'tin' => $application->tin,
+                'plan_code' => $application->requestedPlan?->code,
+                'plan_name' => $application->requestedPlan?->name,
+                'status' => $application->status,
+                'identity_status' => $application->identity_status,
+                'taxpayer_verification_status' => $application->taxpayer_verification_status,
+                'licence_status' => $application->licence_status,
+                'submitted_at' => $application->submitted_at,
+            ])->values()->all();
     }
 
     /** @return array{application_reference: string, status: string, identity_status: string, taxpayer_verification_status: string, licence_status: string, submitted_at: string, next_action: string} */
