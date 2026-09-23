@@ -11498,3 +11498,44 @@ officer actually looks at first on this page.
   `security-analyst@vat-msa.test` session: all four tiles rendered
   correctly (0 open incidents, 2 high/critical events, 57 pending
   outbox, "55 invoices · 57 audit events").
+
+## Bug fix: VAT returns and Refund claims pages were missing their metric tiles (2026-09-23)
+
+A follow-up field-level drift pass (continuing the angle that found the
+Security operations gap above) found the same pattern twice more: a
+`page.tsx`'s top-of-page metric-grid was missing from the corresponding
+Laravel Blade view, even though the underlying data was already present
+in the props the controller already passes -- a template-only gap, not
+a missing controller/service method.
+
+- **`/vat-periods`** (`app/returns/page.tsx` lines 18-28): 4 tiles --
+  Output VAT and Eligible input (summed across `snapshot.periods`), Net
+  position (their difference), and Approval queue (count of
+  `PENDING` approvals). `resources/views/vat-periods/index.blade.php`
+  had none of these -- `$snapshot['periods']` already carries
+  `output_tax_cents`/`input_tax_cents` per row
+  (`VatLifecycleService::snapshot()`), and the sidebar already computes
+  a `$pending` collection for the approvals list, so this was a
+  template-only fix (sum/count in a `@php` block, four cards matching
+  this port's own established dashboard tile markup).
+- **`/refunds`** (`app/refunds/page.tsx`): 3 of its 4 tiles ported --
+  Refund requests (count), Requested value (sum of `amount_cents`), and
+  Configuration blocks (count of `status` starting `BLOCKED_`).
+  **Source's own fourth tile ("Approved for payment", counting
+  `status === "APPROVED_FOR_PAYMENT"`) was deliberately NOT ported**:
+  `RefundClaimStatus` (`lib/domain/compliance.ts`) no longer has that
+  value in its enum at all, confirmed by reading the type directly --
+  the source tile is dead code that always renders 0 upstream too, not
+  a real metric to carry forward. Documented in the Blade view itself,
+  not just here.
+- New tests: `VatLifecycleViewTest::test_the_vat_periods_list_renders_its_four_metric_tiles`
+  (generates a real return via the certified-invoice fixture chain and
+  asserts the exact summed amounts) and
+  `RefundViewTest::test_the_refunds_list_renders_its_metric_tiles`
+  (asserts the three ported tiles' values and that the dropped fourth
+  tile's label doesn't appear at all). Full suite: 1096 tests, 0
+  regressions.
+- Manually verified both pages render without error via a logged-in
+  demo session (values legitimately zero for that account's own empty
+  period/claim history; the tests above cover the non-zero case with
+  real fixtures).

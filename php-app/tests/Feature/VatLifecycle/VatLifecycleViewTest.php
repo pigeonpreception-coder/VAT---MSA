@@ -140,6 +140,29 @@ class VatLifecycleViewTest extends TestCase
         $response->assertSee(route('vat-periods.show', $period->id), false);
     }
 
+    /**
+     * Gap-finding pass (2026-09-23): app/returns/page.tsx renders a
+     * metric-grid summing Output VAT/Eligible input/Net position across
+     * every period plus a pending-approval count -- this view had no
+     * equivalent tiles at all.
+     */
+    public function test_the_vat_periods_list_renders_its_four_metric_tiles(): void
+    {
+        $supplier = $this->makeTradingParty('VAT-VIEW-SUP-0009');
+        $customer = $this->makeTradingParty('VAT-VIEW-CUS-0009');
+        $this->certifyInvoice($supplier['owner'], 'VAT-VIEW-SUP-0009', 'VAT-VIEW-CUS-0009');
+        $period = $this->openPeriod($customer['organisation']->id, $customer['taxpayer']->id);
+        $this->actingAs($customer['owner'])->post(route('vat-periods.return.store', $period->id));
+
+        $response = $this->actingAs($customer['owner'])->get('/vat-periods');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Output VAT', 'N$ 0.00']);
+        $response->assertSeeInOrder(['Eligible input', 'N$ 150.00']);
+        $response->assertSeeInOrder(['Net position', 'N$ -150.00']);
+        $response->assertSee('Approval queue');
+    }
+
     public function test_the_period_detail_page_404s_for_a_period_outside_the_actors_taxpayer_scope(): void
     {
         $party = $this->makeTradingParty('VAT-VIEW-0002');
