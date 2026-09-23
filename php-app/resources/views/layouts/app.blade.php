@@ -192,6 +192,8 @@
 
                     <li class="nav-item"><a class="nav-link" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents &amp; Records</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('reports.index') }}" @if (request()->routeIs('reports.*')) aria-current="page" @endif>Reporting &amp; Analytics</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ route('offline.index') }}" @if (request()->routeIs('offline.*')) aria-current="page" @endif>Offline Continuity</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ route('integrations.index') }}" @if (request()->routeIs('integrations.*')) aria-current="page" @endif>Integrations</a></li>
 
                     <li class="nav-item sidebar-group">
                         <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-administration" aria-expanded="{{ $activeGroup === 'administration' ? 'true' : 'false' }}">
