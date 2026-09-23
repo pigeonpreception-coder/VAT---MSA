@@ -11460,3 +11460,41 @@ exactly matching source's own posture of keeping both.
   (`EMERGENCY_OVERRIDE_UNSUPPORTED`). Full suite: 1093 tests, 0
   regressions. No new Blade UI, so no manual browser verification for
   this module.
+
+## Bug fix: Security operations page was missing its four dashboard metrics (2026-09-23)
+
+A follow-up gap-finding pass (field-level drift on pages not yet
+checked) found `lib/data/repository.ts`'s `getSecurityOperationsSnapshot`
+(the dashboard-metrics half of the real Security Operations Centre page,
+`app/security/page.tsx`) had no Laravel counterpart at all. This port's
+`App\Services\Security\SecurityOperationsService` only ever implemented
+`security-repository.ts`'s own newer, narrower derivatives
+(`getSOCQueue`/`getRecentEvents`), whose own doc comment explicitly
+describes them as "the queue/incidents half of the *existing*
+`getSecurityOperationsSnapshot`" -- confirming the fuller aggregate was
+the original the source page renders, not something later superseded.
+The Blade view accordingly had zero metric tiles: no open-incident
+count, no high/critical event count, no pending-outbox backlog, and no
+data-integrity summary -- the four top-line KPIs a NamRA security
+officer actually looks at first on this page.
+
+- New `SecurityOperationsService::getOperationsMetrics()`: a whole-table
+  severity breakdown across `security_events` (not scoped to
+  `getRecentEvents()`'s own limited page, matching source exactly), an
+  `outbox_events` status breakdown, and `taxpayers`/`invoices`/
+  `audit_events` counts.
+- `SecurityOperationsViewController::index()` now passes `metrics`
+  alongside the existing `incidents`/`events`.
+- `resources/views/security/operations.blade.php` gained the four
+  metric tiles (open incidents, high/critical events, pending outbox,
+  data integrity), matching this port's own established metric-tile
+  markup (`resources/views/dashboard.blade.php`'s `row-cols-lg-4`
+  pattern) rather than inventing new styling.
+- New test (`SecurityOperationsViewTest::test_the_page_renders_its_four_metric_tiles`)
+  proves only the OPEN incident counts toward the open-incidents tile
+  (not CLOSED) and only CRITICAL/HIGH events count toward the
+  high/critical tile (not LOW). Full suite: 1094 tests, 0 regressions.
+- Manually verified against real demo data via a logged-in
+  `security-analyst@vat-msa.test` session: all four tiles rendered
+  correctly (0 open incidents, 2 high/critical events, 57 pending
+  outbox, "55 invoices · 57 audit events").

@@ -11,6 +11,7 @@ use Database\Seeders\IdentityProviderSeeder;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
@@ -83,6 +84,47 @@ class SecurityOperationsViewTest extends TestCase
         $response->assertOk()->assertViewIs('security.operations');
         $response->assertSee('Security operations');
         $response->assertSee('Suspicious activity');
+    }
+
+    /**
+     * Gap-finding pass (2026-09-23): lib/data/repository.ts's
+     * getSecurityOperationsSnapshot -- the dashboard-metrics half of this
+     * page app/security/page.tsx actually renders (open incidents,
+     * high/critical events, pending outbox, data integrity) -- had no
+     * Laravel counterpart at all; the port only ever built the incident
+     * queue and recent-events list.
+     */
+    public function test_the_page_renders_its_four_metric_tiles(): void
+    {
+        $this->makeIncident('OPEN');
+        $this->makeIncident('CLOSED');
+        SecurityEvent::create([
+            'id' => (string) Str::uuid(), 'event_type' => 'AUTHORISATION_DENIED', 'severity' => 'CRITICAL', 'actor_id' => null,
+            'source_token' => 'src:test', 'correlation_id' => (string) Str::uuid(), 'action' => 'invoices:submit',
+            'outcome' => 'DENIED', 'details' => '{}', 'occurred_at' => now(),
+        ]);
+        SecurityEvent::create([
+            'id' => (string) Str::uuid(), 'event_type' => 'RATE_LIMIT_EXCEEDED', 'severity' => 'LOW', 'actor_id' => null,
+            'source_token' => 'src:test', 'correlation_id' => (string) Str::uuid(), 'action' => 'invoices:submit',
+            'outcome' => 'DENIED', 'details' => '{}', 'occurred_at' => now(),
+        ]);
+        DB::table('outbox_events')->insert([
+            'id' => (string) Str::uuid(), 'aggregate_type' => 'SECURITY_INCIDENT', 'aggregate_id' => (string) Str::uuid(),
+            'event_type' => 'SecurityIncidentOpened', 'event_version' => 1, 'partition_key' => (string) Str::uuid(),
+            'payload' => '{}', 'status' => 'PENDING', 'publish_attempts' => 0, 'occurred_at' => now(), 'available_at' => now(),
+        ]);
+        $viewer = $this->makeUser('metrics@secops.test', 'SECURITY_ANALYST');
+
+        $response = $this->actingAs($viewer)->get('/security');
+
+        $response->assertOk();
+        // Only the OPEN incident counts -- CLOSED does not.
+        $response->assertSeeInOrder(['Open incidents', '1']);
+        // Only the CRITICAL event counts toward high/critical -- LOW does not.
+        $response->assertSeeInOrder(['High / critical events', '1']);
+        $response->assertSeeInOrder(['Pending outbox', '1']);
+        $response->assertSee('Data integrity');
+        $response->assertSee('audit events');
     }
 
     public function test_opening_an_incident_requires_security_manage(): void

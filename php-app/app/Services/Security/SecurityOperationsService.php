@@ -44,6 +44,35 @@ class SecurityOperationsService
             ->map(fn (SecurityIncident $incident) => $this->presentIncident($incident))->all();
     }
 
+    /**
+     * Ported from lib/data/repository.ts's getSecurityOperationsSnapshot --
+     * the dashboard-metrics half of the real Security Operations Centre
+     * page (app/security/page.tsx), found missing by a gap-finding pass:
+     * this port had only ever built the queue/incidents half
+     * (getSOCQueue/getRecentEvents, security-repository.ts's own newer,
+     * narrower derivatives), never the four top-line KPI tiles the source
+     * page itself renders from this. Severity/outbox counts are whole-
+     * table aggregates, not scoped to getRecentEvents()'s own limited
+     * page, matching source exactly.
+     *
+     * @return array{event_counts: array<int, array{severity: string, count: int}>, outbox_counts: array<int, array{status: string, count: int}>, taxpayer_count: int, invoice_count: int, audit_event_count: int}
+     */
+    public function getOperationsMetrics(): array
+    {
+        $eventCounts = SecurityEvent::selectRaw('severity, COUNT(*) as count')->groupBy('severity')->get()
+            ->map(fn ($row) => ['severity' => $row->severity, 'count' => (int) $row->count])->all();
+        $outboxCounts = DB::table('outbox_events')->select('status', DB::raw('COUNT(*) as count'))->groupBy('status')->get()
+            ->map(fn ($row) => ['status' => $row->status, 'count' => (int) $row->count])->all();
+
+        return [
+            'event_counts' => $eventCounts,
+            'outbox_counts' => $outboxCounts,
+            'taxpayer_count' => (int) DB::table('taxpayers')->count(),
+            'invoice_count' => (int) DB::table('invoices')->count(),
+            'audit_event_count' => (int) DB::table('audit_events')->count(),
+        ];
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function getRecentEvents(int $limit = 50): array
     {
