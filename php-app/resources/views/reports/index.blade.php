@@ -19,6 +19,45 @@
     </div>
 @endif
 
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Definitions</span><span>R</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($reportsSummary['definitions_count']) }}</div>
+                <div class="small text-muted">Versioned and allow-listed</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Completed inline</span><span>C</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($reportsSummary['completed_count']) }}</div>
+                <div class="small text-success">Bounded query aggregates</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Failed</span><span>!</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($reportsSummary['failed_count']) }}</div>
+                <div class="small text-muted">Visible execution outcomes</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Export worker</span><span>X</span></div>
+                <div class="fs-2 fw-semibold">Off</div>
+                <div class="small text-warning">External scanner required</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card mb-3">
     <div class="card-header">
         <div class="fw-semibold">Report catalogue</div>

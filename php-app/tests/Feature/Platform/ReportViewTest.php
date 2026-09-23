@@ -139,6 +139,31 @@ class ReportViewTest extends TestCase
         $this->assertDatabaseHas('report_runs', ['status' => 'COMPLETED_INLINE', 'requested_by' => $admin->id]);
     }
 
+    /**
+     * Gap-finding pass (2026-09-23): app/reports/page.tsx's own 4-tile
+     * metric grid (Definitions, Completed inline, Failed, Export worker)
+     * had no Laravel equivalent -- the Blade view jumped straight from
+     * the page header into the report catalogue table.
+     */
+    public function test_the_reports_page_renders_its_metric_tiles(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0020');
+        $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'TAX_CONFIDENTIAL');
+        $admin = $this->pilotAdmin();
+        $this->actingAs($admin)->post('/reports/SALES_VAT_SUMMARY/run');
+
+        $response = $this->actingAs($admin)->get('/reports');
+
+        $response->assertOk();
+        $response->assertSee('Definitions');
+        $response->assertSee('Completed inline');
+        $response->assertSee('Failed');
+        $response->assertSee('Export worker');
+        $this->assertSame(1, $response->viewData('reportsSummary')['definitions_count']);
+        $this->assertSame(1, $response->viewData('reportsSummary')['completed_count']);
+        $this->assertSame(0, $response->viewData('reportsSummary')['failed_count']);
+    }
+
     /** RT-015: ReportExportService::runInline() originally had no idempotency-key support at all -- a double-submit of "Run report" created two duplicate COMPLETED_INLINE rows. */
     public function test_double_submitting_the_same_rendered_run_form_creates_only_one_report_run(): void
     {
