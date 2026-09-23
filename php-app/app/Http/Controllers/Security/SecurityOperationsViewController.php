@@ -22,13 +22,13 @@ use Illuminate\View\View;
  * pre-existing `href: '/security'`, `required_permission: 'security:read'`
  * item), which had no route behind it in this migration until now.
  *
- * The source exposes these as a separate JSON API surface
- * (app/api/v1/security/**); this migration has no such surface for any
- * of its other Blade-driven read/write pages either (AdministrationView-
- * Controller, WorkflowAuthoringViewController, ...), so this is one more
- * Blade view over the same service methods, matching that established
- * precedent rather than adding a parallel JSON API this port doesn't
- * otherwise expose.
+ * The source also exposes these as a separate JSON API surface
+ * (app/api/v1/security/**), now ported too as
+ * App\Http\Controllers\Security\SecurityOperationsController -- see that
+ * class's own doc comment for why the "no other Blade-driven admin page
+ * has one either" reasoning this comment used to give stopped holding
+ * once Fixed Assets and Logistics (the two sibling examples it cited)
+ * shipped their own JSON APIs the same session.
  */
 class SecurityOperationsViewController extends Controller
 {
