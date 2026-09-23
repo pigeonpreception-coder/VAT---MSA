@@ -11386,3 +11386,77 @@ suite: 1084 tests, 0 regressions.
   different authority value than the party's own recorded one (to
   deliberately exercise `MISMATCH`), pre-filled with the party's own
   values so the common "confirm my own data" path is a single click.
+
+## New feature: DecideExpense (2026-09-23)
+
+A follow-up gap-finding pass revisited an earlier lower-confidence
+finding this session had flagged but not verified:
+`lib/domain/business.ts`'s `normalizeAndValidateExpenseDecision`/
+`evaluateExpenseDecision` (~line 596), with no Laravel counterpart at
+all. Investigation confirmed this is a genuine, additive, unported
+command -- `DECIDE_EXPENSE`, ported from `lib/data/business-repository.ts`'s
+`decideExpense`: a newer, consolidated maker-checker decision that
+replaces the older two-step SUBMIT->APPROVE/REJECT flow (already fully
+ported and covered by `ExpenseTest.php`) with a single receipt-gated
+decision straight from `DRAFT`. Critically, `decideExpense`'s own doc
+comment in source states the old flow remains "unchanged for callers
+still on that flow" -- both are real, parallel, still-live commands in
+source, not a deprecation. Confirmed this by checking every caller of
+`submitExpense`/`SUBMIT_EXPENSE` across the whole TS source: only its
+own route/dispatcher plumbing, no UI page -- while `app/operations/
+page.tsx` (the source's real expense-register UI) wires
+`ExpenseDecisionActions.tsx`, which calls `/api/v1/expenses/{id}/decision`
+exclusively and never the old submit/approve/reject routes. So
+`DECIDE_EXPENSE` is the flow the actual source UI uses; the older flow
+is API-only in source today (still real, still tested, but reached by
+direct API clients, not the web UI). This port's own
+`OperationsViewController`/Blade UI was built earlier this session
+against the old flow, which is a legitimate source API surface in its
+own right, so it was left unchanged here -- only the missing
+`DECIDE_EXPENSE` JSON command itself was added, additive alongside it,
+exactly matching source's own posture of keeping both.
+
+- New `expense_decisions` table/`App\Models\ExpenseDecision` -- one row
+  per decided expense (`expense_id` unique).
+- `App\Domain\Business\BusinessValidator::expenseDecision()` (payload
+  validation: `decision` must be `APPROVE`/`REJECT`, a 5-500 character
+  `reason`, and an `emergency_override` key is rejected outright rather
+  than silently ignored -- source's own doc comment explains this was a
+  legacy bypass for the receipt gate, deliberately closed off here too)
+  and `evaluateExpenseDecision()` (the gate itself: only a `DRAFT`
+  expense can be decided, the actor can never decide their own expense,
+  and approving one that requires a receipt is blocked until that
+  receipt has cleared scanning and is available -- rejecting never
+  requires evidence to already be in place).
+- `App\Services\Business\ExpenseService::decide()` and a new
+  `POST /api/v1/expenses/{id}/decision` route/controller action
+  (`expenses:manage`, matching this controller's own already-established
+  unified permission convention rather than source's separate
+  `expenses:approve`, which this port never introduced for any of the
+  sibling submit/approve/reject/receipt actions either).
+- **Column semantics on decide, read directly off `drizzle/
+  0010_curvy_zaran.sql`'s `apply_expense_decision` trigger** (source's
+  own authoritative enforcement, since `decideExpense`'s own JS never
+  issues an explicit `UPDATE expenses SET status=...` -- the trigger
+  derives it from the `expense_decisions` INSERT, the same "enforce a
+  trigger's effect at the one place the app actually writes" posture
+  `expense_receipt_links`'s own migration already documented): approving
+  sets `approved_by`/`approved_at` to the actor/now; rejecting clears
+  both to `NULL` rather than leaving over a prior action's values; and
+  `expenses.rejection_reason` is never touched by this flow at all --
+  unlike the older `REJECT_EXPENSE` command, which does set that column
+  directly, a decided rejection's reason lives only in
+  `expense_decisions.reason`. Verified directly against the trigger SQL,
+  not assumed from the JS alone.
+- 9 new tests (`tests/Feature/Business/ExpenseDecisionTest.php`): a
+  no-receipt-required approval; a rejection's exact column effects
+  (including proving `rejection_reason` stays `NULL`); the creator
+  denied deciding their own expense (403); an already-decided expense
+  re-decided is a conflict (409); a receipt-required approval blocked
+  with no clean receipt (409) but an equivalent rejection is not
+  blocked; a receipt-required approval succeeding once a clean, linked
+  receipt exists; an invalid `decision` value rejected
+  (`DECISION_INVALID`); and `emergency_override` rejected outright
+  (`EMERGENCY_OVERRIDE_UNSUPPORTED`). Full suite: 1093 tests, 0
+  regressions. No new Blade UI, so no manual browser verification for
+  this module.

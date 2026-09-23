@@ -501,6 +501,64 @@ class BusinessValidator
         return ['schema_version' => '1.0.0', 'reason' => $reason];
     }
 
+    /**
+     * DecideExpense normalizer. `emergency_override` was a legacy escape
+     * hatch for bypassing the receipt-gated maker-checker decision below
+     * (see evaluateExpenseDecision()); it is deliberately rejected here
+     * rather than silently ignored, so a stale client can't believe it
+     * bypassed the gate when it didn't.
+     *
+     * @return array{schema_version: string, decision: string, reason: string}
+     */
+    public static function expenseDecision(array $input): array
+    {
+        $messages = [];
+        self::schemaVersion($input, $messages);
+        $decision = mb_strtoupper(self::textValue($input['decision'] ?? null));
+        if ($decision !== 'APPROVE' && $decision !== 'REJECT') {
+            $messages[] = ['code' => 'DECISION_INVALID', 'path' => '/decision', 'message' => 'decision must be APPROVE or REJECT.'];
+        }
+        $reason = self::textField($input['reason'] ?? null, '/reason', 'Decision reason', 5, 500, $messages);
+        if (array_key_exists('emergency_override', $input)) {
+            $messages[] = ['code' => 'EMERGENCY_OVERRIDE_UNSUPPORTED', 'path' => '/emergency_override', 'message' => 'Emergency override of the expense decision gate is not supported.'];
+        }
+        if (count($messages) > 0) {
+            throw new BusinessValidationException($messages);
+        }
+
+        return ['schema_version' => '1.0.0', 'decision' => $decision, 'reason' => $reason];
+    }
+
+    /**
+     * Ported verbatim from lib/domain/business.ts's evaluateExpenseDecision
+     * -- the receipt-gated maker-checker gate DecideExpense enforces: only
+     * a draft expense can be decided, the actor can never decide their own
+     * expense, and approving one that requires a receipt is blocked until
+     * that receipt has cleared scanning and is available (rejecting never
+     * requires evidence to already be in place).
+     *
+     * @return array{allowed: bool, targetStatus: string, reason: string}
+     */
+    public static function evaluateExpenseDecision(string $status, string $createdBy, string $actorId, string $decision, bool $receiptRequired, ?string $receiptDocumentId, ?string $receiptScanStatus, ?string $receiptStatus): array
+    {
+        $targetStatus = $decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+        if ($status !== 'DRAFT') {
+            return ['allowed' => false, 'targetStatus' => $targetStatus, 'reason' => "Only a draft expense can be decided; current status is {$status}."];
+        }
+        if ($actorId === $createdBy) {
+            return ['allowed' => false, 'targetStatus' => $targetStatus, 'reason' => 'Maker-checker separation prevents deciding an expense you created yourself.'];
+        }
+        if ($decision === 'APPROVE' && $receiptRequired
+            && (! $receiptDocumentId || $receiptScanStatus !== 'CLEAN' || $receiptStatus !== 'ACTIVE')) {
+            return ['allowed' => false, 'targetStatus' => $targetStatus, 'reason' => 'Approval requires a linked receipt that has cleared scanning and is available.'];
+        }
+
+        return [
+            'allowed' => true, 'targetStatus' => $targetStatus,
+            'reason' => $decision === 'APPROVE' ? 'The expense evidence and totals were independently reviewed and approved.' : 'The expense was independently reviewed and rejected.',
+        ];
+    }
+
     /** Ported from lib/domain/business.ts's normalizeAndValidateExpenseReceiptLink. @return array{schema_version: string, receipt_document_id: string} */
     public static function expenseReceiptLink(array $input): array
     {

@@ -997,6 +997,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/expenses/{id}/approval', [ExpenseController::class, 'approve']);
         Route::post('/expenses/{id}/rejection', [ExpenseController::class, 'reject']);
         Route::post('/expenses/{id}/receipt', [ExpenseController::class, 'linkReceipt']);
+        Route::post('/expenses/{id}/decision', [ExpenseController::class, 'decide']);
 
         // Phase 10 (slice 4): inventory -- products, warehouses, stock
         // movements/transfers, availability/valuation. Kept 1:1 with the
