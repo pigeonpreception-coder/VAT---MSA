@@ -13,6 +13,7 @@ use App\Models\AuditFinding;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Services\Compliance\AuditCaseService;
+use App\Services\Compliance\ComplianceSnapshotService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -54,7 +55,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AuditCaseViewController extends Controller
 {
-    public function __construct(private readonly AuditCaseService $cases) {}
+    public function __construct(private readonly AuditCaseService $cases, private readonly ComplianceSnapshotService $complianceSnapshot) {}
 
     public function index(Request $request): View
     {
@@ -69,10 +70,25 @@ class AuditCaseViewController extends Controller
             'vat_number' => $taxpayers[$case['taxpayer_id']]->vat_number ?? null,
         ])->all();
 
+        // Gap-finding pass (2026-09-23): app/cases/page.tsx's own
+        // metric-grid (open cases, preliminary findings, risk indicators,
+        // critical review) had no equivalent here -- reuses the same
+        // ComplianceSnapshotService aggregate NamraPortalSnapshotService
+        // already relies on for its own "Open cases"/"Risk indicators"
+        // tiles, rather than a second bespoke query.
+        $snapshot = $this->complianceSnapshot->getSnapshot($request->user());
+        $metrics = [
+            'open_cases' => collect($result['cases'])->where('status', '!==', 'CLOSED')->count(),
+            'preliminary_findings' => collect($snapshot['findings'])->where('status', 'PRELIMINARY')->count(),
+            'risk_indicators' => count($snapshot['risks']),
+            'critical_review' => collect($snapshot['risks'])->filter(fn ($risk) => $risk['severity'] === 'CRITICAL' && in_array($risk['status'], ['OPEN', 'UNDER_REVIEW'], true))->count(),
+        ];
+
         return view('audit-cases.index', [
             'cases' => $cases,
             'status' => $request->query('status', ''),
             'canManage' => $request->user()->hasAppPermission('cases:manage'),
+            'metrics' => $metrics,
         ]);
     }
 

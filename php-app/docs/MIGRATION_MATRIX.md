@@ -11539,3 +11539,32 @@ a missing controller/service method.
   demo session (values legitimately zero for that account's own empty
   period/claim history; the tests above cover the non-zero case with
   real fixtures).
+
+## Bug fix: Audit cases page was missing its metric tiles (2026-09-23)
+
+A fourth hit from the same field-level drift pass: `app/cases/page.tsx`
+(lines 12-19) renders a metric-grid (Open cases, Preliminary findings,
+Risk indicators, Critical review) that `resources/views/audit-cases/index.blade.php`
+had no equivalent for at all, even though
+`App\Services\Compliance\ComplianceSnapshotService::getSnapshot()`
+already returns the exact `cases`/`findings`/`risks` arrays needed
+(it's already used elsewhere, by `NamraPortalSnapshotService`) -- again
+a template-only gap, not a missing service method.
+
+- `AuditCaseViewController` now also injects `ComplianceSnapshotService`
+  and computes `metrics` in `index()`: open (non-`CLOSED`) case count,
+  `PRELIMINARY`-status finding count, total risk-indicator count, and a
+  "critical review" count (risk indicators with `severity === 'CRITICAL'`
+  and `status` in `OPEN`/`UNDER_REVIEW`), matching the source page's own
+  logic exactly.
+- `resources/views/audit-cases/index.blade.php` gained the four metric
+  tiles using this port's own established `row-cols-lg-4` tile markup.
+- New test `AuditCaseViewTest::test_the_list_page_renders_its_four_metric_tiles`
+  seeds a real open case, a preliminary finding, and two risk indicators
+  (one CRITICAL/OPEN, one LOW/CLOSED) and asserts the exact tile counts
+  (1, 1, 2, 1) so the CLOSED/non-CRITICAL rows are proven not to count.
+  Full suite: 1097 tests, 0 regressions.
+- Manually verified via a logged-in `namra-auditor@vat-msa.test` session:
+  page renders without error, all four tiles present (values legitimately
+  zero for that account's own case history; the new test covers the
+  non-zero case with real fixtures).

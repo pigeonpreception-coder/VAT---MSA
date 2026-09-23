@@ -4,7 +4,9 @@ namespace Tests\Feature\Compliance;
 
 use App\Models\AuditCase;
 use App\Models\AuditEvidence;
+use App\Models\AuditFinding;
 use App\Models\Organisation;
+use App\Models\RiskIndicator;
 use App\Models\Taxpayer;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
@@ -157,6 +159,43 @@ class AuditCaseViewTest extends TestCase
 
         $unmatched = $this->actingAs($auditor)->get(route('audit-cases.index', ['status' => 'CLOSED']));
         $unmatched->assertDontSee($case->case_number);
+    }
+
+    /**
+     * Gap-finding pass (2026-09-23): app/cases/page.tsx renders a
+     * metric-grid (open cases, preliminary findings, risk indicators,
+     * critical review) this view had no equivalent tiles for at all.
+     */
+    public function test_the_list_page_renders_its_four_metric_tiles(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-CASE-0009');
+        $auditor = $this->namraAuditor();
+        $caseId = $this->openCaseViaUi($auditor, 'VAT-VIEW-CASE-0009');
+        AuditFinding::create([
+            'id' => (string) Str::uuid(), 'audit_case_id' => $caseId, 'finding_code' => 'FND-0001', 'title' => 'Under-declared output VAT',
+            'description' => 'Preliminary review finding.', 'amount_cents' => 500000, 'currency' => 'NAD', 'status' => 'PRELIMINARY',
+            'author_id' => $auditor->id, 'created_at' => now(),
+        ]);
+        RiskIndicator::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'subject_type' => 'TAXPAYER', 'subject_id' => $tp['taxpayer']->id, 'indicator_code' => 'HIGH_VALUE_INVOICE', 'score_bps' => 8000,
+            'severity' => 'CRITICAL', 'rationale' => 'Test rationale.', 'rule_version' => 'v1', 'decision_effect' => 'BLOCK',
+            'status' => 'OPEN', 'detected_at' => now(),
+        ]);
+        RiskIndicator::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'subject_type' => 'TAXPAYER', 'subject_id' => $tp['taxpayer']->id, 'indicator_code' => 'LOW_RISK_PATTERN', 'score_bps' => 1000,
+            'severity' => 'LOW', 'rationale' => 'Test rationale.', 'rule_version' => 'v1', 'decision_effect' => 'NONE',
+            'status' => 'CLOSED', 'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($auditor)->get(route('audit-cases.index'));
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Open cases', '1']);
+        $response->assertSeeInOrder(['Preliminary findings', '1']);
+        $response->assertSeeInOrder(['Risk indicators', '2']);
+        $response->assertSeeInOrder(['Critical review', '1']);
     }
 
     public function test_the_case_detail_page_shows_only_valid_actions_at_each_lifecycle_step(): void

@@ -9,6 +9,45 @@
     <p class="text-muted mb-0">A fully governed audit lifecycle -- every status change, finding, evidence citation and note is recorded, never edited or deleted in place.</p>
 </div>
 
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open cases</span><span>C</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['open_cases']) }}</div>
+                <div class="small text-muted">Controlled officer work queue</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Preliminary findings</span><span>F</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['preliminary_findings']) }}</div>
+                <div class="small text-muted">Not final assessments</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Risk indicators</span><span>R</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['risk_indicators']) }}</div>
+                <div class="small text-muted">Explainable, advisory-only signals</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Critical review</span><span>!</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['critical_review']) }}</div>
+                <div class="small text-warning">Human review required</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 @can('permission', 'cases:manage')
     <div class="card mb-3">
         <div class="card-body">
