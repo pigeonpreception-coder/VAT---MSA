@@ -5,6 +5,7 @@ namespace App\Services\Business;
 use App\Domain\Business\BusinessValidator;
 use App\Exceptions\BusinessResourceException;
 use App\Exceptions\RepositoryConflictException;
+use App\Models\BusinessParty;
 use App\Models\Expense;
 use App\Models\Project;
 use App\Models\ProjectBudget;
@@ -12,6 +13,7 @@ use App\Models\ProjectCost;
 use App\Models\User;
 use App\Services\Audit\AuditService;
 use App\Support\Business\CommandLedger;
+use App\Support\Business\CounterpartyTrustGate;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -289,14 +291,18 @@ class ProjectService
         if (! $partyId) {
             return;
         }
-        $exists = DB::table('business_parties')->where('business_parties.id', $partyId)->where('business_parties.organisation_id', $organisationId)->where('business_parties.status', 'ACTIVE')
-            ->whereExists(function ($sub) use ($partyId) {
+        $row = BusinessParty::where('business_parties.id', $partyId)->where('business_parties.organisation_id', $organisationId)->where('business_parties.status', 'ACTIVE')
+            ->whereExists(function ($sub) {
                 $sub->select(DB::raw(1))->from('party_relationships')->whereColumn('party_relationships.party_id', 'business_parties.id')
                     ->where('party_relationships.relationship', 'CUSTOMER')->where('party_relationships.status', 'ACTIVE');
-            })->exists();
-        if (! $exists) {
+            })->first();
+        if (! $row) {
             throw new BusinessResourceException('Customer party is not an active customer in the authorised organisation.', 422);
         }
+        // Issue 3 counterparty trust boundary (05-security/
+        // issue3-counterparty-trust-boundary.md): an active relationship
+        // alone no longer makes a party transaction-eligible.
+        CounterpartyTrustGate::require($row, 'Customer party');
     }
 
     private function loadProject(string $projectId, string $organisationId): Project

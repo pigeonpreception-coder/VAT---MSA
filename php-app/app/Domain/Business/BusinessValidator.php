@@ -33,7 +33,7 @@ class BusinessValidator
     private const MAX_SEARCH_LIMIT = 200;
     private const DEFAULT_SEARCH_LIMIT = 50;
 
-    /** @return array{schema_version: string, display_name: string, legal_name: ?string, vat_number: ?string, tin: ?string, email: ?string, phone: ?string, address: ?string, relationships: list<string>} */
+    /** @return array{schema_version: string, display_name: string, legal_name: ?string, vat_number: ?string, tin: ?string, company_registration_number: ?string, email: ?string, phone: ?string, address: ?string, relationships: list<string>} */
     public static function party(array $input): array
     {
         $messages = [];
@@ -44,6 +44,8 @@ class BusinessValidator
         $vatNumber = $vatNumber !== null ? mb_strtoupper($vatNumber) : null;
         $tin = self::optionalText($input['tin'] ?? null, '/tin', 'TIN', 40, $messages);
         $tin = $tin !== null ? mb_strtoupper($tin) : null;
+        $companyRegistrationNumber = self::optionalText($input['company_registration_number'] ?? null, '/company_registration_number', 'Company registration number', 40, $messages);
+        $companyRegistrationNumber = $companyRegistrationNumber !== null ? mb_strtoupper($companyRegistrationNumber) : null;
         $email = self::optionalText($input['email'] ?? null, '/email', 'Email', 254, $messages);
         $email = $email !== null ? mb_strtolower($email) : null;
         $phone = self::optionalText($input['phone'] ?? null, '/phone', 'Phone', 40, $messages);
@@ -54,6 +56,9 @@ class BusinessValidator
         }
         if ($tin && ! preg_match('/^[A-Z0-9][A-Z0-9 ._\/-]{1,39}$/', $tin)) {
             $messages[] = ['code' => 'TIN_INVALID', 'path' => '/tin', 'message' => 'TIN contains unsupported characters.'];
+        }
+        if ($companyRegistrationNumber && ! preg_match('/^[A-Z0-9][A-Z0-9 ._\/-]{1,39}$/', $companyRegistrationNumber)) {
+            $messages[] = ['code' => 'COMPANY_REGISTRATION_NUMBER_INVALID', 'path' => '/company_registration_number', 'message' => 'Company registration number contains unsupported characters.'];
         }
         if ($email && ! preg_match('/^[^\s@]+@[^\s@]+\.[^\s@]+$/', $email)) {
             $messages[] = ['code' => 'EMAIL_INVALID', 'path' => '/email', 'message' => 'Email must be a valid address.'];
@@ -79,7 +84,8 @@ class BusinessValidator
 
         return [
             'schema_version' => '1.0.0', 'display_name' => $displayName, 'legal_name' => $legalName,
-            'vat_number' => $vatNumber, 'tin' => $tin, 'email' => $email, 'phone' => $phone, 'address' => $address,
+            'vat_number' => $vatNumber, 'tin' => $tin, 'company_registration_number' => $companyRegistrationNumber,
+            'email' => $email, 'phone' => $phone, 'address' => $address,
             'relationships' => $relationships,
         ];
     }

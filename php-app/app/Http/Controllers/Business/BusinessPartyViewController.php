@@ -7,7 +7,9 @@ use App\Exceptions\BusinessValidationException;
 use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Services\Business\BusinessPartyService;
+use App\Services\Business\CounterpartyTrustService;
 use App\Services\Business\SupplierVerificationService;
+use App\Support\Business\CounterpartyTrustGate;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -56,6 +58,7 @@ class BusinessPartyViewController extends Controller
     public function __construct(
         private readonly BusinessPartyService $parties,
         private readonly SupplierVerificationService $verification,
+        private readonly CounterpartyTrustService $trust,
     ) {}
 
     public function index(Request $request): View
@@ -68,6 +71,7 @@ class BusinessPartyViewController extends Controller
         return view('business-parties.index', [
             'parties' => $result['parties'], 'totalCount' => $result['total_count'],
             'filters' => $request->only(['status', 'relationship', 'q']),
+            'syntheticVerificationEnabled' => CounterpartyTrustGate::syntheticEnabled(),
         ]);
     }
 
@@ -85,7 +89,10 @@ class BusinessPartyViewController extends Controller
             abort(Response::HTTP_NOT_FOUND, $e->getMessage());
         }
 
-        return view('business-parties.show', ['party' => $history['party'], 'snapshots' => $history['snapshots']]);
+        return view('business-parties.show', [
+            'party' => $history['party'], 'snapshots' => $history['snapshots'],
+            'syntheticVerificationEnabled' => CounterpartyTrustGate::syntheticEnabled(),
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -95,7 +102,8 @@ class BusinessPartyViewController extends Controller
         $payload = [
             'schema_version' => '1.0.0', 'display_name' => (string) $request->input('display_name'),
             'legal_name' => $request->input('legal_name') ?: null, 'vat_number' => $request->input('vat_number') ?: null,
-            'tin' => $request->input('tin') ?: null, 'email' => $request->input('email') ?: null,
+            'tin' => $request->input('tin') ?: null, 'company_registration_number' => $request->input('company_registration_number') ?: null,
+            'email' => $request->input('email') ?: null,
             'phone' => $request->input('phone') ?: null, 'address' => $request->input('address') ?: null,
             'relationships' => array_filter((array) $request->input('relationships', [])),
         ];
@@ -128,6 +136,41 @@ class BusinessPartyViewController extends Controller
         }
 
         return redirect()->route('business-parties.show', $id)->with('status', 'Supplier verified against the national taxpayer register.');
+    }
+
+    /**
+     * Ported from app/commercial/parties/PartyManager.tsx's runSyntheticVerification
+     * -- the Blade equivalent of that fetch(), same "labelled test-only
+     * evidence" caveat. Only reachable when
+     * CounterpartyTrustGate::syntheticEnabled(); the view itself hides the
+     * form otherwise, and this action re-checks server-side (via
+     * App\Services\Business\CounterpartyTrustService::syntheticallyVerify's
+     * own 403) rather than trusting that alone.
+     */
+    public function storeSyntheticVerification(Request $request, string $id): RedirectResponse
+    {
+        $this->authorize('permission', 'parties:manage');
+
+        $payload = [
+            'schema_version' => '1.0.0',
+            'authority_record' => [
+                'legal_name' => (string) $request->input('authority_legal_name'),
+                'vat_number' => $request->input('authority_vat_number') ?: null,
+                'tin' => $request->input('authority_tin') ?: null,
+                'company_registration_number' => $request->input('authority_company_registration_number') ?: null,
+                'tax_registration_status' => (string) $request->input('authority_tax_registration_status'),
+            ],
+        ];
+
+        try {
+            $this->trust->syntheticallyVerify($id, $payload, $request->user(), $this->formIdempotencyKey($request), (string) Str::uuid(), $request->query('organisation_id'));
+        } catch (BusinessValidationException $e) {
+            return redirect()->route('business-parties.show', $id)->withErrors($this->fieldErrors($e))->withInput();
+        } catch (BusinessResourceException|RepositoryConflictException $e) {
+            return redirect()->route('business-parties.show', $id)->withErrors(['form' => $e->getMessage()])->withInput();
+        }
+
+        return redirect()->route('business-parties.show', $id)->with('status', 'Synthetic counterparty evidence recorded. It is test-only, expires after 24 hours, and is never authority verification.');
     }
 
     public function storeDeactivation(Request $request, string $id): RedirectResponse

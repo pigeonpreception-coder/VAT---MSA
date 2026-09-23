@@ -317,6 +317,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/business-parties/{id}', [BusinessPartyViewController::class, 'show'])->name('business-parties.show');
     Route::post('/business-parties', [BusinessPartyViewController::class, 'store'])->name('business-parties.store');
     Route::post('/business-parties/{id}/verification', [BusinessPartyViewController::class, 'storeVerification'])->name('business-parties.verification.store');
+    Route::post('/business-parties/{id}/synthetic-verification', [BusinessPartyViewController::class, 'storeSyntheticVerification'])->name('business-parties.synthetic-verification.store');
     Route::post('/business-parties/{id}/deactivation', [BusinessPartyViewController::class, 'storeDeactivation'])->name('business-parties.deactivation.store');
 
     // Real Blade UI for ReconciliationService (Module 3 Phase A/B: the
@@ -960,6 +961,7 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/business-parties/{id}/deactivation', [BusinessPartyController::class, 'deactivate']);
         Route::get('/business-parties/{id}/verification', [BusinessPartyController::class, 'verificationHistory']);
         Route::post('/business-parties/{id}/verification', [BusinessPartyController::class, 'verify']);
+        Route::post('/business-parties/{id}/synthetic-verification', [BusinessPartyController::class, 'syntheticVerify']);
 
         Route::get('/quotations', [QuotationController::class, 'index']);
         Route::post('/quotations', [QuotationController::class, 'store']);

@@ -11196,3 +11196,193 @@ reclaim requires a trusted, active supplier on record.
   validator would never have allowed to exist -- updated to assert the
   now-required supplier's name instead).
 - Full suite: 1073 tests, 0 regressions.
+
+## New feature: counterparty trust boundary + company_registration_number (2026-09-23)
+
+Found via a fourth gap-finding pass (whole-feature sweep, run after the
+function-level, route-level and validator-strictness sweeps above were
+all exhausted): the source implements an entire subsystem this port had
+never touched at all, documented in full at `05-security/
+issue3-counterparty-trust-boundary.md` -- a counterparty trust boundary
+that gates every quotation, tax-bearing expense and project creation on
+the customer/supplier having a *current, verified* trust profile, not
+merely an active `CUSTOMER`/`SUPPLIER` relationship. This port's
+`QuotationService`/`ExpenseService`/`ProjectService` checked the active
+relationship alone -- a party became transaction-eligible the moment an
+operator typed a plausible VAT number, exactly the gap Issue 3 exists to
+close. Alongside it, `business_parties.company_registration_number`
+(source: `db/runtime.ts`) was entirely missing from this port too, a
+third independent business identifier alongside `vat_number`/`tin` that
+the trust evaluator itself reconciles. Confirmed with the user before
+building: the full feature, not a partial stub -- real `AUTHORITY_VERIFIED`
+status requires the NamRA/ITAS/BIPA provider integration, which is
+`BLOCKED -- EXTERNAL DEPENDENCY REQUIRED` in production per that same
+design doc, so the actual deliverable here is the whole lifecycle
+(profile creation, the labelled `SYNTHETIC_VALID` test-only path, and the
+enforcement gate) exactly as the source itself builds it while that
+integration remains blocked.
+
+**Schema** (`db/runtime.ts` lines ~197-239): four new/changed tables.
+`business_parties` gained `company_registration_number` (nullable
+string). Three new tables -- `counterparty_trust_profiles` (one row per
+party, `business_party_id` unique), `counterparty_verification_snapshots`
+(immutable, append-only reconciliation history) and
+`counterparty_trust_events` (append-only state-change log) -- ported as
+plain `VARCHAR` columns rather than the source's SQLite
+`CHECK`-constrained enums, this port's own established convention once a
+value set is app-level policy rather than a DB-level guarantee (see
+`2026_09_19_000001_widen_party_relationships_relationship.php`'s own doc
+comment). None of the three new tables carry `organisation_id` directly
+(matching the source exactly) -- they scope through `business_party_id`
+to `business_parties`, which is itself organisation-scoped, so their new
+models (`CounterpartyTrustProfile`, `CounterpartyVerificationSnapshot`,
+`CounterpartyTrustEvent`) deliberately do not use the
+`BelongsToOrganisation` trait.
+
+**Domain**: `App\Domain\Business\CounterpartyTrustEvaluator` is a direct
+port of `lib/domain/counterparty-trust.ts` in full --
+`evaluate()` (ported from `evaluateCounterpartyTrust`: compares
+normalized `vat_number` (4000bps), `tin` (3500bps),
+`company_registration_number` (1500bps) and `legal_name` (1000bps,
+NFKC-normalized) between the party and a submitted authority record;
+any conflicting field is `MISMATCH`, zero matched *identifiers* (legal
+name doesn't count) is `INVALID`, otherwise `SYNTHETIC_VALID`) and
+`normalizeSyntheticVerification()` (the submission validator). Kept as
+its own class next to `BusinessValidator` rather than folded into it,
+mirroring the source's own separate `counterparty-trust.ts` module.
+`BusinessValidator::party()` gained `company_registration_number`
+handling (optional, <=40 chars, uppercase, `COMPANY_REGISTRATION_NUMBER_INVALID`
+on the identifier regex), mirroring `vat_number`/`tin` exactly.
+
+**Services**: `BusinessPartyService::create()` now also writes a
+`PENDING_PROVIDER` trust profile and a `CounterpartyVerificationRequested`
+event in the same transaction as the party (creation is intake only,
+never transaction-eligible); `update()` resets an existing trust profile
+back to `PENDING_PROVIDER` with a `CounterpartyIdentityChanged` event
+whenever `legal_name`/`vat_number`/`tin`/`company_registration_number`
+changes; `assertIdentifiersAvailable()`'s dedup check now also covers
+`company_registration_number`; `present()` exposes the new trust fields
+(`trust_status`, `tax_registration_status`, `confidence_bps`,
+`provider_environment`, `checked_at`, `expires_at`) with the same
+already-batched N+1 discipline `search()` established for relationships
+(docs' own "Duplicate-submission hardening"-style N+1 note -- see the
+red-team #12 fix already in this file above; a first pass here
+regressed it again via a `?: false` fallback that queried per-row for
+any party without a profile, caught by `OperationsViewTest`'s own N+1
+regression test and fixed before this landed). New
+`App\Services\Business\CounterpartyTrustService::syntheticallyVerify()`
+(split out of `BusinessPartyService` the same way `SupplierVerificationService`
+already was) ports `syntheticallyVerifyBusinessParty` in full: idempotent
+via the existing `CommandLedger` convention, environment-gated (403 when
+disabled), evaluates via `CounterpartyTrustEvaluator`, updates the trust
+profile, writes a verification snapshot and a `CounterpartyTrustEvaluated`
+event, and appends the usual audit/outbox pair. `evidence_hash` reuses
+`CommandLedger::requestHash()` (already `sha256(canonicalJson(...))`,
+the same convention as the source's own `stableStringify`) rather than
+inventing a new hashing helper.
+
+**The gate**: new `App\Support\Business\CounterpartyTrustGate::require()`
+-- a single shared helper (this port's own `Support\Business` namespace
+convention, see `CommandLedger`/`OrganisationResolver`/
+`TransactionClassifier` as precedent) called from all three sites the
+source itself gates: `QuotationService::requirePartyRelationship`
+(create + update), `ExpenseService::requireSupplierRelationship` (now
+takes a third `$requireActiveTaxRegistration` param, called as
+`$expense['tax_cents'] > 0`), and `ProjectService::requireCustomerRelationship`.
+Each keeps its own existing active-relationship lookup and error
+untouched, then additionally requires: `AUTHORITY_VERIFIED` and current
+(`expires_at` in the future), or `SYNTHETIC_VALID` + `SYNTHETIC_TEST`
+provider environment + current *and* synthetic trust enabled in this
+environment -- else 422 "is not currently trusted for new transactions.
+Complete an approved counterparty verification first." A tax-bearing
+expense additionally requires `tax_registration_status === 'ACTIVE'`,
+else a second, distinct 422. `CounterpartyTrustGate::syntheticEnabled()`
+translates the source's `VAT_MSA_ENVIRONMENT`/`NODE_ENV`/`VITEST`
+combination to Laravel idiom: enabled in local/testing always; enabled
+in staging only behind an explicit `services.vat_msa.
+enable_synthetic_counterparty_trust` config flag (env:
+`VAT_MSA_ENABLE_SYNTHETIC_COUNTERPARTY_TRUST`, documented in
+`.env.example`); always disabled in production. Deliberately does
+**not** collapse the staging branch to "disabled" the way
+`AuthorityGovernanceService::requireLocalWritesEnabled` did for its own,
+simpler flag -- the whole point of the synthetic path is to let staging
+rehearse the real workflow ahead of `AUTHORITY_VERIFIED`, so collapsing
+it away would remove the capability being built.
+
+**JSON API + Blade UI**: `POST /api/v1/business-parties/{id}/synthetic-verification`
+(`BusinessPartyController::syntheticVerify`, `parties:manage`), ported
+from `app/api/v1/business-parties/[id]/synthetic-verification/route.ts`.
+The Blade party register (`resources/views/business-parties/index.blade.php`)
+gained a company-registration-number field on the create form and a
+"Counterparty trust" column; the party show page
+(`resources/views/business-parties/show.blade.php`) gained a
+"Counterparty trust" card with a synthetic-verification form, shown only
+when `CounterpartyTrustGate::syntheticEnabled()` -- mirroring
+`app/commercial/parties/page.tsx`'s own visibility decision. This show
+page is served by `SupplierVerificationService::history()`, not
+`BusinessPartyService::present()`, so `SupplierVerificationService::presentParty()`
+needed its own copy of the new trust/`company_registration_number`
+fields.
+
+**Test-fixture ripple** (the largest share of this change): every
+existing fixture that creates a supplier/customer via direct Eloquent
+`BusinessParty::create()`/`PartyRelationship::create()` and then feeds it
+into a gated command now also needs a current, `AUTHORITY_VERIFIED`
+trust profile -- `tests/Feature/Business/ExpenseTest.php`,
+`ExpenseReceiptLinkTest.php`, `OperationsViewTest.php`, `ProjectTest.php`,
+`PurchaseOrderViewTest.php` (not gated on creation, but its lifecycle
+test *converts* the order to an `ExpenseService::create()` expense,
+which is), and `tests/Feature/Portal/BuyerPortalTest.php` each grew a
+`trustParty()` helper alongside their existing `createSupplier()`/
+`makeSupplier()`. `SupplierLedgerViewTest.php`/`CustomerLedgerViewTest.php`/
+`PurchaseOrderViewTest.php`'s own purchase-order creation and
+`SupplierVerificationTest.php`/`BusinessPartyViewTest.php` needed no
+change: they either insert `Expense`/`Quotation`/`PurchaseOrder` rows
+directly (bypassing the gated service entirely) or never exercise a
+gated command at all. Three files whose fixtures create a party through
+the real command chain (`POST /api/v1/business-parties`, which now
+starts every party `PENDING_PROVIDER`) upgrade the resulting trust
+profile directly via Eloquent afterwards, the same "insert prerequisite
+state directly, not through the command chain" convention rather than
+exercising the synthetic-verification command itself for pure test
+setup: `tests/Feature/Business/QuotationViewTest.php`,
+`tests/Feature/Business/BusinessPartyAndQuotationTest.php`, and
+`tests/Feature/Portal/SellerPortalTest.php` (found by running the full
+suite, not in the original candidate list -- its own `createCustomerParty`
+feeds quotations the same way).
+
+**New tests**: `tests/Feature/Business/CounterpartyTrustTest.php` (11
+tests) -- a new party starts `PENDING_PROVIDER`; an identity-field change
+returns an already-verified party to `PENDING_PROVIDER`; the evaluator's
+full-match, mismatch and invalid outcomes via the real endpoint; the
+synthetic submission's own validation (identifier required, supported
+tax status required); a quotation and a project are rejected for a
+`PENDING_PROVIDER` customer and accepted once synthetically verified; a
+tax-bearing expense additionally requires `ACTIVE` tax-registration
+evidence (and a zero-tax expense against the same non-`ACTIVE` supplier
+is unaffected); the environment gate itself -- disabled in production,
+flag-gated in staging, enabled in testing -- exercised end to end by
+overriding the container's `env` binding for one request (this port had
+no existing convention for stubbing environment-dependent behaviour in
+tests; doing so also flips `Application::runningUnitTests()`, which
+Laravel's CSRF middleware uses to exempt the test client, so that one
+test explicitly disables `ValidateCsrfToken` to avoid a false 419); and
+`company_registration_number` validation, dedup and persistence. Full
+suite: 1084 tests, 0 regressions.
+
+**Judgment calls, documented per this migration's own convention**:
+- No DB-level `CHECK`/partial-unique-index equivalents for the new
+  enums or the SQLite migration's own trigger-enforced invariants
+  (no-delete on profiles, no-update on snapshots/events, the identity-
+  change-requires-`PENDING_PROVIDER` guard) -- app-level only, matching
+  how every other enum/invariant in this port is already enforced (the
+  services and models are the only writers of these tables).
+- `CounterpartyTrustGate::require()` treats a party with no trust profile
+  row at all (should not occur in practice -- every `create()` call
+  writes one in the same transaction) the same as one that fails the
+  trust check, rather than a separate error -- there is no path in this
+  port that creates a `business_parties` row without one.
+- The Blade synthetic-verification form lets an operator type a
+  different authority value than the party's own recorded one (to
+  deliberately exercise `MISMATCH`), pre-filled with the party's own
+  values so the common "confirm my own data" path is a single click.

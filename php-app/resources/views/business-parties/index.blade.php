@@ -40,6 +40,11 @@
                 @error('vat_number')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-2">
+                <label for="company_registration_number" class="form-label small mb-0">Company reg. no. (optional)</label>
+                <input type="text" id="company_registration_number" name="company_registration_number" value="{{ old('company_registration_number') }}" class="form-control form-control-sm @error('company_registration_number') is-invalid @enderror">
+                @error('company_registration_number')<div class="invalid-feedback">{{ $message }}</div>@enderror
+            </div>
+            <div class="col-md-2">
                 <label for="email" class="form-label small mb-0">Email (optional)</label>
                 <input type="email" id="email" name="email" value="{{ old('email') }}" class="form-control form-control-sm @error('email') is-invalid @enderror">
                 @error('email')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -104,6 +109,7 @@
                     <th scope="col">VAT number</th>
                     <th scope="col">Relationships</th>
                     <th scope="col">Status</th>
+                    <th scope="col">Counterparty trust</th>
                 </tr>
             </thead>
             <tbody>
@@ -117,9 +123,12 @@
                             @endforeach
                         </td>
                         <td><x-status-badge :value="$party['status']" type="status" /></td>
+                        <td>
+                            <span class="badge text-bg-light border">{{ ucwords(strtolower(str_replace('_', ' ', $party['trust_status'] ?? 'PENDING_PROVIDER'))) }}</span>
+                        </td>
                     </tr>
                 @empty
-                    <tr><td colspan="4" class="text-center text-muted py-4">No business parties match this view.</td></tr>
+                    <tr><td colspan="5" class="text-center text-muted py-4">No business parties match this view.</td></tr>
                 @endforelse
             </tbody>
         </table>

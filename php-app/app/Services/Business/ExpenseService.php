@@ -13,6 +13,7 @@ use App\Models\ExpenseReceiptLink;
 use App\Models\User;
 use App\Services\Audit\AuditService;
 use App\Support\Business\CommandLedger;
+use App\Support\Business\CounterpartyTrustGate;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -73,7 +74,7 @@ class ExpenseService
             return $this->findOrFail($prior, $organisation->id);
         }
         $this->requireOwnedCategory($expense['category_id'], $organisation->id);
-        $this->requireSupplierRelationship($expense['supplier_party_id'], $organisation->id);
+        $this->requireSupplierRelationship($expense['supplier_party_id'], $organisation->id, $expense['tax_cents'] > 0);
         $this->requireOwnedBranch($expense['branch_id'], $organisation->id);
         // project_id: no ownership check yet -- projects (Phase 10's own later
         // sub-slice) has no table to check against, matching the expenses
@@ -356,7 +357,7 @@ class ExpenseService
         }
     }
 
-    private function requireSupplierRelationship(?string $partyId, string $organisationId): void
+    private function requireSupplierRelationship(?string $partyId, string $organisationId, bool $requireActiveTaxRegistration = false): void
     {
         if (! $partyId) {
             return;
@@ -367,6 +368,11 @@ class ExpenseService
         if (! $row) {
             throw new BusinessResourceException('Supplier party is not an active supplier in the authorised organisation.', 422);
         }
+        // Issue 3 counterparty trust boundary (05-security/
+        // issue3-counterparty-trust-boundary.md): a tax-bearing expense
+        // additionally requires current ACTIVE tax-registration evidence,
+        // not just identity trust.
+        CounterpartyTrustGate::require($row, 'Supplier party', $requireActiveTaxRegistration);
     }
 
     private function requireOwnedBranch(?string $branchId, string $organisationId): void

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Business;
 
 use App\Models\BusinessParty;
+use App\Models\CounterpartyTrustProfile;
 use App\Models\Organisation;
 use App\Models\PartyRelationship;
 use App\Models\Taxpayer;
@@ -73,8 +74,30 @@ class ExpenseTest extends TestCase
             'id' => (string) Str::uuid(), 'organisation_id' => $organisation->id, 'party_id' => $party->id,
             'relationship' => 'SUPPLIER', 'status' => 'ACTIVE', 'effective_from' => now(), 'created_at' => now(),
         ]);
+        $this->trustParty($party, $organisation);
 
         return $party->id;
+    }
+
+    /**
+     * Issue 3 counterparty trust boundary (05-security/
+     * issue3-counterparty-trust-boundary.md): an active relationship alone
+     * no longer makes a party transaction-eligible -- test fixtures insert
+     * a current, ACTIVE-tax-registered trust profile directly, the same
+     * "insert prerequisite state directly, not through the command chain"
+     * convention this file's own createSupplier() already uses for the
+     * party and relationship rows.
+     */
+    private function trustParty(BusinessParty $party, Organisation $organisation): void
+    {
+        CounterpartyTrustProfile::create([
+            'id' => (string) Str::uuid(), 'business_party_id' => $party->id, 'provider' => 'SYNTHETIC_AUTHORITY',
+            'provider_environment' => 'SYNTHETIC_TEST', 'trust_status' => 'AUTHORITY_VERIFIED', 'tax_registration_status' => 'ACTIVE',
+            'vat_verification_status' => 'NOT_PROVIDED', 'tin_verification_status' => 'NOT_PROVIDED', 'company_verification_status' => 'NOT_PROVIDED',
+            'confidence_bps' => 10000, 'evidence_hash' => null, 'source_reference' => null,
+            'requested_by' => User::where('taxpayer_id', $organisation->taxpayer_id)->value('id'), 'reviewed_by' => null,
+            'checked_at' => now(), 'expires_at' => now()->addYear(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
     }
 
     private function expensePayload(string $categoryId, string $supplierPartyId, array $overrides = []): array

@@ -4,6 +4,7 @@ namespace App\Services\Business;
 
 use App\Exceptions\BusinessResourceException;
 use App\Models\BusinessParty;
+use App\Models\CounterpartyTrustProfile;
 use App\Models\PartyRelationship;
 use App\Models\PartyVerificationSnapshot;
 use App\Models\User;
@@ -110,14 +111,30 @@ class SupplierVerificationService
         ];
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Same trust fields App\Services\Business\BusinessPartyService::present()
+     * exposes -- this Blade "show" page (App\Http\Controllers\Business\
+     * BusinessPartyViewController::show) reads a party through this
+     * service's history(), not that one, so it needs its own copy to
+     * display the counterparty trust card.
+     *
+     * @return array<string, mixed>
+     */
     private function presentParty(BusinessParty $party): array
     {
+        $trust = CounterpartyTrustProfile::where('business_party_id', $party->id)->first();
+
         return [
             'id' => $party->id, 'organisation_id' => $party->organisation_id, 'display_name' => $party->display_name,
             'legal_name' => $party->legal_name, 'vat_number' => $party->vat_number, 'tin' => $party->tin,
+            'company_registration_number' => $party->company_registration_number,
             'email' => $party->email, 'phone' => $party->phone, 'address' => $party->address, 'status' => $party->status,
             'relationships' => PartyRelationship::where('party_id', $party->id)->where('status', 'ACTIVE')->pluck('relationship')->values()->all(),
+            'trust_status' => $trust?->trust_status, 'tax_registration_status' => $trust?->tax_registration_status,
+            'vat_verification_status' => $trust?->vat_verification_status, 'tin_verification_status' => $trust?->tin_verification_status,
+            'company_verification_status' => $trust?->company_verification_status, 'confidence_bps' => $trust?->confidence_bps,
+            'provider_environment' => $trust?->provider_environment,
+            'checked_at' => optional($trust?->checked_at)->toISOString(), 'expires_at' => optional($trust?->expires_at)->toISOString(),
             'created_at' => optional($party->created_at)->toISOString(), 'updated_at' => optional($party->updated_at)->toISOString(),
         ];
     }

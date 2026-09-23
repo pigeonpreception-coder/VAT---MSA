@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Business;
 
+use App\Models\CounterpartyTrustProfile;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\Taxpayer;
@@ -61,13 +62,19 @@ class QuotationViewTest extends TestCase
         return compact('taxpayer', 'organisation', 'owner');
     }
 
+    /** See tests/Feature/Portal/SellerPortalTest.php's own createCustomerParty() doc comment. */
     private function createCustomerParty(User $owner, string $vatNumber = 'VAT-CUST-0001', string $displayName = 'Acme Customer'): string
     {
         $response = $this->actingAs($owner)->postJson('/api/v1/business-parties', [
             'schema_version' => '1.0.0', 'display_name' => $displayName, 'vat_number' => $vatNumber, 'relationships' => ['CUSTOMER'],
         ], ['Idempotency-Key' => 'test-idem-cust-'.$vatNumber]);
+        $id = $response->json('resource.id');
+        CounterpartyTrustProfile::where('business_party_id', $id)->update([
+            'trust_status' => 'AUTHORITY_VERIFIED', 'tax_registration_status' => 'ACTIVE',
+            'checked_at' => now(), 'expires_at' => now()->addYear(), 'updated_at' => now(),
+        ]);
 
-        return $response->json('resource.id');
+        return $id;
     }
 
     private function quotationFormPayload(string $customerPartyId, array $overrides = []): array
