@@ -11568,6 +11568,51 @@ a template-only gap, not a missing service method.
   page renders without error, all four tiles present (values legitimately
   zero for that account's own case history; the new test covers the
   non-zero case with real fixtures).
+## Bug fix: Organisations page was missing its metric tiles and its Capabilities column (2026-09-23)
+
+A fifth hit from the same field-level drift pass, with a second, related
+gap in the underlying query itself: `app/organisations/page.tsx` renders a
+metric-grid (Canonical organisations, Active branches, Linked identities,
+Pending registrations) that `resources/views/organisations/index.blade.php`
+had no equivalent for, and its organisation registry table's own
+Capabilities column (each row's active trading capabilities, e.g.
+BUYER/SELLER) was missing too -- and unlike the four prior template-only
+hits, this one traced back one layer further: `OrganisationService::list()`
+never selected capabilities at all, so the Blade layer had nothing to
+render even if it had tried.
+
+- `OrganisationService::list()` now selects `capabilities_summary`, a
+  correlated `GROUP_CONCAT` subquery against `organisation_capabilities`
+  matching `listOrganisations`'s own `ORGANISATION_QUERY` exactly
+  (active, date-effective capabilities only). Named distinctly from the
+  model's own `capabilities()` `HasMany` relation (used by `get()`'s
+  detail read) so a summary row's comma-joined string and a detail row's
+  relation collection never collide on the same attribute.
+- `OrganisationViewController::index()` now also stops double-querying:
+  `IdentityFoundationSnapshotService::getSnapshot()` already calls
+  `OrganisationService::list()` internally for its own `organisations`
+  key (matching source's `getIdentityFoundationSnapshot`, which calls
+  `listOrganisations` exactly once and reuses it for both the metric
+  count and the registry table) -- the controller previously called
+  `list()` a second time for its own separate `organisations` view
+  variable. Now it reuses `$snapshot['organisations']`.
+- `resources/views/organisations/index.blade.php` gained the four metric
+  tiles, a Capabilities column (status badges per active capability) on
+  the registry table, and the source's own static "ITAS integration
+  boundary is ready" notice (real page content, not data-driven, ported
+  for the same reason `resources/views/organisations/show.blade.php`
+  already carries the rest of this page's literal copy).
+- New test `OrganisationViewTest::test_the_index_page_renders_its_metric_tiles_and_capabilities_column`
+  seeds a real `ACTIVE` `BUYER` capability and both a `PENDING_VERIFICATION`
+  and an `APPROVED` registration application, and asserts the tile counts
+  and the capability badge render -- proving the pending-registration
+  filter excludes the approved one and the capability actually reaches
+  the page. Full suite: 1098 tests, 0 regressions.
+- Manually verified via a logged-in `namra-auditor@vat-msa.test` session
+  against real demo data: all four tiles rendered with real non-zero
+  counts (11 canonical organisations, 1 active branch), and the registry
+  table's Capabilities column showed real `Buyer`/`Seller` badges.
+
 ## New views: Offline continuity and Integrations pages (2026-09-23)
 
 Continuing the same gap-finding pass, but a different shape of gap this

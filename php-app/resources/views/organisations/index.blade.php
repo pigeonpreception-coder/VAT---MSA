@@ -9,6 +9,49 @@
     <p class="text-muted mb-0">Module 1's own identity foundation -- taxpayer organisations, identity providers, and platform-wide access counts.</p>
 </div>
 
+@php
+    $pendingRegistrations = collect($snapshot['registrations'])->whereNotIn('status', ['APPROVED', 'REJECTED', 'CANCELLED'])->count();
+@endphp
+
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Canonical organisations</span><span>O</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format(count($organisations)) }}</div>
+                <div class="small text-success">One-to-one taxpayer mappings</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Active branches</span><span>B</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($snapshot['access']['active_branches']) }}</div>
+                <div class="small text-muted">Branch-scoped access boundary</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Linked identities</span><span>ID</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($snapshot['access']['active_identity_links']) }}</div>
+                <div class="small text-muted">Provider subject links -- not email identity</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending registrations</span><span>!</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($pendingRegistrations) }}</div>
+                <div class="small text-warning">No auto-activation before authority checks</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-3 mb-3">
     <div class="col-md-8">
         <div class="card h-100">
@@ -24,6 +67,10 @@
                     </li>
                 @endforeach
             </ul>
+            <div class="alert alert-info mb-0 rounded-0 border-0 border-top small">
+                <strong>ITAS integration boundary is ready.</strong><br>
+                Live federation and taxpayer verification remain disabled until NamRA/ITAS confirms the protocol, claims and authoritative response contract.
+            </div>
         </div>
     </div>
     <div class="col-md-4">
@@ -48,6 +95,7 @@
                 <tr>
                     <th scope="col">Organisation</th>
                     <th scope="col">Taxpayer</th>
+                    <th scope="col">Capabilities</th>
                     <th scope="col">Status</th>
                     <th scope="col" class="text-end">Branches</th>
                     <th scope="col" class="text-end">Members</th>
@@ -58,12 +106,17 @@
                     <tr>
                         <td><a href="{{ route('organisations.show', $organisation->id) }}"><strong>{{ $organisation->legal_name }}</strong></a></td>
                         <td>{{ $organisation->taxpayer?->legal_name }} <span class="text-muted small">{{ $organisation->taxpayer?->vat_number }}</span></td>
+                        <td>
+                            @foreach (array_filter(explode(',', $organisation->capabilities_summary ?? '')) as $capability)
+                                <x-status-badge :value="$capability" type="status" />
+                            @endforeach
+                        </td>
                         <td><x-status-badge :value="$organisation->status" type="status" /></td>
                         <td class="text-end">{{ $organisation->branch_count }}</td>
                         <td class="text-end">{{ $organisation->member_count }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="5" class="text-center text-muted py-4">No organisations are visible in this scope.</td></tr>
+                    <tr><td colspan="6" class="text-center text-muted py-4">No organisations are visible in this scope.</td></tr>
                 @endforelse
             </tbody>
         </table>

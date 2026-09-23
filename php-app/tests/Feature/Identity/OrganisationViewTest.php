@@ -5,7 +5,9 @@ namespace Tests\Feature\Identity;
 use App\Models\Branch;
 use App\Models\MfaTotpCredential;
 use App\Models\Organisation;
+use App\Models\OrganisationCapability;
 use App\Models\OrganisationMembership;
+use App\Models\RegistrationApplication;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Support\Access\Totp;
@@ -95,6 +97,46 @@ class OrganisationViewTest extends TestCase
         $response->assertSee('Identity providers');
         $response->assertSee('ITAS identity provider');
         $response->assertSee($fx['organisation']->legal_name);
+    }
+
+    /**
+     * Gap-finding pass (2026-09-23): app/organisations/page.tsx renders a
+     * metric-grid (canonical organisations, active branches, linked
+     * identities, pending registrations) and a Capabilities column on the
+     * registry table -- this view had neither, even though
+     * IdentityFoundationSnapshotService::getSnapshot() already returns the
+     * data needed for all four tiles.
+     */
+    public function test_the_index_page_renders_its_metric_tiles_and_capabilities_column(): void
+    {
+        $fx = $this->ownerWithOrganisation();
+        OrganisationCapability::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $fx['organisation']->id, 'capability' => 'BUYER',
+            'status' => 'ACTIVE', 'effective_from' => now()->subDay(), 'effective_to' => null,
+        ]);
+        $admin = $this->pilotAdmin();
+        RegistrationApplication::create([
+            'id' => (string) Str::uuid(), 'idempotency_key' => Str::random(20), 'request_hash' => str_repeat('a', 64),
+            'vat_number' => 'VAT-VIEW-ORG-PENDING', 'tin' => 'TIN-VAT-VIEW-ORG-PENDING', 'legal_name' => 'Pending Applicant Co',
+            'taxpayer_type' => 'PRIVATE_COMPANY', 'return_frequency' => 'MONTHLY', 'address' => '1 Test Street',
+            'email' => 'pending-app@test.test', 'status' => 'PENDING_VERIFICATION', 'verification_source' => 'MANUAL',
+            'submitted_by' => $admin->id, 'submitted_at' => now(),
+        ]);
+        RegistrationApplication::create([
+            'id' => (string) Str::uuid(), 'idempotency_key' => Str::random(20), 'request_hash' => str_repeat('b', 64),
+            'vat_number' => 'VAT-VIEW-ORG-APPROVED', 'tin' => 'TIN-VAT-VIEW-ORG-APPROVED', 'legal_name' => 'Approved Applicant Co',
+            'taxpayer_type' => 'PRIVATE_COMPANY', 'return_frequency' => 'MONTHLY', 'address' => '1 Test Street',
+            'email' => 'approved-app@test.test', 'status' => 'APPROVED', 'verification_source' => 'MANUAL',
+            'submitted_by' => $admin->id, 'submitted_at' => now(), 'reviewed_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->get('/organisations');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Canonical organisations', '1']);
+        $response->assertSeeInOrder(['Active branches', '1']);
+        $response->assertSeeInOrder(['Pending registrations', '1']);
+        $response->assertSee('Buyer');
     }
 
     public function test_a_taxpayer_can_view_their_own_organisation_with_its_branch_and_membership(): void
