@@ -96,7 +96,7 @@ class VatLifecycleService
             ]))
             ->orderByDesc('m.created_at')->limit(100)->get();
 
-        $provider = $this->itasStatus();
+        $provider = $this->itasStatus($actor->organisation()?->id);
 
         return [
             'periods' => $periodRows, 'approvals' => $approvals, 'submissions' => $submissions,
@@ -459,7 +459,7 @@ class VatLifecycleService
                     'payload_hash' => $version->ledger_snapshot_hash,
                     'boxes' => $boxes->map(fn ($b) => ['code' => $b->box_code, 'amount_cents' => (int) $b->amount_cents])->all(),
                     'correlation_id' => $correlationId,
-                ]);
+                ], $taxpayer?->organisation?->id);
                 $status = $result['status'] === 'ACCEPTED' ? 'ACKNOWLEDGED' : 'REJECTED_BY_PROVIDER';
                 $providerReference = $result['provider_reference'];
                 $responseHash = $result['response_hash'];
@@ -524,9 +524,9 @@ class VatLifecycleService
     }
 
     /** @return array{provider: string, configured: bool, state: string, capabilities: list<string>} */
-    private function itasStatus(): array
+    private function itasStatus(?string $organisationId): array
     {
-        return $this->itas->status();
+        return $this->itas->status($organisationId);
     }
 
     /** @return array<string, mixed> */

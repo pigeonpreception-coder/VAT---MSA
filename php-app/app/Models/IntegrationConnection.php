@@ -14,14 +14,19 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * `organisation_id` NULL means a platform-wide connection (registered by a
  * national/platform-technical actor with no taxpayer of their own); a
- * present value scopes the row to that organisation. The four pre-seeded
- * government/banking/treasury connections (ITAS, BIPA, bank-org1,
- * treasury) already exist as rows here with free-text
+ * present value scopes the row to that organisation. Two pre-seeded
+ * platform-wide government connections (ITAS, E-Tariff/ETARIFF -- see
+ * database/seeders/IntegrationConnectionSeeder, added multi-tenant SaaS
+ * pivot phase 5, 2026-09-24) exist as rows here with free-text
  * "REQUIRES_*_CONTRACT" `configuration_status` values that deliberately
  * fall outside this service's own closed DRAFT/CONFIGURED/SUSPENDED enum
  * -- see App\Domain\Integration\IntegrationValidator::assertTransition's
  * own doc comment for why that keeps ApproveIntegration from ever
- * touching those four rows.
+ * touching either row. BIPA and the banking/treasury connections a much
+ * earlier doc comment here once also claimed were pre-seeded are not --
+ * that was never true of any of the four; only ITAS/E-Tariff are, and
+ * only as of phase 5, genuinely scoped to "generalize the ITAS/E-Tariff
+ * port contracts" (docs/MIGRATION_MATRIX.md's own phase 5 entry).
  */
 class IntegrationConnection extends Model
 {

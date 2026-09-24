@@ -225,7 +225,7 @@ class TaxpayerService
             $result = $this->itas->verifyTaxpayer([
                 'vat_number' => $taxpayer->vat_number, 'tin' => $taxpayer->tin, 'company_registration_number' => null,
                 'correlation_id' => $correlationId,
-            ]);
+            ], $taxpayer->organisation?->id);
             DB::transaction(function () use ($taxpayerId, $result, $actor, $correlationId) {
                 TaxpayerIdentifier::where('taxpayer_id', $taxpayerId)->whereIn('identifier_type', ['VAT_NUMBER', 'TIN'])
                     ->where('status', 'ACTIVE')->update(['verified_at' => $result['checked_at']]);
