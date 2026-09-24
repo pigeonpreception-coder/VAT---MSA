@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * `id` holds the source's own stable, human-readable seed IDs (e.g.
@@ -16,4 +17,10 @@ class TaxAuthority extends Model
     public $timestamps = false;
 
     protected $guarded = [];
+
+    /** Multi-tenant SaaS pivot phase 2 (2026-09-24) -- see Organisation::taxAuthority()'s own doc comment. */
+    public function organisations(): HasMany
+    {
+        return $this->hasMany(Organisation::class);
+    }
 }
