@@ -103,6 +103,7 @@
                     <th scope="col">Identity</th>
                     <th scope="col">Taxpayer verification</th>
                     <th scope="col">Licence</th>
+                    <th scope="col">Conflict</th>
                     <th scope="col">Submitted</th>
                 </tr>
             </thead>
@@ -129,10 +130,17 @@
                         <td><x-status-badge :value="$application['identity_status']" /></td>
                         <td><x-status-badge :value="$application['taxpayer_verification_status']" /></td>
                         <td><x-status-badge :value="$application['licence_status']" /></td>
+                        <td>
+                            @if ($application['identity_conflict_detected'])
+                                <span class="badge text-bg-danger">Conflict detected</span>
+                            @else
+                                <span class="badge text-bg-success">Clear</span>
+                            @endif
+                        </td>
                         <td>{{ optional($application['submitted_at'])->format('Y-m-d H:i') }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="9" class="text-center text-muted py-4">No self-serve applications. Public submissions will appear here after validation and deduplication.</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted py-4">No self-serve applications. Public submissions will appear here after validation and deduplication.</td></tr>
                 @endforelse
             </tbody>
         </table>

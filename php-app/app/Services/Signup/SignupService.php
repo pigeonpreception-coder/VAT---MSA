@@ -100,6 +100,12 @@ class SignupService
      * `/registrations` Blade view uses that to decide whether to render the
      * section at all, same as source).
      *
+     * Includes `identity_conflict_detected` -- the whole point of recording
+     * that flag on the row (see this class's own doc comment) is so a
+     * reviewer here can see it; the first cut of this page's Blade view
+     * left the column out, so the flag was reaching this method's own
+     * caller but not the admin actually reviewing the queue.
+     *
      * @return list<array<string, mixed>>
      */
     public function listSelfServeSignupApplications(User $user): array
@@ -125,6 +131,7 @@ class SignupService
                 'identity_status' => $application->identity_status,
                 'taxpayer_verification_status' => $application->taxpayer_verification_status,
                 'licence_status' => $application->licence_status,
+                'identity_conflict_detected' => $application->identity_conflict_detected,
                 'submitted_at' => $application->submitted_at,
             ])->values()->all();
     }
