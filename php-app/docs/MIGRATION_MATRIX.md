@@ -12442,3 +12442,107 @@ stateless group instead). Two were genuinely missing:
   own pre-existing one-off ITAS fixture row.
 - Remaining phase (not started, requires explicit user go-ahead): decide
   the per-tenant role-catalogue strategy (phase 6).
+
+## Multi-tenant SaaS pivot, phase 6: per-tenant role-catalogue strategy (2026-09-24)
+
+- User go-ahead given (2026-09-24) after phase 5 merged (PR #108). Every
+  prior phase's own "remaining phases" note has deferred this exact
+  decision. Research first (background Explore agent, this phase's own
+  full inventory kept for reference): `Permissions::ROLE_PERMISSIONS` is,
+  and always was even in the original TS source (`lib/domain/access.ts`),
+  a single static PHP map every tax authority shares -- two organisations
+  under two different authorities minting a `TAXPAYER_ADMIN` user get
+  identical permissions today, with no `tax_authority_id` dimension
+  anywhere in the resolution path. The one real authorization choke point
+  (`Gate::define('permission', ...)` -> `User::hasAppPermission()` ->
+  formerly `Permissions::roleHas()` directly) meant this was a small,
+  contained change -- the 110 controller call sites that call
+  `$this->authorize('permission', ...)` needed no changes at all.
+- **Design**: an authority's role catalogue, where one exists, is a
+  *complete replacement* permission set for a role code, not a diff
+  against the static map -- the simplest semantics for "this authority's
+  own catalogue for this role." New `tax_authority_role_permissions`
+  table (`tax_authority_id`/`role_code`/`permission_code`, FK'd to the
+  existing `tax_authorities`/`access_roles`/`access_permissions` tables
+  for referential integrity): one row per permission an authority grants
+  a role. Presence of at least one row for a (`tax_authority_id`,
+  `role_code`) pair means that authority customizes that role; absence
+  falls back to `Permissions::effectiveForRole()` exactly as before. No
+  rows are seeded for NamRA by this phase, so every existing tenant's
+  behaviour is unchanged by construction -- the same discipline every
+  phase 2-5 change in this pivot already applied.
+- Deliberately administratively configured, not self-service: unlike
+  `organisation_role_permissions` (tenant-defined custom roles, already
+  built in an earlier, pre-pivot phase, capped by
+  `Permissions::tenantGrantablePermissions()` because an organisation
+  admin is a less-trusted actor), a tax authority's own role catalogue is
+  platform-level configuration -- the same trust level as
+  `TaxRuleSet`/`VatRuleSet` rows -- so no such ceiling applies here. This
+  is a new, fourth axis alongside three that already existed (the
+  descriptive `access_roles`/`access_permissions`/`role_permission_grants`
+  catalogue nothing reads at runtime; the genuinely dynamic
+  organisation-level custom-role layer; and the unrelated Authority
+  Governance module's own segregation-of-duties `tax_authority_role_*`
+  tables) -- not a rebuild of any of them.
+- **New `App\Support\Access\AuthorityRolePermissions`**
+  (`hasCatalogue()`/`forRole()`/`roleHas()`): the one place
+  `User::hasAppPermission()` and `EffectiveAccessController::show()` (the
+  self-service "effective access" screen, which previously called
+  `Permissions::effectiveForRole($user->role)` directly) now go through
+  instead of `Permissions::roleHas()`/`effectiveForRole()`. New
+  `User::taxAuthorityId()`: null for a national-scope actor (no
+  `organisation()` to resolve one from) or a taxpayer-scoped user whose
+  Organisation row somehow doesn't exist -- both resolve to the static
+  fallback, matching every other defensive `??`-style resolver this pivot
+  has added.
+- **Two bugs found and fixed while wiring this up, both against this
+  session's own full test suite, neither previously exposed**:
+  1. *Query-count regression* (`BudgetsViewTest`/`ProjectManagementViewTest`/
+     `SupplierLedgerViewTest`): `AuthorityRolePermissions::forRole()`'s own
+     DB lookup, called fresh on every `hasAppPermission()` invocation,
+     turned one query per rendered page into one query per permission
+     check in views that build a per-row "can edit" flag (49-50 queries
+     for 40 rows instead of ~14-15). Fixed with the same instance-level
+     memoization discipline `User::organisation()` already established in
+     phase 4 -- costs exactly one query per `User` instance regardless of
+     call count. `SupplierLedgerViewTest`'s own fixed query-count ceiling
+     was raised 10 -> 11 even after memoization: this phase adds one
+     genuine, permanent, row-count-independent query (checking whether the
+     actor's tax authority customizes their role) that has no further
+     reduction available without introducing a cross-request cache layer
+     this codebase deliberately doesn't have (see `DynamicPermissions`'
+     own doc comment on preferring freshness over caching) -- a real new
+     architectural cost, not a reintroduced inefficiency, and the test's
+     own intent (no scaling with row count) still holds.
+  2. *`User::organisation()` crash on `refresh()`*: `organisation()` was
+     never a real Eloquent relationship method, so its phase 4 memoization
+     via `setRelation()`/`getRelation()` silently set an entry in the
+     model's `$relations` array under the key `'organisation'`. Harmless
+     until something called both `organisation()` and `Model::refresh()`
+     on the same instance in one request -- `refresh()` reloads every
+     currently-set relation via `$this->load(array_keys($this->relations))`,
+     which tries to eager-load `'organisation'` as a real relationship and
+     crashes with "Call to a member function addEagerConstraints() on
+     null" once `organisation()` returns anything other than a `Relation`
+     object. This phase's own `hasAppPermission()` change made
+     `organisation()` resolution part of every authorization check, not
+     just view rendering, and `TenantRoleEscalationTest`'s own
+     `$admin->refresh()` immediately after a permission check exposed it.
+     Fixed by switching `organisation()`'s memoization to a plain instance
+     property instead of Eloquent's relation-cache mechanism -- same
+     one-query-per-instance behaviour, no `$relations` array footprint, no
+     interface change for any of the ~10 existing callers.
+- New `AuthorityRoleCatalogueTest` (5 tests): a role with no authority
+  catalogue resolves the static set exactly; a second, fictitious tax
+  authority's catalogue genuinely replaces (not merely adds to) the
+  static set for its own organisations; NamRA is provably unaffected
+  (no override rows exist for its authority id); a national-scope user
+  with no organisation always resolves the static map regardless of any
+  authority's own catalogue; and a third organisation under a different
+  authority never sees another authority's catalogue.
+- Full suite: 1167 tests, 0 regressions.
+- No further phases planned for this pivot's original scope; future
+  per-tenant work (an admin UI over `tax_authority_role_permissions`,
+  `PortalDefinitions`'/`PortalService::capabilitySet()`'s own hardcoded
+  role-code arrays becoming authority-aware) remains genuinely
+  out-of-scope until explicitly requested.

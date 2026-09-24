@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Identity;
 
 use App\Http\Controllers\Controller;
 use App\Models\UserCapabilityAssignment;
+use App\Support\Access\AuthorityRolePermissions;
 use App\Support\Access\DynamicPermissions;
-use App\Support\Access\Permissions;
 use App\Support\Access\TaxpayerScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,7 +35,12 @@ class EffectiveAccessController extends Controller
                 ->where('status', 'ACTIVE')->pluck('capability')->unique()->sort()->values()->all()
             : [];
 
-        $permissions = collect(Permissions::effectiveForRole($user->role))
+        // Multi-tenant SaaS pivot phase 6 (2026-09-24): reflects the same
+        // authority-specific catalogue hasAppPermission() now resolves
+        // through, in place of the static Permissions::effectiveForRole()
+        // this always called directly -- see User::taxAuthorityId()'s own
+        // doc comment for why that's a no-op for every actor today.
+        $permissions = collect(AuthorityRolePermissions::forRole($user->taxAuthorityId(), $user->role))
             ->merge(DynamicPermissions::forUser($user))
             ->unique()->sort()->values()->all();
 
