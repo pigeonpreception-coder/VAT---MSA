@@ -119,6 +119,40 @@ class RegistrationsViewTest extends TestCase
         $nationalResponse->assertSee('Self Serve Trading');
     }
 
+    public function test_the_self_serve_queue_shows_the_identity_conflict_flag(): void
+    {
+        $admin = $this->nationalAdmin();
+        $plan = LicensePlan::create([
+            'id' => (string) Str::uuid(), 'code' => 'STARTER', 'name' => 'Starter', 'version' => 1,
+            'plan_domain' => 'COMMERCIAL_SAAS', 'status' => 'ACTIVE', 'effective_from' => now()->subDay(),
+        ]);
+        $shared = [
+            'onboarding_path' => 'COMPANY_ADMIN', 'country_code' => 'NA', 'requested_plan_id' => $plan->id,
+            'applicant_role' => 'COMPANY_ADMIN', 'taxpayer_type' => 'PRIVATE_COMPANY', 'return_frequency' => 'MONTHLY',
+            'address' => '1 Conflict Street', 'terms_version' => 'v1', 'privacy_notice_version' => 'v1',
+            'status' => 'PENDING_VERIFICATION', 'identity_status' => 'VERIFICATION_REQUIRED',
+            'taxpayer_verification_status' => 'AWAITING_PROVIDER_CONTRACT', 'licence_status' => 'NOT_ACTIVATED', 'submitted_at' => now(),
+        ];
+        SelfServeSignupApplication::create([...$shared,
+            'id' => (string) Str::uuid(), 'public_reference' => 'VMS-2026-CONFLICTED01', 'idempotency_key' => 'selfserve-conflict-key-0001',
+            'request_hash' => str_repeat('c', 64), 'applicant_name' => 'Conflicted Applicant', 'contact_email' => 'conflicted@selfserve.test',
+            'vat_number' => 'VAT-CONFLICT-0001', 'tin' => 'TIN-CONFLICT-0001', 'legal_name' => 'Conflicted Trading',
+            'identity_conflict_detected' => true,
+        ]);
+        SelfServeSignupApplication::create([...$shared,
+            'id' => (string) Str::uuid(), 'public_reference' => 'VMS-2026-CLEARAPP01', 'idempotency_key' => 'selfserve-clear-key-0001',
+            'request_hash' => str_repeat('d', 64), 'applicant_name' => 'Clear Applicant', 'contact_email' => 'clear@selfserve.test',
+            'vat_number' => 'VAT-CLEAR-0001', 'tin' => 'TIN-CLEAR-0001', 'legal_name' => 'Clear Trading',
+            'identity_conflict_detected' => false,
+        ]);
+
+        $response = $this->actingAs($admin)->get('/registrations');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Conflicted Trading', 'Conflict detected']);
+        $response->assertSeeInOrder(['Clear Trading', 'Clear']);
+    }
+
     public function test_a_taxpayer_owner_can_submit_a_registration_application_through_the_form(): void
     {
         $owner = $this->taxpayerOwner();
