@@ -14,6 +14,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\Developer\DeveloperPlatformController;
 use App\Http\Controllers\Identity\BranchController;
+use App\Http\Controllers\Identity\EffectiveAccessController;
 use App\Http\Controllers\Identity\IdentityFoundationController;
 use App\Http\Controllers\Identity\IdentityLinkController;
 use App\Http\Controllers\Identity\IdentityProofingCaseController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\Identity\OrganisationViewController;
 use App\Http\Controllers\Identity\RegistrationApplicationController;
 use App\Http\Controllers\Identity\RegistrationsViewController;
 use App\Http\Controllers\Identity\TaxpayerController;
+use App\Http\Controllers\Identity\TransactionClassificationController;
 use App\Http\Controllers\Identity\TaxpayerViewController;
 use App\Http\Controllers\Identity\UserController;
 use App\Http\Controllers\Identity\UserInvitationController;
@@ -823,6 +825,14 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         Route::post('/registration-applications/{id}/decision', [RegistrationApplicationController::class, 'decision'])
             ->middleware(['step-up', 'rate-limit:registration']);
         Route::get('/identity-proofing-cases', [IdentityProofingCaseController::class, 'index']);
+
+        // Ported from app/api/v1/me/access/route.ts -- see
+        // EffectiveAccessController's own doc comment.
+        Route::get('/me/access', [EffectiveAccessController::class, 'show']);
+
+        // Ported from app/api/v1/counterparties/classification/route.ts --
+        // see TransactionClassificationController's own doc comment.
+        Route::get('/counterparties/classification', [TransactionClassificationController::class, 'show']);
 
         // getIdentityFoundationSnapshot -- Module 1's own dashboard
         // aggregate (organisations + registrations + identity providers +

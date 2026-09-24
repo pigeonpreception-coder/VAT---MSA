@@ -11986,3 +11986,45 @@ page header rendered with no call to action.
   Full suite: 1130 tests, 0 regressions.
 - Manually verified via a logged-in `admin@vat-msa.test` session: the
   button renders at `/organisations`.
+
+## Two JSON routes with no Laravel equivalent at all (2026-09-24)
+
+A new angle: an exhaustive, systematic cross-check of every one of the
+203 `app/api/v1/**/route.ts` files against `routes/web.php`, rather than
+the metric-tile/UI-content diffing this pass had been using. 201 of 203
+were already covered (including one, `signup-applications`, deliberately
+registered outside `routes/web.php`'s `api/v1` group, in `routes/api.php`'s
+stateless group instead). Two were genuinely missing:
+
+- **`GET /api/v1/me/access`** (`lib/domain/access.ts`'s `getUserAccess`) --
+  a self-service "effective access" readback (organisation/taxpayer/role/
+  national-scope/capabilities/permissions) for the current session had no
+  Laravel route at all. New `EffectiveAccessController::show()` composes
+  it from already-existing, already-tested building blocks --
+  `App\Support\Access\DynamicPermissions::homeOrganisationId()`/`forUser()`
+  (the Phase 12 slice 2 dynamic-permission resolver) and
+  `Permissions::effectiveForRole()` -- no new query logic. Source's own
+  `isDevelopmentIdentity` field (a local-only step-up bypass -- see
+  `App\Support\Access\StepUp`'s own doc comment) was deliberately never
+  ported anywhere in this migration, so it's hardcoded `false` here: no
+  identity of that type exists in this deployment. No permission gate
+  beyond authentication, matching source exactly -- this only ever
+  reflects the caller's own access.
+- **`GET /api/v1/counterparties/classification`** (`lib/data/identity-repository.ts`'s
+  `classifyTransaction`) -- a pre-flight counterparty check by raw VAT
+  number, usable before any `BusinessParty` record or invoice exists. The
+  underlying logic (`App\Support\Business\TransactionClassifier::classify()`)
+  already existed and was already reused internally by
+  `SupplierVerificationService::verify()`, but had no standalone route.
+  New `TransactionClassificationController::show()` validates the VAT
+  number against the same identifier pattern `SubmitRegistrationRequest`
+  already uses, then calls the existing classifier directly.
+- New tests: `EffectiveAccessTest` (3 tests: auth gate, a national-scope
+  actor's static-only permission set, a taxpayer-scoped actor's
+  organisation/capabilities/dynamic-role-permission resolution) and
+  `TransactionClassificationTest` (5 tests: auth gate, permission gate,
+  malformed VAT number rejected, unknown VAT number classifies fully
+  inactive, an active counterparty with a real capability classifies
+  correctly). Full suite: 1138 tests, 0 regressions.
+- Manually verified via a logged-in `admin@vat-msa.test` session against
+  both real endpoints over HTTP.
