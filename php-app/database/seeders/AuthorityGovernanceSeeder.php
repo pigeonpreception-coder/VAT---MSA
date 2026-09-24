@@ -29,7 +29,7 @@ class AuthorityGovernanceSeeder extends Seeder
         );
         DB::table('tax_authorities')->updateOrInsert(
             ['id' => 'tax-authority-na-namra'],
-            ['jurisdiction_id' => 'tax-jurisdiction-na-national', 'code' => 'NAMRA', 'name' => 'Namibia Revenue Agency', 'status' => 'ACTIVE', 'created_at' => now()],
+            ['jurisdiction_id' => 'tax-jurisdiction-na-national', 'code' => 'NAMRA', 'short_name' => 'NamRA', 'name' => 'Namibia Revenue Agency', 'status' => 'ACTIVE', 'created_at' => now()],
         );
 
         $roles = [

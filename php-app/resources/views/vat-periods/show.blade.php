@@ -3,7 +3,7 @@
 @section('title', $period['period_code'])
 
 @php
-    $money = fn (int $cents) => 'NAD '.number_format($cents / 100, 2);
+    $money = fn (int $cents) => $tenantCurrencyCode.' '.number_format($cents / 100, 2);
     $date = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y') : '—';
     $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
     $blockingStatuses = ['PENDING_APPROVAL', 'APPROVED', 'AWAITING_PROVIDER', 'FILED'];
@@ -190,7 +190,7 @@
                     @error('direction')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-2">
-                    <label for="amount" class="form-label">Amount (NAD)</label>
+                    <label for="amount" class="form-label">Amount ({{ $tenantCurrencyCode }})</label>
                     <input type="number" step="0.01" min="0.01" id="amount" name="amount" value="{{ old('amount') }}" class="form-control @error('amount_cents') is-invalid @enderror" required>
                     @error('amount_cents')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>

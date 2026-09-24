@@ -34,8 +34,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Requested value</span><span>N$</span></div>
-                <div class="fs-2 fw-semibold">NAD {{ number_format($requestedValueCents / 100, 2) }}</div>
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Requested value</span><span>{{ $tenantCurrencySymbol }}</span></div>
+                <div class="fs-2 fw-semibold">{{ $tenantCurrencyCode }} {{ number_format($requestedValueCents / 100, 2) }}</div>
                 <div class="small text-muted">Not an approved payment amount</div>
             </div>
         </div>
@@ -60,8 +60,8 @@
             </span>
         </div>
         <div class="card-body">
-            <p class="text-muted small mb-2">Claims that have cleared every review stage but have no payment instruction recorded yet -- what NamRA owes once Payment is authorised.</p>
-            <div class="fs-4 fw-semibold">NAD {{ number_format($outstanding['total_outstanding_cents'] / 100, 2) }}</div>
+            <p class="text-muted small mb-2">Claims that have cleared every review stage but have no payment instruction recorded yet -- what {{ $tenantAuthorityShortName }} owes once Payment is authorised.</p>
+            <div class="fs-4 fw-semibold">{{ $tenantCurrencyCode }} {{ number_format($outstanding['total_outstanding_cents'] / 100, 2) }}</div>
         </div>
         @if (count($outstanding['claims']))
             <div class="table-responsive">
@@ -73,7 +73,7 @@
                             <tr>
                                 <td><a href="{{ route('refunds.show', $claim['id']) }}">{{ $claim['claim_number'] }}</a></td>
                                 <td>{{ $claim['legal_name'] }}</td>
-                                <td>NAD {{ number_format(($claim['net_payable_cents'] ?? $claim['amount_cents']) / 100, 2) }}</td>
+                                <td>{{ $tenantCurrencyCode }} {{ number_format(($claim['net_payable_cents'] ?? $claim['amount_cents']) / 100, 2) }}</td>
                                 <td>{{ $claim['approved_at'] ? \Illuminate\Support\Carbon::parse($claim['approved_at'])->format('d M Y') : '—' }}</td>
                             </tr>
                         @endforeach
@@ -151,7 +151,7 @@
 
 <div class="mt-5">
     <div class="text-uppercase text-muted small fw-semibold">VAT Refund Report</div>
-    <h2 class="h4 mb-3">NamRA VAT Summary Report</h2>
+    <h2 class="h4 mb-3">{{ $tenantAuthorityShortName }} VAT Summary Report</h2>
 
     <div class="card mb-3">
         <div class="card-body">
@@ -175,7 +175,7 @@
     @else
         @php
             $np = $namraSummary['period'];
-            $nfmt = fn (int $cents) => 'N$ '.number_format($cents / 100, 2);
+            $nfmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
         @endphp
         <div class="card mb-3">
             <div class="card-body">

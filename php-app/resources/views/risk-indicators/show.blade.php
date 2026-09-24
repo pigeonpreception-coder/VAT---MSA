@@ -10,7 +10,7 @@
 @section('content')
 <div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
     <div>
-        <div class="text-uppercase text-muted small fw-semibold">Risk indicator &middot; NamRA-restricted</div>
+        <div class="text-uppercase text-muted small fw-semibold">Risk indicator &middot; {{ $tenantAuthorityShortName }}-restricted</div>
         <h1 class="h3 mb-1">{{ $titleCase($indicator->indicator_code) }}</h1>
         <p class="text-muted mb-0">{{ $taxpayer->legal_name ?? 'Unknown subject' }} @if ($taxpayer) &middot; {{ $taxpayer->vat_number }} @endif</p>
     </div>

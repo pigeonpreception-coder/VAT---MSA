@@ -73,7 +73,7 @@ class ProjectManagementViewController extends Controller
         $this->authorize('permission', 'projects:manage');
         $payload = [
             'schema_version' => '1.0.0', 'code' => $request->input('code'), 'name' => $request->input('name'),
-            'customer_party_id' => $request->input('customer_party_id') ?: null, 'currency' => 'NAD',
+            'customer_party_id' => $request->input('customer_party_id') ?: null, 'currency' => $request->user()->organisation()?->currencyCode() ?? 'NAD',
             'start_date' => $request->input('start_date'), 'end_date' => $request->input('end_date') ?: null,
             'budget_cents' => $this->safeIntegerInput($request->input('budget_cents')) ?: null,
         ];

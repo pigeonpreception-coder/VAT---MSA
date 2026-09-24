@@ -59,6 +59,16 @@ class ReportExportService
     /** Fallback only -- read live via PlatformConfigReader::int('reports.min_cell_suppression_threshold', ...) below when an ACTIVE platform_config row exists. */
     private const MIN_CELL_SUPPRESSION_THRESHOLD_DEFAULT = 10;
 
+    /**
+     * Multi-tenant SaaS pivot phase 4 (2026-09-24): deliberately left
+     * hardcoded, unlike the per-organisation currency literals this phase
+     * swept elsewhere. This report definitions engine aggregates figures
+     * *across* taxpayers for the platform/NamRA side, not for one
+     * organisation -- there is no single Organisation to resolve a
+     * currency from, and denominating a genuinely cross-tenant aggregate
+     * (once a second tax authority is real) is a real design question of
+     * its own, not a mechanical literal swap. Left for a later phase.
+     */
     private const CURRENCY_BASIS = 'NAD';
 
     public function __construct(private readonly OrganisationResolver $organisations) {}

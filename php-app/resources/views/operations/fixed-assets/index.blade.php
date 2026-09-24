@@ -54,7 +54,7 @@
                                 </td>
                                 <td>{{ ucwords(strtolower(str_replace('_', ' ', $asset['category']))) }}</td>
                                 <td>{{ $asset['location_or_address'] }}</td>
-                                <td>NAD {{ number_format(($asset['current_value_cents'] ?? $asset['acquisition_cost_cents']) / 100, 2) }}</td>
+                                <td>{{ $tenantCurrencyCode }} {{ number_format(($asset['current_value_cents'] ?? $asset['acquisition_cost_cents']) / 100, 2) }}</td>
                                 <td><x-status-badge :value="$asset['status']" type="status" /></td>
                                 @if ($canManage)
                                     <td>

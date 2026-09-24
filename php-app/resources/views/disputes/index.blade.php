@@ -48,7 +48,7 @@
                     @error('disputed_resource_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-2">
-                    <label for="disputed_amount" class="form-label small mb-0">Disputed amount (NAD)</label>
+                    <label for="disputed_amount" class="form-label small mb-0">Disputed amount ({{ $tenantCurrencyCode }})</label>
                     <input type="number" step="0.01" min="0" id="disputed_amount" name="disputed_amount" value="{{ old('disputed_amount') }}" class="form-control form-control-sm @error('disputed_amount_cents') is-invalid @enderror" required>
                     @error('disputed_amount_cents')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>

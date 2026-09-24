@@ -55,6 +55,37 @@ class User extends Authenticatable
     }
 
     /**
+     * Multi-tenant SaaS pivot phase 4 (2026-09-24): the single convenience
+     * accessor every controller-side currency/branding literal this phase
+     * swept now goes through, in place of re-deriving `taxpayer->
+     * organisation` at each call site. Null for a national-scope actor
+     * (no `taxpayer_id` at all -- see isNationalScope()'s own doc
+     * comment) or a taxpayer whose Organisation row somehow doesn't exist;
+     * every caller treats that the same way Organisation's own resolver
+     * methods treat an unresolvable tax authority -- default to today's
+     * only tenant's values, never an error.
+     *
+     * Queries `organisations` directly (by `taxpayer_id`) rather than
+     * going through the `taxpayer()` relation first -- one query instead
+     * of two -- and memoizes via setRelation()/getRelation() so repeated
+     * calls on the same instance (the global tenant-branding view composer
+     * calls this once per rendered view, including every `@include`d
+     * partial, and this session's own SupplierLedgerViewTest asserts a
+     * fixed, row-count-independent query ceiling every page must respect)
+     * cost exactly one query for the whole request, not one per call --
+     * safe because `Auth::user()` returns the same cached model instance
+     * throughout a request.
+     */
+    public function organisation(): ?Organisation
+    {
+        if (! $this->relationLoaded('organisation')) {
+            $this->setRelation('organisation', $this->taxpayer_id ? Organisation::where('taxpayer_id', $this->taxpayer_id)->first() : null);
+        }
+
+        return $this->getRelation('organisation');
+    }
+
+    /**
      * Module 1's isNationalScope (lib/domain/access.ts): a national-scope
      * actor has no taxpayer_id and holds one of the national-only roles --
      * NamRA/pilot-admin/internal-audit/security roles that see across every

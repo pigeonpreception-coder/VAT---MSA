@@ -18,7 +18,7 @@
         <div class="card h-100"><div class="card-body">
             <div class="text-muted small text-uppercase">Expenses</div>
             <div class="fs-2 fw-semibold">{{ number_format($expenses->count()) }}</div>
-            <div class="small text-muted">NAD {{ number_format($expenseValueCents / 100, 2) }} recorded</div>
+            <div class="small text-muted">{{ $tenantCurrencyCode }} {{ number_format($expenseValueCents / 100, 2) }} recorded</div>
         </div></div>
     </div>
     <div class="col">
@@ -244,7 +244,7 @@
                                 <td><strong>{{ optional($balance->product)->name }}</strong></td>
                                 <td class="font-monospace">{{ optional($balance->product)->sku }}</td>
                                 <td>{{ $quantity($balance->quantity_micros) }}</td>
-                                <td>NAD {{ number_format($balance->average_cost_cents / 100, 2) }}</td>
+                                <td>{{ $tenantCurrencyCode }} {{ number_format($balance->average_cost_cents / 100, 2) }}</td>
                             </tr>
                         @empty
                             <tr><td colspan="5" class="text-center text-muted py-4">No inventory balances on record.</td></tr>

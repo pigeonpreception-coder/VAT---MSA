@@ -20,7 +20,7 @@
         <div class="card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Output VAT</span><span>O</span></div>
-                <div class="fs-2 fw-semibold">N$ {{ number_format($outputTaxCents / 100, 2) }}</div>
+                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($outputTaxCents / 100, 2) }}</div>
                 <div class="small text-muted">Certificate-backed seller liability</div>
             </div>
         </div>
@@ -29,7 +29,7 @@
         <div class="card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Eligible input</span><span>I</span></div>
-                <div class="fs-2 fw-semibold">N$ {{ number_format($inputTaxCents / 100, 2) }}</div>
+                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($inputTaxCents / 100, 2) }}</div>
                 <div class="small text-muted">Matched buyer evidence only</div>
             </div>
         </div>
@@ -38,7 +38,7 @@
         <div class="card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Net position</span><span>&Sigma;</span></div>
-                <div class="fs-2 fw-semibold">N$ {{ number_format(($outputTaxCents - $inputTaxCents) / 100, 2) }}</div>
+                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format(($outputTaxCents - $inputTaxCents) / 100, 2) }}</div>
                 <div class="small text-muted">Across latest controlled versions</div>
             </div>
         </div>

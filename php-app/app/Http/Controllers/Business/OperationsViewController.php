@@ -160,7 +160,7 @@ class OperationsViewController extends Controller
             'schema_version' => '1.0.0', 'category_id' => $request->input('category_id'),
             'supplier_party_id' => $request->input('supplier_party_id') ?: null,
             'expense_number' => $request->input('expense_number'), 'expense_date' => $request->input('expense_date'),
-            'description' => $request->input('description'), 'currency' => 'NAD',
+            'description' => $request->input('description'), 'currency' => $request->user()->organisation()?->currencyCode() ?? 'NAD',
             'net_cents' => $netCents, 'tax_cents' => $taxCents, 'total_cents' => $netCents + $taxCents,
         ];
 

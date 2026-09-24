@@ -69,7 +69,7 @@ class PurchaseOrderViewController extends Controller
         $payload = [
             'schema_version' => '1.0.0', 'supplier_party_id' => $request->input('supplier_party_id'),
             'category_id' => $request->input('category_id'), 'po_number' => $request->input('po_number'),
-            'currency' => 'NAD', 'issue_date' => $request->input('issue_date'), 'valid_until' => $request->input('valid_until'),
+            'currency' => $request->user()->organisation()?->currencyCode() ?? 'NAD', 'issue_date' => $request->input('issue_date'), 'valid_until' => $request->input('valid_until'),
             'description' => $request->input('description'), 'net_cents' => $netCents, 'tax_cents' => $taxCents,
             'total_cents' => $netCents + $taxCents, 'notes' => $request->input('notes') ?: null,
         ];

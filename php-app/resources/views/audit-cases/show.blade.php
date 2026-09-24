@@ -5,7 +5,7 @@
 @php
     $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
     $dateTime = fn ($value) => $value ? \Illuminate\Support\Carbon::parse($value)->format('d M Y, H:i') : '—';
-    $money = fn (int $cents, string $currency = 'NAD') => $currency.' '.number_format($cents / 100, 2);
+    $money = fn (int $cents, ?string $currency = null) => ($currency ?? $tenantCurrencyCode).' '.number_format($cents / 100, 2);
     $actorName = fn (?string $id) => $id ? ($actorNames[$id] ?? $id) : '—';
 @endphp
 
@@ -174,7 +174,7 @@
                         @error('title')<div class="invalid-feedback">{{ $message }}</div>@enderror
                     </div>
                     <div class="col-md-2">
-                        <label for="finding-amount" class="form-label small mb-0">Amount (NAD)</label>
+                        <label for="finding-amount" class="form-label small mb-0">Amount ({{ $tenantCurrencyCode }})</label>
                         <input type="number" step="0.01" min="0" id="finding-amount" name="amount" value="{{ old('amount') }}" class="form-control form-control-sm @error('amount_cents') is-invalid @enderror" required>
                         @error('amount_cents')<div class="invalid-feedback">{{ $message }}</div>@enderror
                     </div>

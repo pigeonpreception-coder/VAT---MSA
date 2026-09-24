@@ -32,7 +32,7 @@
 @else
     @php
         $p = $report['period'];
-        $fmt = fn (int $cents) => 'N$ '.number_format($cents / 100, 2);
+        $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
     @endphp
 
     <div class="card mb-4">

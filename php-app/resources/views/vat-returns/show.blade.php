@@ -7,7 +7,7 @@
 @section('title', 'Return v'.$version['version_number'])
 
 @php
-    $money = fn (int $cents) => 'NAD '.number_format($cents / 100, 2);
+    $money = fn (int $cents) => $tenantCurrencyCode.' '.number_format($cents / 100, 2);
     $dateTime = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y, H:i') : '—';
     $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
     $pendingApproval = collect($detail['approvals'])->firstWhere('status', 'PENDING');

@@ -60,6 +60,56 @@ class Organisation extends Model
         return $this->taxAuthority?->jurisdiction?->country?->currency_code ?? 'NAD';
     }
 
+    /**
+     * Multi-tenant SaaS pivot phase 4 (2026-09-24): the currency *symbol*
+     * ('N$'), not the ISO code (`currencyCode()`, 'NAD') -- used by Blade
+     * views that display an amount with a symbol prefix, in place of the
+     * hardcoded 'N$' literals this phase swept out of them. Resolved the
+     * same way, walking the same chain; see currencyCode()'s own doc
+     * comment for why the '??' fallback is defensive only.
+     */
+    public function currencySymbol(): string
+    {
+        return $this->taxAuthority?->jurisdiction?->country?->currency_symbol ?? 'N$';
+    }
+
+    /**
+     * Multi-tenant SaaS pivot phase 4 (2026-09-24): this organisation's
+     * licensed tax authority's own technical code ('NAMRA', uppercase --
+     * `tax_authorities.code`, e.g. for a future machine-readable context)
+     * and full display name ('Namibia Revenue Agency'). Resolved directly
+     * off taxAuthority() (`tax_authorities.code`/`name` already held both,
+     * unlike currencySymbol()/currencyCode() which needed the jurisdiction/
+     * country hop) -- the '??' fallback is defensive only, for the same
+     * reason given on taxAuthority()'s own doc comment.
+     */
+    public function taxAuthorityCode(): string
+    {
+        return $this->taxAuthority?->code ?? 'NAMRA';
+    }
+
+    public function taxAuthorityName(): string
+    {
+        return $this->taxAuthority?->name ?? 'Namibia Revenue Agency';
+    }
+
+    /**
+     * Multi-tenant SaaS pivot phase 4 (2026-09-24): the authority's own
+     * short, stylized brand mention for running prose ("what NamRA owes",
+     * "approved by NamRA") -- neither the uppercase technical `code`
+     * ('NAMRA', shout-cased and visibly wrong mid-sentence) nor the full
+     * `name` ('Namibia Revenue Agency', too formal for a short mention)
+     * fits; `tax_authorities.short_name` is its own column for exactly
+     * this (see the phase 4 migration that added it, and its own doc
+     * comment on why `code` alone would have been a real, visible
+     * regression for today's only tenant). In place of the hardcoded
+     * "NamRA" literals this phase swept out of Blade views.
+     */
+    public function taxAuthorityShortName(): string
+    {
+        return $this->taxAuthority?->short_name ?? 'NamRA';
+    }
+
     public function branches(): HasMany
     {
         return $this->hasMany(Branch::class);

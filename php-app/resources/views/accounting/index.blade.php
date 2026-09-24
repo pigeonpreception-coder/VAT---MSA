@@ -34,8 +34,8 @@
     <div class="col">
         <div class="card h-100"><div class="card-body">
             <div class="text-muted small text-uppercase">Currency</div>
-            <div class="fs-2 fw-semibold">N$</div>
-            <div class="small text-muted">Namibian-dollar reporting currency</div>
+            <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }}</div>
+            <div class="small text-muted">{{ $tenantCurrencyCode }} reporting currency</div>
         </div></div>
     </div>
 </div>

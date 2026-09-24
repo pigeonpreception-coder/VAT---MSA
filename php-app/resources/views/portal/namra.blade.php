@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'NamRA portal')
+@section('title', $tenantAuthorityShortName.' portal')
 
 @php
     $dateTime = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y, H:i') : '—';
@@ -12,9 +12,9 @@
 
 @section('content')
 <div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">NamRA officer workspace</div>
+    <div class="text-uppercase text-muted small fw-semibold">{{ $tenantAuthorityShortName }} officer workspace</div>
     <h1 class="h3 mb-1">Due, abnormal, unresolved and assigned work</h1>
-    <p class="text-muted mb-0">National tax data and internal indicators appear only for authorised NamRA roles. Risk indicators remain advisory and require human evidence-led review before any adverse action.</p>
+    <p class="text-muted mb-0">National tax data and internal indicators appear only for authorised {{ $tenantAuthorityShortName }} roles. Risk indicators remain advisory and require human evidence-led review before any adverse action.</p>
 </div>
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">

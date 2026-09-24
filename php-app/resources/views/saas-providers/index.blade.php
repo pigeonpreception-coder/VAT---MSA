@@ -6,7 +6,7 @@
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Developer domain</div>
     <h1 class="h3 mb-1">SaaS provider onboarding</h1>
-    <p class="text-muted mb-0">Register a SaaS/ERP/accounting integration provider and take it through NamRA's fixed conformance test harness before it may operate against SANDBOX or PRODUCTION data.</p>
+    <p class="text-muted mb-0">Register a SaaS/ERP/accounting integration provider and take it through {{ $tenantAuthorityShortName }}'s fixed conformance test harness before it may operate against SANDBOX or PRODUCTION data.</p>
 </div>
 
 @if ($errors->any())

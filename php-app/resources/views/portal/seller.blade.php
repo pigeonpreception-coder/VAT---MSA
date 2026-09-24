@@ -3,7 +3,7 @@
 @section('title', 'Seller portal')
 
 @php
-    $money = fn (int $cents, ?string $currency = null) => trim(($currency ?? 'NAD').' '.number_format($cents / 100, 2));
+    $money = fn (int $cents, ?string $currency = null) => trim(($currency ?? $tenantCurrencyCode).' '.number_format($cents / 100, 2));
     $date = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y') : '—';
     $outputVat = collect($snapshot['vat']['periods'])->sum(fn ($period) => (int) ($period['output_tax_cents'] ?? 0));
 @endphp
