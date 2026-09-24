@@ -12028,3 +12028,36 @@ stateless group instead). Two were genuinely missing:
   correctly). Full suite: 1138 tests, 0 regressions.
 - Manually verified via a logged-in `admin@vat-msa.test` session against
   both real endpoints over HTTP.
+
+## Session-revocation actions wrote no audit trail (2026-09-24)
+
+- Gap-finding pass, specific angle: audit-log completeness across the
+  Laravel-only additions (no `page.tsx`/route in the TS source, so no
+  direct port comparison applies) -- specifically MFA/session self-
+  service (`App\Http\Controllers\Identity\MfaViewController`, added
+  Phase: MFA/step-up cutover) and the pre-existing password-reset flow
+  (`App\Http\Requests\Auth\ResetPasswordRequest`, RT-005). Neither
+  `MfaViewController::revokeSession()`/`revokeOtherSessions()` nor
+  `ResetPasswordRequest::resetPassword()`'s own blanket `sessions` wipe
+  wrote an `audit_events` row, unlike every other security-sensitive
+  actor action already logged elsewhere in this codebase
+  (`MfaService`'s own enrollment/step-up events,
+  `SecurityOperationsService`'s `SECURITY_INCIDENT_ACCESS_REVOKED`). No
+  TS source convention exists to diverge from here -- this only brings
+  these two Laravel-only paths in line with this codebase's own
+  established audit-logging pattern, closing the one gap where a
+  compromised-account holder's own remediation step (revoking a
+  suspected attacker's session) left no trail.
+- Fix: `AuditService::append()` calls added --
+  `USER_SESSION_REVOKED` (only on an actual deletion, not a no-op replay
+  of an already-gone session id), `USER_ALL_OTHER_SESSIONS_REVOKED`, and
+  `PASSWORD_RESET_SESSIONS_REVOKED`, each keyed to the affected user as
+  `resource_type => 'USER'`.
+- New/updated tests:
+  `MfaViewTest::test_a_user_can_revoke_one_of_their_own_other_sessions_but_not_someone_elses`
+  and `::test_log_out_other_sessions_removes_every_other_session_but_leaves_the_current_one`
+  now assert the corresponding `audit_events` row; new
+  `::test_revoking_an_already_gone_session_writes_no_audit_event` proves
+  the no-op case stays silent; `PasswordResetTest::test_a_password_reset_invalidates_every_existing_session_for_that_user`
+  now asserts `PASSWORD_RESET_SESSIONS_REVOKED`. Full suite: 1140 tests,
+  0 regressions.

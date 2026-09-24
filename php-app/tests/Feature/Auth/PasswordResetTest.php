@@ -176,6 +176,7 @@ class PasswordResetTest extends TestCase
 
         $this->assertSame(0, DB::table('sessions')->where('user_id', $user->id)->count(), 'Every session for the reset user must be gone.');
         $this->assertSame(1, DB::table('sessions')->where('user_id', $otherUser->id)->count(), 'A different users own session must be left untouched.');
+        $this->assertDatabaseHas('audit_events', ['action' => 'PASSWORD_RESET_SESSIONS_REVOKED', 'resource_id' => $user->id]);
     }
 
     public function test_an_expired_or_invalid_token_is_rejected_with_a_generic_message(): void
