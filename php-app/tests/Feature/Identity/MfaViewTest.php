@@ -159,10 +159,26 @@ class MfaViewTest extends TestCase
             ->assertRedirect(route('security.mfa'))
             ->assertSessionHas('status');
         $this->assertSame(0, DB::table('sessions')->where('id', 'sess-revoke-mine')->count());
+        $this->assertDatabaseHas('audit_events', ['action' => 'USER_SESSION_REVOKED', 'resource_id' => $user->id]);
 
         $this->actingAs($user)->post('/security/sessions/sess-revoke-other/revoke')
             ->assertRedirect(route('security.mfa'));
         $this->assertSame(1, DB::table('sessions')->where('id', 'sess-revoke-other')->count(), "One user must not be able to revoke another user's session.");
+    }
+
+    /**
+     * Gap-finding pass (2026-09-24): a no-op revoke (the session was
+     * already gone, e.g. a stale link) must not write a misleading
+     * "revoked" audit entry -- it only ever fires on an actual deletion.
+     */
+    public function test_revoking_an_already_gone_session_writes_no_audit_event(): void
+    {
+        $user = $this->makeUser('mfa-view-revoke-gone@test.test');
+
+        $this->actingAs($user)->post('/security/sessions/sess-already-gone/revoke')
+            ->assertRedirect(route('security.mfa'))
+            ->assertSessionHas('status', 'That session was already gone.');
+        $this->assertDatabaseMissing('audit_events', ['action' => 'USER_SESSION_REVOKED']);
     }
 
     /**
@@ -213,5 +229,6 @@ class MfaViewTest extends TestCase
 
         $this->assertSame(1, DB::table('sessions')->where('user_id', $user->id)->count());
         $this->assertSame(1, DB::table('sessions')->where('id', $currentSessionId)->count(), 'The current session must survive "log out other sessions".');
+        $this->assertDatabaseHas('audit_events', ['action' => 'USER_ALL_OTHER_SESSIONS_REVOKED', 'resource_id' => $user->id]);
     }
 }

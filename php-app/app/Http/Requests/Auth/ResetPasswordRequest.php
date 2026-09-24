@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Auth;
 
 use App\Models\User;
+use App\Services\Audit\AuditService;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +65,13 @@ class ResetPasswordRequest extends FormRequest
                 // including the one this reset was submitted from -- to log
                 // in again with the new credential.
                 DB::table('sessions')->where('user_id', $user->id)->delete();
+
+                // Gap-finding pass (2026-09-24): this blanket wipe wrote no
+                // audit_events row, unlike MfaViewController's own session-
+                // revocation actions (see that class's own doc comment,
+                // fixed in the same pass) and every other security-
+                // sensitive actor action in this codebase.
+                AuditService::append($user, 'PASSWORD_RESET_SESSIONS_REVOKED', 'USER', $user->id, [], now());
 
                 event(new PasswordReset($user));
             }

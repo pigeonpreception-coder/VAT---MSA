@@ -6,6 +6,7 @@ use App\Exceptions\IdentityValidationException;
 use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\MfaTotpCredential;
+use App\Services\Audit\AuditService;
 use App\Services\Identity\MfaService;
 use App\Support\Access\SafeRedirect;
 use Illuminate\Http\RedirectResponse;
@@ -144,6 +145,17 @@ class MfaViewController extends Controller
      * change to someone else's, the same category password reset's own
      * blanket session wipe (ResetPasswordRequest::resetPassword()) already
      * falls into without a step-up gate.
+     *
+     * Gap-finding pass (2026-09-24): neither this nor
+     * revokeOtherSessions() nor ResetPasswordRequest's own blanket wipe
+     * wrote an audit_events row -- an inconsistency against every other
+     * security-sensitive actor action in this codebase (MfaService's own
+     * enrollment/step-up events, SecurityOperationsService's
+     * SECURITY_INCIDENT_ACCESS_REVOKED), and the one place a compromised-
+     * account holder's own remediation step (revoking a suspected
+     * attacker's session) would otherwise leave no trail. No source
+     * page.tsx or audit convention exists for this Laravel-only feature to
+     * diverge from; this only aligns it with this codebase's own pattern.
      */
     public function revokeSession(Request $request, string $sessionId): RedirectResponse
     {
@@ -156,6 +168,9 @@ class MfaViewController extends Controller
         }
 
         $deleted = DB::table('sessions')->where('id', $sessionId)->where('user_id', $actor->id)->delete();
+        if ($deleted > 0) {
+            AuditService::append($actor, 'USER_SESSION_REVOKED', 'USER', $actor->id, ['session_id' => $sessionId], now());
+        }
 
         return redirect()->route('security.mfa')
             ->with('status', $deleted > 0 ? 'That session has been logged out.' : 'That session was already gone.');
@@ -168,6 +183,7 @@ class MfaViewController extends Controller
         $currentSessionId = $request->session()->getId();
 
         DB::table('sessions')->where('user_id', $actor->id)->where('id', '!=', $currentSessionId)->delete();
+        AuditService::append($actor, 'USER_ALL_OTHER_SESSIONS_REVOKED', 'USER', $actor->id, [], now());
 
         return redirect()->route('security.mfa')->with('status', 'Every other session has been logged out.');
     }
