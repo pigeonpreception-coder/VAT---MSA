@@ -56,7 +56,17 @@ class InvoiceService
             ]);
         }
 
-        $calculated = $this->calculator->calculateAndValidate($payload);
+        // Multi-tenant SaaS pivot phase 3 (2026-09-24): resolved from the
+        // payload's own claimed supplier VAT number, before calculateAndValidate
+        // runs, so the currency gate judges this invoice against its real
+        // supplier's jurisdiction rather than a hardcoded 'NAD'. Unlike
+        // getVatNumber()'s other call site below (after calculateAndValidate
+        // has already thrown on a malformed supplier), this one runs first
+        // and so cannot assume $payload['supplier'] is well-shaped.
+        $rawSupplier = is_array($payload['supplier'] ?? null) ? $payload['supplier'] : [];
+        $expectedCurrency = $this->resolveExpectedCurrency($this->calculator->getVatNumber($rawSupplier));
+
+        $calculated = $this->calculator->calculateAndValidate($payload, $expectedCurrency);
         $requestHash = hash('sha256', AuditService::canonicalJson($payload));
 
         $prior = IdempotencyRecord::where('actor_id', $actor->id)->where('idempotency_key', $idempotencyKey)->first();
@@ -95,7 +105,7 @@ class InvoiceService
             $vatRuleIdByLineNumber[$line['line_number']] = $rule->id;
         }
 
-        $supplierVat = $this->calculator->getVatNumber($payload['supplier']);
+        $supplierVat = $this->calculator->getVatNumber($rawSupplier);
         $customerVat = $this->calculator->getVatNumber($payload['customer']);
         $now = now();
 
@@ -645,6 +655,27 @@ class InvoiceService
     private function applicableVatRule(string $taxCategory, string $isoDate): ?VatRule
     {
         return VatRuleResolver::applicable($taxCategory, $isoDate);
+    }
+
+    /**
+     * Multi-tenant SaaS pivot phase 3 (2026-09-24): looks up the claimed
+     * supplier's organisation purely to learn which currency its tax
+     * authority certifies in -- not an authorisation decision (that's
+     * resolveCapableTaxpayer()'s job, later, with its own ACTIVE/capability
+     * checks). An unresolvable or malformed supplier VAT number defaults to
+     * NAD, the same value the old hardcoded check used unconditionally, so
+     * every existing single-tenant (NamRA/Namibia) invoice -- and any
+     * genuinely invalid or unauthorised supplier, which calculateAndValidate's
+     * own SUPPLIER_VAT_REQUIRED/SUPPLIER_NOT_AUTHORISED checks still reject
+     * regardless of this default -- keeps exactly the same behaviour.
+     */
+    private function resolveExpectedCurrency(?string $supplierVat): string
+    {
+        if (! $supplierVat) {
+            return 'NAD';
+        }
+
+        return Taxpayer::where('vat_number', $supplierVat)->first()?->organisation?->currencyCode() ?? 'NAD';
     }
 
     /** Ported from submitInvoice's inline supplier/customer resolution query -- the dynamic BUYER/SELLER capability grant, never a static role. */

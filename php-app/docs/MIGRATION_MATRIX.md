@@ -12196,3 +12196,73 @@ stateless group instead). Two were genuinely missing:
 - Full suite: 1147 tests, 0 regressions -- including every pre-existing
   test file that creates an `Organisation` without ever mentioning
   `tax_authority_id`.
+
+## Multi-tenant SaaS pivot, phase 3: jurisdiction-aware VAT return generation and invoice currency gate (2026-09-24)
+
+- User go-ahead given (2026-09-24) after phase 2 merged (PR #105). Phase
+  2's own PR description named this phase's exact job: the two hardcoded
+  literals `VatLifecycleService::generateReturn()`'s
+  `TaxRuleSet::where('jurisdiction', 'NA')` filter and
+  `InvoiceCalculator`'s hardcoded NAD-only currency gate used, now both
+  resolved from an organisation's own `tax_authority_id` instead.
+- New `App\Models\Country` (PK `code`, e.g. 'NA') and
+  `App\Models\TaxJurisdiction` models, plus
+  `App\Models\TaxAuthority::jurisdiction()` (`belongsTo`) -- the
+  `countries` -> `tax_jurisdictions` -> `tax_authorities` chain phase 2's
+  own migration populated already existed as tables but had no models
+  reading it yet (`AuthorityGovernanceService` only ever read it via raw
+  `DB::table()` joins).
+- `App\Models\Organisation::jurisdictionCountryCode()`/`currencyCode()`
+  added as the single resolution point both call sites use, walking
+  `taxAuthority()->jurisdiction()->country()`. Both fall back to
+  Namibia/NAD only if the chain is somehow unresolvable -- defensive
+  only, since `tax_authority_id` is `NOT NULL` with a real FK (phase 2),
+  so the chain always resolves today.
+- `VatLifecycleService::generateReturn()`: the period's own organisation
+  now supplies the jurisdiction code the `TaxRuleSet` lookup filters by,
+  in place of the hardcoded `'NA'` literal.
+- `InvoiceCalculator::calculateAndValidate()` gained an `$expectedCurrency
+  = 'NAD'` parameter, checked instead of the hardcoded `'NAD'` literal.
+  `InvoiceService::submit()` resolves it from the payload's own claimed
+  supplier VAT number *before* calling `calculateAndValidate()` (a
+  lightweight lookup purely to learn the expected currency, not an
+  authorisation decision -- `resolveCapableTaxpayer()`'s own ACTIVE/
+  capability checks still gate authorisation, unchanged, later in the
+  same method) -- an unresolvable or malformed supplier still defaults
+  to NAD, so every existing single-tenant invoice keeps identical
+  behaviour.
+- Found and fixed a genuine pre-existing bug surfaced while building this
+  phase's own `TaxJurisdiction` lookups, in phase 2's already-merged
+  `TaxAuthority` model: neither it nor phase 2 itself set
+  `$incrementing = false`/`$keyType = 'string'`, so Eloquent's own
+  `Model::getCasts()` implicitly added `['id' => 'int']` (its default
+  behaviour whenever `$incrementing` is true, the default) -- every read
+  of `TaxAuthority`'s own `id` (not just `find()`/`where()` results but
+  its `organisations()` hasMany, which keys its query off
+  `$this->getAttribute('id')`) was silently cast to
+  `(int) 'tax-authority-na-namra'` = `0`. Phase 2's own
+  `test_the_eloquent_relationship_resolves_both_ways` never caught this:
+  it only reads `->code` off a `belongsTo` result (never touches
+  `TaxAuthority`'s own id) and its `->organisations` containment check
+  happened to still pass by accident -- MySQL's loose string-to-int
+  comparison coerces every non-numeric `tax_authority_id` value to `0`
+  too, so `WHERE tax_authority_id = 0` matched every row rather than
+  none. Fixed on both `TaxAuthority` and the new `TaxJurisdiction`
+  (`Country`'s own PK is `code`, already declared correctly). A direct
+  regression test (`TaxAuthority::find(...)->id` asserted as the real
+  string, not `0`) added to `OrganisationTaxAuthorityTest`.
+- New `JurisdictionAwareCalculationTest` (5 tests) builds a second,
+  wholly fictitious tax authority (country 'ZT', currency 'ZTD') to
+  prove the resolution is genuinely dynamic, not a passthrough that
+  happens to equal Namibia's own values: a ZT-tenant invoice is
+  certified in ZTD and rejected in NAD (and vice versa for NamRA/NAD);
+  VAT return generation for a ZT-tenant period resolves the ZT rule set,
+  not the NA one; a NamRA-tenant period still resolves the NA rule set.
+  Plus the `TaxAuthority` id-cast regression test above.
+- Full suite: 1153 tests, 0 regressions.
+- Remaining phases (not started, require explicit user go-ahead before
+  each, per this pivot's own established pattern): sweep the ~150
+  mechanical NAD/N$/NamRA literals in controllers, seeders and Blade
+  views into tenant config (phase 4); generalize the ITAS/E-Tariff port
+  contracts and add tenant-scoping to the adapter registry (phase 5);
+  decide the per-tenant role-catalogue strategy (phase 6).

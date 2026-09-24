@@ -178,7 +178,14 @@ class VatLifecycleService
         if ($blocking) {
             throw new RepositoryConflictException("Return version {$blocking->id} is already in controlled status {$blocking->status}.");
         }
-        $rule = TaxRuleSet::where('jurisdiction', 'NA')->whereIn('status', ['PILOT_CONTROLLED', 'AUTHORITY_APPROVED'])
+        // Multi-tenant SaaS pivot phase 3 (2026-09-24): the rule set's
+        // jurisdiction used to be hardcoded 'NA' -- now resolved from the
+        // period's own organisation's licensed tax authority (see
+        // Organisation::jurisdictionCountryCode()'s own doc comment), so a
+        // future second tenant's periods are matched against its own
+        // jurisdiction's rule sets, not Namibia's.
+        $jurisdictionCode = $period->organisation?->jurisdictionCountryCode() ?? 'NA';
+        $rule = TaxRuleSet::where('jurisdiction', $jurisdictionCode)->whereIn('status', ['PILOT_CONTROLLED', 'AUTHORITY_APPROVED'])
             ->where('effective_from', '<=', $period->period_end->toDateString())
             ->where(fn ($q) => $q->whereNull('effective_to')->orWhere('effective_to', '>=', $period->period_start->toDateString()))
             ->orderByDesc('effective_from')->first();
