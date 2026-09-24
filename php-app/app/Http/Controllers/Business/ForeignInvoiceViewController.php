@@ -47,7 +47,7 @@ class ForeignInvoiceViewController extends Controller
 
         return view('invoice-management.foreign', [
             'records' => $records,
-            'etariffStatus' => app(EtariffPort::class)->status(),
+            'etariffStatus' => app(EtariffPort::class)->status($organisation->id),
             'canPull' => $user->hasAppPermission('imports:manage'),
         ]);
     }

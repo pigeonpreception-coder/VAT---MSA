@@ -70,7 +70,7 @@ class ForeignInvoiceService
                 'taxpayer_vat_number' => $taxpayer?->vat_number ?? '',
                 'tin' => $taxpayer?->tin,
                 'correlation_id' => (string) Str::uuid(),
-            ]);
+            ], $organisation->id);
         } catch (EtariffIntegrationUnavailableException $e) {
             AuditService::append($actor, 'FOREIGN_INVOICE_PULL_BLOCKED', 'IMPORT_RECORD', $organisation->id, [
                 'organisationId' => $organisation->id, 'reason' => $e->getMessage(),

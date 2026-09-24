@@ -12356,3 +12356,89 @@ stateless group instead). Two were genuinely missing:
   each): generalize the ITAS/E-Tariff port contracts and add
   tenant-scoping to the adapter registry (phase 5); decide the
   per-tenant role-catalogue strategy (phase 6).
+
+## Multi-tenant SaaS pivot, phase 5: tenant-scoped ITAS/E-Tariff adapters (2026-09-24)
+
+- User go-ahead given (2026-09-24) after phase 4 merged (PR #107).
+  `App\Integrations\Itas\ItasIdentityPort`/`App\Integrations\Etariff\
+  EtariffPort` were each bound to a single, hardcoded-unavailable
+  adapter with no per-organisation dimension at all -- `ItasIdentityPort`'s
+  own doc comment had asked, since the port was first written, to
+  "upgrade to the full gated adapter when Module 10 is migrated"; Module
+  10 (`integration_connections`, Module 10 Phase A's already-migrated,
+  already organisation-scoped generic connector model --
+  `App\Services\Integration\IntegrationConnectionService`) has been
+  migrated for a while, but that upgrade was never done. This phase does
+  it, for both ports, rather than inventing a second, parallel
+  tenant-scoping mechanism.
+- **Port contracts generalized**: every method on both interfaces gained
+  an optional, nullable `?string $organisationId = null` parameter.
+  Several real call sites genuinely have no single organisation in scope
+  (`RegistrationService::submit()` runs before any taxpayer/organisation
+  exists; a national-scope actor's own platform-wide snapshot spans many
+  organisations) and pass nothing, resolving against the platform-wide
+  connection only -- identical to every method's own pre-phase-5
+  behaviour.
+- **`App\Integrations\TenantScopedIntegrationLookup`** (new trait, shared
+  by both `Unavailable*Adapter`s): resolves a tenant-specific
+  `integration_connections` row for the given organisation, falling back
+  to the platform-wide row (`organisation_id` NULL) -- a tenant's own
+  configuration always wins over the platform default once it exists,
+  matching `IntegrationConnectionService::loadConnectionForActor()`'s own
+  ownership boundary.
+- **`status()` is now genuinely per-tenant, real administrative data** --
+  `configured`/`state` reflect whichever connection resolves for the
+  calling organisation. `verifyTaxpayer()`/`submitVatReturn()`/
+  `pullDeclarations()` still always throw regardless: an administratively
+  CONFIGURED `integration_connections` row records a real government
+  contract/credentials/approval, never a live connector implementation --
+  no HTTP client or mock exists for either integration at all (unlike
+  `App\Integrations\Payment\SandboxPaymentConnector`, whose own genuine
+  mock logic this deliberately does not attempt to mirror; there is
+  nothing analogous to build here without a real ITAS/E-Tariff contract).
+  `ItasIntegrationUnavailableException`/`EtariffIntegrationUnavailableException`
+  each gained an optional `$connectionConfigured` parameter (default
+  `false`, preserving every pre-phase-5 call site's exact message) so the
+  thrown reason stays honest once a connection is genuinely configured --
+  "has an approved connection but no live connector implementation exists
+  for this provider yet" instead of "is awaiting a confirmed technical
+  contract", which would be false at that point.
+- **Consumers updated**: `ForeignInvoiceService::pullFromEtariff()` and
+  `ForeignInvoiceViewController::index()` (both already had `Organisation`
+  directly in scope), `TaxpayerService::verifyIdentifiers()` and
+  `VatLifecycleService::submitReturn()` (derive it from the resolved
+  `Taxpayer`'s own `organisation()` relation), `VatLifecycleService`'s
+  snapshot-level `itasStatus()` and `IdentityFoundationSnapshotService::
+  getSnapshot()` (derive it from the acting `User`'s own `organisation()`
+  accessor, phase 4's). `RegistrationService::submit()` deliberately
+  unchanged -- see above.
+- **New `database/seeders/IntegrationConnectionSeeder`** seeds two
+  platform-wide (`organisation_id` NULL) rows, ITAS and E-Tariff/ETARIFF,
+  with the same free-text `REQUIRES_*_CONTRACT`/`DISABLED` convention
+  `ServiceComponentSeeder`'s own `component-itas` row already established
+  -- deliberately outside `IntegrationValidator::assertTransition`'s
+  closed DRAFT/CONFIGURED/SUSPENDED enum, so `IntegrationConnectionService
+  ::approve()` can never be the command that flips either row live. Closes
+  a real doc/reality gap this phase's own research found:
+  `App\Models\IntegrationConnection`'s doc comment had claimed since it
+  was written that "the four pre-seeded government/banking/treasury
+  connections (ITAS, BIPA, bank-org1, treasury) already exist as rows
+  here" -- true of none of them until now, and still not true of the
+  other two (BIPA, banking/treasury), which remain genuinely outside this
+  phase's own scope; that doc comment is corrected to say so.
+- New `TenantScopedIntegrationAdapterTest` (5 tests), matching
+  `tests/Feature/Payment/PaymentConnectorTest.php`'s own established
+  two-halves pattern for this exact shape: the platform-wide seeded rows
+  exist from the seeder alone; every command stays blocked with only that
+  row; a tenant-specific connection is preferred over the platform-wide
+  one and never leaks to a different organisation; and a clearly-labelled
+  direct-DB simulation of a hypothetical CONFIGURED connection (something
+  no real command can create, per `IntegrationValidator::assertTransition`'s
+  own closed enum) proves the distinct "configured but no live connector"
+  exception message for both ITAS and E-Tariff.
+- Full suite: 1162 tests, 0 regressions -- including every pre-existing
+  ITAS/E-Tariff/Payment/Integration test file, confirming zero behaviour
+  change for the only real tenant (NamRA) and for `IntegrationConnectionTest`'s
+  own pre-existing one-off ITAS fixture row.
+- Remaining phase (not started, requires explicit user go-ahead): decide
+  the per-tenant role-catalogue strategy (phase 6).

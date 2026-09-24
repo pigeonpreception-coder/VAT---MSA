@@ -42,7 +42,7 @@ class IdentityFoundationSnapshotService
             'organisations' => $this->organisations->list($user),
             'registrations' => $this->registrations->list($user),
             'access' => $this->accessCounts($user),
-            'itas' => $this->itas->status(),
+            'itas' => $this->itas->status($user->organisation()?->id),
         ];
     }
 
