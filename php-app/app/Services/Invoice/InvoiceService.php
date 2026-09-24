@@ -19,7 +19,7 @@ use App\Models\User;
 use App\Models\VatRule;
 use App\Models\VatTransaction;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Invoice\VatRuleResolver;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -105,7 +105,7 @@ class InvoiceService
                 ['code' => 'SUPPLIER_NOT_AUTHORISED', 'path' => '/supplier/identifiers', 'message' => 'Supplier VAT number does not resolve to an active organisation with seller capability.'],
             ]);
         }
-        TenantScope::requireTaxpayer($actor, $supplier->id);
+        TaxpayerScope::requireTaxpayer($actor, $supplier->id);
 
         $customer = $customerVat ? $this->resolveCapableTaxpayer($customerVat, 'BUYER', $now) : null;
 
@@ -332,7 +332,7 @@ class InvoiceService
     public function list(User $actor, int $limit = 100): array
     {
         $query = Invoice::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $query->where(function ($q) use ($taxpayerId) {
                 $q->where('supplier_taxpayer_id', $taxpayerId)->orWhere('customer_taxpayer_id', $taxpayerId);
@@ -348,7 +348,7 @@ class InvoiceService
     public function find(string $id, User $actor): ?array
     {
         $query = Invoice::query()->with('certificate');
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $query->where(function ($q) use ($taxpayerId) {
                 $q->where('supplier_taxpayer_id', $taxpayerId)->orWhere('customer_taxpayer_id', $taxpayerId);
@@ -435,7 +435,7 @@ class InvoiceService
                 ['code' => 'INVOICE_NOT_FOUND', 'path' => '/invoice_id', 'message' => 'The invoice does not exist.'],
             ]);
         }
-        TenantScope::requireTaxpayer($actor, $invoice->supplier_taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $invoice->supplier_taxpayer_id);
         if ($invoice->status === 'CANCELLED') {
             return ['invoiceId' => $invoice->id, 'status' => 'CANCELLED'];
         }
@@ -516,7 +516,7 @@ class InvoiceService
     public function explainVat(string $id, User $actor): ?array
     {
         $query = Invoice::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $query->where(fn ($q) => $q->where('supplier_taxpayer_id', $taxpayerId)->orWhere('customer_taxpayer_id', $taxpayerId));
         }
@@ -565,7 +565,7 @@ class InvoiceService
     public function transactionTimeline(string $id, User $actor): ?array
     {
         $query = Invoice::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $query->where(fn ($q) => $q->where('supplier_taxpayer_id', $taxpayerId)->orWhere('customer_taxpayer_id', $taxpayerId));
         }

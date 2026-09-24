@@ -193,7 +193,7 @@ class OrganisationViewTest extends TestCase
 
         // Out-of-scope but existing -- the RT-002 clean-403 page, not a
         // 404, matching OrganisationService::get()'s own
-        // TenantScope::requireTaxpayer() AuthorizationException, the same
+        // TaxpayerScope::requireTaxpayer() AuthorizationException, the same
         // service-level-exception precedent as VAT Returns/Audit Cases.
         $this->actingAs($ownerA)->get(route('organisations.show', $fxB['organisation']->id))->assertForbidden();
     }

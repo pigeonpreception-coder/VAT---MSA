@@ -7,7 +7,7 @@ use App\Exceptions\PlatformResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -90,7 +90,7 @@ class DataProductService
      */
     public function runModel(string $dataProductId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national platform role may run an analytics model.');
         }
         CommandLedger::validateIdempotencyKey($idempotencyKey);
@@ -155,7 +155,7 @@ class DataProductService
      */
     public function publish(string $dataProductId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national platform role may publish a data product.');
         }
         CommandLedger::validateIdempotencyKey($idempotencyKey);

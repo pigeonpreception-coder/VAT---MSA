@@ -8,7 +8,7 @@ use App\Exceptions\PlatformResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
 use App\Support\Platform\PlatformConfigReader;
@@ -108,7 +108,7 @@ class ReportExportService
                 'result_summary' => json_decode($run->result_summary, true) ?? [], 'requested_at' => $run->requested_at,
             ];
         }
-        $orgScope = TenantScope::isNational($actor) ? null : $this->organisations->resolve($actor, null);
+        $orgScope = TaxpayerScope::isNational($actor) ? null : $this->organisations->resolve($actor, null);
         $taxpayerIdForRun = $orgScope?->taxpayer_id;
         $organisationIdForRun = $orgScope?->id;
         $caseId = null;
@@ -130,9 +130,9 @@ class ReportExportService
             // Reaching CASE_EVIDENCE_SUMMARY at all already requires
             // audit:read/cases:manage (requireAudienceAccess below), and
             // every role holding either is also a NATIONAL_SCOPE_ROLES
-            // member -- so TenantScope::isNational($actor) is always true
+            // member -- so TaxpayerScope::isNational($actor) is always true
             // here. Preserved anyway for a future role grant, not pruned.
-            if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
+            if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
                 throw new AuthorizationException('The audit case is outside your authorised taxpayer scope.');
             }
             $taxpayerIdForRun = $auditCase->taxpayer_id;
@@ -192,7 +192,7 @@ class ReportExportService
         if (! $run) {
             throw new PlatformResourceException('Report run was not found.', 404);
         }
-        if (! TenantScope::isNational($actor) && $run->requested_by !== $actor->id) {
+        if (! TaxpayerScope::isNational($actor) && $run->requested_by !== $actor->id) {
             throw new AuthorizationException('You may only publish a report run you requested.');
         }
         if ($run->status !== 'COMPLETED_INLINE') {
@@ -248,7 +248,7 @@ class ReportExportService
         }
 
         $run = $this->loadRunForExport($reportRunId);
-        if (! TenantScope::isNational($actor) && $run->requested_by !== $actor->id) {
+        if (! TaxpayerScope::isNational($actor) && $run->requested_by !== $actor->id) {
             throw new AuthorizationException('You may only export a report run you requested.');
         }
         if (! in_array($run->status, ['COMPLETED_INLINE', 'PUBLISHED'], true)) {
@@ -320,7 +320,7 @@ class ReportExportService
      */
     public function approveExport(string $exportId, array $payload, User $actor, string $idempotencyKey, string $correlationId, bool $hasFreshStepUp): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national platform role may approve a report export.');
         }
         CommandLedger::validateIdempotencyKey($idempotencyKey);
@@ -381,7 +381,7 @@ class ReportExportService
         if (! $row) {
             throw new PlatformResourceException('Report export was not found.', 404);
         }
-        if (! TenantScope::isNational($actor) && $row->requested_by !== $actor->id) {
+        if (! TaxpayerScope::isNational($actor) && $row->requested_by !== $actor->id) {
             throw new AuthorizationException('You may only cancel a report export you requested.');
         }
         if ($row->status !== 'PENDING_APPROVAL') {
@@ -464,7 +464,7 @@ class ReportExportService
         if (! $row) {
             throw new PlatformResourceException('Report export was not found.', 404);
         }
-        if (! TenantScope::isNational($actor) && $row->requested_by !== $actor->id) {
+        if (! TaxpayerScope::isNational($actor) && $row->requested_by !== $actor->id) {
             throw new AuthorizationException('You may only access a report export you requested.');
         }
 
@@ -490,8 +490,8 @@ class ReportExportService
     {
         return match ($definition->audience) {
             'TAXPAYER', 'OPEN_DATA' => [],
-            'NAMRA_OPERATIONS' => TenantScope::isNational($actor) ? [] : throw new AuthorizationException('This report is restricted to NamRA operations roles.'),
-            'EXECUTIVE' => (TenantScope::isNational($actor) && $actor->hasAppPermission('reports:executive')) ? [] : throw new AuthorizationException('This report is restricted to executive roles.'),
+            'NAMRA_OPERATIONS' => TaxpayerScope::isNational($actor) ? [] : throw new AuthorizationException('This report is restricted to NamRA operations roles.'),
+            'EXECUTIVE' => (TaxpayerScope::isNational($actor) && $actor->hasAppPermission('reports:executive')) ? [] : throw new AuthorizationException('This report is restricted to executive roles.'),
             'AUDITOR_LEGAL' => ($actor->hasAppPermission('audit:read') || $actor->hasAppPermission('cases:manage')) ? [] : throw new AuthorizationException('This report requires audit case authority.'),
             'PRACTITIONER' => $this->requirePractitionerDelegations($actor),
             default => throw new PlatformResourceException('Unsupported report audience.', 500),

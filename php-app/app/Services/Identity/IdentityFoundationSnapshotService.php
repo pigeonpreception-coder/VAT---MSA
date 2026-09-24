@@ -4,7 +4,7 @@ namespace App\Services\Identity;
 
 use App\Integrations\Itas\ItasIdentityPort;
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -59,7 +59,7 @@ class IdentityFoundationSnapshotService
      */
     private function accessCounts(User $user): array
     {
-        if (TenantScope::isNational($user)) {
+        if (TaxpayerScope::isNational($user)) {
             return [
                 'active_users' => DB::table('users')->where('status', 'ACTIVE')->count(),
                 'active_identity_links' => DB::table('identity_links')->where('status', 'ACTIVE')->count(),

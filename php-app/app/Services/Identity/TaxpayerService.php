@@ -12,7 +12,7 @@ use App\Models\Taxpayer;
 use App\Models\TaxpayerIdentifier;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -39,7 +39,7 @@ class TaxpayerService
      * migration.
      *
      * Deliberately unscoped, matching the source's own query exactly: no
-     * `TenantScope` filter here, even though the page's own gate is just
+     * `TaxpayerScope` filter here, even though the page's own gate is just
      * `taxpayers:read` -- confirmed against Permissions::ROLE_PERMISSIONS
      * that this permission is held broadly, including by
      * TAXPAYER_OWNER/ADMIN/ACCOUNTANT, not NAMRA-only. This is the
@@ -217,7 +217,7 @@ class TaxpayerService
         if (! $taxpayer) {
             throw new IdentityValidationException([['code' => 'TAXPAYER_NOT_FOUND', 'path' => '/taxpayer_id', 'message' => 'The taxpayer does not exist.']]);
         }
-        TenantScope::requireTaxpayer($actor, $taxpayer->id);
+        TaxpayerScope::requireTaxpayer($actor, $taxpayer->id);
 
         $now = now();
 

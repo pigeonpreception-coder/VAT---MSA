@@ -16,7 +16,7 @@ use App\Models\Invoice;
 use App\Models\User;
 use App\Models\VatReturnVersion;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Compliance\NotificationRecorder;
 use App\Support\Compliance\TaxpayerResolver;
@@ -41,7 +41,7 @@ class AuditCaseService
     public function open(array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may open an audit case.');
         }
         $input = ComplianceValidator::caseOpening($payload);
@@ -81,7 +81,7 @@ class AuditCaseService
     public function transition(string $caseId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may transition an audit case.');
         }
         $input = ComplianceValidator::caseTransition($payload);
@@ -168,7 +168,7 @@ class AuditCaseService
     public function issueFinding(string $caseId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may issue an audit finding.');
         }
         $input = ComplianceValidator::findingIssuance($payload);
@@ -215,7 +215,7 @@ class AuditCaseService
         if (! $auditCase) {
             return null;
         }
-        if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
             throw new AuthorizationException('The audit case is outside your authorised taxpayer scope.');
         }
         $transitions = AuditCaseTransition::where('audit_case_id', $caseId)->orderBy('occurred_at')->get();
@@ -273,7 +273,7 @@ class AuditCaseService
     public function addEvidence(string $caseId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may add case evidence.');
         }
         $input = ComplianceValidator::evidenceAddition($payload);
@@ -380,7 +380,7 @@ class AuditCaseService
     public function recordEvidenceCustodyEvent(string $evidenceId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may record an evidence custody event.');
         }
         $input = ComplianceValidator::evidenceCustodyEvent($payload);
@@ -436,7 +436,7 @@ class AuditCaseService
         if (! $auditCase) {
             return null;
         }
-        if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
             throw new AuthorizationException('The audit case is outside your authorised taxpayer scope.');
         }
         $evidence = AuditEvidence::where('audit_case_id', $caseId)->orderBy('added_at')->get();
@@ -459,7 +459,7 @@ class AuditCaseService
     public function addNote(string $caseId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may add a case note.');
         }
         $input = ComplianceValidator::caseNoteAddition($payload);
@@ -501,7 +501,7 @@ class AuditCaseService
         if (! $auditCase) {
             return null;
         }
-        if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $auditCase->taxpayer_id) {
             throw new AuthorizationException('The audit case is outside your authorised taxpayer scope.');
         }
         $notes = AuditCaseNote::where('audit_case_id', $caseId)->orderBy('created_at')->get();
@@ -516,7 +516,7 @@ class AuditCaseService
     public function search(User $actor, array $params): array
     {
         $query = AuditCase::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $query->where('taxpayer_id', $actor->taxpayer_id ?? '__none__');
         }
         if (! empty($params['status'])) {

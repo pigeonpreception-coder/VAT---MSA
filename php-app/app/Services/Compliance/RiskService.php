@@ -13,7 +13,7 @@ use App\Models\TaxObligation;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Compliance\NotificationRecorder;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -50,7 +50,7 @@ class RiskService
     public function assignReview(string $indicatorId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national risk role may assign a risk indicator for review.');
         }
         $input = ComplianceValidator::riskReviewAssignment($payload);
@@ -104,7 +104,7 @@ class RiskService
     public function approveAction(string $indicatorId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national risk role may record a risk action decision.');
         }
         $input = ComplianceValidator::riskActionApproval($payload);
@@ -176,7 +176,7 @@ class RiskService
     public function evaluate(string $taxpayerId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national risk role may evaluate risk for a taxpayer.');
         }
         ComplianceValidator::riskEvaluationRequest($payload);
@@ -247,7 +247,7 @@ class RiskService
     /** Deliberately NOT taxpayer-visible at all -- risk indicators carry a NamRA-restricted classification. @return array<string, mixed> */
     public function restricted(User $actor, array $params): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Risk indicators are restricted to authorised national risk roles.');
         }
         $query = ComplianceValidator::riskIndicatorQuery($params);
@@ -281,7 +281,7 @@ class RiskService
      */
     public function summary(User $actor): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Risk indicators are restricted to authorised national risk roles.');
         }
 

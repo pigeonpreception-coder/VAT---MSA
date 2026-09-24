@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\UserCapabilityAssignment;
 use App\Support\Access\DynamicPermissions;
 use App\Support\Access\Permissions;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -44,7 +44,7 @@ class EffectiveAccessController extends Controller
             'organisation_id' => $organisationId,
             'taxpayer_id' => $user->taxpayer_id,
             'role' => $user->role,
-            'is_national_scope' => TenantScope::isNational($user),
+            'is_national_scope' => TaxpayerScope::isNational($user),
             // Source's own local-step-up dev bypass (isDevelopmentIdentity
             // -- see App\Support\Access\StepUp's own doc comment) was
             // deliberately never ported: this deployment always requires a

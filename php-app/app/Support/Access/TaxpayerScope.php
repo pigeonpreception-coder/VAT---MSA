@@ -12,8 +12,17 @@ use Illuminate\Auth\Access\AuthorizationException;
  * this is the equivalent guard every migrated repository/service method
  * must call before reading or writing a taxpayer-owned record, never
  * trusting a taxpayer_id/organisation_id supplied by a form or URL alone.
+ *
+ * Renamed from TenantScope (2026-09-24, multi-tenant SaaS pivot phase 1):
+ * this class has only ever isolated one *taxpayer's* data from another
+ * within a single deployment -- it has nothing to do with isolating one
+ * *licensed national platform* (e.g. a second country's NamRA-equivalent)
+ * from another, which is what "tenant" now means as this codebase grows a
+ * real multi-tenant concept. Keeping the old name would have made every
+ * future reference to "tenant" ambiguous. See docs/MIGRATION_MATRIX.md's
+ * own entry for this rename.
  */
-final class TenantScope
+final class TaxpayerScope
 {
     public static function isNational(User $user): bool
     {

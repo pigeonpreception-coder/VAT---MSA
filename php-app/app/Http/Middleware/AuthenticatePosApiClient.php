@@ -27,7 +27,7 @@ use Symfony\Component\HttpFoundation\Response;
  * request's lifecycle -- no session is started, matching the stateless
  * `api` middleware group this route runs under -- so downstream code
  * (App\Http\Controllers\Integration\PosInvoiceController,
- * App\Services\Invoice\InvoiceService::submit()'s own TenantScope check)
+ * App\Services\Invoice\InvoiceService::submit()'s own TaxpayerScope check)
  * can use $request->user() exactly as the session-authenticated JSON
  * mirror already does.
  */

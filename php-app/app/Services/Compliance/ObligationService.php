@@ -8,7 +8,7 @@ use App\Exceptions\RepositoryConflictException;
 use App\Models\TaxObligation;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Compliance\NotificationRecorder;
 use App\Support\Compliance\TaxpayerResolver;
@@ -25,7 +25,7 @@ class ObligationService
     public function create(array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may create a tax obligation.');
         }
         $input = ComplianceValidator::obligationCreation($payload);
@@ -62,7 +62,7 @@ class ObligationService
     public function markSatisfied(string $obligationId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may mark a tax obligation satisfied.');
         }
         $input = ComplianceValidator::obligationSatisfaction($payload);
@@ -94,7 +94,7 @@ class ObligationService
     public function search(User $actor, array $params): array
     {
         $query = TaxObligation::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $query->where('taxpayer_id', $actor->taxpayer_id ?? '__none__');
         }
         if (! empty($params['status'])) {

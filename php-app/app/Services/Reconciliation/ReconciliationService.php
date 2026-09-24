@@ -12,7 +12,7 @@ use App\Models\ReconciliationMatch;
 use App\Models\User;
 use App\Models\VatPeriod;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
@@ -63,7 +63,7 @@ class ReconciliationService
         if (! $invoice) {
             throw new ReconciliationValidationException('INVOICE_NOT_FOUND', 'The invoice does not exist.');
         }
-        TenantScope::requireTaxpayer($actor, $invoice->supplier_taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $invoice->supplier_taxpayer_id);
 
         $existing = ReconciliationMatch::where('invoice_id', $invoice->id)->where('taxpayer_id', $invoice->supplier_taxpayer_id)->first();
         if ($existing) {
@@ -145,7 +145,7 @@ class ReconciliationService
         if (! $exception) {
             throw new ReconciliationValidationException('EXCEPTION_NOT_FOUND', 'The reconciliation exception does not exist.');
         }
-        TenantScope::requireTaxpayer($actor, $exception->taxpayer_id ?? '');
+        TaxpayerScope::requireTaxpayer($actor, $exception->taxpayer_id ?? '');
         if ($exception->status === 'RESOLVED') {
             throw new RepositoryConflictException('This exception is already resolved and cannot be reassigned.');
         }
@@ -185,7 +185,7 @@ class ReconciliationService
         if (! $exception) {
             throw new ReconciliationValidationException('EXCEPTION_NOT_FOUND', 'The reconciliation exception does not exist.');
         }
-        TenantScope::requireTaxpayer($actor, $exception->taxpayer_id ?? '');
+        TaxpayerScope::requireTaxpayer($actor, $exception->taxpayer_id ?? '');
         if ($exception->status === 'RESOLVED') {
             return ['id' => $exceptionId, 'status' => 'RESOLVED'];
         }
@@ -261,7 +261,7 @@ class ReconciliationService
     public function getSummaryTotals(User $actor): array
     {
         $base = DB::table('reconciliation_exceptions as e')->join('invoices as i', 'i.id', '=', 'e.invoice_id');
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $base->where(fn ($w) => $w->where('i.supplier_taxpayer_id', $taxpayerId)->orWhere('i.customer_taxpayer_id', $taxpayerId));
         }
@@ -275,7 +275,7 @@ class ReconciliationService
 
     private function applyFilters(Builder $q, array $query, User $actor): void
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $q->where(fn ($w) => $w->where('i.supplier_taxpayer_id', $taxpayerId)->orWhere('i.customer_taxpayer_id', $taxpayerId));
         }

@@ -11,7 +11,7 @@ use App\Models\CommunicationThread;
 use App\Models\ReconciliationException;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Compliance\NotificationRecorder;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -32,7 +32,7 @@ class CommunicationService
     public function sendNotice(array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may send a notice.');
         }
         $input = ComplianceValidator::notice($payload);
@@ -90,7 +90,7 @@ class CommunicationService
         if (! $thread) {
             throw new ComplianceResourceException('Correspondence thread was not found.', 404);
         }
-        if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $thread->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $thread->taxpayer_id) {
             throw new AuthorizationException('The correspondence thread is outside your authorised taxpayer scope.');
         }
         $requestHash = CommandLedger::requestHash(['thread_id' => $threadId, 'input' => $input]);
@@ -102,7 +102,7 @@ class CommunicationService
             throw new RepositoryConflictException('This correspondence thread is closed and cannot accept a new reply.');
         }
 
-        $direction = TenantScope::isNational($actor) ? 'OUTBOUND' : 'INBOUND';
+        $direction = TaxpayerScope::isNational($actor) ? 'OUTBOUND' : 'INBOUND';
         $messageId = (string) Str::uuid();
         $now = now();
         DB::transaction(function () use ($input, $thread, $threadId, $direction, $actor, $messageId, $now, $idempotencyKey, $requestHash, $correlationId) {
@@ -127,7 +127,7 @@ class CommunicationService
     public function close(string $threadId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may close a correspondence thread.');
         }
         $input = ComplianceValidator::conversationClosure($payload);
@@ -160,7 +160,7 @@ class CommunicationService
     {
         $query = ComplianceValidator::inboxQuery($params);
         $builder = CommunicationThread::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $builder->where('taxpayer_id', $actor->taxpayer_id ?? '__none__');
         } elseif ($query['taxpayerId']) {
             $builder->where('taxpayer_id', $query['taxpayerId']);
@@ -194,7 +194,7 @@ class CommunicationService
         if (! $thread) {
             return null;
         }
-        if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $thread->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $thread->taxpayer_id) {
             throw new AuthorizationException('The correspondence thread is outside your authorised taxpayer scope.');
         }
         $messages = Communication::where('thread_id', $threadId)->orderBy('occurred_at')->get();

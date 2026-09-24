@@ -5,7 +5,7 @@ namespace App\Support\Compliance;
 use App\Exceptions\ComplianceResourceException;
 use App\Models\Taxpayer;
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Auth\Access\AuthorizationException;
 
 /**
@@ -25,11 +25,11 @@ class TaxpayerResolver
     /** @return array{taxpayer_id: string, organisation_id: string, legal_name: string, vat_number: string} */
     public function resolve(User $actor, ?string $requestedTaxpayerId): array
     {
-        $taxpayerId = TenantScope::isNational($actor) ? $requestedTaxpayerId : $actor->taxpayer_id;
+        $taxpayerId = TaxpayerScope::isNational($actor) ? $requestedTaxpayerId : $actor->taxpayer_id;
         if (! $taxpayerId) {
             throw new ComplianceResourceException('A taxpayer id is required for this command.');
         }
-        if (! TenantScope::isNational($actor) && $requestedTaxpayerId && $requestedTaxpayerId !== $actor->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $requestedTaxpayerId && $requestedTaxpayerId !== $actor->taxpayer_id) {
             throw new AuthorizationException('The requested taxpayer is outside your authorised scope.');
         }
 

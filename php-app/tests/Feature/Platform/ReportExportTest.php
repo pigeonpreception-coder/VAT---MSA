@@ -270,7 +270,7 @@ class ReportExportTest extends TestCase
      * reachable by any role seeded today: every role holding
      * `audit:read`/`cases:manage` is also a `NATIONAL_SCOPE_ROLES` member
      * (verified across the full `Permissions::ROLE_PERMISSIONS` map), so
-     * `TenantScope::isNational($actor)` is always true before that
+     * `TaxpayerScope::isNational($actor)` is always true before that
      * comparison is ever reached. This test covers what IS reachable: an
      * unknown case id (404) and a real case from a national officer (201).
      */

@@ -3,7 +3,7 @@
 namespace App\Services\Platform;
 
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +48,7 @@ class PlatformSnapshotService
      */
     public function getSnapshot(User $actor): array
     {
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
         $taxpayerId = $actor->taxpayer_id ?? '__none__';
         $organisation = $scoped ? $this->organisations->resolve($actor, null) : null;
         $orgId = $organisation?->id ?? '__none__';

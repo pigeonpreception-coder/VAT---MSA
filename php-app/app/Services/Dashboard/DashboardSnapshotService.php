@@ -6,7 +6,7 @@ use App\Models\AuditEvent;
 use App\Models\Invoice;
 use App\Models\User;
 use App\Services\Invoice\InvoiceService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 
 /**
  * Ported from lib/data/repository.ts's getDashboardSnapshot -- the
@@ -52,7 +52,7 @@ class DashboardSnapshotService
      */
     public function snapshot(User $actor): array
     {
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
         $taxpayerId = $actor->taxpayer_id ?? '__none__';
 
         $scopedQuery = Invoice::query();

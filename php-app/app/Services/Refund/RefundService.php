@@ -17,7 +17,7 @@ use App\Models\User;
 use App\Models\VatPeriod;
 use App\Models\VatReturnVersion;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -44,7 +44,7 @@ class RefundService
         if (! $version) {
             throw new ComplianceResourceException('VAT return version was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $version->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $version->taxpayer_id);
         if ($version->net_payable_cents >= 0) {
             throw new RepositoryConflictException('A refund request requires a negative net VAT position.');
         }
@@ -116,7 +116,7 @@ class RefundService
         if (! $claim) {
             return null;
         }
-        TenantScope::requireTaxpayer($actor, $claim->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $claim->taxpayer_id);
         $checks = RefundClaimCheck::where('refund_claim_id', $claimId)->orderBy('evaluated_at')->get();
 
         return [
@@ -145,7 +145,7 @@ class RefundService
     public function transition(string $claimId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national refund role may transition a refund claim.');
         }
         $input = ComplianceValidator::refundClaimTransition($payload);
@@ -260,7 +260,7 @@ class RefundService
         if (! $claim) {
             throw new ComplianceResourceException('Refund claim was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $claim->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $claim->taxpayer_id);
         if ($claim->requested_by !== $actor->id) {
             throw new AuthorizationException("Only the original requester may dispute this refund claim's outcome.");
         }

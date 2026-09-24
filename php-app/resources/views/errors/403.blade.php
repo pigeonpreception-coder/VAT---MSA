@@ -5,7 +5,7 @@
 {{--
     Red team finding RT-002 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md): a plain
     Illuminate\Auth\Access\AuthorizationException (thrown by both
-    TenantScope::requireTaxpayer() and every $this->authorize() gate denial)
+    TaxpayerScope::requireTaxpayer() and every $this->authorize() gate denial)
     fell through to Laravel's default exception handler, which leaks a full
     stack trace and local filesystem path whenever APP_DEBUG=true -- unlike
     every one of this app's own custom exceptions (PlatformResourceException

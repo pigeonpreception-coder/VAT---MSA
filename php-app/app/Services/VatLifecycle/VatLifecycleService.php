@@ -17,7 +17,7 @@ use App\Models\VatReturnBox;
 use App\Models\VatReturnSubmission;
 use App\Models\VatReturnVersion;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -52,7 +52,7 @@ class VatLifecycleService
     /** @return array<string, mixed> */
     public function snapshot(User $actor): array
     {
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
         $periods = VatPeriod::with('taxpayer')->when($scoped, fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))
             ->orderByDesc('period_end')->get();
 
@@ -321,7 +321,7 @@ class VatLifecycleService
         if (! $task) {
             throw new VatLifecycleResourceException('Approval task was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $task->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $task->taxpayer_id);
         if ($task->status !== 'PENDING') {
             throw new RepositoryConflictException("Approval task is already {$task->status}.");
         }
@@ -500,7 +500,7 @@ class VatLifecycleService
         if (! $period) {
             throw new VatLifecycleResourceException('VAT period was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $period->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $period->taxpayer_id);
 
         return $period;
     }
@@ -511,7 +511,7 @@ class VatLifecycleService
         if (! $version) {
             throw new VatLifecycleResourceException('VAT return version was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $version->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $version->taxpayer_id);
 
         return $version;
     }

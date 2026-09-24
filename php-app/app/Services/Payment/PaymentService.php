@@ -11,7 +11,7 @@ use App\Models\PaymentInstruction;
 use App\Models\RefundClaim;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -44,7 +44,7 @@ class PaymentService
     public function recordPayment(string $claimId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national refund role may record a refund payment.');
         }
         $input = PaymentValidator::recordPaymentInput($payload);
@@ -115,7 +115,7 @@ class PaymentService
     public function allocatePayment(string $claimId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national refund role may allocate a refund payment.');
         }
         $input = PaymentValidator::allocatePaymentInput($payload);
@@ -187,7 +187,7 @@ class PaymentService
      */
     public function getOutstanding(User $actor): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('The outstanding refund payment queue is restricted to national-scope refund roles.');
         }
 

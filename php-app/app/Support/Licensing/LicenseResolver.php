@@ -4,7 +4,7 @@ namespace App\Support\Licensing;
 
 use App\Models\Organisation;
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
@@ -43,13 +43,13 @@ class LicenseResolver
             if (! $organisation) {
                 throw new AuthorizationException('The organisation scope is unavailable.');
             }
-            if (! TenantScope::isNational($actor) && $organisation->taxpayer_id !== $actor->taxpayer_id) {
+            if (! TaxpayerScope::isNational($actor) && $organisation->taxpayer_id !== $actor->taxpayer_id) {
                 throw new AuthorizationException('The requested organisation is outside your authorised scope.');
             }
 
             return $organisation;
         }
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $organisation = Organisation::where('taxpayer_id', $actor->taxpayer_id ?? '__none__')->where('status', 'ACTIVE')->first();
             if (! $organisation) {
                 throw new AuthorizationException('An active organisation membership is required.');

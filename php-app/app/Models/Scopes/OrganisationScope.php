@@ -2,7 +2,7 @@
 
 namespace App\Models\Scopes;
 
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\Auth;
 
 /**
  * Phase 7's reusable Eloquent global scope -- the automatic-enforcement
- * counterpart to App\Support\Access\TenantScope's manual assertion. Every
+ * counterpart to App\Support\Access\TaxpayerScope's manual assertion. Every
  * organisation-scoped service built so far (Phases 8-12) already gets this
  * right by hand: each one resolves the actor's own organisation via
  * App\Support\Business\OrganisationResolver (or an equivalent inline
- * branch on TenantScope::isNational) and adds its own
+ * branch on TaxpayerScope::isNational) and adds its own
  * `->where('organisation_id', ...)` to every query -- so this scope is not
  * closing a security gap (SECURITY_GAP_ASSESSMENT.md Section 3 already
  * found none), it is a defense-in-depth backstop: a model that opts in via
@@ -27,7 +27,7 @@ use Illuminate\Support\Facades\Auth;
  *   existing tests that build fixtures with direct `Model::create()` calls
  *   outside a request) -- no filter. There is no actor to scope against,
  *   and fixture setup routinely spans multiple organisations.
- * - A national-scope actor (`TenantScope::isNational`) -- no filter,
+ * - A national-scope actor (`TaxpayerScope::isNational`) -- no filter,
  *   exactly like every service's own `if (! isNational) { ...scope... }`
  *   branch already does.
  * - A taxpayer-scoped actor -- filtered to the one organisation their own
@@ -47,7 +47,7 @@ class OrganisationScope implements Scope
             return;
         }
         $user = Auth::user();
-        if (TenantScope::isNational($user)) {
+        if (TaxpayerScope::isNational($user)) {
             return;
         }
         if ($user->taxpayer_id === null) {

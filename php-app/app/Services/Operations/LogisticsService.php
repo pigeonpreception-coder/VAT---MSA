@@ -9,7 +9,7 @@ use App\Models\FixedAsset;
 use App\Models\LogisticsDelivery;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Support\Facades\DB;
@@ -108,7 +108,7 @@ class LogisticsService
     /** @return list<array<string, mixed>> */
     public function list(User $actor, ?string $requestedOrganisationId): array
     {
-        if (TenantScope::isNational($actor)) {
+        if (TaxpayerScope::isNational($actor)) {
             return LogisticsDelivery::orderByDesc('created_at')->get()->map(fn (LogisticsDelivery $delivery) => $delivery->toArray())->all();
         }
         $organisation = $this->organisations->resolve($actor, $requestedOrganisationId);
@@ -161,7 +161,7 @@ class LogisticsService
         if (! $delivery) {
             throw new BusinessResourceException('Logistics delivery was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $delivery->organisation->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $delivery->organisation->taxpayer_id);
 
         return $delivery;
     }

@@ -31,7 +31,7 @@ use Symfony\Component\HttpFoundation\Response;
  * facing; `risk:read`/`risk:review` are held only by national-scope roles
  * in this app's RBAC (see Permissions::ROLE_PERMISSIONS), and
  * RiskService's own commands independently enforce
- * `TenantScope::isNational()` regardless of what the controller checks.
+ * `TaxpayerScope::isNational()` regardless of what the controller checks.
  */
 class RiskViewController extends Controller
 {

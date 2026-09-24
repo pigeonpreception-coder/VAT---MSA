@@ -31,7 +31,7 @@ use Illuminate\Support\Facades\Schema;
  * governance context (who authorised what, at what office/region, for
  * audit) -- there is no separate office/region-scoped permission
  * *enforcement* mechanism anywhere else in this codebase to hook into
- * beyond the existing national-vs-tenant split (`TenantScope::isNational`),
+ * beyond the existing national-vs-tenant split (`TaxpayerScope::isNational`),
  * and this migration does not invent one; see App\Services\Access\
  * UserRoleScopeGrantService's own doc comment for the honest statement
  * of what is and is not enforced.

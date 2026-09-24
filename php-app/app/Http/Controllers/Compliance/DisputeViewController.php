@@ -8,7 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Dispute;
 use App\Models\Taxpayer;
 use App\Services\Compliance\DisputeService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -63,7 +63,7 @@ class DisputeViewController extends Controller
         return view('disputes.index', [
             'disputes' => $disputes, 'status' => $request->query('status', ''),
             'canFile' => $actor->hasAppPermission('disputes:manage'),
-            'isNational' => TenantScope::isNational($actor),
+            'isNational' => TaxpayerScope::isNational($actor),
         ]);
     }
 
@@ -72,7 +72,7 @@ class DisputeViewController extends Controller
         $this->authorize('permission', 'compliance:read');
         $actor = $request->user();
 
-        $dispute = Dispute::when(! TenantScope::isNational($actor), fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))->find($id);
+        $dispute = Dispute::when(! TaxpayerScope::isNational($actor), fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))->find($id);
         // 404, not 403 -- matching Invoices'/VAT-periods' own no-resource-
         // existence-disclosure precedent (DisputeService has no dedicated
         // single-read method with its own tenant-scope exception to defer
@@ -89,7 +89,7 @@ class DisputeViewController extends Controller
         $actor = $request->user();
 
         $taxpayerId = null;
-        if (TenantScope::isNational($actor)) {
+        if (TaxpayerScope::isNational($actor)) {
             $vatNumber = (string) $request->input('vat_number');
             $taxpayer = Taxpayer::where('vat_number', $vatNumber)->first();
             if (! $taxpayer) {

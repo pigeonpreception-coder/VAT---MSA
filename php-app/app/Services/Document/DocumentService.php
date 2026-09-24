@@ -8,7 +8,7 @@ use App\Exceptions\RepositoryConflictException;
 use App\Models\DocumentMetadata;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -158,7 +158,7 @@ class DocumentService
      */
     public function completeScan(string $documentId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national platform role may record a document scan result.');
         }
         CommandLedger::validateIdempotencyKey($idempotencyKey);
@@ -327,7 +327,7 @@ class DocumentService
      */
     public function setRetentionHold(string $documentId, array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national platform role may set a document retention hold.');
         }
         CommandLedger::validateIdempotencyKey($idempotencyKey);

@@ -9,7 +9,7 @@ use App\Models\AccessRole;
 use App\Models\User;
 use App\Models\UserRoleScopeGrant;
 use App\Services\Access\UserRoleScopeGrantService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -33,7 +33,7 @@ class AccessRightsViewController extends Controller
         // See UserRoleScopeGrantService's own doc comment for why that
         // assumption is asserted directly here too, not just implied by
         // the permission map.
-        abort_unless(TenantScope::isNational($request->user()), 403);
+        abort_unless(TaxpayerScope::isNational($request->user()), 403);
 
         return view('access-rights.index', [
             'users' => User::orderBy('name')->get(['id', 'name', 'email', 'role', 'taxpayer_id']),

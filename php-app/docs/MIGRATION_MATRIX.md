@@ -12102,3 +12102,46 @@ stateless group instead). Two were genuinely missing:
   `::test_the_verify_token_source_bucket_returns_429_after_its_limit`,
   both real end-to-end HTTP tests against the real routes (11/31 real
   requests respectively). Full suite: 1142 tests, 0 regressions.
+
+## Multi-tenant SaaS pivot, phase 1: `TenantScope` renamed to `TaxpayerScope` (2026-09-24)
+
+- User decision (2026-09-24): this deployment, currently single-tenant and
+  built specifically for NamRA/Namibia, is to become a multi-tenant
+  platform -- one shared deployment licensable to multiple national tax
+  authorities, NamRA/Namibia becoming tenant #1 rather than a special
+  case baked into the code. A background inventory pass (this session)
+  found the schema skeleton for this already exists and is unused: the
+  Authority Governance module's `countries`/`tax_jurisdictions`/
+  `tax_authorities` tables, seeded with exactly one row each (Namibia/
+  NAMRA), never wired in as an actual scoping mechanism for `organisations`/
+  `taxpayers`/`VatRule`/`TaxRuleSet`. That inventory also surfaced a naming
+  collision blocking every later phase: `App\Support\Access\TenantScope`
+  (and the word "tenant" throughout its own doc comments and every call
+  site) has only ever meant *taxpayer*-level data isolation within one
+  deployment -- Section 3 of `SECURITY_GAP_ASSESSMENT.md`'s own
+  "Multi-tenant isolation" heading already used "tenant" this way, ported
+  faithfully from source's own `requireTaxpayerScope`/`isNationalScope`.
+  Nothing in this codebase has ever meant *SaaS tenant* (a licensed
+  national platform) by "tenant" -- introducing that real meaning without
+  first freeing up the word would make every future reference ambiguous.
+- Phase 1 (this pass, mechanical rename only, no behavioural change):
+  `App\Support\Access\TenantScope` renamed to `App\Support\Access\TaxpayerScope`
+  (`isNational()`/`requireTaxpayer()` unchanged). Every call site across
+  51 files (controllers, services, `App\Models\Scopes\OrganisationScope`,
+  `bootstrap/app.php`'s exception-render doc comment, tests) updated to
+  match. Historical, dated documents (prior `RED_TEAM_ASSESSMENT_*.md`
+  reports, earlier `MIGRATION_MATRIX.md` entries above this one) are
+  deliberately left referencing the old name -- they describe the
+  codebase as it was at the time they were written, not living
+  documentation to keep in sync.
+- Full suite: 1142 tests, 0 regressions (rename only -- no test assertions
+  needed updating since none referenced the class name directly).
+- Remaining phases (not started, see the user-facing report this pass
+  produced): wire the Authority Governance schema into `organisations`
+  as the real jurisdiction/authority FK; make `VatLifecycleService`'s
+  hardcoded `jurisdiction='NA'` return-generation filter and
+  `InvoiceCalculator`'s hardcoded NAD-only certification gate
+  jurisdiction-aware; sweep the ~150 mechanical NAD/N$/NamRA literals in
+  controllers, seeders and Blade views into tenant config; generalize the
+  ITAS/E-Tariff port contracts and add tenant-scoping to the adapter
+  registry; decide the per-tenant role-catalogue strategy.

@@ -15,7 +15,7 @@ use App\Models\RefundClaim;
 use App\Services\Payment\PaymentService;
 use App\Services\Refund\RefundService;
 use App\Services\VatLifecycle\VatReconciliationReportService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -58,7 +58,7 @@ class RefundViewController extends Controller
     {
         $this->authorize('permission', 'refunds:read');
         $actor = $request->user();
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
 
         $claims = RefundClaim::with('taxpayer')
             ->when($scoped, fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))
@@ -87,7 +87,7 @@ class RefundViewController extends Controller
     {
         $this->authorize('permission', 'refunds:read');
         $actor = $request->user();
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
 
         $claim = RefundClaim::with(['taxpayer', 'checks', 'transitions.actor'])
             ->when($scoped, fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))

@@ -7,7 +7,7 @@ use App\Models\InvoiceLine;
 use App\Models\User;
 use App\Models\VatPeriod;
 use App\Models\VatReturnVersion;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -39,7 +39,7 @@ class VatReconciliationReportService
     /** @return Collection<int, VatPeriod> periods the actor may pick for either report, most recent first. */
     public function periodOptions(User $actor): Collection
     {
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
 
         return VatPeriod::with('taxpayer')
             ->when($scoped, fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))
@@ -83,7 +83,7 @@ class VatReconciliationReportService
 
     private function resolvePeriod(User $actor, ?string $periodId): VatPeriod
     {
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
         $period = $periodId
             ? VatPeriod::with('taxpayer')->find($periodId)
             : VatPeriod::with('taxpayer')->when($scoped, fn ($q) => $q->where('taxpayer_id', $actor->taxpayer_id))
@@ -91,7 +91,7 @@ class VatReconciliationReportService
         if (! $period) {
             throw new VatLifecycleResourceException('No VAT period is available to report on.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $period->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $period->taxpayer_id);
 
         return $period;
     }

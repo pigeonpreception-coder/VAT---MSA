@@ -5,7 +5,7 @@ namespace App\Services\Identity;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Collection;
 
@@ -29,7 +29,7 @@ class OrganisationService
             'memberships as member_count' => fn ($q) => $q->where('status', 'ACTIVE'),
         ])->addSelect(['capabilities_summary' => $capabilities]);
 
-        if (! TenantScope::isNational($user)) {
+        if (! TaxpayerScope::isNational($user)) {
             $query->where('taxpayer_id', $user->taxpayer_id ?? '__none__');
         }
 
@@ -49,7 +49,7 @@ class OrganisationService
             return null;
         }
 
-        TenantScope::requireTaxpayer($user, $organisation->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($user, $organisation->taxpayer_id);
 
         return $organisation;
     }
@@ -61,7 +61,7 @@ class OrganisationService
         if (! $organisation) {
             throw new \InvalidArgumentException('The organisation does not exist.');
         }
-        TenantScope::requireTaxpayer($user, $organisation->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($user, $organisation->taxpayer_id);
         return $organisation;
     }
 }
