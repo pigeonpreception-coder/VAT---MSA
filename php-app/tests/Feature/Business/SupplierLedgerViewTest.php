@@ -263,6 +263,15 @@ class SupplierLedgerViewTest extends TestCase
         DB::disableQueryLog();
 
         $response->assertOk();
-        $this->assertLessThan(10, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 suppliers/120 expenses -- an N+1 regression scales with row count, not a fixed ceiling.");
+        // Ceiling raised 10 -> 11 for multi-tenant SaaS pivot phase 6
+        // (2026-09-24): User::hasAppPermission() now also resolves
+        // App\Support\Access\AuthorityRolePermissions::forRole(), one
+        // more row-count-independent query per request (memoized per
+        // User instance, like organisation() already is -- see either
+        // method's own doc comment) to check whether the actor's tax
+        // authority defines its own catalogue for their role. A genuine
+        // new fixed cost, not a reintroduced inefficiency: this test's
+        // own intent (no scaling with supplier/expense count) still holds.
+        $this->assertLessThan(11, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 suppliers/120 expenses -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }
