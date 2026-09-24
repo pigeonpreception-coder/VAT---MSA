@@ -122,6 +122,55 @@ class RateLimitGuard
     }
 
     /**
+     * Gap-finding pass (2026-09-24), rate-limit-boundary angle:
+     * `lib/security/request.ts` defines this bucket set (and
+     * enforceVerifyTokenRateLimits() below) with an explicit security
+     * rationale in its own doc comment -- "claimInvitation is a
+     * token-guessing surface (Sec 18)" -- but never actually calls either
+     * one from its own route handler (`app/api/v1/invitations/claim/
+     * route.ts` calls straight into `claimInvitation` with no rate-limit
+     * call at all). That is a pre-existing gap in the source itself, not
+     * a Laravel-side regression -- this port has nothing to diverge from
+     * here. Wiring it up anyway (rather than faithfully reproducing the
+     * same unused-dead-code state) because the underlying vulnerability
+     * is real and reachable (an unauthenticated actor can submit an
+     * unbounded number of guesses against `ClaimInvitationRequest`'s own
+     * token field) and the infrastructure to close it already exists,
+     * unlike a genuinely new feature this session would otherwise avoid
+     * inventing. Source/device bucket keying uses
+     * RequestContext::unauthenticatedRequestIp(), not sourceToken()/
+     * deviceId() -- see that method's own doc comment for why a
+     * pre-auth caller's own headers cannot be trusted as the sole
+     * rate-limit signal.
+     */
+    public static function enforceInvitationClaimRateLimits(string $sourceToken, string $deviceId): void
+    {
+        self::enforce([
+            ['key' => "invitation-claim:source:{$sourceToken}", 'limit' => 10, 'windowSeconds' => 300],
+            ['key' => "invitation-claim:device:{$deviceId}", 'limit' => 15, 'windowSeconds' => 300],
+            ['key' => 'invitation-claim:global', 'limit' => 200, 'windowSeconds' => 300],
+        ]);
+    }
+
+    /**
+     * Gap-finding pass (2026-09-24) -- see enforceInvitationClaimRateLimits()'s
+     * own doc comment for the full explanation; same situation, same fix
+     * rationale. Source's own doc comment: "GET /api/v1/verify/[token] is
+     * a public, unauthenticated, cached certificate-lookup endpoint -- an
+     * enumeration surface (Sec 18)" -- again defined in
+     * lib/security/request.ts but never called from
+     * `app/api/v1/verify/[token]/route.ts` itself.
+     */
+    public static function enforceVerifyTokenRateLimits(string $sourceToken, string $deviceId): void
+    {
+        self::enforce([
+            ['key' => "verify-token:source:{$sourceToken}", 'limit' => 30, 'windowSeconds' => 60],
+            ['key' => "verify-token:device:{$deviceId}", 'limit' => 45, 'windowSeconds' => 60],
+            ['key' => 'verify-token:global', 'limit' => 2_000, 'windowSeconds' => 60],
+        ]);
+    }
+
+    /**
      * Security fix 2026-08-27 (SECURITY_GAP_ASSESSMENT.md item #8, ported
      * verbatim): the generic per-command actor/tenant/global bucket shape
      * the identity/control-plane/reconciliation/vat-rule route families

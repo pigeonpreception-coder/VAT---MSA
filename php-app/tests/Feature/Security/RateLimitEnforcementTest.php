@@ -123,4 +123,49 @@ class RateLimitEnforcementTest extends TestCase
         $response->assertStatus(401);
         $this->assertDatabaseCount('rate_limit_windows', 0);
     }
+
+    /**
+     * Gap-finding pass (2026-09-24): RateLimitGuard::enforceInvitationClaimRateLimits()/
+     * enforceVerifyTokenRateLimits() -- unlike every other named bucket
+     * set above, these two are called inline from their own service
+     * (UserInvitationService::claim()/PublicVerificationService::verify()),
+     * not via the EnforceRateLimit middleware, since both routes are
+     * genuinely pre-auth (no `$request->user()` for the middleware's own
+     * short-circuit above to key on) -- same shape as
+     * enforceSelfServeSignup's own SignupService call site.
+     */
+    public function test_the_invitation_claim_source_bucket_returns_429_after_its_limit(): void
+    {
+        // enforceInvitationClaimRateLimits' own source bucket is 10 requests
+        // per 300 seconds (RateLimitGuard's own doc comment) -- 11 real
+        // HTTP POSTs (every one with an invalid token, on purpose: the rate
+        // limit is checked before the token is ever looked up) proves the
+        // 11th is rejected with a graceful form error, not a raw 500.
+        $payload = ['token' => 'not-a-real-token', 'name' => 'Claimant', 'password' => 'CorrectHorse1', 'password_confirmation' => 'CorrectHorse1'];
+        $response = null;
+        for ($i = 0; $i < 11; $i++) {
+            $response = $this->post('/invitations/claim', $payload);
+        }
+
+        $response->assertSessionHasErrors('token');
+        $this->assertDatabaseHas('rate_limit_windows', ['bucket_key' => 'invitation-claim:source:127.0.0.1']);
+    }
+
+    public function test_the_verify_token_source_bucket_returns_429_after_its_limit(): void
+    {
+        // enforceVerifyTokenRateLimits' own source bucket is 30 requests per
+        // 60 seconds -- 31 real HTTP GETs against an unknown token (the
+        // rate limit is checked before the certificate lookup) proves the
+        // 31st is rejected, matching RateLimitExceededException::render()'s
+        // own JSON shape on this JSON route.
+        $response = null;
+        for ($i = 0; $i < 31; $i++) {
+            $response = $this->getJson('/api/v1/verify/not-a-real-token');
+        }
+
+        $response->assertStatus(429);
+        $response->assertJson(['code' => 'RATE_LIMIT_EXCEEDED']);
+        $this->assertTrue($response->headers->has('Retry-After'));
+        $this->assertDatabaseHas('rate_limit_windows', ['bucket_key' => 'verify-token:source:127.0.0.1']);
+    }
 }

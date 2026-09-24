@@ -33,9 +33,12 @@ class RequestContext
      * A source/device identifier the caller cannot spoof -- the request's
      * own resolved IP address, ignoring `X-Source-Token`/`X-Device-Id`
      * entirely. Use this (not sourceToken()/deviceId()) for a genuinely
-     * unauthenticated route -- self-serve signup is currently the only
-     * one (App\Http\Controllers\Signup\SignupController/
-     * SignupViewController).
+     * unauthenticated route -- self-serve signup was the first
+     * (App\Http\Controllers\Signup\SignupController/SignupViewController);
+     * invitation claim and public invoice verification (see
+     * RateLimitGuard::enforceInvitationClaimRateLimits()/
+     * enforceVerifyTokenRateLimits()'s own doc comments) are the same
+     * shape -- no actor exists yet at the point either is called.
      *
      * Why sourceToken()/deviceId() stay header-trusting for every other
      * caller: every other route this app rate-limits is authenticated, so
