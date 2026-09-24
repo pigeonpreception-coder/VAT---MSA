@@ -12145,3 +12145,54 @@ stateless group instead). Two were genuinely missing:
   controllers, seeders and Blade views into tenant config; generalize the
   ITAS/E-Tariff port contracts and add tenant-scoping to the adapter
   registry; decide the per-tenant role-catalogue strategy.
+
+## Multi-tenant SaaS pivot, phase 2: `organisations.tax_authority_id` (2026-09-24)
+
+- User go-ahead given (2026-09-24) after phase 1's rename merged (PR #104).
+  `organisations` previously had no concept of which licensed national
+  platform it belonged to -- only a `taxpayer_id`. New migration
+  `2026_09_24_000001_add_tax_authority_id_to_organisations_table.php`
+  adds `tax_authority_id`, a real foreign key into the Authority
+  Governance module's own `tax_authorities` table (`countries` ->
+  `tax_jurisdictions` -> `tax_authorities`) -- a schema that already
+  existed, unused as a scoping mechanism, seeded with exactly one row
+  each for Namibia/NAMRA by `Database\Seeders\AuthorityGovernanceSeeder`.
+- The migration inserts those same three reference rows itself
+  (`updateOrInsert`, same IDs/values as the seeder, so whichever of the
+  two runs first the other is a harmless no-op) -- required because a
+  fresh test database only runs the seeders a test file explicitly calls
+  `$this->seed()` for, and this migration must not depend on
+  `AuthorityGovernanceSeeder` having run.
+- `tax_authority_id` is `NOT NULL` with a database-level `DEFAULT` of
+  NamRA's own id (`tax-authority-na-namra`), not just backfilled and
+  left nullable -- deliberately, so every one of this migration set's
+  ~50 existing test fixtures (and any future one) that build an
+  `Organisation` without naming a tax authority keep working completely
+  unchanged: the column is real and enforced (a genuinely unknown
+  authority id is rejected by the FK), but a caller that says nothing
+  about which authority still gets today's only answer. Tightening this
+  default away is explicitly a later phase's job, once a second tenant
+  is real and an omitted authority should be an error rather than an
+  assumption -- not attempted here.
+- `App\Models\Organisation::taxAuthority()` (`belongsTo`) and
+  `App\Models\TaxAuthority::organisations()` (`hasMany`) added. No other
+  application code changed -- nothing reads this column yet (that's
+  phase 3: making `VatLifecycleService`'s hardcoded `jurisdiction='NA'`
+  filter and `InvoiceCalculator`'s hardcoded NAD-only gate actually
+  consult it).
+- New `OrganisationTaxAuthorityTest` (5 tests): the reference rows exist
+  from the migration alone with no seeder run; an organisation created
+  without naming an authority defaults to NamRA; an explicit authority
+  can be assigned; the Eloquent relationship resolves both ways (noting
+  in its own doc comment why `->fresh()` is required: `create()`'s
+  in-memory instance never reflects a column left for the database's own
+  `DEFAULT` to fill in until re-fetched); an unknown authority id is
+  rejected by the foreign key. `App\Models\TaxAuthority::create()` is
+  not used to set up the "a different authority" fixture -- see that
+  model's own doc comment on why it deliberately omits `HasUuids` (no
+  real command creates a row through it), which left the test's first
+  draft silently writing `id => 0`; fixed to `DB::table()->insert()`,
+  matching the migration's own established pattern for this table.
+- Full suite: 1147 tests, 0 regressions -- including every pre-existing
+  test file that creates an `Organisation` without ever mentioning
+  `tax_authority_id`.
