@@ -88,6 +88,29 @@ class OrganisationTaxAuthorityTest extends TestCase
         $this->assertTrue($namra->organisations->contains('id', $organisation->id));
     }
 
+    /**
+     * Multi-tenant SaaS pivot phase 3 (2026-09-24): found while building
+     * phase 3's own TaxJurisdiction lookups. TaxAuthority didn't set
+     * `$incrementing = false`/`$keyType = 'string'` (see the model's own
+     * doc comment for the mechanism), so Eloquent implicitly cast every
+     * read of its own `id` to int -- `(int) 'tax-authority-na-namra'` =
+     * 0. test_the_eloquent_relationship_resolves_both_ways() above never
+     * caught this: it only reads ->code off a belongsTo result (never
+     * touches TaxAuthority's own id) and its ->organisations containment
+     * check happened to still pass, because MySQL's loose string-to-int
+     * comparison coerces every non-numeric tax_authority_id value to 0
+     * too, so `WHERE tax_authority_id = 0` matched every row rather than
+     * none -- an accidental over-broad match, not a real pass. This
+     * asserts the id itself, which the coercion bug would fail outright.
+     */
+    public function test_a_tax_authoritys_own_primary_key_reads_back_as_the_real_string_id_not_zero(): void
+    {
+        $namra = TaxAuthority::find('tax-authority-na-namra');
+
+        $this->assertSame('tax-authority-na-namra', $namra->id);
+        $this->assertIsString($namra->id);
+    }
+
     public function test_an_unknown_tax_authority_id_is_rejected_by_the_foreign_key(): void
     {
         $taxpayer = $this->makeTaxpayer('VAT-TA-0004');

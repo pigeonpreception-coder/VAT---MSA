@@ -24,7 +24,7 @@ class InvoiceCalculator
      *
      * @throws InvoiceValidationException
      */
-    public function calculateAndValidate(array $payload): array
+    public function calculateAndValidate(array $payload, string $expectedCurrency = 'NAD'): array
     {
         $errors = [];
 
@@ -88,8 +88,14 @@ class InvoiceCalculator
         }
         if (! preg_match('/^[A-Z]{3}$/', (string) ($payload['currency'] ?? ''))) {
             $errors[] = ['code' => 'CURRENCY_INVALID', 'path' => '/currency', 'message' => 'Currency must be a three-letter ISO code.'];
-        } elseif (($payload['currency'] ?? '') !== 'NAD') {
-            $errors[] = ['code' => 'CURRENCY_JURISDICTION_MISMATCH', 'path' => '/currency', 'message' => 'Namibia VAT certification requires NAD currency.'];
+        } elseif (($payload['currency'] ?? '') !== $expectedCurrency) {
+            // Multi-tenant SaaS pivot phase 3 (2026-09-24): this used to be a
+            // hardcoded 'NAD' literal ("Namibia VAT certification requires
+            // NAD currency") -- InvoiceService::submit() now resolves the
+            // real supplier's organisation/tax-authority currency (see
+            // Organisation::currencyCode()'s own doc comment) and passes it
+            // in here, defaulting to 'NAD' only when it can't be resolved.
+            $errors[] = ['code' => 'CURRENCY_JURISDICTION_MISMATCH', 'path' => '/currency', 'message' => "VAT certification requires {$expectedCurrency} currency for this taxpayer's jurisdiction."];
         }
 
         // Red-team punch list #9 (docs/RED_TEAM_OPEN_ITEMS_CONSOLIDATED_
