@@ -6,7 +6,7 @@
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Invoice Management</div>
     <h1 class="h3 mb-1">Local invoices</h1>
-    <p class="text-muted mb-0">Domestic invoices issued or received in real time -- whether pushed by a taxpayer's own private Point-of-Sale system through a real API credential, or processed directly through VAT-MSA's own built-in POS module -- with the same cross-party match status behind NamRA's real-time VAT audit and refund reporting.</p>
+    <p class="text-muted mb-0">Domestic invoices issued or received in real time -- whether pushed by a taxpayer's own private Point-of-Sale system through a real API credential, or processed directly through VAT-MSA's own built-in POS module -- with the same cross-party match status behind {{ $tenantAuthorityShortName }}'s real-time VAT audit and refund reporting.</p>
 </div>
 
 @if ($errors->any())

@@ -6,8 +6,8 @@
     // Currency-code prefix, matching invoices/show.blade.php's own $money
     // helper convention -- not the "N$" shorthand the Business/Accounting
     // domain views use, since an invoice's own currency is per-document,
-    // not always NAD.
-    $fmt = fn (int $cents) => trim(($selected->currency ?? 'NAD').' '.number_format($cents / 100, 2));
+    // not always the viewer's own tenant currency.
+    $fmt = fn (int $cents) => trim(($selected->currency ?? $tenantCurrencyCode).' '.number_format($cents / 100, 2));
     $todayIso = now()->toDateString();
 @endphp
 

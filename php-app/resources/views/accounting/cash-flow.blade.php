@@ -3,7 +3,7 @@
 @section('title', 'Cash Flow Projects')
 
 @php
-    $fmt = fn (int $cents) => 'N$ '.number_format($cents / 100, 2);
+    $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')

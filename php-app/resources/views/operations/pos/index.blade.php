@@ -53,7 +53,7 @@
                                     <strong>{{ $product->name }}</strong>
                                     <div class="text-muted small font-monospace">{{ $product->sku }}</div>
                                 </td>
-                                <td>NAD {{ number_format($product->sales_price_cents / 100, 2) }}</td>
+                                <td>{{ $tenantCurrencyCode }} {{ number_format($product->sales_price_cents / 100, 2) }}</td>
                                 @if ($canSell)
                                     <td>
                                         <button type="button" class="btn btn-sm btn-secondary" onclick="posAddToCart('{{ $product->id }}', {{ Illuminate\Support\Js::from($product->name) }}, {{ (int) $product->sales_price_cents }}, {{ (int) $product->tax_rate_bps }})">Add</button>
@@ -106,9 +106,9 @@
                             </datalist>
                         </div>
                         <div class="border rounded p-2 mb-3 small">
-                            <div class="d-flex justify-content-between"><span>Tax-exclusive value</span><strong id="pos-net">NAD 0.00</strong></div>
-                            <div class="d-flex justify-content-between"><span>VAT</span><strong id="pos-tax">NAD 0.00</strong></div>
-                            <div class="d-flex justify-content-between fs-6"><span>Payable amount</span><strong id="pos-total">NAD 0.00</strong></div>
+                            <div class="d-flex justify-content-between"><span>Tax-exclusive value</span><strong id="pos-net">{{ $tenantCurrencyCode }} 0.00</strong></div>
+                            <div class="d-flex justify-content-between"><span>VAT</span><strong id="pos-tax">{{ $tenantCurrencyCode }} 0.00</strong></div>
+                            <div class="d-flex justify-content-between fs-6"><span>Payable amount</span><strong id="pos-total">{{ $tenantCurrencyCode }} 0.00</strong></div>
                         </div>
                         <button type="submit" class="btn btn-primary w-100" id="pos-submit" disabled>Complete sale</button>
                     </form>
@@ -125,7 +125,7 @@
     var posCart = [];
 
     function posFormatMoney(cents) {
-        return 'NAD ' + (cents / 100).toFixed(2);
+        return '{{ $tenantCurrencyCode }} ' + (cents / 100).toFixed(2);
     }
 
     function posAddToCart(productId, name, priceCents, taxRateBps) {

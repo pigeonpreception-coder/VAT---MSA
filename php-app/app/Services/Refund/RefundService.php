@@ -6,6 +6,7 @@ use App\Domain\Compliance\ComplianceValidator;
 use App\Exceptions\ComplianceResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\Invoice;
+use App\Models\Organisation;
 use App\Models\RefundClaim;
 use App\Models\RefundClaimCheck;
 use App\Models\RefundClaimTransition;
@@ -72,11 +73,14 @@ class RefundService
         $now = now();
         $snapshot = $this->buildSnapshot($version, $period, $now);
         $checks = $this->evaluateChecks($version, $filed, $riskSignal);
+        // Multi-tenant SaaS pivot phase 4 (2026-09-24): the claimant's own
+        // organisation currency, not always 'NAD'.
+        $currencyCode = Organisation::find($version->organisation_id)?->currencyCode() ?? 'NAD';
 
-        DB::transaction(function () use ($id, $claimNumber, $version, $amount, $status, $filed, $riskTier, $actor, $now, $snapshot, $checks, $idempotencyKey, $requestHash, $correlationId) {
+        DB::transaction(function () use ($id, $claimNumber, $version, $amount, $status, $filed, $riskTier, $actor, $now, $snapshot, $checks, $idempotencyKey, $requestHash, $correlationId, $currencyCode) {
             RefundClaim::create([
                 'id' => $id, 'claim_number' => $claimNumber, 'organisation_id' => $version->organisation_id, 'taxpayer_id' => $version->taxpayer_id,
-                'vat_return_version_id' => $version->id, 'amount_cents' => $amount, 'currency' => 'NAD', 'status' => $status,
+                'vat_return_version_id' => $version->id, 'amount_cents' => $amount, 'currency' => $currencyCode, 'status' => $status,
                 'evidence_status' => $filed ? 'PENDING_REVIEW' : 'AWAITING_ITAS_ACKNOWLEDGEMENT', 'risk_tier' => $riskTier,
                 'requested_by' => $actor->id, 'requested_at' => $now, 'approved_by' => null, 'approved_at' => null, 'payment_instruction_id' => null,
                 'resume_status' => null, 'offset_amount_cents' => 0, 'net_payable_cents' => null, 'dispute_reason' => null,

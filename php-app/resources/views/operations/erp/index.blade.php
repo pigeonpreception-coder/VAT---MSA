@@ -23,7 +23,7 @@
         <a href="{{ $canReadAssets ? route('operations.immovable-assets') : '#' }}" class="text-decoration-none {{ $canReadAssets ? '' : 'opacity-50' }}">
             <div class="card h-100"><div class="card-body">
                 <div class="text-muted small text-uppercase">Fixed Assets</div>
-                <div class="fs-2 fw-semibold text-body">NAD {{ number_format($assetValueCents / 100, 2) }}</div>
+                <div class="fs-2 fw-semibold text-body">{{ $tenantCurrencyCode }} {{ number_format($assetValueCents / 100, 2) }}</div>
                 <div class="small text-muted">{{ $canReadAssets ? $assetCount.' in service' : 'No permission' }}</div>
             </div></div>
         </a>
@@ -32,7 +32,7 @@
         <a href="{{ route('operations.inventory') }}" class="text-decoration-none">
             <div class="card h-100"><div class="card-body">
                 <div class="text-muted small text-uppercase">Inventory (POS)</div>
-                <div class="fs-2 fw-semibold text-body">NAD {{ number_format($inventoryValueCents / 100, 2) }}</div>
+                <div class="fs-2 fw-semibold text-body">{{ $tenantCurrencyCode }} {{ number_format($inventoryValueCents / 100, 2) }}</div>
                 <div class="small text-muted">{{ $productCount }} products</div>
             </div></div>
         </a>

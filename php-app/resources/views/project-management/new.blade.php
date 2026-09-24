@@ -113,7 +113,7 @@
                         <div class="mb-3">
                             <label for="budget_cents" class="form-label">Proposed budget (cents, optional)</label>
                             <input type="number" class="form-control" id="budget_cents" name="budget_cents" min="0" step="1" value="{{ old('budget_cents') }}">
-                            <div class="form-text">Enter N$ 100.00 as 10000. Awaits approval on the Budgets page.</div>
+                            <div class="form-text">Enter {{ $tenantCurrencySymbol }} 100.00 as 10000. Awaits approval on the Budgets page.</div>
                         </div>
                         <button type="submit" class="btn btn-primary">Create project</button>
                     </form>

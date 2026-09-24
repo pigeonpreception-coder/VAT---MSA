@@ -3,7 +3,7 @@
 @section('title', 'Buyer portal')
 
 @php
-    $money = fn (int $cents, ?string $currency = null) => trim(($currency ?? 'NAD').' '.number_format($cents / 100, 2));
+    $money = fn (int $cents, ?string $currency = null) => trim(($currency ?? $tenantCurrencyCode).' '.number_format($cents / 100, 2));
     $date = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y') : '—';
     $inputVat = collect($snapshot['vat']['periods'])->sum(fn ($period) => (int) ($period['input_tax_cents'] ?? 0));
     $unmatched = collect($snapshot['vat']['reconciliation'])->filter(fn ($item) => $item['status'] !== 'MATCHED')->count();
@@ -13,7 +13,7 @@
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Buyer workspace</div>
     <h1 class="h3 mb-1">Purchases, input VAT and evidence requiring action</h1>
-    <p class="text-muted mb-0">This projection omits NamRA internal risk and technical administration. It shows authorised supplier transactions, business expenses, reconciliation, return impact and evidence state.</p>
+    <p class="text-muted mb-0">This projection omits {{ $tenantAuthorityShortName }} internal risk and technical administration. It shows authorised supplier transactions, business expenses, reconciliation, return impact and evidence state.</p>
 </div>
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">

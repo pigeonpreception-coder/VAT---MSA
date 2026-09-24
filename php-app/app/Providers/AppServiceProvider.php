@@ -9,8 +9,11 @@ use App\Integrations\Itas\UnavailableItasIdentityAdapter;
 use App\Integrations\Payment\PaymentConnectorPort;
 use App\Integrations\Payment\SandboxPaymentConnector;
 use App\Models\User;
+use App\Support\Tenancy\TenantBranding;
 use Illuminate\Auth\Access\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -64,6 +67,24 @@ class AppServiceProvider extends ServiceProvider
             }
 
             return Response::deny("Role {$user->role} does not have {$permission} permission.");
+        });
+
+        /**
+         * Multi-tenant SaaS pivot phase 4 (2026-09-24) -- see
+         * App\Support\Tenancy\TenantBranding's own doc comment.
+         * `Auth::user()` is the same cached model instance for the whole
+         * request (Laravel's session guard resolves it once), and
+         * Eloquent caches a loaded belongsTo/hasOne relation on that
+         * instance -- so this composer firing once per rendered view
+         * (including every `@include`d partial) costs at most one query
+         * each for ->taxpayer and ->organisation, not one per view.
+         */
+        View::composer('*', function ($view) {
+            $view->with(
+                collect(TenantBranding::forUser(Auth::user()))
+                    ->mapWithKeys(fn ($value, $key) => ['tenant'.ucfirst($key) => $value])
+                    ->all()
+            );
         });
     }
 }

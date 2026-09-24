@@ -187,10 +187,15 @@ class AuditCaseViewController extends Controller
     {
         $this->authorize('permission', 'cases:manage');
 
+        // Multi-tenant SaaS pivot phase 4 (2026-09-24): defaults to the
+        // audit case's own taxpayer's organisation currency, not the
+        // acting officer's -- this finding is being recorded against
+        // that taxpayer, not the caller.
+        $caseTaxpayer = AuditCase::find($id)?->taxpayer;
         $payload = [
             'schema_version' => '1.0.0', 'finding_code' => (string) $request->input('finding_code'), 'title' => (string) $request->input('title'),
             'description' => (string) $request->input('description'), 'legal_reference' => $request->input('legal_reference') ?: null,
-            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: 'NAD'),
+            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: ($caseTaxpayer?->organisation?->currencyCode() ?? 'NAD')),
             'override_reason' => $request->input('override_reason') ?: null,
         ];
 

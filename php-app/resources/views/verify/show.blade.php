@@ -68,7 +68,7 @@
                     </table>
                 @endif
 
-                <div class="alert alert-danger mt-4 mb-0 small">Pilot certificate only. Production legal signatures require the approved NamRA signing profile and protected HSM keys.</div>
+                <div class="alert alert-danger mt-4 mb-0 small">Pilot certificate only. Production legal signatures require the approved {{ $tenantAuthorityShortName }} signing profile and protected HSM keys.</div>
                 <div class="mt-3"><a class="btn btn-outline-secondary btn-sm" href="{{ url('/') }}">Return to VAT-MSA</a></div>
             </div>
         </div>

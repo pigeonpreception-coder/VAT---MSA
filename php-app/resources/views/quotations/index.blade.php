@@ -34,7 +34,7 @@
     <div class="col">
         <div class="card h-100"><div class="card-body">
             <div class="text-muted small text-uppercase">Quoted value</div>
-            <div class="fs-2 fw-semibold">N$ {{ number_format($quotedValueCents / 100, 2) }}</div>
+            <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($quotedValueCents / 100, 2) }}</div>
             <div class="small text-muted">Issued, accepted and converted</div>
         </div></div>
     </div>
@@ -235,7 +235,7 @@
                         <div class="mb-3">
                             <label for="unit_price_cents" class="form-label">Unit price (cents)</label>
                             <input type="number" class="form-control" id="unit_price_cents" name="unit_price_cents" required min="0" step="1" value="{{ old('unit_price_cents') }}">
-                            <div class="form-text">Enter N$ 100.00 as 10000. VAT is calculated server-side.</div>
+                            <div class="form-text">Enter {{ $tenantCurrencySymbol }} 100.00 as 10000. VAT is calculated server-side.</div>
                         </div>
                         <div class="mb-3">
                             <label for="notes" class="form-label">Notes</label>

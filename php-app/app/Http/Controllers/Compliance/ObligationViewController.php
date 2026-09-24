@@ -78,7 +78,11 @@ class ObligationViewController extends Controller
             'schema_version' => '1.0.0', 'taxpayer_id' => $taxpayer->id,
             'obligation_type' => mb_strtoupper((string) $request->input('obligation_type')),
             'period_code' => (string) $request->input('period_code'), 'due_date' => (string) $request->input('due_date'),
-            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: 'NAD'),
+            // Multi-tenant SaaS pivot phase 4 (2026-09-24): defaults to the
+            // *target* taxpayer's own organisation currency, not the
+            // acting officer's -- this obligation is being recorded
+            // against $taxpayer, not the caller.
+            'amount_cents' => $this->safeDecimalCentsInput($request->input('amount')), 'currency' => (string) ($request->input('currency') ?: ($taxpayer->organisation?->currencyCode() ?? 'NAD')),
         ];
 
         try {

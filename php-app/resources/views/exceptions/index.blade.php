@@ -41,8 +41,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Exception value</span><span>N$</span></div>
-                <div class="fs-2 fw-semibold">N$ {{ number_format($summary['total_value_cents'] / 100, 2) }}</div>
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Exception value</span><span>{{ $tenantCurrencySymbol }}</span></div>
+                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($summary['total_value_cents'] / 100, 2) }}</div>
                 <div class="small text-muted">Gross value under exception control</div>
             </div>
         </div>

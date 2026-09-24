@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'NamRA administration portal')
+@section('title', $tenantAuthorityShortName.' administration portal')
 
 @php
     $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';

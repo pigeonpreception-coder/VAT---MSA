@@ -115,7 +115,9 @@ class PosService
                 ? ['name' => $customer->legal_name, 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => $customer->vat_number]]]
                 : ['name' => 'Walk-in customer', 'identifiers' => [['type' => 'OTHER', 'value' => 'CONSUMER']]],
             'invoice_number' => 'POS-'.now()->format('Ymd').'-'.mb_strtoupper(Str::random(6)),
-            'issue_date' => now()->toDateString(), 'currency' => 'NAD', 'lines' => $lines,
+            // Multi-tenant SaaS pivot phase 4 (2026-09-24): the selling
+            // organisation's own currency, not always 'NAD'.
+            'issue_date' => now()->toDateString(), 'currency' => $organisation->currencyCode(), 'lines' => $lines,
             'totals' => [
                 'line_net_amount' => $this->calculator->centsToDecimal($netTotal), 'tax_exclusive_amount' => $this->calculator->centsToDecimal($netTotal),
                 'tax_amount' => $this->calculator->centsToDecimal($taxTotal), 'tax_inclusive_amount' => $this->calculator->centsToDecimal($totalCents),

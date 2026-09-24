@@ -89,6 +89,7 @@ class DisputeViewController extends Controller
         $actor = $request->user();
 
         $taxpayerId = null;
+        $disputingOrganisation = $actor->organisation();
         if (TaxpayerScope::isNational($actor)) {
             $vatNumber = (string) $request->input('vat_number');
             $taxpayer = Taxpayer::where('vat_number', $vatNumber)->first();
@@ -96,13 +97,18 @@ class DisputeViewController extends Controller
                 return back()->withErrors(['vat_number' => 'No taxpayer is registered with that VAT number.'])->withInput();
             }
             $taxpayerId = $taxpayer->id;
+            $disputingOrganisation = $taxpayer->organisation;
         }
 
         $payload = [
             'schema_version' => '1.0.0', 'taxpayer_id' => $taxpayerId, 'audit_case_id' => $request->input('audit_case_id') ?: null,
             'disputed_resource_type' => (string) $request->input('disputed_resource_type'), 'disputed_resource_id' => (string) $request->input('disputed_resource_id'),
             'grounds' => (string) $request->input('grounds'), 'disputed_amount_cents' => $this->safeDecimalCentsInput($request->input('disputed_amount')),
-            'currency' => (string) ($request->input('currency') ?: 'NAD'),
+            // Multi-tenant SaaS pivot phase 4 (2026-09-24): defaults to the
+            // disputing party's own organisation currency (the actor's
+            // own when taxpayer-scoped, the resolved target taxpayer's
+            // when national), not always 'NAD'.
+            'currency' => (string) ($request->input('currency') ?: ($disputingOrganisation?->currencyCode() ?? 'NAD')),
         ];
 
         try {

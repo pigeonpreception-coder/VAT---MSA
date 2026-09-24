@@ -10,7 +10,7 @@
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Registered domain</div>
     <h1 class="h3 mb-1">Registered taxpayer systems</h1>
-    <p class="text-muted mb-0">NamRA e-VAT MS Registered Taxpayer Systems Framework -- a taxpayer's own ERP/POS/accounting/invoicing system, self-registered and approved by NamRA before it can integrate.</p>
+    <p class="text-muted mb-0">NamRA e-VAT MS Registered Taxpayer Systems Framework -- a taxpayer's own ERP/POS/accounting/invoicing system, self-registered and approved by {{ $tenantAuthorityShortName }} before it can integrate.</p>
 </div>
 
 @if ($errors->any())

@@ -77,7 +77,7 @@
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Currency</label>
-                        <output class="form-control">N$</output>
+                        <output class="form-control">{{ $tenantCurrencySymbol }}</output>
                         <div class="form-text">Namibian-dollar presentation; ISO code remains internal.</div>
                     </div>
                     <div class="col-md-4 mb-3">

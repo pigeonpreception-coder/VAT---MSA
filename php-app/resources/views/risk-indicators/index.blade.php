@@ -10,7 +10,7 @@
 @section('content')
 <div class="mb-4 d-flex justify-content-between align-items-start">
     <div>
-        <div class="text-uppercase text-muted small fw-semibold">Compliance domain &middot; NamRA-restricted</div>
+        <div class="text-uppercase text-muted small fw-semibold">Compliance domain &middot; {{ $tenantAuthorityShortName }}-restricted</div>
         <h1 class="h3 mb-1">Risk indicators</h1>
         <p class="text-muted mb-0">Advisory-only signals from a small, fixed, code-versioned rule catalogue -- never a black-box score, and never auto-escalated to a case without an authorised officer's own decision.</p>
     </div>

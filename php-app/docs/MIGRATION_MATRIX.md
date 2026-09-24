@@ -12266,3 +12266,93 @@ stateless group instead). Two were genuinely missing:
   views into tenant config (phase 4); generalize the ITAS/E-Tariff port
   contracts and add tenant-scoping to the adapter registry (phase 5);
   decide the per-tenant role-catalogue strategy (phase 6).
+
+## Multi-tenant SaaS pivot, phase 4: tenant-branded currency/authority display literals (2026-09-24)
+
+- User go-ahead given (2026-09-24) after phase 3 merged (PR #106).
+  Phase 3 made the two hardcoded *business-logic* literals
+  (`VatLifecycleService`'s jurisdiction filter, `InvoiceCalculator`'s
+  currency gate) jurisdiction-aware; this phase does the same for the
+  ~150 mechanical `NAD`/`N$`/`NamRA` *display* literals phase 2's own
+  PR description named as this phase's job -- controller-side currency
+  defaults on new records, and every hardcoded currency symbol/code and
+  authority-name mention in Blade views.
+- **Schema**: two new self-sufficient migrations, same backward-compatible
+  DB-level-DEFAULT pattern as phase 2's own
+  `add_tax_authority_id_to_organisations_table` migration --
+  `countries.currency_symbol` (DEFAULT `'N$'`) and
+  `tax_authorities.short_name` (DEFAULT `'NamRA'`). `short_name` is its
+  own column, not a reuse of `tax_authorities.code` ('NAMRA', uppercase,
+  a technical identifier): this codebase's own prose has always used the
+  real authority's own stylized mixed-case brand spelling, "NamRA", in
+  running text -- deriving it from `code` instead would have silently
+  reflowed every prose mention to shout-cased "NAMRA", a real, visible
+  regression for today's only tenant caught by this phase's own
+  `RefundViewTest` assertion before it shipped (see the fix below).
+- **Resolution point**: `App\Models\Organisation` gained
+  `currencySymbol()`/`taxAuthorityShortName()` (alongside phase 3's
+  `currencyCode()`), and `App\Models\User::organisation()` -- a single
+  convenience accessor (`taxpayer_id` -> `organisations` directly, one
+  query, memoized via `setRelation()`/`getRelation()` so repeated calls
+  on the same request-cached `Auth::user()` instance cost exactly one
+  query total, not one per call) every controller-side literal and the
+  new view composer both go through.
+- **`App\Support\Tenancy\TenantBranding`** + a global `View::composer('*',
+  ...)` in `AppServiceProvider::boot()` share `$tenantCurrencyCode`/
+  `$tenantCurrencySymbol`/`$tenantAuthorityShortName`/`$tenantAuthorityName`
+  to every rendered view, resolved from the viewing user's own
+  organisation -- a guest, a national-scope actor (no `taxpayer_id`), or
+  an unresolvable organisation all default to today's only tenant's
+  values, so a platform-side user (NamRA staff, pilot admin) sees no
+  change either.
+- **Controllers**: ~10 call sites (`QuotationViewController`,
+  `PurchaseOrderViewController`, `OperationsViewController`,
+  `ProjectManagementViewController`, `ObligationViewController`,
+  `AuditCaseViewController`, `DisputeViewController`, `PosService`,
+  `RefundService`) that hardcoded `'currency' => 'NAD'` on a new record
+  now resolve it from the relevant party's own organisation (the acting
+  user's own for a self-service form; the *target* taxpayer's for an
+  officer recording something against a taxpayer, e.g.
+  `ObligationViewController::store()`/`AuditCaseViewController::
+  storeFinding()`/`DisputeViewController::store()` -- see each call
+  site's own comment for which). `ReportExportService::CURRENCY_BASIS`
+  deliberately left hardcoded, with its own doc comment explaining why:
+  it aggregates figures *across* taxpayers for the platform side, so
+  there is no single Organisation to resolve a currency from -- a real
+  design question for a later phase, not a mechanical swap.
+- **Blade views**: ~40 files swept. Left deliberately untouched, with
+  the scoping reasoning inline where non-obvious: role/permission
+  constant names (`NAMRA_SYSTEM_ADMIN` etc. -- structural, not display);
+  doc-comment prose; `database/seeders/*` demo/fixture data (describes
+  a specific pilot customer, not display logic); and every mention of
+  the *ITAS*/*E-Tariff*/*BIPA* external integrations by name (phase 5's
+  own explicit scope, not phase 4's -- generalizing those port contracts
+  is an integration-architecture question, not a literal swap).
+- **Bug found and fixed along the way**: building this phase's own
+  `View::composer` surfaced a real N+1-adjacent regression against
+  `SupplierLedgerViewTest`'s own fixed query-count ceiling -- the
+  composer's `Auth::user()->organisation()` lookup added two constant
+  queries (load `taxpayer`, then its `organisation`) to every request.
+  Fixed by collapsing `User::organisation()` to one direct query
+  (`taxpayer_id` -> `organisations`, skipping the intermediate
+  `Taxpayer` load) with instance-level memoization, landing under the
+  ceiling with room to spare.
+- New `TenantBrandingViewTest` (4 tests) and 6 tests added to
+  `JurisdictionAwareCalculationTest`/`OrganisationTaxAuthorityTest` in
+  phase 3 (kept there, not duplicated): builds a second, fictitious tax
+  authority (currency symbol `'Z$'`, short name `'ZTRA'` -- deliberately
+  distinct from every DB-level DEFAULT) and asserts a real HTTP response
+  shows the tenant's *own* branding, not Namibia's; a matching NamRA-tenant
+  assertion on each page proves zero visible change for today's only
+  real tenant. Manually verified in a running dev server too (`php
+  artisan serve` + `curl`, logged in as both a taxpayer-side and a
+  NamRA-side demo user): dashboard, refunds, accounting, the POS
+  terminal's embedded JS formatter, the NamRA portal's `<title>` tag,
+  obligations and risk-indicators pages all render byte-identical
+  "N$"/"NAD"/"NamRA" text to before this phase, no errors, no blank
+  variables.
+- Full suite: 1157 tests, 0 regressions.
+- Remaining phases (not started, require explicit user go-ahead before
+  each): generalize the ITAS/E-Tariff port contracts and add
+  tenant-scoping to the adapter registry (phase 5); decide the
+  per-tenant role-catalogue strategy (phase 6).

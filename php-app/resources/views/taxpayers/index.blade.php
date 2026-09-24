@@ -50,8 +50,8 @@
                         </td>
                         <td>{{ $taxpayer['return_frequency'] }}</td>
                         <td class="text-end">{{ number_format($taxpayer['transaction_count']) }}</td>
-                        <td class="text-end">N$ {{ number_format($taxpayer['output_tax_cents'] / 100, 2) }}</td>
-                        <td class="text-end">N$ {{ number_format($taxpayer['input_tax_cents'] / 100, 2) }}</td>
+                        <td class="text-end">{{ $tenantCurrencySymbol }} {{ number_format($taxpayer['output_tax_cents'] / 100, 2) }}</td>
+                        <td class="text-end">{{ $tenantCurrencySymbol }} {{ number_format($taxpayer['input_tax_cents'] / 100, 2) }}</td>
                         <td><x-status-badge :value="$taxpayer['vat_status']" type="taxpayer" /></td>
                     </tr>
                 @empty

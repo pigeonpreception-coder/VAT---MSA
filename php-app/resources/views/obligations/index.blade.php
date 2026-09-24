@@ -6,7 +6,7 @@
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Compliance domain</div>
     <h1 class="h3 mb-1">Tax Obligations</h1>
-    <p class="text-muted mb-0">NamRA-imposed obligations against a taxpayer -- a filing, payment, or other duty with a due date, tracked to satisfaction.</p>
+    <p class="text-muted mb-0">{{ $tenantAuthorityShortName }}-imposed obligations against a taxpayer -- a filing, payment, or other duty with a due date, tracked to satisfaction.</p>
 </div>
 
 @can('permission', 'obligations:manage')
@@ -46,7 +46,7 @@
                     @error('due_date')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-2">
-                    <label for="amount" class="form-label small mb-0">Amount (NAD)</label>
+                    <label for="amount" class="form-label small mb-0">Amount ({{ $tenantCurrencyCode }})</label>
                     <input type="number" step="0.01" min="0" id="amount" name="amount" value="{{ old('amount') }}" class="form-control form-control-sm @error('amount_cents') is-invalid @enderror" required>
                     @error('amount_cents')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>

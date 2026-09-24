@@ -68,7 +68,7 @@
         <div class="card my-3">
             <div class="card-body">
                 <h2 class="h6">Submit a conformance run</h2>
-                <p class="text-muted small mb-2">Runs NamRA's fixed conformance harness against the tested capabilities and acknowledged events below. A PASSED SANDBOX run is immediately granted; a PASSED PRODUCTION run awaits NamRA authority approval.</p>
+                <p class="text-muted small mb-2">Runs {{ $tenantAuthorityShortName }}'s fixed conformance harness against the tested capabilities and acknowledged events below. A PASSED SANDBOX run is immediately granted; a PASSED PRODUCTION run awaits {{ $tenantAuthorityShortName }} authority approval.</p>
                 <form method="POST" action="{{ route('saas-applications.conformance-runs.store', $application['id']) }}" class="row g-2">
                     @csrf
                     <x-idempotency-key />
