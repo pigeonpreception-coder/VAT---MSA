@@ -8,7 +8,7 @@ use App\Models\AuditCase;
 use App\Models\Dispute;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Compliance\NotificationRecorder;
 use App\Support\Compliance\TaxpayerResolver;
@@ -71,7 +71,7 @@ class DisputeService
     public function search(User $actor, array $params): array
     {
         $query = Dispute::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $query->where('taxpayer_id', $actor->taxpayer_id ?? '__none__');
         }
         if (! empty($params['status'])) {

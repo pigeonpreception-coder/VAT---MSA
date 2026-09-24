@@ -11,7 +11,7 @@ use App\Models\SaasEnvironmentApproval;
 use App\Models\SaasProvider;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -41,7 +41,7 @@ class SaasService
         if (! $application) {
             throw new SaasResourceException('SaaS application was not found.', 404);
         }
-        if ($application->provider->registered_by !== $actor->id && ! TenantScope::isNational($actor)) {
+        if ($application->provider->registered_by !== $actor->id && ! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only the registering actor or a national-scope actor may act on this SaaS application.');
         }
 
@@ -54,7 +54,7 @@ class SaasService
         if (! $provider) {
             throw new SaasResourceException('SaaS provider was not found.', 404);
         }
-        if ($provider->registered_by !== $actor->id && ! TenantScope::isNational($actor)) {
+        if ($provider->registered_by !== $actor->id && ! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only the registering actor or a national-scope actor may view this SaaS provider\'s usage.');
         }
 
@@ -227,7 +227,7 @@ class SaasService
     public function index(User $actor): array
     {
         $query = SaasProvider::query()->orderByDesc('registered_at');
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $query->where('registered_by', $actor->id);
         }
 

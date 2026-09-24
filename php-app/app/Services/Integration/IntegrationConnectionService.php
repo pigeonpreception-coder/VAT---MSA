@@ -202,12 +202,12 @@ class IntegrationConnectionService
     /**
      * Any actor with no taxpayer_id at all -- a national NamRA role or a
      * platform-technical role (SUPER_ADMIN/INFRASTRUCTURE_ADMIN, neither
-     * of which App\Support\Access\TenantScope::isNational() itself
+     * of which App\Support\Access\TaxpayerScope::isNational() itself
      * recognises, since neither represents a tax-administration function)
      * -- registers a platform-wide connection (organisation_id NULL). Any
      * actor with a taxpayer_id registers for their own active
      * organisation only. Deliberately checks `taxpayer_id === null`
-     * directly rather than calling TenantScope::isNational(): that helper
+     * directly rather than calling TaxpayerScope::isNational(): that helper
      * additionally requires the role to be in its own national-role list,
      * which would wrongly deny SUPER_ADMIN/INFRASTRUCTURE_ADMIN a
      * platform-wide registration even though source's own rule for this

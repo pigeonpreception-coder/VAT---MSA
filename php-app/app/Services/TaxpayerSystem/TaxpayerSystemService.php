@@ -9,7 +9,7 @@ use App\Models\Organisation;
 use App\Models\TaxpayerSystemRegistration;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -56,7 +56,7 @@ class TaxpayerSystemService
         if (! $registration) {
             throw new TaxpayerSystemResourceException('Taxpayer system registration was not found.', 404);
         }
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             if (! $actor->taxpayer_id) {
                 throw new AuthorizationException("Only that organisation's own taxpayer may manage its registered systems.");
             }
@@ -159,7 +159,7 @@ class TaxpayerSystemService
      */
     public function approve(string $id, User $actor, string $idempotencyKey, string $correlationId): array
     {
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may approve a taxpayer system registration.');
         }
 
@@ -221,7 +221,7 @@ class TaxpayerSystemService
      */
     public function index(User $actor): array
     {
-        if (TenantScope::isNational($actor)) {
+        if (TaxpayerScope::isNational($actor)) {
             return TaxpayerSystemRegistration::orderByDesc('created_at')->get()->map(fn (TaxpayerSystemRegistration $r) => $this->present($r))->all();
         }
         if (! $actor->taxpayer_id) {

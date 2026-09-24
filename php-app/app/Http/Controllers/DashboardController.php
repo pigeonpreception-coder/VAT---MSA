@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Dashboard\DashboardSnapshotService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
@@ -23,7 +23,7 @@ class DashboardController extends Controller
 
         return view('dashboard', [
             'user' => $user,
-            'isNationalScope' => TenantScope::isNational($user),
+            'isNationalScope' => TaxpayerScope::isNational($user),
             'snapshot' => $dashboard->snapshot($user),
         ]);
     }

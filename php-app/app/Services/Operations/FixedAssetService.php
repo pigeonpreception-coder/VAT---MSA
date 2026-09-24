@@ -9,7 +9,7 @@ use App\Models\Employee;
 use App\Models\FixedAsset;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use App\Support\Business\OrganisationResolver;
 use Illuminate\Support\Facades\DB;
@@ -142,7 +142,7 @@ class FixedAssetService
     /** @return list<array<string, mixed>> */
     public function list(User $actor, ?string $assetClass, ?string $requestedOrganisationId): array
     {
-        if (TenantScope::isNational($actor)) {
+        if (TaxpayerScope::isNational($actor)) {
             $query = FixedAsset::query();
             if ($assetClass) {
                 $query->where('asset_class', $assetClass);
@@ -205,7 +205,7 @@ class FixedAssetService
         if (! $asset) {
             throw new BusinessResourceException('Fixed asset was not found.', 404);
         }
-        TenantScope::requireTaxpayer($actor, $asset->organisation->taxpayer_id);
+        TaxpayerScope::requireTaxpayer($actor, $asset->organisation->taxpayer_id);
 
         return $asset;
     }

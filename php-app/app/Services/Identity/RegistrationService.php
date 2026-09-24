@@ -17,7 +17,7 @@ use App\Models\Taxpayer;
 use App\Models\TaxpayerIdentifier;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -46,7 +46,7 @@ class RegistrationService
     public function list(User $user): array
     {
         $query = RegistrationApplication::query()->with(['verifications', 'proofingCase.mismatchCase']);
-        if (! TenantScope::isNational($user)) {
+        if (! TaxpayerScope::isNational($user)) {
             $query->where('submitted_by', $user->id);
         }
 
@@ -86,7 +86,7 @@ class RegistrationService
     public function listProofingCases(User $user): array
     {
         $query = IdentityProofingCase::query()->with('mismatchCase');
-        if (! TenantScope::isNational($user)) {
+        if (! TaxpayerScope::isNational($user)) {
             $query->where('requested_by', $user->id);
         }
 

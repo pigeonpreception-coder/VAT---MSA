@@ -3,7 +3,7 @@
 namespace App\Services\Compliance;
 
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -30,7 +30,7 @@ class ComplianceSnapshotService
     /** @return array<string, mixed> */
     public function getSnapshot(User $actor): array
     {
-        $scoped = ! TenantScope::isNational($actor);
+        $scoped = ! TaxpayerScope::isNational($actor);
         $taxpayerId = $actor->taxpayer_id ?? '__none__';
 
         $obligations = $scoped

@@ -13,7 +13,7 @@ use Tests\TestCase;
  * bootstrap/app.php -- the fix for red team finding RT-002
  * (docs/RED_TEAM_ASSESSMENT_2026-09-02.md): a plain
  * Illuminate\Auth\Access\AuthorizationException (thrown both by
- * TenantScope::requireTaxpayer() and every $this->authorize() gate denial)
+ * TaxpayerScope::requireTaxpayer() and every $this->authorize() gate denial)
  * fell through to Laravel's default exception handler, which leaks a full
  * stack trace and local filesystem path whenever APP_DEBUG=true. These
  * tests run under this environment's actual .env APP_DEBUG=true (no

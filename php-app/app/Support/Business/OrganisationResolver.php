@@ -5,7 +5,7 @@ namespace App\Support\Business;
 use App\Exceptions\BusinessResourceException;
 use App\Models\Organisation;
 use App\Models\User;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Auth\Access\AuthorizationException;
 
 /**
@@ -21,7 +21,7 @@ class OrganisationResolver
 {
     public function resolve(User $user, ?string $requestedOrganisationId): Organisation
     {
-        if (TenantScope::isNational($user)) {
+        if (TaxpayerScope::isNational($user)) {
             $query = Organisation::where('status', 'ACTIVE');
             $organisation = $requestedOrganisationId
                 ? $query->where('id', $requestedOrganisationId)->first()

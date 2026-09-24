@@ -7,7 +7,7 @@ use App\Exceptions\PlatformResourceException;
 use App\Exceptions\RepositoryConflictException;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -59,7 +59,7 @@ class OfflineSyncService
         if (! $device) {
             throw new PlatformResourceException('Offline device is not enrolled.', 404);
         }
-        if (! TenantScope::isNational($actor) && $actor->taxpayer_id !== $device->taxpayer_id) {
+        if (! TaxpayerScope::isNational($actor) && $actor->taxpayer_id !== $device->taxpayer_id) {
             throw new AuthorizationException('The offline device is outside your authorised scope.');
         }
 

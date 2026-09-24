@@ -14,7 +14,7 @@ use App\Models\Taxpayer;
 use App\Models\TaxpayerIdentifier;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Security\RateLimitGuard;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -110,7 +110,7 @@ class SignupService
      */
     public function listSelfServeSignupApplications(User $user): array
     {
-        if (! TenantScope::isNational($user)) {
+        if (! TaxpayerScope::isNational($user)) {
             return [];
         }
 

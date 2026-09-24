@@ -7,7 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Identity\SubmitRegistrationRequest;
 use App\Services\Identity\RegistrationService;
 use App\Services\Signup\SignupService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
@@ -17,7 +17,7 @@ use Illuminate\View\View;
  * registration intake" -- and its app/registrations/new/RegistrationForm.tsx
  * sibling. Two independent read sections: the self-serve signup queue
  * (national-scope actors only, SignupService::listSelfServeSignupApplications
- * gates on TenantScope::isNational internally same as source's own
+ * gates on TaxpayerScope::isNational internally same as source's own
  * isNationalScope(user)) and the controlled registration-application
  * register (RegistrationService::list(), already used by the JSON API and
  * IdentityFoundationSnapshotService). store() reuses
@@ -42,7 +42,7 @@ class RegistrationsViewController extends Controller
         return view('registrations.index', [
             'applications' => $this->registrations->list($user),
             'selfServeApplications' => $this->signup->listSelfServeSignupApplications($user),
-            'isNationalScope' => TenantScope::isNational($user),
+            'isNationalScope' => TaxpayerScope::isNational($user),
         ]);
     }
 

@@ -11,7 +11,7 @@ use App\Models\NotificationPreference;
 use App\Models\Taxpayer;
 use App\Models\User;
 use App\Services\Audit\AuditService;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +31,7 @@ class NotificationService
     public function queue(array $payload, User $actor, string $idempotencyKey, string $correlationId): array
     {
         CommandLedger::validateIdempotencyKey($idempotencyKey);
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             throw new AuthorizationException('Only an authorised national compliance role may queue a notification directly.');
         }
         $input = ComplianceValidator::notificationQueue($payload);
@@ -165,7 +165,7 @@ class NotificationService
     {
         $query = ComplianceValidator::notificationQuery($params);
         $builder = Notification::query();
-        if (! TenantScope::isNational($actor)) {
+        if (! TaxpayerScope::isNational($actor)) {
             $taxpayerId = $actor->taxpayer_id ?? '__none__';
             $builder->where(function ($q) use ($actor, $taxpayerId) {
                 $q->where('user_id', $actor->id)->orWhere('taxpayer_id', $taxpayerId);
@@ -187,7 +187,7 @@ class NotificationService
 
     private function requireNotificationScope(User $actor, Notification $notification): void
     {
-        if (TenantScope::isNational($actor)) {
+        if (TaxpayerScope::isNational($actor)) {
             return;
         }
         if ($actor->id === $notification->user_id) {

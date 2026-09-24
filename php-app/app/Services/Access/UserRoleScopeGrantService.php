@@ -7,7 +7,7 @@ use App\Exceptions\RepositoryConflictException;
 use App\Models\AccessRole;
 use App\Models\User;
 use App\Models\UserRoleScopeGrant;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use App\Support\Business\CommandLedger;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -31,13 +31,13 @@ use Illuminate\Support\Facades\DB;
  * row here immediately sets the target user's own `users.role` column to
  * the granted role -- that column is this app's one real, everywhere-
  * enforced source of what a user can do (every `$user->hasAppPermission()`
- * check, every `PortalDefinitions` role list, `TenantScope::isNational`),
+ * check, every `PortalDefinitions` role list, `TaxpayerScope::isNational`),
  * so the grant takes real effect, not just a record. `scope_level` and
  * `scope_label` are the grant's own governance context for auditing who
  * authorised what at which office/region -- there is no separate office/
  * region-scoped *enforcement* mechanism anywhere else in this codebase
  * (the only existing scope split is national-vs-tenant,
- * `TenantScope::isNational`), and this class does not invent one. A user
+ * `TaxpayerScope::isNational`), and this class does not invent one. A user
  * granted a NamRA-facing role at LOCAL_OFFICE scope gets that role's full,
  * ordinary permission set exactly as if granted at NATIONAL/GLOBAL scope
  * -- the office/region label is recorded, not yet a live data filter.
@@ -69,7 +69,7 @@ use Illuminate\Support\Facades\DB;
  * a tenant-scoped role would silently reopen this screen to that
  * tenant -- for a screen that can grant `SUPER_ADMIN` itself, that is
  * too large a blast radius to leave resting on the permission map alone.
- * Both methods now assert `TenantScope::isNational()` directly.
+ * Both methods now assert `TaxpayerScope::isNational()` directly.
  */
 class UserRoleScopeGrantService
 {
@@ -82,7 +82,7 @@ class UserRoleScopeGrantService
     /** @param array{user_id?: mixed, role_code?: mixed, scope_level?: mixed, scope_label?: mixed} $payload */
     public function grant(array $payload, User $grantedBy, string $idempotencyKey): UserRoleScopeGrant
     {
-        if (! TenantScope::isNational($grantedBy)) {
+        if (! TaxpayerScope::isNational($grantedBy)) {
             throw new AuthorizationException('Access rights may only be granted by a national-scope administrator.');
         }
         CommandLedger::validateIdempotencyKey($idempotencyKey);
@@ -158,7 +158,7 @@ class UserRoleScopeGrantService
 
     public function revoke(UserRoleScopeGrant $grant, User $revokedBy): void
     {
-        if (! TenantScope::isNational($revokedBy)) {
+        if (! TaxpayerScope::isNational($revokedBy)) {
             throw new AuthorizationException('Access rights may only be revoked by a national-scope administrator.');
         }
         if ($grant->status !== 'ACTIVE') {

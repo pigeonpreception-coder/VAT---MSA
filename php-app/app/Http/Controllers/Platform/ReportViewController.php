@@ -9,7 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Platform\DataProductService;
 use App\Services\Platform\ReportExportService;
 use App\Support\Access\StepUp;
-use App\Support\Access\TenantScope;
+use App\Support\Access\TaxpayerScope;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -53,7 +53,7 @@ class ReportViewController extends Controller
     {
         $this->authorize('permission', 'reports:read');
         $user = $request->user();
-        $isNational = TenantScope::isNational($user);
+        $isNational = TaxpayerScope::isNational($user);
 
         $definitions = DB::table('report_definitions')->where('status', 'ACTIVE')->orderBy('code')->get();
 

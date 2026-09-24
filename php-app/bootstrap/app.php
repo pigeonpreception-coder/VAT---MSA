@@ -37,7 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // Red team finding RT-002 (docs/RED_TEAM_ASSESSMENT_2026-09-02.md):
         // a plain Illuminate\Auth\Access\AuthorizationException -- thrown
-        // both by TenantScope::requireTaxpayer() and every controller's
+        // both by TaxpayerScope::requireTaxpayer() and every controller's
         // own $this->authorize() gate denial -- fell through to Laravel's
         // default exception handler, which leaks a full stack trace and
         // local filesystem path whenever APP_DEBUG=true.
