@@ -4,6 +4,7 @@ namespace App\Services\Invoice;
 
 use App\Models\Certificate;
 use App\Models\InvoiceCorrection;
+use App\Support\Security\RateLimitGuard;
 
 /**
  * Ported from lib/data/repository.ts's getPublicVerification. Module 2
@@ -15,12 +16,19 @@ use App\Models\InvoiceCorrection;
  * text (kept authenticated-only) since this is an unauthenticated, public-
  * posture command -- no actor, no audit trail, a pure read by
  * verification token.
+ *
+ * Gap-finding pass (2026-09-24): $sourceToken/$deviceId added -- see
+ * RateLimitGuard::enforceVerifyTokenRateLimits()'s own doc comment for
+ * why this unauthenticated, token-enumerable lookup now gets the
+ * purpose-built rate limit it never had (in the source or this port)
+ * before now.
  */
 class PublicVerificationService
 {
     /** @return array<string, mixed>|null */
-    public function verify(string $token): ?array
+    public function verify(string $token, string $sourceToken, string $deviceId): ?array
     {
+        RateLimitGuard::enforceVerifyTokenRateLimits($sourceToken, $deviceId);
         $certificate = Certificate::with('invoice')->where('verification_token', $token)->first();
         if (! $certificate || ! $certificate->invoice) {
             return null;

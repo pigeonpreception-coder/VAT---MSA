@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\RateLimitExceededException;
 use App\Services\Invoice\PublicVerificationService;
 use App\Support\Invoice\InvoiceNumberMask;
+use App\Support\Security\RequestContext;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -23,9 +26,13 @@ class PublicVerificationController extends Controller
 {
     public function __construct(private readonly PublicVerificationService $verifications) {}
 
-    public function show(string $token): JsonResponse
+    public function show(Request $request, string $token): JsonResponse
     {
-        $record = $this->verifications->verify($token);
+        // Not caught here -- RateLimitExceededException::render() already
+        // self-renders the correct 429 JSON body, matching every other
+        // self-rendering exception in this codebase.
+        $ip = RequestContext::unauthenticatedRequestIp($request);
+        $record = $this->verifications->verify($token, $ip, $ip);
         if (! $record) {
             return response()->json([
                 'type' => 'https://vat-msa.local/problems/not-found', 'title' => 'Certificate not found', 'status' => 404,
@@ -54,9 +61,14 @@ class PublicVerificationController extends Controller
         ]);
     }
 
-    public function page(string $token): View
+    public function page(Request $request, string $token): View
     {
-        $record = $this->verifications->verify($token);
+        $ip = RequestContext::unauthenticatedRequestIp($request);
+        try {
+            $record = $this->verifications->verify($token, $ip, $ip);
+        } catch (RateLimitExceededException $e) {
+            abort($e->status(), $e->getMessage());
+        }
         abort_if(! $record, 404);
 
         return view('verify.show', ['record' => $record, 'token' => $token]);

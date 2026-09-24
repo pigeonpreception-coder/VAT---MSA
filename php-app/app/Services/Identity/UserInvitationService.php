@@ -9,6 +9,7 @@ use App\Models\OutboxEvent;
 use App\Models\User;
 use App\Models\UserInvitation;
 use App\Services\Audit\AuditService;
+use App\Support\Security\RateLimitGuard;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -88,9 +89,18 @@ class UserInvitationService
         return UserInvitation::findOrFail($id);
     }
 
-    /** @return array{userId: string, organisationId: string, roleCode: string, status: string} */
-    public function claim(string $token, string $name, string $password, string $correlationId): array
+    /**
+     * Gap-finding pass (2026-09-24): $sourceToken/$deviceId added --
+     * see RateLimitGuard::enforceInvitationClaimRateLimits()'s own doc
+     * comment for why this unauthenticated token-guessing surface now
+     * gets a purpose-built rate limit it never had (in the source or
+     * this port) before now.
+     *
+     * @return array{userId: string, organisationId: string, roleCode: string, status: string}
+     */
+    public function claim(string $token, string $name, string $password, string $correlationId, string $sourceToken, string $deviceId): array
     {
+        RateLimitGuard::enforceInvitationClaimRateLimits($sourceToken, $deviceId);
         $invitation = UserInvitation::where('claim_token', $token)->first();
         if (! $invitation || $invitation->status !== 'PENDING') {
             $this->invalidOrExpired();

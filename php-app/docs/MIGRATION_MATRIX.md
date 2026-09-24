@@ -12061,3 +12061,44 @@ stateless group instead). Two were genuinely missing:
   the no-op case stays silent; `PasswordResetTest::test_a_password_reset_invalidates_every_existing_session_for_that_user`
   now asserts `PASSWORD_RESET_SESSIONS_REVOKED`. Full suite: 1140 tests,
   0 regressions.
+
+## Two pre-auth rate-limit bucket sets defined in source but never wired up (2026-09-24)
+
+- Gap-finding pass, rate-limit angle: after verifying the window-boundary
+  math itself (`windowStart`/`expiresAt`/the `count > limit` comparator/
+  the `% 97` sweep) is byte-for-byte identical to `lib/security/request.ts`'s
+  `enforceRateLimits`, a full-repo search for the source's own
+  `enforceInvitationClaimRateLimits`/`enforceVerifyTokenRateLimits`
+  functions found them defined in `lib/security/request.ts`, each with an
+  explicit security rationale in its own doc comment ("claimInvitation is
+  a token-guessing surface (Sec 18)"; "GET /api/v1/verify/[token] ...
+  an enumeration surface (Sec 18)") -- but never actually called from
+  either route's own handler (`app/api/v1/invitations/claim/route.ts`,
+  `app/api/v1/verify/[token]/route.ts`). This is a real gap in the
+  source itself, not a Laravel-side port regression -- there was nothing
+  in either source route to diverge from. Closed anyway: the underlying
+  vulnerability (an unauthenticated actor can submit unbounded token
+  guesses against either surface) is real and reachable, and the
+  infrastructure to close it (`RateLimitGuard`,
+  `RequestContext::unauthenticatedRequestIp()`) already exists from the
+  earlier self-serve-signup rate-limit work.
+- `App\Support\Security\RateLimitGuard::enforceInvitationClaimRateLimits()`/
+  `::enforceVerifyTokenRateLimits()` added, matching the source's own
+  bucket shapes exactly (invitation-claim: source 10/300s, device
+  15/300s, global 200/300s; verify-token: source 30/60s, device 45/60s,
+  global 2,000/60s). Both are called inline from their own service
+  (`UserInvitationService::claim()`/`PublicVerificationService::verify()`),
+  not via the `EnforceRateLimit` middleware -- neither route has an
+  authenticated actor for that middleware's own `$request->user()`
+  short-circuit to key on, the same reason `SignupService::submit()`
+  calls `RateLimitGuard::enforceSelfServeSignup()` inline instead.
+  `PublicVerificationController::show()` (JSON) lets
+  `RateLimitExceededException` self-render via its own `render()`
+  method; `::page()` (Blade) and `InvitationClaimController::store()`
+  (Blade) both catch it explicitly, matching `SignupViewController::store()`'s
+  own precedent, since that exception always renders JSON regardless of
+  the request type.
+- New tests: `RateLimitEnforcementTest::test_the_invitation_claim_source_bucket_returns_429_after_its_limit`/
+  `::test_the_verify_token_source_bucket_returns_429_after_its_limit`,
+  both real end-to-end HTTP tests against the real routes (11/31 real
+  requests respectively). Full suite: 1142 tests, 0 regressions.
