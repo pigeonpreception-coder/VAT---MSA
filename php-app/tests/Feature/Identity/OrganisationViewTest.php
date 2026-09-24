@@ -139,6 +139,26 @@ class OrganisationViewTest extends TestCase
         $response->assertSee('Buyer');
     }
 
+    /**
+     * Gap-finding pass (2026-09-23): app/organisations/page.tsx's own
+     * PageHeader `actions` slot (a "New registration" button) had no
+     * Laravel equivalent -- the page had no header-level call to action
+     * at all. Now links to the /registrations page built earlier this
+     * pass (matching source's own equivalent target, adjusted since this
+     * port folds the create form onto the index page rather than a
+     * separate /registrations/new route).
+     */
+    public function test_the_index_page_has_a_new_registration_action_link(): void
+    {
+        $admin = $this->pilotAdmin();
+
+        $response = $this->actingAs($admin)->get('/organisations');
+
+        $response->assertOk();
+        $response->assertSee('New registration');
+        $response->assertSee(route('registrations.index'), false);
+    }
+
     public function test_a_taxpayer_can_view_their_own_organisation_with_its_branch_and_membership(): void
     {
         $fx = $this->ownerWithOrganisation();

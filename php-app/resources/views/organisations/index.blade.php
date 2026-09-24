@@ -3,10 +3,13 @@
 @section('title', 'Organisations')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Identity domain</div>
-    <h1 class="h3 mb-1">Organisations</h1>
-    <p class="text-muted mb-0">Module 1's own identity foundation -- taxpayer organisations, identity providers, and platform-wide access counts.</p>
+<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <div class="text-uppercase text-muted small fw-semibold">Identity domain</div>
+        <h1 class="h3 mb-1">Organisations</h1>
+        <p class="text-muted mb-0">Module 1's own identity foundation -- taxpayer organisations, identity providers, and platform-wide access counts.</p>
+    </div>
+    <a href="{{ route('registrations.index') }}" class="btn btn-primary text-nowrap">New registration</a>
 </div>
 
 @php

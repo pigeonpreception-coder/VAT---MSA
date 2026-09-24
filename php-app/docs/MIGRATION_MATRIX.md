@@ -11961,3 +11961,28 @@ a missing-page gap.
   Full suite: 1129 tests, 0 regressions.
 - Manually verified via a logged-in `admin@vat-msa.test` session: all
   four tiles render at `/reports`.
+
+## Organisations page: missing "New registration" action link (2026-09-24)
+
+Re-auditing pages already covered by an earlier pass (per this session's
+own "port copy verbatim, then verify every claim is actually true"
+discipline, which caught the security-headers and reports-metrics gaps):
+`app/organisations/page.tsx`'s own `PageHeader` carries an `actions` slot
+-- a "New registration" primary button linking to `/registrations/new`
+-- that the Laravel `organisations/index.blade.php` never had at all; the
+page header rendered with no call to action.
+
+- `organisations/index.blade.php`'s header now includes a "New
+  registration" button, linking to `route('registrations.index')` --
+  this port's own `/registrations` page (built earlier this session)
+  folds the create form onto the index page rather than a separate
+  `/registrations/new` route, so that's the equivalent target here.
+  Left unconditional, matching source exactly: source's own button is
+  unconditional too (only the destination page gates on
+  `registrations:submit`), so a viewer without that permission sees the
+  identical button-that-403s-if-clicked behaviour in both versions --
+  not a new gap this port introduces.
+- New test `OrganisationViewTest::test_the_index_page_has_a_new_registration_action_link`.
+  Full suite: 1130 tests, 0 regressions.
+- Manually verified via a logged-in `admin@vat-msa.test` session: the
+  button renders at `/organisations`.
