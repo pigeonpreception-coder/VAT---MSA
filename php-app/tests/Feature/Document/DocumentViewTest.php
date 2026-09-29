@@ -105,6 +105,39 @@ class DocumentViewTest extends TestCase
         $response->assertSee('scope="col"', false);
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's new side panels
+     * (by-domain, by-classification breakdowns) are derived from the same
+     * tenant-scoped, already-fetched $documents collection the register
+     * table itself uses -- no new query.
+     */
+    public function test_the_page_renders_its_side_panels(): void
+    {
+        $org = $this->makeOrganisation('VAT-SELLER-0008');
+        DocumentMetadata::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'owner_domain' => 'EXPENSE',
+            'owner_resource_id' => 'exp-0008', 'object_key' => 'quarantine/test/key1', 'file_name' => 'receipt-a.pdf',
+            'content_type' => 'application/pdf', 'size_bytes' => 128, 'checksum_sha256' => str_repeat('a', 64),
+            'classification' => 'TAX_CONFIDENTIAL', 'scan_status' => 'CLEAN', 'status' => 'ACTIVE',
+            'uploaded_by' => $org['owner']->id, 'uploaded_at' => now(), 'legal_hold' => false,
+        ]);
+        DocumentMetadata::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $org['organisation']->id, 'owner_domain' => 'AUDIT_CASE',
+            'owner_resource_id' => 'case-0001', 'object_key' => 'quarantine/test/key2', 'file_name' => 'finding.pdf',
+            'content_type' => 'application/pdf', 'size_bytes' => 256, 'checksum_sha256' => str_repeat('b', 64),
+            'classification' => 'RESTRICTED', 'scan_status' => 'PENDING_EXTERNAL_SCANNER', 'status' => 'QUARANTINED',
+            'uploaded_by' => $org['owner']->id, 'uploaded_at' => now(), 'legal_hold' => false,
+        ]);
+
+        $response = $this->actingAs($org['owner'])->get('/documents');
+
+        $response->assertOk();
+        $response->assertSee('Documents by domain');
+        $response->assertSeeInOrder(['EXPENSE', '1']);
+        $response->assertSeeInOrder(['AUDIT CASE', '1']);
+        $response->assertSee('Documents by classification');
+    }
+
     public function test_a_valid_pdf_can_be_uploaded_to_quarantine(): void
     {
         $org = $this->makeOrganisation('VAT-SELLER-0002');

@@ -12994,3 +12994,52 @@ never by fetching the full table into PHP.
   and "Matching filters" genuinely diverge once a filter is applied.
 - Scope unchanged from the prior entries: this closes the eighth screen
   in the user's own named sweep.
+
+## Documents: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Ninth screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview,
+Risk Indicators, Obligations, Disputes, and Audit Trail, all above).
+`resources/views/documents/index.blade.php` was the furthest along of
+any screen redesigned so far: it already had a 4-tile stat row
+(Documents/Quarantined/Clean/Legal holds), just not in this sweep's own
+label-then-icon convention, and no main/side split -- everything
+(stats, the upload form, and the evidence register table) was stacked
+full-width.
+
+- **Stat tiles restyled** to the same convention as every other
+  redesign in this sweep (uppercase label + icon top row, big number,
+  muted subtitle) -- values and counts themselves unchanged.
+- **Main/side split**: the Add-evidence form and the evidence register
+  table both move into a `col-lg-8`, upload behavior and the register's
+  own tenant-scoped, 100-row-capped query completely unchanged. The new
+  `col-lg-4` holds two panels, both derived from the same already-
+  fetched `$documents` collection the register table itself uses -- no
+  new query, the same pattern already established for Obligations'/
+  Disputes' own small, tenant-scoped side panels: "Documents by domain"
+  and "Documents by classification" (badge/count breakdowns).
+- **A real bug caught and fixed during live verification, not just a
+  re-skin**: the evidence register table's original 7 columns (File,
+  Owner, Classification, Scan, Status, Size, Uploaded) no longer fit
+  inside the new, narrower `col-lg-8` -- confirmed via the
+  `table-responsive` element's own `scrollWidth` (889px) exceeding its
+  `clientWidth` (763px) at 1440px, with the Size/Uploaded columns
+  visibly clipped against the card's right edge in the live screenshot.
+  Fixed by consolidating to 5 columns: Scan and Status now stack as two
+  badges in one "Scan & status" column, and Size/Uploaded stack as one
+  "Size & uploaded" column -- re-verified `scrollWidth` === `clientWidth`
+  afterward, continuing the per-table internal-overflow check this
+  sweep adopted after the Obligations redesign's own caught bug.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as the real NEMA Property Developers CC taxpayer owner already in the
+  dev database, using the app's own "Add evidence" form to upload two
+  real PDF evidence files (EXPENSE/Tax confidential and AUDIT_CASE/
+  Restricted) -- stat tiles, both side panels, and the consolidated
+  register table columns all verified against live, non-synthetic
+  data. No horizontal overflow at either width after the fix above.
+- Full suite: 1176 tests, 0 regressions. `tests/Feature/Document/
+  DocumentViewTest.php`'s existing 9 tests unedited; one new test added
+  (`test_the_page_renders_its_side_panels`) covering both new side
+  panels.
+- Scope unchanged from the prior entries: this closes the ninth screen
+  in the user's own named sweep.
