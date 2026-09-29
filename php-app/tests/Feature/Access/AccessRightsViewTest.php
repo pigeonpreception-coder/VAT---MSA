@@ -236,6 +236,34 @@ class AccessRightsViewTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $admin->id, 'role' => 'SUPER_ADMIN']);
     }
 
+    /**
+     * Redesign coverage (2026-09-29): the stat tile row and both
+     * "Grants by role"/"Grants by scope" side panels are derived from the
+     * same already-fetched, 100-row-capped $grants collection the table
+     * itself renders -- proves the counts line up with real grant rows
+     * rather than just checking the labels render.
+     */
+    public function test_the_page_renders_its_stat_tiles_and_grant_breakdown_panels(): void
+    {
+        $admin = $this->superAdmin();
+        $targetA = $this->taxpayerViewer('viewer-a@accessrights.test');
+        $targetB = $this->taxpayerViewer('viewer-b@accessrights.test');
+        $this->actingAs($admin)->withFreshStepUp()
+            ->post('/access-rights', ['user_id' => $targetA->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'GLOBAL']);
+        $this->actingAs($admin)->withFreshStepUp()
+            ->post('/access-rights', ['user_id' => $targetB->id, 'role_code' => 'TAXPAYER_ADMIN', 'scope_level' => 'NATIONAL']);
+        $grantId = DB::table('user_role_scope_grants')->where('user_id', $targetA->id)->value('id');
+        $this->actingAs($admin)->withFreshStepUp()->post("/access-rights/{$grantId}/revoke");
+
+        $response = $this->actingAs($admin)->get('/access-rights');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Grants', 'Active', 'Revoked', 'Users']);
+        $response->assertSeeInOrder(['Grants by role', 'TAXPAYER_ADMIN']);
+        $response->assertSeeInOrder(['Grants by scope', 'GLOBAL']);
+        $response->assertSeeInOrder(['Grants by scope', 'NATIONAL']);
+    }
+
     public function test_granting_requires_access_rights_manage(): void
     {
         // access-rights:read alone doesn't exist as a role fixture yet, so
