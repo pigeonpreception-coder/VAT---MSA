@@ -2,6 +2,10 @@
 
 @section('title', 'Platform config')
 
+@php
+    $sidePreviewLimit = 5;
+@endphp
+
 @section('content')
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Platform</div>
@@ -19,190 +23,230 @@
     </div>
 @endif
 
-<div class="card mb-3">
-    <div class="card-header">
-        <div class="fw-semibold">Feature flags</div>
-        <div class="text-muted small">Proposing a change stages it as PENDING; nothing changes until an independent reviewer approves it</div>
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Feature flags</span><span>F</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['feature_flags']) }}</div>
+                <div class="small text-muted">Active</div>
+            </div>
+        </div>
     </div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Active feature flags with their current enabled state and a propose-change action</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Key</th>
-                    <th scope="col">Description</th>
-                    <th scope="col">Rollout</th>
-                    <th scope="col">Enabled</th>
-                    @if ($canManage)
-                        <th scope="col">Propose change</th>
-                    @endif
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($config['feature_flags'] as $flag)
-                    <tr>
-                        <td><span class="font-monospace">{{ $flag['key'] }}</span><div class="text-muted small">{{ $flag['name'] }}</div></td>
-                        <td>{{ $flag['description'] }}</td>
-                        <td>{{ str_replace('_', ' ', $flag['rollout_scope']) }}</td>
-                        <td><x-status-badge :value="$flag['enabled'] ? 'ACTIVE' : 'CANCELLED'" type="status" /></td>
-                        @if ($canManage)
-                            <td>
-                                <form method="POST" action="{{ route('platform.change-requests.store') }}" class="d-flex gap-2">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <input type="hidden" name="target_type" value="FEATURE_FLAG">
-                                    <input type="hidden" name="target_id" value="{{ $flag['id'] }}">
-                                    <input type="hidden" name="enabled" value="{{ $flag['enabled'] ? '0' : '1' }}">
-                                    <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason (min 5 chars)" required minlength="5" maxlength="500" style="width: 12rem;">
-                                    <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap">Propose {{ $flag['enabled'] ? 'disable' : 'enable' }}</button>
-                                </form>
-                            </td>
-                        @endif
-                    </tr>
-                @empty
-                    <tr><td colspan="{{ $canManage ? 5 : 4 }}" class="text-center text-muted py-4">No active feature flags.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Config values</span><span>C</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['platform_config']) }}</div>
+                <div class="small text-muted">Active</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Access policies</span><span>A</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['access_policies']) }}</div>
+                <div class="small text-muted">Active</div>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending changes</span><span>!</span></div>
+                <div class="fs-2 fw-semibold">{{ number_format($metrics['pending_changes']) }}</div>
+                <div class="small {{ $metrics['pending_changes'] > 0 ? 'text-warning' : 'text-muted' }}">Awaiting independent decision</div>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="card mb-3">
-    <div class="card-header fw-semibold">Platform config values</div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Active platform config values with a propose-change action</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Key</th>
-                    <th scope="col">Category</th>
-                    <th scope="col">Value</th>
-                    @if ($canManage)
-                        <th scope="col">Propose change</th>
-                    @endif
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($config['platform_config'] as $entry)
-                    <tr>
-                        <td><span class="font-monospace">{{ $entry['key'] }}</span><div class="text-muted small">{{ $entry['description'] }}</div></td>
-                        <td>{{ $entry['category'] }}</td>
-                        <td><span class="font-monospace">{{ $entry['value'] }}</span></td>
-                        @if ($canManage)
-                            <td>
-                                <form method="POST" action="{{ route('platform.change-requests.store') }}" class="d-flex gap-2">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <input type="hidden" name="target_type" value="PLATFORM_CONFIG">
-                                    <input type="hidden" name="target_id" value="{{ $entry['id'] }}">
-                                    <input type="text" name="value" class="form-control form-control-sm" placeholder="New value" required style="width: 8rem;">
-                                    <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason (min 5 chars)" required minlength="5" maxlength="500" style="width: 12rem;">
-                                    <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap">Propose</button>
-                                </form>
-                            </td>
-                        @endif
-                    </tr>
-                @empty
-                    <tr><td colspan="{{ $canManage ? 4 : 3 }}" class="text-center text-muted py-4">No active platform config values.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header fw-semibold">Access policies</div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Active access policies with their parameters and a propose-change action</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Code</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">Parameters</th>
-                    @if ($canManage)
-                        <th scope="col">Propose change</th>
-                    @endif
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($config['access_policies'] as $policy)
-                    <tr>
-                        <td><span class="font-monospace">{{ $policy['code'] }}</span><div class="text-muted small">{{ $policy['name'] }}</div></td>
-                        <td>{{ str_replace('_', ' ', $policy['policy_type']) }}</td>
-                        <td><span class="font-monospace small">{{ json_encode($policy['parameters']) }}</span></td>
-                        @if ($canManage)
-                            <td>
-                                <form method="POST" action="{{ route('platform.change-requests.store') }}" class="d-flex gap-2">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <input type="hidden" name="target_type" value="ACCESS_POLICY">
-                                    <input type="hidden" name="target_id" value="{{ $policy['id'] }}">
-                                    <input type="text" name="parameters" class="form-control form-control-sm font-monospace" placeholder='{"key":"value"}' required style="width: 10rem;" value="{{ json_encode($policy['parameters']) }}">
-                                    <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason (min 5 chars)" required minlength="5" maxlength="500" style="width: 12rem;">
-                                    <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap">Propose</button>
-                                </form>
-                            </td>
-                        @endif
-                    </tr>
-                @empty
-                    <tr><td colspan="{{ $canManage ? 4 : 3 }}" class="text-center text-muted py-4">No active access policies.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header">
-        <div class="fw-semibold">Change requests</div>
-        <div class="text-muted small">A reviewer may never decide a change request they submitted themselves</div>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Platform change requests with their status and a decide action for pending ones</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Target</th>
-                    <th scope="col">Reason</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Requested</th>
-                    @if ($canManage)
-                        <th scope="col">Decide</th>
-                    @endif
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($changeRequests as $change)
-                    <tr>
-                        <td>{{ str_replace('_', ' ', $change['target_type']) }}<div class="text-muted small font-monospace">{{ $change['target_id'] }}</div></td>
-                        <td>{{ $change['reason'] }}</td>
-                        <td><x-status-badge :value="$change['status']" type="status" /></td>
-                        <td>{{ \Illuminate\Support\Carbon::parse($change['requested_at'])->format('d M Y, H:i') }}</td>
-                        @if ($canManage)
-                            <td>
-                                @if ($change['status'] === 'PENDING')
-                                    <form method="POST" action="{{ route('platform.change-requests.decide', $change['id']) }}" class="d-flex gap-2">
-                                        @csrf
-                                        <x-idempotency-key/>
-                                        <input type="text" name="notes" class="form-control form-control-sm" placeholder="Decision notes" style="width: 10rem;">
-                                        <button type="submit" name="decision" value="APPROVE" class="btn btn-sm btn-outline-success text-nowrap">Approve</button>
-                                        <button type="submit" name="decision" value="REJECT" class="btn btn-sm btn-outline-danger text-nowrap">Reject</button>
-                                    </form>
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card mb-3">
+            <div class="card-header">
+                <div class="fw-semibold">Feature flags</div>
+                <div class="text-muted small">Proposing a change stages it as PENDING; nothing changes until an independent reviewer approves it</div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <caption class="visually-hidden">Active feature flags with their current enabled state and a propose-change action</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Key</th>
+                            <th scope="col">Rollout</th>
+                            <th scope="col">Enabled</th>
+                            @if ($canManage)
+                                <th scope="col">Propose change</th>
+                            @endif
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($config['feature_flags'] as $flag)
+                            <tr>
+                                <td>
+                                    <span class="font-monospace">{{ $flag['key'] }}</span>
+                                    <div class="text-muted small">{{ $flag['name'] }}</div>
+                                    <div class="text-muted small">{{ $flag['description'] }}</div>
+                                </td>
+                                <td>{{ str_replace('_', ' ', $flag['rollout_scope']) }}</td>
+                                <td><x-status-badge :value="$flag['enabled'] ? 'ACTIVE' : 'CANCELLED'" type="status" /></td>
+                                @if ($canManage)
+                                    <td>
+                                        <form method="POST" action="{{ route('platform.change-requests.store') }}">
+                                            @csrf
+                                            <x-idempotency-key/>
+                                            <input type="hidden" name="target_type" value="FEATURE_FLAG">
+                                            <input type="hidden" name="target_id" value="{{ $flag['id'] }}">
+                                            <input type="hidden" name="enabled" value="{{ $flag['enabled'] ? '0' : '1' }}">
+                                            <input type="text" name="reason" class="form-control form-control-sm mb-1" placeholder="Reason (min 5 chars)" required minlength="5" maxlength="500">
+                                            <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap w-100">Propose {{ $flag['enabled'] ? 'disable' : 'enable' }}</button>
+                                        </form>
+                                    </td>
                                 @endif
-                            </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="{{ $canManage ? 4 : 3 }}" class="text-center text-muted py-4">No active feature flags.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header fw-semibold">Platform config values</div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <caption class="visually-hidden">Active platform config values with a propose-change action</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Key &amp; category</th>
+                            <th scope="col">Value</th>
+                            @if ($canManage)
+                                <th scope="col">Propose change</th>
+                            @endif
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($config['platform_config'] as $entry)
+                            <tr>
+                                <td>
+                                    <span class="font-monospace">{{ $entry['key'] }}</span>
+                                    <div class="text-muted small">{{ $entry['category'] }} &middot; {{ $entry['description'] }}</div>
+                                </td>
+                                <td><span class="font-monospace">{{ $entry['value'] }}</span></td>
+                                @if ($canManage)
+                                    <td>
+                                        <form method="POST" action="{{ route('platform.change-requests.store') }}">
+                                            @csrf
+                                            <x-idempotency-key/>
+                                            <input type="hidden" name="target_type" value="PLATFORM_CONFIG">
+                                            <input type="hidden" name="target_id" value="{{ $entry['id'] }}">
+                                            <input type="text" name="value" class="form-control form-control-sm mb-1" placeholder="New value" required>
+                                            <input type="text" name="reason" class="form-control form-control-sm mb-1" placeholder="Reason (min 5 chars)" required minlength="5" maxlength="500">
+                                            <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap w-100">Propose</button>
+                                        </form>
+                                    </td>
+                                @endif
+                            </tr>
+                        @empty
+                            <tr><td colspan="{{ $canManage ? 3 : 2 }}" class="text-center text-muted py-4">No active platform config values.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header fw-semibold">Access policies</div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <caption class="visually-hidden">Active access policies with their parameters and a propose-change action</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Code &amp; type</th>
+                            <th scope="col">Parameters</th>
+                            @if ($canManage)
+                                <th scope="col">Propose change</th>
+                            @endif
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($config['access_policies'] as $policy)
+                            <tr>
+                                <td>
+                                    <span class="font-monospace">{{ $policy['code'] }}</span>
+                                    <div class="text-muted small">{{ $policy['name'] }} &middot; {{ str_replace('_', ' ', $policy['policy_type']) }}</div>
+                                </td>
+                                <td><span class="font-monospace small">{{ json_encode($policy['parameters']) }}</span></td>
+                                @if ($canManage)
+                                    <td>
+                                        <form method="POST" action="{{ route('platform.change-requests.store') }}">
+                                            @csrf
+                                            <x-idempotency-key/>
+                                            <input type="hidden" name="target_type" value="ACCESS_POLICY">
+                                            <input type="hidden" name="target_id" value="{{ $policy['id'] }}">
+                                            <input type="text" name="parameters" class="form-control form-control-sm font-monospace mb-1" placeholder='{"key":"value"}' required value="{{ json_encode($policy['parameters']) }}">
+                                            <input type="text" name="reason" class="form-control form-control-sm mb-1" placeholder="Reason (min 5 chars)" required minlength="5" maxlength="500">
+                                            <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap w-100">Propose</button>
+                                        </form>
+                                    </td>
+                                @endif
+                            </tr>
+                        @empty
+                            <tr><td colspan="{{ $canManage ? 3 : 2 }}" class="text-center text-muted py-4">No active access policies.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                <span>Change requests</span>
+                <span class="badge text-bg-light border">{{ count($changeRequests) }}</span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">A reviewer may never decide a change request they submitted themselves.</p>
+                @forelse ($changeRequests as $index => $change)
+                    <div class="mb-3 pb-3 border-bottom change-request-item" @if ($index >= $sidePreviewLimit) hidden @endif>
+                        <div class="d-flex justify-content-between align-items-start">
+                            <span>{{ str_replace('_', ' ', $change['target_type']) }}</span>
+                            <x-status-badge :value="$change['status']" type="status" />
+                        </div>
+                        <div class="text-muted small font-monospace mt-1">{{ $change['target_id'] }}</div>
+                        <div class="small mt-1">{{ $change['reason'] }}</div>
+                        <div class="text-muted small mt-1">{{ \Illuminate\Support\Carbon::parse($change['requested_at'])->format('d M Y, H:i') }}</div>
+                        @if ($canManage && $change['status'] === 'PENDING')
+                            <form method="POST" action="{{ route('platform.change-requests.decide', $change['id']) }}" class="mt-2">
+                                @csrf
+                                <x-idempotency-key/>
+                                <input type="text" name="notes" class="form-control form-control-sm mb-1" placeholder="Decision notes">
+                                <div class="d-flex gap-1">
+                                    <button type="submit" name="decision" value="APPROVE" class="btn btn-sm btn-outline-success w-100">Approve</button>
+                                    <button type="submit" name="decision" value="REJECT" class="btn btn-sm btn-outline-danger w-100">Reject</button>
+                                </div>
+                            </form>
                         @endif
-                    </tr>
+                    </div>
                 @empty
-                    <tr><td colspan="{{ $canManage ? 5 : 4 }}" class="text-center text-muted py-4">No change requests yet.</td></tr>
+                    <p class="text-muted small mb-0">No change requests yet.</p>
                 @endforelse
-            </tbody>
-        </table>
+                @if (count($changeRequests) > $sidePreviewLimit)
+                    <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1" data-show-more-target="change-request-item" data-show-more-count="{{ count($changeRequests) - $sidePreviewLimit }}">
+                        Show {{ count($changeRequests) - $sidePreviewLimit }} more
+                    </button>
+                @endif
+            </div>
+        </div>
     </div>
 </div>
 
 @if ($canManage)
-    <div class="card mb-3">
+    <div class="card mt-3">
         <div class="card-header">
             <div class="fw-semibold">Provision platform staff</div>
             <div class="text-muted small">A national/technical account with no taxpayer organisation -- unconditionally step-up gated</div>
@@ -240,3 +284,23 @@
     </div>
 @endif
 @endsection
+
+@push('scripts')
+<script>
+    (function () {
+        document.querySelectorAll('[data-show-more-target]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var expanded = button.dataset.expanded === '1';
+                var items = document.querySelectorAll('.' + button.dataset.showMoreTarget);
+                items.forEach(function (item, index) {
+                    if (index >= 5) { item.hidden = expanded; }
+                });
+                button.dataset.expanded = expanded ? '0' : '1';
+                button.textContent = expanded
+                    ? 'Show ' + button.dataset.showMoreCount + ' more'
+                    : 'Show fewer';
+            });
+        });
+    })();
+</script>
+@endpush

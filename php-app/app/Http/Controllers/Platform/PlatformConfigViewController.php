@@ -42,12 +42,31 @@ class PlatformConfigViewController extends Controller
         $status = $request->query('status');
         $status = is_string($status) && trim($status) !== '' ? mb_strtoupper(trim($status)) : null;
 
+        $config = $this->platform->config();
+        $changeRequests = $this->platform->listChangeRequests($status);
+
+        // Blade view redesign (2026-09-29): the index page has no filter
+        // control of its own for $status (it's only ever reachable via a
+        // hand-typed query string), but the stat tile below still needs
+        // the FULL unfiltered list to count pending requests correctly if
+        // one ever is passed -- re-fetches unfiltered only when a filter
+        // is actually active, the same pattern already used for
+        // Obligations'/Disputes'/Audit Trail's own stat tiles.
+        $allChangeRequests = $status ? $this->platform->listChangeRequests(null) : $changeRequests;
+        $metrics = [
+            'feature_flags' => count($config['feature_flags']),
+            'platform_config' => count($config['platform_config']),
+            'access_policies' => count($config['access_policies']),
+            'pending_changes' => collect($allChangeRequests)->where('status', 'PENDING')->count(),
+        ];
+
         return view('platform.index', [
-            'config' => $this->platform->config(),
-            'changeRequests' => $this->platform->listChangeRequests($status),
+            'config' => $config,
+            'changeRequests' => $changeRequests,
             'statusFilter' => $status,
             'canManage' => $user->hasAppPermission('platform:manage'),
             'staffRoles' => PlatformChangeValidator::PLATFORM_STAFF_ROLES,
+            'metrics' => $metrics,
         ]);
     }
 

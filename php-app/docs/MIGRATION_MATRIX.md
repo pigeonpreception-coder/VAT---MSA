@@ -13102,3 +13102,59 @@ approvals (national-only), then a whole second "Analytics" sub-page
   reviewer's point of view.
 - Scope unchanged from the prior entries: this closes the tenth screen
   in the user's own named sweep.
+
+## Platform Config: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Eleventh screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview,
+Risk Indicators, Obligations, Disputes, Audit Trail, Documents, and
+Reports & Analytics, all above). Unlike Reports, this screen had no
+stat tile row at all yet -- `resources/views/platform/index.blade.php`
+went straight from the page header into four stacked full-width
+sections (Feature flags, Platform config values, Access policies,
+Change requests), plus a fifth "Provision platform staff" form.
+
+- **New 4-tile stat row**: Feature flags, Config values, Access
+  policies (each an active-row count from the same `config()` call the
+  page already made -- no new query) and Pending changes (a warning
+  subtitle once non-zero). Pending changes reflects the FULL unfiltered
+  change-request list even though the page has no filter control of its
+  own reachable through the UI -- `listChangeRequests($status)` still
+  accepts a hand-typed `?status=` query string, so the controller
+  re-fetches unfiltered only when one is actually passed, the same
+  defensive pattern already used for Obligations'/Disputes'/Audit
+  Trail's own stat tiles.
+- **Main/side split**: the three "current definitions" tables (Feature
+  flags, Platform config values, Access policies -- what an actor reads
+  and proposes changes against) move into a `col-lg-8`; Change requests
+  (the review/tracking queue those proposals land in) becomes a
+  `col-lg-4` card-item side panel, no new query. Each panel item's
+  maker-checker decide form (notes + Approve/Reject) is preserved
+  exactly, just re-laid-out to fit the narrower column. "Provision
+  platform staff" stays a separate full-width section below the split
+  -- a distinct one-off admin action, not secondary to either half.
+- **Every inline propose-change form's fields stacked vertically
+  instead of side by side**, applied proactively rather than reactively
+  (same lesson as the Reports redesign): Feature flags' reason field,
+  Platform config's new-value+reason fields, and Access policies'
+  parameters+reason fields all stack full-width in their own table
+  cell now, rather than a row of fixed `style="width: Xrem"` inputs
+  that no longer fit once the table itself narrowed into `col-lg-8`.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as two different real national admin accounts already in the dev
+  database (`SUPER_ADMIN` and `INFRASTRUCTURE_ADMIN`, satisfying the
+  maker-checker self-decision rule), exercising the full round trip
+  live: proposed a real feature-flag change through the app's own form,
+  then approved it from the new side panel as the second reviewer --
+  confirmed the flag flipped to Cancelled, the change request showed
+  Applied, and the Pending changes tile dropped from 1 to 0 in the same
+  page reload. No horizontal overflow at either width across all three
+  of this page's `table-responsive` elements.
+- Full suite: 1178 tests, 0 regressions. `tests/Feature/Platform/
+  PlatformConfigViewTest.php`'s existing 14 tests -- covering the
+  maker-checker self-decision refusal, idempotency, and the staff-
+  provisioning step-up gate -- all pass unedited; one new test added
+  (`test_the_page_renders_its_stat_tiles_and_change_requests_side_panel`)
+  covering the new stat tiles and the side panel's decide form.
+- Scope unchanged from the prior entries: this closes the eleventh
+  screen in the user's own named sweep.
