@@ -136,6 +136,37 @@ class PlatformConfigViewTest extends TestCase
         ])->assertForbidden();
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's new stat tiles
+     * and the "Change requests" side panel both derive from the same
+     * config()/listChangeRequests() calls the page already made -- covers
+     * the counts and that a pending change request's decide form still
+     * renders (and works) from inside the side panel.
+     */
+    public function test_the_page_renders_its_stat_tiles_and_change_requests_side_panel(): void
+    {
+        $this->seedFeatureFlag(false);
+        $this->seedPlatformConfig();
+        $this->seedAccessPolicy();
+        $flagId = $this->seedFeatureFlag(false);
+        $requester = $this->superAdmin('stats-requester@platformview.test');
+        $this->actingAs($requester)->post('/platform/change-requests', [
+            'target_type' => 'FEATURE_FLAG', 'target_id' => $flagId, 'enabled' => '1', 'reason' => 'Enable for the pilot cohort.',
+        ]);
+
+        $response = $this->actingAs($requester)->get('/platform');
+
+        $response->assertOk();
+        $response->assertSee('Feature flags');
+        $response->assertSee('Config values');
+        $response->assertSee('Access policies');
+        $response->assertSee('Pending changes');
+        $response->assertSeeInOrder(['Pending changes', '1']);
+        $response->assertSee('Change requests');
+        $response->assertSee('Approve');
+        $response->assertSee('Reject');
+    }
+
     public function test_a_manager_can_propose_a_feature_flag_change(): void
     {
         $flagId = $this->seedFeatureFlag(false);
