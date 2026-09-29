@@ -188,6 +188,40 @@ class AuditTrailTest extends TestCase
         $response->assertSee('Passed');
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's new stat tiles and
+     * side panels (by-resource-type breakdown, most active actors) are
+     * computed via cheap DB-level aggregates against audit_events directly
+     * (system-wide, not tenant-scoped) rather than reusing the page's own
+     * filtered searchTrail() result -- covers both an unfiltered "Total
+     * events" tile that differs from "Matching filters" once a filter is
+     * applied, and the chain-status tile reflecting the latest run.
+     */
+    public function test_the_page_renders_its_stat_tiles_and_side_panels(): void
+    {
+        $auditor = $this->auditor();
+        AuditService::append($auditor, 'INVOICE_CERTIFIED', 'INVOICE', 'inv-stats-1', []);
+        AuditService::append($auditor, 'INVOICE_CERTIFIED', 'INVOICE', 'inv-stats-2', []);
+        AuditService::append($auditor, 'QUOTATION_ISSUED', 'QUOTATION', 'quo-stats-1', []);
+        $this->actingAs($auditor)->post('/audit-trail/verification');
+
+        $response = $this->actingAs($auditor)->get('/audit-trail?resource_type=INVOICE');
+
+        $response->assertOk();
+        $response->assertSee('Total events');
+        $response->assertSee('Matching filters');
+        $response->assertSeeInOrder(['Matching filters', '2']);
+        $response->assertSee('Chain status');
+        $response->assertSeeInOrder(['Chain status', 'Passed']);
+        $response->assertSee('Verification runs');
+        $response->assertSeeInOrder(['Verification runs', '1']);
+        $response->assertSee('Events by resource type');
+        $response->assertSeeInOrder(['Invoice', '2']);
+        $response->assertSeeInOrder(['Quotation', '1']);
+        $response->assertSee('Most active actors');
+        $response->assertSee($auditor->role);
+    }
+
     public function test_the_json_api_can_list_and_trigger_chain_verifications(): void
     {
         $auditor = $this->auditor();
