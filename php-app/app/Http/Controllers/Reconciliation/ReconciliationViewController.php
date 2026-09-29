@@ -49,6 +49,8 @@ class ReconciliationViewController extends Controller
         return view('exceptions.index', [
             'workQueue' => $this->reconciliation->getWorkQueue($request, $user),
             'summary' => $this->reconciliation->getSummaryTotals($user),
+            'unassignedPreview' => $this->reconciliation->getUnassignedPreview($user),
+            'recentlyResolvedPreview' => $this->reconciliation->getRecentlyResolvedPreview($user),
             'canManage' => $user->hasAppPermission('reconciliation:manage'),
             'filters' => $request->only(['status', 'severity', 'assigned_officer_id', 'unassigned_only', 'min_age_days', 'max_age_days']),
         ]);

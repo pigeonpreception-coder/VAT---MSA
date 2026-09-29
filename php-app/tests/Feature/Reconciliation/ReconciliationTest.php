@@ -369,6 +369,84 @@ class ReconciliationTest extends TestCase
         $this->assertSame(1, $response->viewData('summary')['critical_count']);
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the side-panel severity breakdown
+     * (`ReconciliationService::getSummaryTotals()`'s new `by_severity` key)
+     * covers all four severities regardless of which ones actually occur,
+     * unlike the work-queue table which only ever shows rows that exist.
+     */
+    public function test_the_blade_view_renders_the_severity_breakdown_side_panel(): void
+    {
+        ReconciliationException::create([
+            'id' => (string) Str::uuid(), 'invoice_id' => $this->certifyInvoice()['invoiceId'], 'taxpayer_id' => null,
+            'exception_type' => 'LEDGER_MISMATCH', 'severity' => 'MEDIUM', 'status' => 'OPEN', 'summary' => 'Medium severity mismatch.', 'created_at' => now(),
+        ]);
+        $officer = $this->makeNamraOfficer();
+
+        $response = $this->actingAs($officer)->get('/exceptions');
+
+        $response->assertOk();
+        $response->assertSee('Exceptions by severity');
+        $this->assertSame(
+            ['CRITICAL' => 0, 'HIGH' => 0, 'MEDIUM' => 1, 'LOW' => 0],
+            collect($response->viewData('summary')['by_severity'])->pluck('count', 'severity')->all(),
+        );
+    }
+
+    /**
+     * Blade view redesign (2026-09-29): "Needs an officer"
+     * (`ReconciliationService::getUnassignedPreview()`) surfaces open,
+     * unassigned exceptions regardless of the work-queue table's own
+     * filters, and excludes an exception once it has an assigned officer.
+     */
+    public function test_the_blade_view_renders_the_needs_an_officer_side_panel(): void
+    {
+        $exception = ReconciliationException::create([
+            'id' => (string) Str::uuid(), 'invoice_id' => $this->certifyInvoice()['invoiceId'], 'taxpayer_id' => null,
+            'exception_type' => 'LEDGER_MISMATCH', 'severity' => 'HIGH', 'status' => 'OPEN',
+            'summary' => 'Needs officer attention.', 'created_at' => now()->subDays(3),
+        ]);
+        $officer = $this->makeNamraOfficer();
+
+        $response = $this->actingAs($officer)->get('/exceptions');
+
+        $response->assertOk();
+        $response->assertSee('Needs an officer');
+        $response->assertSee('Needs officer attention.');
+        $response->assertSee('Open 3d, unassigned');
+
+        $this->actingAs($officer)->withFreshStepUp()
+            ->post("/exceptions/{$exception->id}/assignment", ['officer_id' => $officer->id]);
+
+        $response = $this->actingAs($officer)->get('/exceptions');
+        $response->assertOk();
+        $response->assertSee('No open exceptions are waiting for an officer.');
+    }
+
+    /**
+     * Blade view redesign (2026-09-29): "Recently resolved"
+     * (`ReconciliationService::getRecentlyResolvedPreview()`) is an
+     * activity feed of resolved exceptions, showing who resolved each one
+     * and their notes.
+     */
+    public function test_the_blade_view_renders_the_recently_resolved_side_panel(): void
+    {
+        $exception = ReconciliationException::create([
+            'id' => (string) Str::uuid(), 'invoice_id' => $this->certifyInvoice()['invoiceId'], 'taxpayer_id' => null,
+            'exception_type' => 'LEDGER_MISMATCH', 'severity' => 'HIGH', 'status' => 'OPEN', 'summary' => 'Test.', 'created_at' => now(),
+        ]);
+        $officer = $this->makeNamraOfficer();
+        $this->actingAs($officer)->withFreshStepUp()
+            ->post("/exceptions/{$exception->id}/resolution", ['notes' => 'Confirmed a timing difference, no action needed.']);
+
+        $response = $this->actingAs($officer)->get('/exceptions');
+
+        $response->assertOk();
+        $response->assertSee('Recently resolved');
+        $response->assertSee('Confirmed a timing difference, no action needed.');
+        $response->assertSee($officer->name);
+    }
+
     public function test_resolving_through_the_blade_view_without_a_fresh_step_up_redirects_to_password_confirmation(): void
     {
         $exception = ReconciliationException::create([

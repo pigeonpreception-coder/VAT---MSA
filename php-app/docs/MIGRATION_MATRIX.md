@@ -12608,3 +12608,78 @@ exact shape:
   the concrete example. Every other view still using the older
   full-width-tables layout remains as it was until a further request
   names it or asks for the sweep to continue.
+
+## Reconciliation Exceptions: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Second screen in the user's own named sweep (after VAT Audit Report,
+above). `resources/views/exceptions/index.blade.php` already had the
+stat-tile row -- kept unchanged -- but the rest of the page was a
+single full-width work-queue table with 7 columns, two of them (Age,
+Assigned to) often just an em dash, and an Actions column embedding
+two side-by-side inline forms (Assign/Resolve) with no side column at
+all.
+
+- **Main column** (`col-lg-8`): the filter form moved from its own
+  full-width card into the work-queue card's own header (two stacked
+  `card-header`s: filters, then the result count), and the table
+  dropped from 7 columns to 5 by combining Severity+Status into one
+  stacked-badge column and folding Age into the invoice cell's own
+  subtitle line (`Supplier Co · 4d`). The Actions column's two forms
+  needed a real layout fix, not just narrower text, once the column
+  itself narrowed from 100% to ~67% of the page: their inline
+  `label + input + button` row's placeholder text
+  (`"Officer user ID"`/`"Resolution notes (10-400 chars)"`) visibly
+  truncated and overlapped its own button in an initial pass -- caught
+  by the same live-browser check this session's own discipline
+  requires before calling a UI change done, not shipped and found
+  later. Fixed by stacking each form's input above its own full-width
+  button instead of placing them side by side, with shorter
+  placeholder text (`"Officer ID"`/`"Notes (10-400 chars)"`) that
+  actually fits the narrower column at both 1440px and 820px.
+- **Side column** (`col-lg-4`), three new mini-dashboard cards mirroring
+  `vat-periods/index.blade.php`'s own three-card side column (a status
+  card, an actionable-subset card, an activity-feed card) --
+  **all three previously did not exist in any form**, unlike VAT Audit
+  Report's redesign, which reshaped data the page already had:
+  - **"Exceptions by severity"**: `ReconciliationService::
+    getSummaryTotals()` gained a new `by_severity` key (all four
+    severities, zero-filled), the same full-tenant-scoped-set shape
+    its sibling `open_count`/`critical_count`/`total_value_cents`
+    fields already have, mirroring `VatAuditReportService::
+    invoiceSummary()`'s own `by_risk_level` breakdown.
+  - **"Needs an officer"**: new `ReconciliationService::
+    getUnassignedPreview()` -- the oldest open, unassigned exceptions
+    (top 5, oldest first), regardless of whatever the work-queue
+    table's own filters currently show. The actionable subset an
+    officer most needs surfaced, matching the reference page's own
+    "Pending approvals" panel.
+  - **"Recently resolved"**: new `ReconciliationService::
+    getRecentlyResolvedPreview()` -- the 5 most recently resolved
+    exceptions with who resolved each one and their notes, matching
+    the reference page's own "Recent submissions" activity feed.
+  
+  All three are genuinely new backend methods (not just new view
+  markup over existing data), each a small, targeted query using the
+  same tenant-scoping pattern `getSummaryTotals()`/`getWorkQueue()`
+  already established -- no change to any existing method's behaviour
+  or return shape beyond the additive `by_severity` key.
+- New tests (3, in `tests/Feature/Reconciliation/ReconciliationTest.php`,
+  alongside its existing 21): the severity breakdown covers all four
+  severities including zero counts; the unassigned-officer panel shows
+  an open unassigned exception and stops showing it once genuinely
+  assigned (through the real `POST .../assignment` endpoint, not a
+  direct DB write); the recently-resolved panel shows a resolution's
+  notes and the resolving officer's name after a real
+  `POST .../resolution` call. Every one of the file's existing 21 tests
+  (JSON API + the original 3 Blade tests) passes unedited.
+- Verified with a real browser session against real demo tenant data
+  (NamRA VAT Auditor account, 25 real reconciliation exceptions seeded
+  from the NEMA Property Developers demo data) at both 1440px and
+  820px -- no horizontal overflow at either width
+  (`document.documentElement.scrollWidth` equal to `clientWidth`), and
+  this verification pass is what caught the Actions-column truncation
+  bug described above before it shipped.
+- Full suite: 1170 tests, 0 regressions.
+- Scope unchanged from the prior entry: this closes the second screen
+  in the user's own named sweep, not every screen sharing the older
+  layout.
