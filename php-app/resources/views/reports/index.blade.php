@@ -2,6 +2,10 @@
 
 @section('title', 'Reports & analytics')
 
+@php
+    $sidePreviewLimit = 5;
+@endphp
+
 @section('content')
 <div class="mb-4">
     <div class="text-uppercase text-muted small fw-semibold">Reports & analytics</div>
@@ -58,193 +62,196 @@
     </div>
 </div>
 
-<div class="card mb-3">
-    <div class="card-header">
-        <div class="fw-semibold">Report catalogue</div>
-        <div class="text-muted small">Running a report re-computes it inline; nothing is official until it is published</div>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Active report definitions, their audience tier and classification, with a run action</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Code</th>
-                    <th scope="col">Name</th>
-                    <th scope="col">Audience</th>
-                    <th scope="col">Classification</th>
-                    <th scope="col">Freshness</th>
-                    @if ($canRun)
-                        <th scope="col">Run</th>
-                    @endif
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($definitions as $definition)
-                    <tr>
-                        <td><span class="font-monospace">{{ $definition->code }}</span></td>
-                        <td>{{ $definition->name }}</td>
-                        <td>{{ str_replace('_', ' ', $definition->audience) }}</td>
-                        <td><x-status-badge :value="$definition->classification" type="status" /></td>
-                        <td>{{ str_replace('_', ' ', $definition->freshness_tier) }}</td>
-                        @if ($canRun)
-                            <td>
-                                <form method="POST" action="{{ route('reports.run', $definition->code) }}" class="d-flex gap-2">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    @if ($definition->code === 'CASE_EVIDENCE_SUMMARY')
-                                        <input type="text" name="case_id" class="form-control form-control-sm" placeholder="Audit case ID" required style="width: 12rem;">
-                                    @endif
-                                    <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap">Run</button>
-                                </form>
-                            </td>
-                        @endif
-                    </tr>
-                @empty
-                    <tr><td colspan="{{ $canRun ? 6 : 5 }}" class="text-center text-muted py-4"><strong>No active report definitions.</strong></td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header">
-        <div class="fw-semibold">My report runs</div>
-        <div class="text-muted small">Publish reconciles the run against live source data before it becomes official</div>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Report runs requested by the signed-in user, with publish and export-request actions</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Report</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Rows</th>
-                    <th scope="col">Requested</th>
-                    <th scope="col">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($myRuns as $run)
-                    <tr>
-                        <td><span class="font-monospace">{{ $run->code }}</span><div class="text-muted small">{{ $run->name }}</div></td>
-                        <td><x-status-badge :value="$run->status" type="status" /></td>
-                        <td>{{ number_format($run->row_count) }}</td>
-                        <td>{{ \Illuminate\Support\Carbon::parse($run->requested_at)->format('d M Y, H:i') }}</td>
-                        <td class="d-flex gap-2">
-                            @if ($run->status === 'COMPLETED_INLINE')
-                                <form method="POST" action="{{ route('reports.publish', $run->id) }}">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <button type="submit" class="btn btn-sm btn-outline-success">Publish</button>
-                                </form>
-                            @endif
-                            @if (in_array($run->status, ['COMPLETED_INLINE', 'PUBLISHED'], true))
-                                <form method="POST" action="{{ route('reports.export.request', $run->id) }}">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <button type="submit" class="btn btn-sm btn-outline-primary">Request export</button>
-                                </form>
-                            @endif
-                        </td>
-                    </tr>
-                @empty
-                    <tr><td colspan="5" class="text-center text-muted py-4"><strong>No report runs yet.</strong> Run a report from the catalogue above.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header">
-        <div class="fw-semibold">My exports</div>
-        <div class="text-muted small">A sensitive report's export starts quarantined until an independent approval</div>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-            <caption class="visually-hidden">Report exports requested by the signed-in user, with cancel and download actions</caption>
-            <thead>
-                <tr>
-                    <th scope="col">Report</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Requested</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse ($myExports as $export)
-                    <tr>
-                        <td><span class="font-monospace">{{ $export->report_code }}</span></td>
-                        <td><x-status-badge :value="$export->status" type="status" /> @if ($export->requires_step_up)<span class="badge text-bg-light">Step-up</span>@endif</td>
-                        <td>{{ \Illuminate\Support\Carbon::parse($export->requested_at)->format('d M Y, H:i') }}</td>
-                        <td>{{ \Illuminate\Support\Carbon::parse($export->expires_at)->format('d M Y, H:i') }}</td>
-                        <td class="d-flex gap-2">
-                            @if ($export->status === 'PENDING_APPROVAL')
-                                <form method="POST" action="{{ route('reports.export.cancel', $export->id) }}">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <input type="hidden" name="reason" value="Cancelled by the requester from the reports console.">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
-                                </form>
-                            @endif
-                            @if ($export->status === 'APPROVED')
-                                <a href="{{ route('reports.export.download', $export->id) }}" class="btn btn-sm btn-outline-secondary">Download</a>
-                            @endif
-                        </td>
-                    </tr>
-                @empty
-                    <tr><td colspan="5" class="text-center text-muted py-4"><strong>No exports requested yet.</strong></td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
-@if ($isNational)
-    <div class="card mb-3">
-        <div class="card-header">
-            <div class="fw-semibold">Pending export approvals</div>
-            <div class="text-muted small">A national role may approve or cancel a colleague's pending export, never their own</div>
-        </div>
-        <div class="table-responsive">
-            <table class="table table-hover mb-0 align-middle">
-                <caption class="visually-hidden">Report exports requested by other users awaiting national approval</caption>
-                <thead>
-                    <tr>
-                        <th scope="col">Report</th>
-                        <th scope="col">Requested</th>
-                        <th scope="col">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($pendingApprovals as $export)
+<div class="row g-3 mb-3">
+    <div class="col-lg-8">
+        <div class="card mb-3">
+            <div class="card-header">
+                <div class="fw-semibold">Report catalogue</div>
+                <div class="text-muted small">Running a report re-computes it inline; nothing is official until it is published</div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <caption class="visually-hidden">Active report definitions, their audience tier and classification, with a run action</caption>
+                    <thead>
                         <tr>
-                            <td><span class="font-monospace">{{ $export->report_code }}</span> @if ($export->requires_step_up)<span class="badge text-bg-light ms-1">Step-up</span>@endif</td>
-                            <td>{{ \Illuminate\Support\Carbon::parse($export->requested_at)->format('d M Y, H:i') }}</td>
-                            <td class="d-flex gap-2">
-                                <form method="POST" action="{{ route('reports.export.approve', $export->id) }}">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <button type="submit" class="btn btn-sm btn-outline-success">Approve</button>
-                                </form>
-                                <form method="POST" action="{{ route('reports.export.cancel', $export->id) }}">
-                                    @csrf
-                                    <x-idempotency-key/>
-                                    <input type="hidden" name="reason" value="Cancelled by a national reviewer from the reports console.">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Cancel</button>
-                                </form>
-                            </td>
+                            <th scope="col">Code</th>
+                            <th scope="col">Name &amp; audience</th>
+                            <th scope="col">Classification &amp; freshness</th>
+                            @if ($canRun)
+                                <th scope="col">Run</th>
+                            @endif
                         </tr>
-                    @empty
-                        <tr><td colspan="3" class="text-center text-muted py-4"><strong>Nothing pending approval.</strong></td></tr>
-                    @endforelse
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        @forelse ($definitions as $definition)
+                            <tr>
+                                <td><span class="font-monospace">{{ $definition->code }}</span></td>
+                                <td>
+                                    {{ $definition->name }}
+                                    <div class="text-muted small">{{ str_replace('_', ' ', $definition->audience) }}</div>
+                                </td>
+                                <td>
+                                    <x-status-badge :value="$definition->classification" type="status" />
+                                    <div class="text-muted small mt-1">{{ str_replace('_', ' ', $definition->freshness_tier) }}</div>
+                                </td>
+                                @if ($canRun)
+                                    <td>
+                                        <form method="POST" action="{{ route('reports.run', $definition->code) }}">
+                                            @csrf
+                                            <x-idempotency-key/>
+                                            @if ($definition->code === 'CASE_EVIDENCE_SUMMARY')
+                                                <input type="text" name="case_id" class="form-control form-control-sm mb-1" placeholder="Audit case ID" required>
+                                            @endif
+                                            <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap">Run</button>
+                                        </form>
+                                    </td>
+                                @endif
+                            </tr>
+                        @empty
+                            <tr><td colspan="{{ $canRun ? 4 : 3 }}" class="text-center text-muted py-4"><strong>No active report definitions.</strong></td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="fw-semibold">My report runs</div>
+                <div class="text-muted small">Publish reconciles the run against live source data before it becomes official</div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <caption class="visually-hidden">Report runs requested by the signed-in user, with publish and export-request actions</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Report</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Rows &amp; requested</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($myRuns as $run)
+                            <tr>
+                                <td><span class="font-monospace">{{ $run->code }}</span><div class="text-muted small">{{ $run->name }}</div></td>
+                                <td><x-status-badge :value="$run->status" type="status" /></td>
+                                <td class="small">
+                                    {{ number_format($run->row_count) }} rows
+                                    <div class="text-muted">{{ \Illuminate\Support\Carbon::parse($run->requested_at)->format('d M Y, H:i') }}</div>
+                                </td>
+                                <td>
+                                    @if ($run->status === 'COMPLETED_INLINE')
+                                        <form method="POST" action="{{ route('reports.publish', $run->id) }}" class="mb-1">
+                                            @csrf
+                                            <x-idempotency-key/>
+                                            <button type="submit" class="btn btn-sm btn-outline-success w-100">Publish</button>
+                                        </form>
+                                    @endif
+                                    @if (in_array($run->status, ['COMPLETED_INLINE', 'PUBLISHED'], true))
+                                        <form method="POST" action="{{ route('reports.export.request', $run->id) }}">
+                                            @csrf
+                                            <x-idempotency-key/>
+                                            <button type="submit" class="btn btn-sm btn-outline-primary w-100">Request export</button>
+                                        </form>
+                                    @endif
+                                </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="4" class="text-center text-muted py-4"><strong>No report runs yet.</strong> Run a report from the catalogue above.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
-@endif
+
+    <div class="col-lg-4 d-flex flex-column gap-3">
+        <div class="card">
+            <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                <span>My exports</span>
+                <span class="badge text-bg-light border">{{ count($myExports) }}</span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">A sensitive report's export starts quarantined until an independent approval.</p>
+                @forelse ($myExports as $index => $export)
+                    <div class="mb-3 pb-3 border-bottom my-export-item" @if ($index >= $sidePreviewLimit) hidden @endif>
+                        <div class="d-flex justify-content-between align-items-start">
+                            <span class="font-monospace fw-semibold">{{ $export->report_code }}</span>
+                            <x-status-badge :value="$export->status" type="status" />
+                        </div>
+                        <div class="text-muted small mt-1">
+                            Requested {{ \Illuminate\Support\Carbon::parse($export->requested_at)->format('d M Y, H:i') }}
+                            &middot; Expires {{ \Illuminate\Support\Carbon::parse($export->expires_at)->format('d M Y, H:i') }}
+                        </div>
+                        @if ($export->requires_step_up)
+                            <span class="badge text-bg-light mt-1">Step-up</span>
+                        @endif
+                        @if ($export->status === 'PENDING_APPROVAL')
+                            <form method="POST" action="{{ route('reports.export.cancel', $export->id) }}" class="mt-2">
+                                @csrf
+                                <x-idempotency-key/>
+                                <input type="hidden" name="reason" value="Cancelled by the requester from the reports console.">
+                                <button type="submit" class="btn btn-sm btn-outline-danger w-100">Cancel</button>
+                            </form>
+                        @endif
+                        @if ($export->status === 'APPROVED')
+                            <a href="{{ route('reports.export.download', $export->id) }}" class="btn btn-sm btn-outline-secondary w-100 mt-2">Download</a>
+                        @endif
+                    </div>
+                @empty
+                    <p class="text-muted small mb-0">No exports requested yet.</p>
+                @endforelse
+                @if (count($myExports) > $sidePreviewLimit)
+                    <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1" data-show-more-target="my-export-item" data-show-more-count="{{ count($myExports) - $sidePreviewLimit }}">
+                        Show {{ count($myExports) - $sidePreviewLimit }} more
+                    </button>
+                @endif
+            </div>
+        </div>
+
+        @if ($isNational)
+            <div class="card">
+                <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                    <span>Pending export approvals</span>
+                    <span class="badge text-bg-light border">{{ count($pendingApprovals) }}</span>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">A national role may approve or cancel a colleague's pending export, never their own.</p>
+                    @forelse ($pendingApprovals as $index => $export)
+                        <div class="mb-3 pb-3 border-bottom pending-approval-item" @if ($index >= $sidePreviewLimit) hidden @endif>
+                            <div class="d-flex justify-content-between align-items-start">
+                                <span class="font-monospace fw-semibold">{{ $export->report_code }}</span>
+                                @if ($export->requires_step_up)
+                                    <span class="badge text-bg-light">Step-up</span>
+                                @endif
+                            </div>
+                            <div class="text-muted small mt-1">Requested {{ \Illuminate\Support\Carbon::parse($export->requested_at)->format('d M Y, H:i') }}</div>
+                            <form method="POST" action="{{ route('reports.export.approve', $export->id) }}" class="mt-2">
+                                @csrf
+                                <x-idempotency-key/>
+                                <button type="submit" class="btn btn-sm btn-outline-success w-100 mb-1">Approve</button>
+                            </form>
+                            <form method="POST" action="{{ route('reports.export.cancel', $export->id) }}">
+                                @csrf
+                                <x-idempotency-key/>
+                                <input type="hidden" name="reason" value="Cancelled by a national reviewer from the reports console.">
+                                <button type="submit" class="btn btn-sm btn-outline-danger w-100">Cancel</button>
+                            </form>
+                        </div>
+                    @empty
+                        <p class="text-muted small mb-0">Nothing pending approval.</p>
+                    @endforelse
+                    @if (count($pendingApprovals) > $sidePreviewLimit)
+                        <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1" data-show-more-target="pending-approval-item" data-show-more-count="{{ count($pendingApprovals) - $sidePreviewLimit }}">
+                            Show {{ count($pendingApprovals) - $sidePreviewLimit }} more
+                        </button>
+                    @endif
+                </div>
+            </div>
+        @endif
+    </div>
+</div>
 
 <div class="mb-3 mt-4">
     <div class="text-uppercase text-muted small fw-semibold">Analytics</div>
@@ -357,3 +364,23 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+    (function () {
+        document.querySelectorAll('[data-show-more-target]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var expanded = button.dataset.expanded === '1';
+                var items = document.querySelectorAll('.' + button.dataset.showMoreTarget);
+                items.forEach(function (item, index) {
+                    if (index >= 5) { item.hidden = expanded; }
+                });
+                button.dataset.expanded = expanded ? '0' : '1';
+                button.textContent = expanded
+                    ? 'Show ' + button.dataset.showMoreCount + ' more'
+                    : 'Show fewer';
+            });
+        });
+    })();
+</script>
+@endpush
