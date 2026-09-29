@@ -84,11 +84,27 @@ class AuditCaseViewController extends Controller
             'critical_review' => collect($snapshot['risks'])->filter(fn ($risk) => $risk['severity'] === 'CRITICAL' && in_array($risk['status'], ['OPEN', 'UNDER_REVIEW'], true))->count(),
         ];
 
+        // Blade view redesign (2026-09-29): side-panel previews reusing the
+        // same $snapshot this method already computed for the metric tiles
+        // above -- no new query. Both are already ordered desc by the
+        // service (created_at/detected_at respectively), so take(5) is the
+        // 5 most recent. 'case_number'/'legal_name' are only present on the
+        // service's own national-scope branch (see ComplianceSnapshotService::
+        // getSnapshot()'s own doc comment) -- a taxpayer-scoped actor (who
+        // also holds compliance:read, per Permissions::ROLE_PERMISSIONS)
+        // sees this same page for their own cases only, without either key.
+        $preliminaryFindings = collect($snapshot['findings'])->where('status', 'PRELIMINARY')->take(5)->values()->all();
+        $riskAlerts = collect($snapshot['risks'])
+            ->whereIn('severity', ['HIGH', 'CRITICAL'])->whereIn('status', ['OPEN', 'UNDER_REVIEW'])
+            ->take(5)->values()->all();
+
         return view('audit-cases.index', [
             'cases' => $cases,
             'status' => $request->query('status', ''),
             'canManage' => $request->user()->hasAppPermission('cases:manage'),
             'metrics' => $metrics,
+            'preliminaryFindings' => $preliminaryFindings,
+            'riskAlerts' => $riskAlerts,
         ]);
     }
 
