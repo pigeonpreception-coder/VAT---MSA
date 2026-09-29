@@ -138,6 +138,35 @@ class RiskViewTest extends TestCase
         $unmatched->assertSee('No risk indicators match this view.');
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's own new stat
+     * tiles and side panels (severity breakdown, most-flagged taxpayers)
+     * reuse RiskService::summary()'s own national-scope-wide aggregate,
+     * the same one the dedicated summary report page already calls --
+     * proves the index page now surfaces it too, not just the report.
+     */
+    public function test_the_list_page_renders_its_stat_tiles_and_side_panels(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-RISK-0010');
+        $this->makeOverdueObligation($tp);
+        $auditor = $this->namraAuditor();
+        $this->actingAs($auditor)->post(route('risk-indicators.evaluation.store'), ['vat_number' => 'VAT-VIEW-RISK-0010']);
+        $indicator = RiskIndicator::where('taxpayer_id', $tp['taxpayer']->id)->firstOrFail();
+
+        $response = $this->actingAs($this->namraAuditor('auditor2@namra.test'))->get('/risk-indicators');
+
+        $response->assertOk();
+        $response->assertSee('Total indicators');
+        $response->assertSee('Needs review');
+        $response->assertSee('Critical severity');
+        $response->assertSee('Escalated to case');
+        $response->assertSee('Indicators by severity');
+        $response->assertSeeInOrder([$indicator->severity === 'CRITICAL' ? 'Critical' : 'High', '1']);
+        $response->assertSee('Most-flagged taxpayers');
+        $response->assertSee('VAT-VIEW-RISK-0010 Trading Co');
+        $response->assertSee('VAT-VIEW-RISK-0010');
+    }
+
     public function test_a_decision_cannot_be_recorded_before_a_review_is_assigned(): void
     {
         $tp = $this->makeTaxpayer('VAT-VIEW-RISK-0004');
