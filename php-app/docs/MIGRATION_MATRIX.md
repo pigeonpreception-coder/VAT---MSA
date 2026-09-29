@@ -12883,3 +12883,59 @@ aggregate.
   covering the new stat tiles and both side panels.
 - Scope unchanged from the prior entries: this closes the sixth screen
   in the user's own named sweep.
+
+## Disputes: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Seventh screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview,
+Risk Indicators, and Obligations, all above).
+`resources/views/disputes/index.blade.php` was a single full-width
+filterable table (Dispute/Taxpayer/Disputed resource/Amount/Status/Filed)
+with an optional "File a dispute" form above it and no summary tiles.
+Like Obligations, `DisputeService` has no `summary()`-style aggregate,
+so stats are again derived in the controller from an already-fetched
+list rather than reusing an existing service aggregate.
+
+- **New 4-tile stat row**: Total disputes, Filed this month, Filed this
+  week, Taxpayers (distinct taxpayers disputing). Deliberately *not* a
+  by-status or by-decision breakdown: `DisputeViewController`'s own doc
+  comment already documents that no dispute ever carries a status other
+  than `FILED` and `decided_at` is never set (no decide path exists on
+  `DisputeService` at all beyond `file()`/`search()`) -- a status tile
+  would always just repeat "Total", so these four were chosen to be
+  genuinely informative (volume and recent filing activity) instead.
+  `search()` applies its status filter at the DB level and is
+  tenant-scoped independently of the controller, so the controller
+  re-fetches unfiltered only when a filter is actually active -- same
+  no-extra-query-when-unfiltered pattern as Obligations, sharing
+  `search()`'s existing 100-row cap.
+- **Main/side split**: the File-a-dispute form and the existing
+  filterable table both move into a `col-lg-8`, filters/pagination/the
+  taxpayer-vs-national-officer form variants all unchanged. The new
+  `col-lg-4` holds two panels derived from the same unfiltered list, no
+  new query: "Disputes by resource type" (a compact breakdown across the
+  four disputable resource types) and "Most active taxpayers" (top 10 by
+  dispute count, mirroring Risk Indicators' "Most-flagged taxpayers"
+  panel) -- previously only discoverable by scanning the full table, now
+  surfaced directly with the established card-item preview pattern
+  (5-item preview, "Show N more" toggle).
+- Learned from the Obligations redesign's caught bug: explicitly checked
+  the `table-responsive` element's own `scrollWidth` vs `clientWidth`
+  during live verification this time (not just the page's), confirming
+  no internal overflow before calling this one done -- this table's
+  Status column has no per-row inline form, so the same class of bug
+  didn't reproduce here, but the check is now part of verifying every
+  remaining screen in this sweep.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a NamRA VAT Auditor, using the app's own "File a dispute" form
+  against two real taxpayers already in the dev database (NEMA Property
+  Developers CC and Demo Trading Co) to file one dispute each against
+  different resource types -- stat tiles and both side panels verified
+  against live data. No horizontal overflow at either width, including
+  no internal `table-responsive` overflow.
+- Full suite: 1174 tests, 0 regressions. `tests/Feature/Compliance/
+  DisputeViewTest.php`'s existing 10 tests unedited; one new test added
+  (`test_the_list_page_renders_its_stat_tiles_and_side_panels`) covering
+  the new stat tiles and both side panels across two taxpayers.
+- Scope unchanged from the prior entries: this closes the seventh
+  screen in the user's own named sweep.

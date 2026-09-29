@@ -214,6 +214,46 @@ class DisputeViewTest extends TestCase
         $this->actingAs($ownerB)->get(route('disputes.show', $dispute->id))->assertNotFound();
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's new stat tiles and
+     * side panels (by-resource-type breakdown, most active taxpayers) are
+     * derived from the same unfiltered search() call the table itself uses
+     * when no status filter is active -- covers a national officer's view
+     * across two different taxpayers' disputes.
+     */
+    public function test_the_list_page_renders_its_stat_tiles_and_side_panels(): void
+    {
+        $tpA = $this->makeTaxpayer('VAT-VIEW-DSP-0009');
+        $tpB = $this->makeTaxpayer('VAT-VIEW-DSP-0010');
+        $auditor = $this->namraAuditor();
+        $this->actingAs($auditor)->post(route('disputes.store'), [
+            'vat_number' => 'VAT-VIEW-DSP-0009',
+            'disputed_resource_type' => 'AUDIT_FINDING', 'disputed_resource_id' => (string) Str::uuid(),
+            'grounds' => 'Disputing a finding that mischaracterised a legitimate zero-rated export sale.',
+            'disputed_amount' => '300',
+        ]);
+        $this->actingAs($auditor)->post(route('disputes.store'), [
+            'vat_number' => 'VAT-VIEW-DSP-0010',
+            'disputed_resource_type' => 'VAT_RETURN', 'disputed_resource_id' => (string) Str::uuid(),
+            'grounds' => 'Disputing an assessed liability that omits substantiated input tax credits.',
+            'disputed_amount' => '450',
+        ]);
+
+        $response = $this->actingAs($auditor)->get('/disputes');
+
+        $response->assertOk();
+        $response->assertSee('Total disputes');
+        $response->assertSee('Filed this month');
+        $response->assertSee('Filed this week');
+        $response->assertSeeInOrder(['Taxpayers', '2']);
+        $response->assertSee('Disputes by resource type');
+        $response->assertSeeInOrder(['Audit Finding', '1']);
+        $response->assertSeeInOrder(['Vat Return', '1']);
+        $response->assertSee('Most active taxpayers');
+        $response->assertSee('VAT-VIEW-DSP-0009 Trading Co');
+        $response->assertSee('VAT-VIEW-DSP-0010 Trading Co');
+    }
+
     public function test_the_list_page_filters_by_status(): void
     {
         $tp = $this->makeTaxpayer('VAT-VIEW-DSP-0007');
