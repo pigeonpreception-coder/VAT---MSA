@@ -13102,3 +13102,64 @@ approvals (national-only), then a whole second "Analytics" sub-page
   reviewer's point of view.
 - Scope unchanged from the prior entries: this closes the tenth screen
   in the user's own named sweep.
+
+## Access Rights: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Eleventh screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview,
+Risk Indicators, Obligations, Disputes, Audit Trail, Documents, and
+Reports & Analytics, all above; a Platform Config redesign is also
+underway in parallel as a separate, not-yet-merged PR at the time this
+branch was cut). This is the Super Admin/NamRA System Admin "grant a
+user an access right" screen
+(`app/Http/Controllers/Access/AccessRightsViewController.php`,
+`resources/views/access-rights/index.blade.php`) -- previously a
+single unstyled register table plus a 4-column grant form, no stat
+tiles at all.
+
+- **New 4-tile stat row**: Grants (subtitle "Most recent 100", matching
+  the existing 100-row cap on the underlying query), Active, Revoked,
+  and Users (a system-wide count, unaffected by the 100-row cap).
+  `$metrics`/`$byRole`/`$byScope` are all derived server-side from the
+  same already-fetched `$grants`/`$users` collections the table itself
+  already rendered -- no new query, the same pattern already used for
+  Obligations'/Disputes'/Documents' own side panels.
+- **Main/side split**: `col-lg-8` keeps the "Grant an access right"
+  form (fields unchanged) and the "Access grants" register table;
+  `col-lg-4` adds two new card-item side panels, "Grants by role"
+  (5-item preview + "Show N more", since the role catalogue can grow)
+  and "Grants by scope" (all 4 scope levels shown at once, no
+  show-more needed since `scope_level` is a fixed 4-value enum:
+  LOCAL_OFFICE/REGIONAL/NATIONAL/GLOBAL).
+- **Access grants table consolidated from 7-8 columns down to 5**
+  (User | Role & scope | Granted | Status | Revoke), applied
+  proactively before first verification (same lesson learned from the
+  Obligations/Documents overflow bugs and applied without incident on
+  Reports): Role+Scope combined into one cell
+  (role_code + a muted "scope_level · scope_label" subtitle), and
+  Granted date + "by {grantedBy name}" combined into one stacked cell.
+- Verified with a real browser session at 1440px and 820px against the
+  real dev database, logged in as `namra-admin@vat-msa.test`
+  (NAMRA_SYSTEM_ADMIN, holds both `access-rights:manage` and, unlike
+  the seeded `SUPER_ADMIN` account, `identity:read` -- needed to reach
+  the step-up MFA page at all). Exercised the full live round trip:
+  enrolled a real TOTP credential through the app's own enrollment
+  form (RFC 6238 code computed from the enrolled secret via the app's
+  own `App\Support\Access\Totp` class, not a stub), confirmed step-up,
+  then submitted the actual "Grant an access right" form -- confirmed
+  the Grants/Active tiles went 0 → 1 and the new "Grants by role"/
+  "Grants by scope" panels populated with the real granted row in the
+  same page reload. No horizontal overflow at either width; the
+  Access grants table's own `table-responsive` was individually
+  checked (763px/794px scrollWidth vs. clientWidth at 1440px/820px
+  respectively, no clipping).
+- Full suite: 1179 tests, 0 regressions. `tests/Feature/Access/
+  AccessRightsViewTest.php`'s existing 16 tests -- covering step-up
+  gating, double-submit idempotency, self-grant prevention, and the
+  service's own defense-in-depth tenant-scope guard -- all pass
+  unedited; one new test added
+  (`test_the_page_renders_its_stat_tiles_and_grant_breakdown_panels`)
+  covering the new stat tiles and both side panels against real
+  granted/revoked rows.
+- Scope unchanged from the prior entries: this closes the eleventh
+  screen in the user's own named sweep.

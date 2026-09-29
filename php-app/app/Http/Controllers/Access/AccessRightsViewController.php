@@ -35,12 +35,34 @@ class AccessRightsViewController extends Controller
         // the permission map.
         abort_unless(TaxpayerScope::isNational($request->user()), 403);
 
+        $users = User::orderBy('name')->get(['id', 'name', 'email', 'role', 'taxpayer_id']);
+        $grants = UserRoleScopeGrant::with(['user', 'role', 'grantedBy', 'revokedBy'])
+            ->orderByDesc('granted_at')->limit(100)->get();
+
+        // Blade view redesign (2026-09-29): both breakdowns and the stat
+        // tiles below are derived from the same already-fetched $grants
+        // collection (capped at the most recent 100, exactly as it
+        // already was) -- no new query, the same pattern already used
+        // for Obligations'/Disputes'/Documents' own small side panels.
+        $metrics = [
+            'total' => $grants->count(),
+            'active' => $grants->where('status', 'ACTIVE')->count(),
+            'revoked' => $grants->where('status', 'REVOKED')->count(),
+            'users' => $users->count(),
+        ];
+        $byRole = $grants->groupBy('role_code')
+            ->map(fn ($group, $roleCode) => ['role_code' => $roleCode, 'count' => $group->count()])
+            ->sortByDesc('count')->values()->all();
+        $byScope = $grants->groupBy('scope_level')
+            ->map(fn ($group, $scopeLevel) => ['scope_level' => $scopeLevel, 'count' => $group->count()])
+            ->sortByDesc('count')->values()->all();
+
         return view('access-rights.index', [
-            'users' => User::orderBy('name')->get(['id', 'name', 'email', 'role', 'taxpayer_id']),
+            'users' => $users,
             'roles' => AccessRole::where('status', 'ACTIVE')->orderBy('name')->get(),
-            'grants' => UserRoleScopeGrant::with(['user', 'role', 'grantedBy', 'revokedBy'])
-                ->orderByDesc('granted_at')->limit(100)->get(),
+            'grants' => $grants,
             'canManage' => $request->user()->hasAppPermission('access-rights:manage'),
+            'metrics' => $metrics, 'byRole' => $byRole, 'byScope' => $byScope,
         ]);
     }
 
