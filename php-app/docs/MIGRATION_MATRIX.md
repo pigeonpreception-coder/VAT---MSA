@@ -12826,3 +12826,60 @@ and no summary tiles at all, unlike its own sibling report page
   evaluated data.
 - Scope unchanged from the prior entries: this closes the fifth screen
   in the user's own named sweep.
+
+## Obligations: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Sixth screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview, and
+Risk Indicators, all above). `resources/views/obligations/index.blade.php`
+was a single full-width filterable table (Taxpayer/Type/Period/Due
+date/Amount/Status/Action) with an optional "Create an obligation" form
+above it and no summary tiles -- `ObligationService` itself has no
+`summary()`-style aggregate the way Risk Indicators' does, so this is the
+first of the six redesigns to derive its own stats in the controller
+from an already-fetched list rather than reusing an existing service
+aggregate.
+
+- **New 4-tile stat row**: Total obligations, Pending, Overdue (red
+  subtitle once non-zero), Satisfied. `ObligationService::search()`
+  applies its status filter at the DB level and is tenant-scoped
+  independently of the controller (its own doc comment), so the
+  controller re-fetches unfiltered only when a status filter is
+  actually active -- when it isn't, the existing filtered result *is*
+  already the full list and is reused as-is, no extra query. Both calls
+  share `search()`'s existing 100-row cap, so "Total obligations"
+  inherits that same pre-existing limit rather than introducing a new
+  one.
+- **Main/side split**: the Create-an-obligation form and the existing
+  filterable table both move into a `col-lg-8`, filters/pagination/the
+  permission-gated create form all unchanged. The new `col-lg-4` holds
+  two panels derived from the same unfiltered list, no new query:
+  "Obligations by type" (a compact type/count breakdown) and "Upcoming
+  due dates" (every pending obligation sorted soonest-first, each
+  flagged "Overdue" where applicable) -- previously only discoverable
+  by scanning the full table, now surfaced directly using the
+  established card-item preview pattern (5-item preview, "Show N more"
+  toggle).
+- **A real layout bug caught and fixed during live verification, not
+  just a re-skin**: narrowing the table into the new `col-lg-8` made the
+  Action column's inline "Mark satisfied" form (a text input side-by-side
+  with a button) not fit, overflowing the `table-responsive` wrapper
+  internally at 1440px (confirmed via `scrollWidth` 811px vs `clientWidth`
+  763px on that element) even though the page itself reported no
+  overflow. Fixed by stacking the notes input above the button instead
+  of side-by-side -- verified the internal overflow is gone
+  (`scrollWidth` === `clientWidth`) and that the "Mark satisfied" flow
+  still works end to end (existing test unedited and still green).
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a NamRA VAT Auditor, using the app's own "Create an obligation"
+  form against a real taxpayer already in the dev database (NEMA
+  Property Developers CC, VAT 12384786-01-5) to create one overdue and
+  one upcoming obligation -- stat tiles, both side panels, and the
+  fixed Action column all verified against live data. No horizontal
+  overflow at either width after the fix above.
+- Full suite: 1173 tests, 0 regressions. `tests/Feature/Compliance/
+  ObligationViewTest.php`'s existing 11 tests unedited; one new test
+  added (`test_the_list_page_renders_its_stat_tiles_and_side_panels`)
+  covering the new stat tiles and both side panels.
+- Scope unchanged from the prior entries: this closes the sixth screen
+  in the user's own named sweep.

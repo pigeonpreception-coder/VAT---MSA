@@ -49,18 +49,46 @@ class ObligationViewController extends Controller
         $this->authorize('permission', 'compliance:read');
         $actor = $request->user();
 
-        $result = $this->obligations->search($actor, $request->only('status'));
-        $taxpayerIds = collect($result['obligations'])->pluck('taxpayer_id')->filter()->unique();
-        $taxpayers = Taxpayer::whereIn('id', $taxpayerIds)->get(['id', 'legal_name', 'vat_number'])->keyBy('id');
+        $params = $request->only('status');
+        $result = $this->obligations->search($actor, $params);
 
-        $obligations = collect($result['obligations'])->map(fn (array $obligation) => $obligation + [
+        // Blade view redesign (2026-09-29): search() applies the status
+        // filter at the DB level and independently enforces tenant scoping
+        // (see its own doc comment) -- the new stat tiles and side panels
+        // below need the FULL scoped list to summarize correctly, not just
+        // whatever the status filter matched, so this re-fetches unfiltered
+        // only when a filter is actually active. Both calls share search()'s
+        // existing 100-row cap, so "Total obligations" inherits that same
+        // pre-existing limit rather than introducing a new one.
+        $all = empty($params['status']) ? $result['obligations'] : $this->obligations->search($actor, [])['obligations'];
+
+        $taxpayerIds = collect($result['obligations'])->merge($all)->pluck('taxpayer_id')->filter()->unique();
+        $taxpayers = Taxpayer::whereIn('id', $taxpayerIds)->get(['id', 'legal_name', 'vat_number'])->keyBy('id');
+        $enrich = fn (array $obligation) => $obligation + [
             'legal_name' => $taxpayers[$obligation['taxpayer_id']]->legal_name ?? null,
             'vat_number' => $taxpayers[$obligation['taxpayer_id']]->vat_number ?? null,
-        ])->all();
+        ];
+
+        $obligations = collect($result['obligations'])->map($enrich)->all();
+
+        $today = now()->toDateString();
+        $isOverdue = fn (array $obligation) => $obligation['status'] === 'PENDING' && $obligation['due_date'] < $today;
+        $metrics = [
+            'total' => count($all),
+            'pending' => collect($all)->where('status', 'PENDING')->count(),
+            'overdue' => collect($all)->filter($isOverdue)->count(),
+            'satisfied' => collect($all)->where('status', 'SATISFIED')->count(),
+        ];
+        $byType = collect($all)->groupBy('obligation_type')
+            ->map(fn ($group, $type) => ['type' => $type, 'count' => $group->count()])
+            ->sortByDesc('count')->values()->all();
+        $upcoming = collect($all)->filter(fn (array $o) => $o['status'] === 'PENDING')
+            ->sortBy('due_date')->map($enrich)->values()->all();
 
         return view('obligations.index', [
             'obligations' => $obligations, 'status' => $request->query('status', ''),
             'canManage' => $actor->hasAppPermission('obligations:manage'),
+            'metrics' => $metrics, 'byType' => $byType, 'upcoming' => $upcoming,
         ]);
     }
 
