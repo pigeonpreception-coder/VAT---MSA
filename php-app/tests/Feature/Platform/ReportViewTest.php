@@ -383,6 +383,36 @@ class ReportViewTest extends TestCase
         $page->assertSee('RV_TRENDS');
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's main/side split
+     * moves "My exports" and, for a national reviewer, "Pending export
+     * approvals" into card-item side panels -- covers that both still
+     * render their content (report code, status, action) and that a
+     * requester's own pending export is not offered for self-approval in
+     * the side panel either, matching the existing self-approval guard.
+     */
+    public function test_the_side_panels_render_exports_and_pending_approvals(): void
+    {
+        $this->makeTaxpayer('VAT-RV-0021');
+        $this->seedDefinition('SALES_VAT_SUMMARY', 'TAXPAYER', 'TAX_CONFIDENTIAL');
+        $requester = $this->pilotAdmin('side-requester@reportview.test');
+        $approver = $this->namraSupervisor('side-approver@reportview.test');
+        $this->actingAs($requester)->post('/reports/SALES_VAT_SUMMARY/run');
+        $runId = DB::table('report_runs')->where('requested_by', $requester->id)->value('id');
+        $this->actingAs($requester)->withFreshStepUp()->post("/reports/runs/{$runId}/export");
+
+        $requesterView = $this->actingAs($requester)->get('/reports');
+        $requesterView->assertOk();
+        $requesterView->assertSee('My exports');
+        $requesterView->assertSee('SALES_VAT_SUMMARY');
+        $requesterView->assertSee('Cancel');
+
+        $approverView = $this->actingAs($approver)->get('/reports');
+        $approverView->assertOk();
+        $approverView->assertSee('Pending export approvals');
+        $approverView->assertSee('Approve');
+    }
+
     public function test_running_an_analytics_model_is_restricted_to_national_roles(): void
     {
         $tp = $this->makeTaxpayer('VAT-RV-0013');

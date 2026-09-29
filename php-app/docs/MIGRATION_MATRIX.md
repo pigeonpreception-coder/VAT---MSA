@@ -13043,3 +13043,62 @@ full-width.
   panels.
 - Scope unchanged from the prior entries: this closes the ninth screen
   in the user's own named sweep.
+
+## Reports & Analytics: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Tenth screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview,
+Risk Indicators, Obligations, Disputes, Audit Trail, and Documents, all
+above), and the densest one yet: `resources/views/reports/index.blade.php`
+already had a 4-tile stat row in this sweep's own convention (added in
+an earlier gap-finding pass), but stacked five full-width sections below
+it -- Report catalogue, My report runs, My exports, Pending export
+approvals (national-only), then a whole second "Analytics" sub-page
+(certified data products, approved metrics, anomaly candidates).
+
+- **Main/side split** applied only to the top compliance-console half:
+  Report catalogue and My report runs (the two sections an actor reads
+  and acts on together, in sequence -- pick a report, run it, then
+  publish/export it) move into a `col-lg-8`; My exports and, for a
+  national reviewer, Pending export approvals move into a `col-lg-4` as
+  card-item panels (5-item preview, "Show N more" toggle) -- no new
+  query for either, both still read the exact same
+  `$myExports`/`$pendingApprovals` collections the controller already
+  built.
+- **The Analytics half (Certified data products, Approved metrics,
+  Anomaly candidates) deliberately stays outside the main/side split**,
+  full-width below it -- same reasoning as Compliance Overview's own
+  "no main/side split" call: these are peer sub-domains of a genuinely
+  different console (a model may only ever be fed by an already-
+  published report run, never live compliance data), not panels
+  secondary to the reports console above them.
+- **Column consolidation applied proactively, not reactively**, learned
+  from three separate caught bugs earlier in this sweep (Obligations'
+  inline-form overflow, Documents' 7-column overflow): both main-column
+  tables' columns were combined before first live verification rather
+  than after -- Report catalogue's Audience/Freshness folded into their
+  neighbouring Name/Classification columns as muted subtitles (6 -> 4
+  columns), My report runs' Rows/Requested folded together (5 -> 4
+  columns) and its Publish/Request-export buttons stacked full-width
+  instead of side by side. This paid off: live verification found zero
+  internal `table-responsive` overflow on any of this page's four
+  tables at 1440px, on the first pass.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a real national NamRA staff account already in the dev database,
+  using the app's own catalogue "Run" buttons to run two real reports
+  (`NATIONAL_VAT_AGGREGATE`, `SALES_VAT_SUMMARY`) and its own "Request
+  export" button to request and auto-approve a real export -- stat
+  tiles, both main tables, and the "My exports" side panel all verified
+  rendering live, non-synthetic data (a real Approved export with a
+  working Download link). No horizontal overflow at either width across
+  all four of this page's `table-responsive` elements.
+- Full suite: 1177 tests, 0 regressions. `tests/Feature/Platform/
+  ReportViewTest.php`'s existing 20 tests -- covering this page's
+  unusually large surface of double-submit idempotency, step-up
+  redirects, maker-checker self-approval refusal, and analytics-model
+  publishing -- all pass unedited; one new test added
+  (`test_the_side_panels_render_exports_and_pending_approvals`)
+  covering both new side panels from both a requester's and a national
+  reviewer's point of view.
+- Scope unchanged from the prior entries: this closes the tenth screen
+  in the user's own named sweep.
