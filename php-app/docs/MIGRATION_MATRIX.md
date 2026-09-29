@@ -12939,3 +12939,58 @@ list rather than reusing an existing service aggregate.
   the new stat tiles and both side panels across two taxpayers.
 - Scope unchanged from the prior entries: this closes the seventh
   screen in the user's own named sweep.
+
+## Audit Trail: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Eighth screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, Compliance Overview,
+Risk Indicators, Obligations, and Disputes, all above). Structurally
+different from every prior entry: `audit_events` is a system-wide,
+hash-chained security log, not a tenant-scoped compliance list, and can
+be far larger than anything redesigned so far -- so unlike Obligations/
+Disputes (whose stats were derived in PHP from an already-fetched,
+naturally small, tenant-scoped list), this redesign's stat tiles and
+side panels are computed with cheap DB-level `COUNT`/`groupBy`
+aggregates against `audit_events`' own indexed columns
+(`(resource_type, resource_id)` and `actor_id`, per its migration),
+never by fetching the full table into PHP.
+
+- **New 4-tile stat row**: Total events (system-wide `COUNT`), Matching
+  filters (the page's own existing filtered count, now promoted to a
+  tile -- zero extra cost), Chain status (Passed/Failed/Not run, from
+  the most recent `AuditChainVerification`, red subtitle on FAILED),
+  Verification runs (all-time `COUNT`).
+- **Deliberately no "events by outcome" tile or panel**: reading
+  `AuditService::append()` -- confirmed as the only write path into this
+  table -- shows `outcome` is hardcoded to `'SUCCESS'` for every row it
+  ever writes, so a by-outcome breakdown would always read 100% success
+  and carry no signal. Same reasoning that kept a by-status tile off the
+  Disputes redesign, applied to a security-log column pretending to vary
+  when it structurally can't.
+- **Main/side split**: the chain-verification card, filter form, and
+  event table all move into a `col-lg-8`, content and behavior
+  completely unchanged (including this page's own pre-existing 50-row
+  default cap with no page-through control on the event table itself --
+  a real, pre-existing gap, not introduced or touched by this redesign,
+  and left as-is to keep this change scoped to layout). The new
+  `col-lg-4` holds two panels, each its own indexed aggregate query:
+  "Events by resource type" (badge/count list) and "Most active actors"
+  (top 10 by event count, actor role + ID, the established card-item
+  preview pattern with a 5-item cutoff and "Show N more").
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a NamRA VAT Auditor, against the dev database's own real audit log
+  (62 pre-existing events) and by actually running a live chain
+  verification through the page's own button -- confirmed "Passed",
+  the new stat tiles, and both side panels all render real data.
+  Checked every `table-responsive` element's own `scrollWidth` vs
+  `clientWidth` (this page has two: chain-verification history and the
+  event trail), not just the page's, continuing the practice started on
+  the Disputes redesign after the Obligations redesign's caught
+  internal-overflow bug. No overflow anywhere at either width.
+- Full suite: 1175 tests, 0 regressions. `tests/Feature/Audit/
+  AuditTrailTest.php`'s existing 10 tests unedited; one new test added
+  (`test_the_page_renders_its_stat_tiles_and_side_panels`) covering the
+  new stat tiles and both side panels, including that "Total events"
+  and "Matching filters" genuinely diverge once a filter is applied.
+- Scope unchanged from the prior entries: this closes the eighth screen
+  in the user's own named sweep.
