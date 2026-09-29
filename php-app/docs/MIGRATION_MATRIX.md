@@ -12683,3 +12683,48 @@ all.
 - Scope unchanged from the prior entry: this closes the second screen
   in the user's own named sweep, not every screen sharing the older
   layout.
+
+## Audit Cases & Risk: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Third screen in the user's own named sweep (after VAT Audit Report and
+Reconciliation Exceptions, both above). `resources/views/audit-cases/
+index.blade.php` already had the stat-tile row and a reasonably concise
+6-column table -- the gap here was purely structural: everything
+(the "Open a case" form, the filter toolbar, the table) stacked
+full-width with no side column at all, unlike the other two redesigns'
+own three-card side columns.
+
+- **Main column** (`col-lg-8`): the "Open a case" form and the
+  case-list table, unchanged in content -- only the form's own field
+  grid was reflowed (4 equal `col-md-3` fields instead of an uneven
+  3/2/2/3/2 split) to read cleanly at the new, narrower column width.
+- **Side column** (`col-lg-4`), two new mini-dashboard cards -- reusing
+  data `AuditCaseViewController::index()` already computed for the
+  metric tiles (`ComplianceSnapshotService::getSnapshot()`'s own
+  `findings`/`risks` arrays, already sorted most-recent-first), so
+  **no new query**, unlike Reconciliation Exceptions' redesign, which
+  needed two:
+  - **"Preliminary findings"**: the 5 most recent findings still
+    `PRELIMINARY` (not yet a final assessment), with the finding's own
+    amount/currency and originating case number.
+  - **"Elevated risk indicators"**: the 5 most recent risk indicators
+    that are both HIGH/CRITICAL severity and still OPEN/UNDER_REVIEW --
+    the same filter the existing "Critical review" stat tile's own
+    critical-only count already used, generalized to both severities
+    for the panel and capped to a preview rather than a raw count.
+- New test (`AuditCaseViewTest`, alongside its existing 14): reuses the
+  exact fixtures `test_the_list_page_renders_its_four_metric_tiles()`
+  already sets up (one preliminary finding, one CRITICAL/OPEN risk
+  indicator, one LOW/CLOSED risk indicator) to prove the two panels
+  show the right one and exclude the other. All 14 pre-existing tests
+  pass unedited.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a NamRA VAT Auditor account against a real case/finding/risk-
+  indicator created through direct model creation against the real
+  taxpayer already in the dev database (NEMA Property Developers CC)
+  -- no demo seeder covers audit cases yet, so this was seeded and
+  cleaned up manually rather than skipped. No horizontal overflow at
+  either width.
+- Full suite: 1171 tests, 0 regressions.
+- Scope unchanged from the prior two entries: this closes the third
+  screen in the user's own named sweep.

@@ -198,6 +198,51 @@ class AuditCaseViewTest extends TestCase
         $response->assertSeeInOrder(['Critical review', '1']);
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the two new side-panel previews
+     * reuse the exact fixtures test_the_list_page_renders_its_four_metric_tiles()
+     * already sets up for the metric tiles above them -- a preliminary
+     * finding and two risk indicators, one CRITICAL/OPEN and one LOW/CLOSED.
+     * The panel must show the finding and the critical indicator, and must
+     * exclude the low-severity closed one (neither high/critical severity
+     * nor open/under-review).
+     */
+    public function test_the_list_page_renders_its_preliminary_findings_and_risk_alert_side_panels(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-CASE-0011');
+        $auditor = $this->namraAuditor();
+        $caseId = $this->openCaseViaUi($auditor, 'VAT-VIEW-CASE-0011');
+        AuditFinding::create([
+            'id' => (string) Str::uuid(), 'audit_case_id' => $caseId, 'finding_code' => 'FND-0002', 'title' => 'Under-declared output VAT',
+            'description' => 'Preliminary review finding.', 'amount_cents' => 500000, 'currency' => 'NAD', 'status' => 'PRELIMINARY',
+            'author_id' => $auditor->id, 'created_at' => now(),
+        ]);
+        RiskIndicator::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'subject_type' => 'TAXPAYER', 'subject_id' => $tp['taxpayer']->id, 'indicator_code' => 'HIGH_VALUE_INVOICE', 'score_bps' => 8000,
+            'severity' => 'CRITICAL', 'rationale' => 'Test rationale.', 'rule_version' => 'v1', 'decision_effect' => 'BLOCK',
+            'status' => 'OPEN', 'detected_at' => now(),
+        ]);
+        RiskIndicator::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $tp['organisation']->id, 'taxpayer_id' => $tp['taxpayer']->id,
+            'subject_type' => 'TAXPAYER', 'subject_id' => $tp['taxpayer']->id, 'indicator_code' => 'LOW_RISK_PATTERN', 'score_bps' => 1000,
+            'severity' => 'LOW', 'rationale' => 'Test rationale.', 'rule_version' => 'v1', 'decision_effect' => 'NONE',
+            'status' => 'CLOSED', 'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($auditor)->get(route('audit-cases.index'));
+
+        $response->assertOk();
+        $response->assertSee('Preliminary findings');
+        $response->assertSee('FND-0002');
+        $response->assertSee('NAD 5,000.00');
+        $response->assertSee('Elevated risk indicators');
+        $response->assertSee('High Value Invoice');
+        $response->assertDontSee('Low Risk Pattern');
+        $this->assertCount(1, $response->viewData('preliminaryFindings'));
+        $this->assertCount(1, $response->viewData('riskAlerts'));
+    }
+
     public function test_the_case_detail_page_shows_only_valid_actions_at_each_lifecycle_step(): void
     {
         $tp = $this->makeTaxpayer('VAT-VIEW-CASE-0004');
