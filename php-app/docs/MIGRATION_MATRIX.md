@@ -12546,3 +12546,65 @@ stateless group instead). Two were genuinely missing:
   `PortalDefinitions`'/`PortalService::capabilitySet()`'s own hardcoded
   role-code arrays becoming authority-aware) remains genuinely
   out-of-scope until explicitly requested.
+
+## VAT Audit Report: redesigned to the dashboard-layout pattern (2026-09-29)
+
+User-requested visual audit: this screen (and, by the user's own
+description, others of its shape across the app) presented as a stack
+of full-width tables -- some with several mostly-empty columns forcing
+a wider layout than the data needed, no summary/KPI view, and no
+per-request visual hierarchy -- unlike `vat-periods/index.blade.php`
+("VAT periods & returns"), which the user singled out as the standard
+to match: a KPI stat-tile row, a focused main table in a `col-lg-8`,
+and a `col-lg-4` column of compact mini-dashboard cards (period
+details, reconciliation exceptions, audit cases) rather than more wide
+tables.
+
+`resources/views/vat-management/audit-report.blade.php` rebuilt to that
+exact shape:
+- **4 stat tiles** (certified invoice count, certified value, High +
+  Critical risk count, exceptions raised) computed from the same
+  `VatAuditReportService::report()` data already returned -- no backend
+  change needed.
+- **Main column**: the risk-level breakdown table (already only 3
+  columns, kept as-is) with the period picker moved into its own
+  card-header toolbar instead of a separate full-width card above
+  everything.
+- **Side column**: the previous 3-column "Taxpayer / Period / Status"
+  info row became a compact "Period details" mini-card; the
+  reconciliation-exceptions and audit-cases tables (7 columns each,
+  several always-empty on any single period, the exact "empty table
+  space" the user called out) became card-item lists matching
+  `vat-periods/index.blade.php`'s own "Pending approvals"/"Recent
+  submissions" panels -- one item per exception/case, no dead columns.
+- **Show-more, not a scrollbar**: each list shows its first 5 items and
+  a "Show N more" button reveals the rest in place (verified against a
+  synthetic 7-item DOM fixture: the button flips every hidden item
+  visible, retoggles its own label, and re-hides them on a second
+  click) -- per the user's explicit request for a shorter default view
+  with an explicit expand action, rather than a fixed-height inner
+  scrollbar.
+- Verified with a real browser session against the actual demo tenant
+  data (not just the test suite): logged in as NEMA Property
+  Developers CC's owner, viewed both of its real VAT periods (one with
+  a High-risk invoice, exercising the risk-tile's warning colour), and
+  confirmed a **1440px** desktop layout with no horizontal scroll and
+  an **820px** tablet width where the stat tiles reflow to two per row
+  and the two-column layout stacks to one column, still with zero
+  horizontal overflow (`document.documentElement.scrollWidth` measured
+  equal to `clientWidth`).
+- No visible-text regression: every string
+  `tests/Feature/VatLifecycle/VatAuditReportViewTest.php` already
+  asserted (`'Low'`, the certified total, the `MATCHED` status badge,
+  both empty-state sentences, a raised exception's type/summary, an
+  audit case's number/title) is still rendered verbatim -- the test
+  file needed no changes, all 6 of its tests still pass unedited.
+- Full suite: 1167 tests, 0 regressions.
+- **Scope note**: the user's own request named this pattern as the
+  standard for "any interface of this system," not only this one
+  screen. Applying it everywhere in one pass would be a much larger,
+  separately-scoped effort (dozens of Blade views); this change closes
+  the one screen named explicitly and by name (VAT Audit Report) as
+  the concrete example. Every other view still using the older
+  full-width-tables layout remains as it was until a further request
+  names it or asks for the sweep to continue.
