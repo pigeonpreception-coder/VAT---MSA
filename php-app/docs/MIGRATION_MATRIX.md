@@ -12728,3 +12728,56 @@ own three-card side columns.
 - Full suite: 1171 tests, 0 regressions.
 - Scope unchanged from the prior two entries: this closes the third
   screen in the user's own named sweep.
+
+## Compliance Overview: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Fourth screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, and Audit Cases & Risk, all above).
+Structurally different from the other three: `resources/views/compliance/
+overview.blade.php` was never a single work-queue table with summary
+tiles bolted on -- it's an aggregate-of-aggregates by design (its own
+controller doc comment: "six of the snapshot's eleven fields already
+have their own dedicated page elsewhere... this page deliberately does
+NOT re-render those as full tables a second time"). Four fields with no
+page anywhere else (communications, notifications, consent grants,
+delegations) got real `<table>`s here, two of them (communications/
+notifications) already artificially truncated to 10 rows via a bare
+`array_slice()` with no way to see the rest, and consents/delegations
+entirely unbounded, all four stacked as two half-width columns of raw
+tables with no visual hierarchy.
+
+- **Stat cards restyled** to the same KPI-tile convention this
+  session's own three prior redesigns already established (uppercase
+  label top-left, big number, muted subtitle) -- previously a
+  differently-styled `display-6`-centered card unique to this page.
+  **The label now renders before the count in the DOM** (matching that
+  convention), the reverse of the original markup; the one test
+  asserting their relative order was updated to match, documented
+  inline in the test itself.
+- **No main/side split**: unlike the other three redesigns, this page
+  has no single dominant list to anchor a `col-lg-8` column -- all four
+  domains are genuine peers. Kept as a symmetric `row-cols-lg-2` grid,
+  but every table became a card-item mini-dashboard panel (matching the
+  side-panel style the other three redesigns already introduced)
+  instead of a raw `<table>` -- no more dead/narrow columns, and each
+  panel now previews 5 items with a "Show N more" toggle rather than a
+  fixed table.
+- **A real behavior improvement, not just a re-skin**: communications
+  and notifications were previously hard-capped at 10 rows with no way
+  to reach an 11th -- the new preview-plus-expand panel can reveal every
+  row the underlying snapshot query returns (up to that service's own
+  100-row limit), not just the first 10. Consents/delegations, previously
+  unbounded (a real, if currently harmless, unbounded-table risk), are
+  now capped to the same 5-item preview with the same expand affordance.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a NamRA VAT Auditor account, including exercising the show-more
+  toggle against 7 real communications/notifications rows (created
+  directly, then cleaned up -- no demo seeder covers this data) to
+  prove the panel grid holds together correctly once a panel expands
+  well past its neighbours' height. No horizontal overflow at either
+  width.
+- Full suite: 1170 tests, 0 regressions (`tests/Feature/Compliance/
+  ComplianceOverviewViewTest.php`'s existing 6 tests, one assertion
+  order updated as noted above, otherwise unedited).
+- Scope unchanged from the prior entries: this closes the fourth
+  screen in the user's own named sweep.
