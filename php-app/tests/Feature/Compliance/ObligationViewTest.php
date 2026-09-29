@@ -258,6 +258,41 @@ class ObligationViewTest extends TestCase
         $satisfyAttempt->assertForbidden();
     }
 
+    /**
+     * Blade view redesign (2026-09-29): the index page's new stat tiles and
+     * side panels (by-type breakdown, upcoming due dates) are derived from
+     * the same unfiltered search() call the table itself uses when no
+     * status filter is active -- covers both the aggregate counts and that
+     * an overdue pending obligation is flagged as such in the "Upcoming due
+     * dates" panel, not just in the main table.
+     */
+    public function test_the_list_page_renders_its_stat_tiles_and_side_panels(): void
+    {
+        $tp = $this->makeTaxpayer('VAT-VIEW-OBL-0010');
+        $auditor = $this->namraAuditor();
+        $this->actingAs($auditor)->post(route('obligations.store'), [
+            'vat_number' => 'VAT-VIEW-OBL-0010', 'obligation_type' => 'VAT_RETURN', 'period_code' => '2026-01',
+            'due_date' => '2026-02-25', 'amount' => '100',
+        ]);
+        $this->actingAs($auditor)->post(route('obligations.store'), [
+            'vat_number' => 'VAT-VIEW-OBL-0010', 'obligation_type' => 'PAYE', 'period_code' => '2026-12',
+            'due_date' => '2099-12-25', 'amount' => '200',
+        ]);
+
+        $response = $this->actingAs($auditor)->get('/obligations');
+
+        $response->assertOk();
+        $response->assertSee('Total obligations');
+        $response->assertSee('Pending');
+        $response->assertSee('Overdue');
+        $response->assertSee('Satisfied');
+        $response->assertSee('Obligations by type');
+        $response->assertSeeInOrder(['Vat Return', '1']);
+        $response->assertSeeInOrder(['Paye', '1']);
+        $response->assertSee('Upcoming due dates');
+        $response->assertSee('VAT-VIEW-OBL-0010 Trading Co');
+    }
+
     public function test_the_list_page_filters_by_status(): void
     {
         $tp = $this->makeTaxpayer('VAT-VIEW-OBL-0009');
