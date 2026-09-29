@@ -256,7 +256,13 @@ class ReconciliationService
      * matching source, which has no filters at all and always summarises
      * the complete list.
      *
-     * @return array{open_count: int, critical_count: int, total_value_cents: int}
+     * `by_severity` (2026-09-29, Blade view redesign) is this session's own
+     * addition, not source's -- the same full-set semantics as the other
+     * three fields, exposed for the redesigned view's side-panel severity
+     * breakdown (mirrors VatAuditReportService::invoiceSummary()'s own
+     * `by_risk_level` shape).
+     *
+     * @return array{open_count: int, critical_count: int, total_value_cents: int, by_severity: list<array{severity: string, count: int}>}
      */
     public function getSummaryTotals(User $actor): array
     {
@@ -266,11 +272,67 @@ class ReconciliationService
             $base->where(fn ($w) => $w->where('i.supplier_taxpayer_id', $taxpayerId)->orWhere('i.customer_taxpayer_id', $taxpayerId));
         }
 
+        $bySeverity = (clone $base)->select('e.severity', DB::raw('count(*) as cnt'))->groupBy('e.severity')->pluck('cnt', 'severity');
+
         return [
             'open_count' => (clone $base)->where('e.status', 'OPEN')->count(),
             'critical_count' => (clone $base)->where('e.severity', 'CRITICAL')->count(),
             'total_value_cents' => (int) (clone $base)->sum('i.total_cents'),
+            'by_severity' => collect(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'])
+                ->map(fn ($level) => ['severity' => $level, 'count' => (int) ($bySeverity[$level] ?? 0)])
+                ->all(),
         ];
+    }
+
+    /**
+     * Side-panel preview (2026-09-29, Blade view redesign): the oldest
+     * open, unassigned exceptions -- the actionable subset an officer most
+     * needs surfaced regardless of whatever the work-queue table's own
+     * filters currently show, mirroring `vat-periods/index.blade.php`'s own
+     * "Pending approvals" panel. Capped at $limit, no separate total count
+     * exposed -- a fixed top-N preview, not a paginated list.
+     *
+     * @return list<array{id: string, invoice_number: string, severity: string, age_days: int, summary: string}>
+     */
+    public function getUnassignedPreview(User $actor, int $limit = 5): array
+    {
+        $base = DB::table('reconciliation_exceptions as e')->join('invoices as i', 'i.id', '=', 'e.invoice_id')
+            ->where('e.status', 'OPEN')->whereNull('e.assigned_officer_id');
+        if (! TaxpayerScope::isNational($actor)) {
+            $taxpayerId = $actor->taxpayer_id ?? '__none__';
+            $base->where(fn ($w) => $w->where('i.supplier_taxpayer_id', $taxpayerId)->orWhere('i.customer_taxpayer_id', $taxpayerId));
+        }
+
+        return $base->selectRaw('e.id, i.invoice_number, e.severity, e.summary, TIMESTAMPDIFF(DAY, e.created_at, NOW()) as age_days')
+            ->orderByDesc('age_days')->limit($limit)->get()
+            ->map(fn ($row) => ['id' => $row->id, 'invoice_number' => $row->invoice_number, 'severity' => $row->severity, 'age_days' => (int) $row->age_days, 'summary' => $row->summary])
+            ->all();
+    }
+
+    /**
+     * Side-panel preview (2026-09-29, Blade view redesign): the most
+     * recently resolved exceptions -- an activity feed mirroring
+     * `vat-periods/index.blade.php`'s own "Recent submissions" panel.
+     *
+     * @return list<array{id: string, invoice_number: string, resolved_at: ?string, resolved_by_name: ?string, resolution_notes: ?string}>
+     */
+    public function getRecentlyResolvedPreview(User $actor, int $limit = 5): array
+    {
+        $base = DB::table('reconciliation_exceptions as e')->join('invoices as i', 'i.id', '=', 'e.invoice_id')
+            ->leftJoin('users as resolver', 'resolver.id', '=', 'e.resolved_by')
+            ->where('e.status', 'RESOLVED');
+        if (! TaxpayerScope::isNational($actor)) {
+            $taxpayerId = $actor->taxpayer_id ?? '__none__';
+            $base->where(fn ($w) => $w->where('i.supplier_taxpayer_id', $taxpayerId)->orWhere('i.customer_taxpayer_id', $taxpayerId));
+        }
+
+        return $base->selectRaw('e.id, i.invoice_number, e.resolved_at, resolver.name as resolved_by_name, e.resolution_notes')
+            ->orderByDesc('e.resolved_at')->limit($limit)->get()
+            ->map(fn ($row) => [
+                'id' => $row->id, 'invoice_number' => $row->invoice_number,
+                'resolved_at' => $row->resolved_at, 'resolved_by_name' => $row->resolved_by_name, 'resolution_notes' => $row->resolution_notes,
+            ])
+            ->all();
     }
 
     private function applyFilters(Builder $q, array $query, User $actor): void
