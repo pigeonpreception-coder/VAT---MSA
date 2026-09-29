@@ -184,7 +184,12 @@ class ComplianceOverviewViewTest extends TestCase
         // real assertion is the scoped count (1), proven indirectly here by
         // asserting the taxpayer's own obligation link carries exactly one,
         // matching ComplianceSnapshotTest's own JSON-level scoping proof.
-        $response->assertSeeInOrder(['1', 'Obligations']);
+        // Blade view redesign (2026-09-29): the stat tile's own label now
+        // renders before its count (matching the KPI-tile convention this
+        // session's own VAT Audit Report/Reconciliation Exceptions/Audit
+        // Cases redesigns already established), reversing this order from
+        // the original count-then-label markup.
+        $response->assertSeeInOrder(['Obligations', '1']);
     }
 
     public function test_an_empty_snapshot_renders_friendly_empty_states(): void
