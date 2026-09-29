@@ -57,11 +57,24 @@ class DocumentViewController extends Controller
 
         $documents = DocumentMetadata::where('organisation_id', $organisation->id)->orderByDesc('uploaded_at')->limit(100)->get();
 
+        // Blade view redesign (2026-09-29): both breakdowns are derived
+        // from the same tenant-scoped, already-fetched (and already
+        // 100-row-capped) $documents collection above -- no new query,
+        // the same no-extra-query pattern used for Obligations'/Disputes'
+        // own small, tenant-scoped side panels.
+        $byDomain = $documents->groupBy('owner_domain')
+            ->map(fn ($group, $domain) => ['domain' => $domain, 'count' => $group->count()])
+            ->sortByDesc('count')->values()->all();
+        $byClassification = $documents->groupBy('classification')
+            ->map(fn ($group, $classification) => ['classification' => $classification, 'count' => $group->count()])
+            ->sortByDesc('count')->values()->all();
+
         return view('documents.index', [
             'documents' => $documents,
             'canUpload' => $user->hasAppPermission('documents:upload'),
             'defaultOwnerDomain' => $request->query('owner_domain') === 'EXPENSE' ? 'EXPENSE' : '',
             'defaultOwnerResourceId' => $request->query('owner_domain') === 'EXPENSE' ? (string) $request->query('owner_resource_id', '') : '',
+            'byDomain' => $byDomain, 'byClassification' => $byClassification,
         ]);
     }
 
