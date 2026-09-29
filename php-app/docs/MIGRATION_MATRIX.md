@@ -12781,3 +12781,48 @@ tables with no visual hierarchy.
   order updated as noted above, otherwise unedited).
 - Scope unchanged from the prior entries: this closes the fourth
   screen in the user's own named sweep.
+
+## Risk Indicators: redesigned to the dashboard-layout pattern (2026-09-29)
+
+Fifth screen in the user's own named sweep (after VAT Audit Report,
+Reconciliation Exceptions, Audit Cases & Risk, and Compliance Overview,
+all above). `resources/views/risk-indicators/index.blade.php` was a
+single full-width filterable table (Indicator/Taxpayer/Severity/Score/
+Status/Detected) with an optional "Evaluate a taxpayer" form above it
+and no summary tiles at all, unlike its own sibling report page
+(`risk-indicators/report.blade.php`, untouched) which already renders
+`RiskService::summary()`'s aggregate.
+
+- **New 4-tile stat row**: Total indicators, Needs review (open + under
+  review), Critical severity (red subtitle once non-zero), Escalated
+  to case. Powered by a `metrics` array the controller derives from
+  `RiskService::summary($request->user())` -- the same national-scope-
+  only aggregate the report page already calls, so this is free: both
+  `summary()` and the register's own `restricted()` independently
+  enforce `TaxpayerScope::isNational()`, so calling both unconditionally
+  in `index()` is safe wherever the existing call already was. No new
+  query added.
+- **Main/side split**: the Evaluate-a-taxpayer form and the existing
+  filterable table both move into a `col-lg-8`, content and behavior
+  otherwise unchanged (filters, pagination, permission-gated Evaluate
+  form all preserved exactly). A new `col-lg-4` holds two panels fed by
+  the same `summary()` call: "Indicators by severity" (a compact
+  severity-badge/count list, no table) and "Most-flagged taxpayers"
+  (`summary()['top_taxpayers']`, top 10 by indicator count, previously
+  surfaced nowhere on this page at all -- only reachable via the
+  separate report page) as a card-item panel with the standard 5-item
+  preview and "Show N more" toggle.
+- Verified with a real browser session at 1440px and 820px, logged in
+  as a NamRA VAT Auditor, using the app's own "Evaluate a taxpayer"
+  form against a real taxpayer already in the dev database (NEMA
+  Property Developers CC, VAT 12384786-01-5) to raise real indicators
+  from its existing invoice/reconciliation evidence, rather than
+  synthetic inserts -- both stat tiles and side panels render live
+  data end to end. No horizontal overflow at either width.
+- Full suite: 1172 tests, 0 regressions. `tests/Feature/Compliance/
+  RiskViewTest.php`'s existing 13 tests unedited; one new test added
+  (`test_the_list_page_renders_its_stat_tiles_and_side_panels`)
+  covering the new stat tiles and both side panels against real
+  evaluated data.
+- Scope unchanged from the prior entries: this closes the fifth screen
+  in the user's own named sweep.

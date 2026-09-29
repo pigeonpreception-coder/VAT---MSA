@@ -50,11 +50,26 @@ class RiskViewController extends Controller
             return $indicator + ['legal_name' => $taxpayer?->legal_name, 'vat_number' => $taxpayer?->vat_number];
         })->all();
 
+        // Blade view redesign (2026-09-29): reuses the same national-scope-
+        // only summary() aggregate the dedicated report page already calls
+        // (both independently enforce TaxpayerScope::isNational(), so this
+        // is safe wherever restricted() above was) for the index page's own
+        // stat tiles and side-panel previews -- no new query.
+        $summary = $this->risk->summary($request->user());
+        $byStatus = collect($summary['by_status'])->pluck('count', 'status');
+        $metrics = [
+            'total' => $summary['total_count'],
+            'needs_review' => $byStatus['OPEN'] + $byStatus['UNDER_REVIEW'],
+            'critical' => collect($summary['by_severity'])->firstWhere('severity', 'CRITICAL')['count'],
+            'escalated' => $byStatus['ESCALATED_TO_CASE'],
+        ];
+
         return view('risk-indicators.index', [
             'indicators' => $indicators, 'totalCount' => $result['totalCount'],
             'limit' => $result['limit'], 'offset' => $result['offset'],
             'filters' => ['status' => $params['status'] ?? '', 'severity' => $params['severity'] ?? ''],
             'canReview' => $request->user()->hasAppPermission('risk:review'),
+            'metrics' => $metrics, 'bySeverity' => $summary['by_severity'], 'topTaxpayers' => $summary['top_taxpayers'],
         ]);
     }
 
