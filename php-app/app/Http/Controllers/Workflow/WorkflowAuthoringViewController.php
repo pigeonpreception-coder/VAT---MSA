@@ -61,11 +61,24 @@ class WorkflowAuthoringViewController extends Controller
         $members = DB::table('organisation_memberships as m')->join('users as u', 'u.id', '=', 'm.user_id')
             ->where('m.organisation_id', $resolvedOrganisationId)->where('m.status', 'ACTIVE')
             ->select('u.id', 'u.name')->distinct()->orderBy('u.name')->get();
+        $delegations = $this->workflows->listDelegations($user, $organisationId);
+
+        // Blade view redesign (2026-09-30): the stat tiles below are
+        // counted from the same already-fetched $snapshot/$draftVersions/
+        // $delegations values this method already assembled -- no new
+        // query, the same pattern already used for every other screen in
+        // this redesign sweep.
+        $metrics = [
+            'workflows' => count($snapshot['workflows']),
+            'draftVersions' => $draftVersions->count(),
+            'pendingTasks' => count($snapshot['tasks']),
+            'activeDelegations' => collect($delegations)->where('status', 'ACTIVE')->count(),
+        ];
 
         return view('workflows.index', [
             'organisation' => $snapshot['organisation'], 'workflows' => $snapshot['workflows'], 'tasks' => $snapshot['tasks'],
             'roles' => $snapshot['roles'], 'draftVersions' => $draftVersions, 'members' => $members,
-            'delegations' => $this->workflows->listDelegations($user, $organisationId),
+            'delegations' => $delegations, 'metrics' => $metrics,
             'testResult' => session('workflow_test_result'),
             'canManage' => $user->hasAppPermission('workflows:manage'), 'canDecide' => $user->hasAppPermission('workflows:decide'),
         ]);

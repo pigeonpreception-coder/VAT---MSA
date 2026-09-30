@@ -13221,3 +13221,72 @@ plus a fifth "Provision platform staff" form.
   covering the new stat tiles and the side panel's decide form.
 - Scope unchanged from the prior entries: this closes the twelfth
   screen in the user's own named sweep.
+
+## Workflow engine: redesigned to the dashboard-layout pattern (2026-09-30)
+
+Thirteenth screen in the user's own named sweep (after VAT Audit
+Report, Reconciliation Exceptions, Audit Cases & Risk, Compliance
+Overview, Risk Indicators, Obligations, Disputes, Audit Trail,
+Documents, Reports & Analytics, Access Rights, and Platform Config,
+all above). This is the tenant-scoped versioned-approval-workflow
+authoring console
+(`app/Http/Controllers/Workflow/WorkflowAuthoringViewController.php`,
+`resources/views/workflows/index.blade.php`) -- the busiest screen in
+the sweep so far, with six distinct functions on one page (a read-only
+workflow catalogue, draft test/publish, draft authoring, instance
+assignment, a pending-task decide queue, and delegation create/revoke),
+no stat tile row at all beforehand.
+
+- **New 4-tile stat row**: Workflows, Draft versions, Pending tasks,
+  and Active delegations -- all four counted from the same already-
+  fetched `$snapshot`/`$draftVersions`/`$delegations` values the
+  controller's `index()` already assembled (the latter extracted into
+  a local variable so both the view and the new `$metrics` calculation
+  reuse the one already-made `listDelegations()` call), no new query.
+- **Main/side split**: `col-lg-8` keeps the two read-oriented catalogue
+  cards (Versioned workflows, Draft versions, now a sub-row inside the
+  main column instead of their own full-width row) plus the two
+  authoring forms (Create a workflow draft, Assign a workflow
+  instance); `col-lg-4` turns the former "Pending tasks" and
+  "Delegations" **tables** into two card-item side panels (5-item
+  preview + "Show N more" each), matching the maker-checker review-
+  queue pattern every side panel in this sweep has used since Platform
+  Config -- Pending tasks is exactly that kind of queue (every item
+  needs a decision from someone other than its initiator). "Create a
+  delegation" stays a separate full-width section below the split, the
+  same "distinct admin action, not secondary to either half" reasoning
+  already applied to Platform Config's "Provision platform staff".
+- **Both former tables' inline action forms stacked vertically instead
+  of side by side**, applied proactively (same lesson as every
+  redesign since Reports): the pending-task decide form's reason input
+  above its Approve/Reject button pair (mirroring Platform Config's
+  own notes+Approve/Reject side-panel form exactly), and the
+  delegation revoke form's reason input above its Revoke button --
+  both previously used a fixed `style="width: ...rem"` input next to a
+  button in a table cell, the same shape that overflowed on Obligations
+  and Documents once narrowed. Converting both tables to card-item
+  panels removes the `.table-responsive` element these two functions
+  used to have entirely, along with any of its own overflow risk.
+- Verified with a real browser session at 1440px and 820px against the
+  real dev database, logged in as `owner@demo-trading.test`
+  (TAXPAYER_OWNER, licensed for `ADVANCED_WORKFLOW`). Enrolled a real
+  TOTP credential through the app's own enrollment form (RFC 6238 code
+  computed from the enrolled secret via `App\Support\Access\Totp`, not
+  a stub), confirmed step-up, then submitted the actual "Create a
+  workflow draft" form -- confirmed the Workflows/Draft versions tiles
+  went 0 → 1 and the new draft appeared in both the Versioned
+  workflows and Draft versions cards in the same page reload. No
+  horizontal overflow at either width, and (since both former tables
+  are now card-item panels) zero `.table-responsive` elements remain
+  on the page at all.
+- Full suite: 1180 tests, 0 regressions. `tests/Feature/Workflow/
+  WorkflowAuthoringViewTest.php`'s existing 13 tests -- covering the
+  step-up gate, double-submit idempotency on both the assign and
+  delegation-create forms, the self-publish and self-decide
+  segregation-of-duties refusals, and delegation create/revoke -- all
+  pass unedited; one new test added
+  (`test_the_page_renders_its_stat_tiles_and_side_panels`) covering
+  the new stat tiles and both side panels against a real published
+  workflow, a real pending task, and a real active delegation.
+- Scope unchanged from the prior entries: this closes the thirteenth
+  screen in the user's own named sweep.
