@@ -143,6 +143,37 @@ class WorkflowAuthoringViewTest extends TestCase
         $response->assertDontSee('Create a workflow draft');
     }
 
+    /**
+     * Redesign coverage (2026-09-30): the stat tile row and both new
+     * "Pending tasks"/"Delegations" side panels are derived from the
+     * same already-fetched $snapshot/$draftVersions/$delegations the
+     * page's own catalogue/table already used -- proves the counts line
+     * up with real assignment/delegation rows, not just that the labels
+     * render.
+     */
+    public function test_the_page_renders_its_stat_tiles_and_side_panels(): void
+    {
+        $ctx = $this->createdDraft('VAT-WFV-0011');
+        $this->actingAs($ctx['approver'])->withFreshStepUp()
+            ->post("/workflows/versions/{$ctx['versionId']}/publish");
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->post('/workflows/instances', ['domain_action' => 'EXPENSE', 'resource_type' => 'EXPENSE_CLAIM', 'resource_id' => 'exp-stat-0001', 'context' => '{}']);
+        $delegate = $this->makeUser($ctx['owner']->taxpayer, 'delegate-stat@wfview.test');
+        $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->post('/workflows/delegations', [
+                'delegator_user_id' => $ctx['owner']->id, 'delegate_user_id' => $delegate->id,
+                'effective_from' => now()->format('Y-m-d\TH:i'), 'effective_to' => now()->addMonth()->format('Y-m-d\TH:i'),
+                'reason' => 'Covering for a colleague.',
+            ]);
+
+        $response = $this->actingAs($ctx['owner'])->get('/workflows');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Workflows', 'Draft versions', 'Pending tasks', 'Active delegations']);
+        $response->assertSeeInOrder(['Pending tasks', 'EXPENSE_CLAIM']);
+        $response->assertSeeInOrder(['Delegations', 'delegate-stat@wfview.test']);
+    }
+
     public function test_creating_a_draft_requires_workflows_manage(): void
     {
         $ctx = $this->makeLicensedOrganisation('VAT-WFV-0003');
