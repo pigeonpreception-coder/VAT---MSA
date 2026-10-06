@@ -13290,3 +13290,76 @@ no stat tile row at all beforehand.
   workflow, a real pending task, and a real active delegation.
 - Scope unchanged from the prior entries: this closes the thirteenth
   screen in the user's own named sweep.
+
+## Taxpayer registry: redesigned to the dashboard-layout pattern (2026-10-06)
+
+Fourteenth screen in the user's own named sweep (after VAT Audit
+Report, Reconciliation Exceptions, Audit Cases & Risk, Compliance
+Overview, Risk Indicators, Obligations, Disputes, Audit Trail,
+Documents, Reports & Analytics, Access Rights, Platform Config, and
+Workflow engine, all above). This is the canonical taxpayer registry
+(`app/Http/Controllers/Identity/TaxpayerViewController.php`,
+`resources/views/taxpayers/index.blade.php`) -- a purely read-only
+page (confirmed by the controller's own doc comment: no write action
+exists anywhere on it) that previously went straight from the page
+header into a single dense 9-column register table, no stat tile row
+at all.
+
+- **New 4-tile stat row**: Taxpayers, Active, Suspended, and
+  Transactions -- all four derived from the same already-fetched
+  `TaxpayerService::list()` collection the register table itself
+  already rendered, no new query. `vat_status` is a 2-value enum
+  (`ACTIVE`/`SUSPENDED` -- confirmed from the migration's own `enum()`
+  definition before adding the Suspended tile), so unlike a tile built
+  from an assumption about the schema, this one is guaranteed to
+  partition the Taxpayers total exactly.
+- **Main/side split**: `col-lg-8` keeps the register table; `col-lg-4`
+  adds two new side panels, "Taxpayers by capability" and "Taxpayers
+  by frequency", both derived from the same already-fetched
+  collection. Neither panel uses the sweep's usual 5-item "Show N
+  more" preview cap: `capability` is a 2-value enum (`BUYER`/`SELLER`)
+  and `return_frequency` a 4-value enum (`MONTHLY`/`BIMONTHLY`/
+  `QUARTERLY`/`ANNUAL`, also confirmed from the migration), the same
+  "small fixed enum, no show-more needed" reasoning already applied to
+  Access Rights' own "Grants by scope" panel.
+- **Register table consolidated from 9 columns down to 5** (Taxpayer |
+  VAT number & TIN | Capabilities & frequency | Activity | Status),
+  applied proactively before first verification (same lesson learned
+  from the Obligations/Documents/Access Rights overflow bugs): VAT
+  number+TIN combined into one cell, Capabilities+frequency combined
+  into one cell (badges + a muted frequency subtitle), and
+  Transactions+Output VAT+Input VAT combined into one right-aligned
+  "Activity" cell (transaction count bold, "{out} out · {in} in" as a
+  muted subtitle) -- the exact same `{{ $tenantCurrencySymbol }}
+  {{ number_format(...) }}` formatting the original two separate
+  columns used, just stacked into one.
+- Verified with a real browser session at 1440px and 820px against the
+  real dev database (11 real taxpayers, both NamRA-seed suppliers and
+  the NEMA Property Developers demo data), logged in as
+  `admin@vat-msa.test` (NAMRA_SYSTEM_SUPPORT, national scope). Since
+  this page has no write path, "live round trip" here means confirming
+  the tiles/panels aggregate the real seeded rows correctly (Taxpayers
+  11, Active 11, Suspended 0, Transactions 85; Seller 11/Buyer 3;
+  Monthly 10/Bimonthly 1) rather than a propose-then-decide cycle. No
+  horizontal overflow at either width; the register table's own
+  `table-responsive` was individually checked (763px/794px scrollWidth
+  vs. clientWidth at 1440px/820px respectively, no clipping).
+- Full suite: 1181 tests attempted, 1171 passed, 0 regressions caused
+  by this change. The 10 failures are pre-existing and unrelated --
+  all in `tests/Feature/Business/QuotationViewTest.php`,
+  `tests/Feature/Business/BusinessPartyAndQuotationTest.php` and
+  `tests/Feature/Portal/SellerPortalTest.php`, confirmed by rerunning
+  them against a clean checkout of this same base commit (no Taxpayer
+  changes applied) where they fail identically with "The quotation
+  validity period has ended; expire it instead." -- a test-fixture
+  staleness bug (a hardcoded near-term `valid_until` date that has
+  since passed relative to the real wall-clock date, unrelated to any
+  code in this sweep) rather than anything introduced here.
+  `tests/Feature/Identity/TaxpayerViewTest.php`'s existing 3 tests --
+  covering the auth/permission gate and the real-data rendering
+  already in place -- all pass unedited; one new test added
+  (`test_the_page_renders_its_stat_tiles_and_breakdown_panels`)
+  covering the new stat tiles and both side panels against a real
+  active/suspended, seller/buyer, monthly/quarterly taxpayer pair.
+- Scope unchanged from the prior entries: this closes the fourteenth
+  screen in the user's own named sweep.

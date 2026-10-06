@@ -99,4 +99,40 @@ class TaxpayerViewTest extends TestCase
         $response->assertSee('Seller');
         $response->assertSee('N$ 150.00');
     }
+
+    /**
+     * Redesign coverage (2026-10-06): the stat tile row and both
+     * "Taxpayers by capability"/"Taxpayers by frequency" side panels are
+     * derived from the same already-fetched TaxpayerService::list()
+     * collection the register table itself renders -- proves the counts
+     * line up with real taxpayer rows rather than just checking the
+     * labels render.
+     */
+    public function test_the_page_renders_its_stat_tiles_and_breakdown_panels(): void
+    {
+        $active = $this->makeTaxpayer('VAT-TPVIEW-0002');
+        OrganisationCapability::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $active['organisation']->id, 'capability' => 'SELLER',
+            'status' => 'ACTIVE', 'effective_from' => now()->subDay(), 'effective_to' => null,
+        ]);
+        $suspended = $this->makeTaxpayer('VAT-TPVIEW-0003');
+        $suspended['taxpayer']->update(['vat_status' => 'SUSPENDED', 'return_frequency' => 'QUARTERLY']);
+        OrganisationCapability::create([
+            'id' => (string) Str::uuid(), 'organisation_id' => $suspended['organisation']->id, 'capability' => 'BUYER',
+            'status' => 'ACTIVE', 'effective_from' => now()->subDay(), 'effective_to' => null,
+        ]);
+        $admin = User::create([
+            'id' => (string) Str::uuid(), 'name' => 'Admin2', 'email' => 'admin2@tpview.test',
+            'password' => bcrypt('password'), 'role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null, 'status' => 'ACTIVE',
+        ]);
+
+        $response = $this->actingAs($admin)->get('/taxpayers');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Taxpayers', 'Active', 'Suspended', 'Transactions']);
+        $response->assertSeeInOrder(['Taxpayers by capability', 'Seller']);
+        $response->assertSeeInOrder(['Taxpayers by capability', 'Buyer']);
+        $response->assertSeeInOrder(['Taxpayers by frequency', 'Monthly']);
+        $response->assertSeeInOrder(['Taxpayers by frequency', 'Quarterly']);
+    }
 }
