@@ -13363,3 +13363,76 @@ at all.
   active/suspended, seller/buyer, monthly/quarterly taxpayer pair.
 - Scope unchanged from the prior entries: this closes the fourteenth
   screen in the user's own named sweep.
+
+## Organisations: redesigned to the dashboard-layout pattern (2026-10-06)
+
+Fifteenth screen in the user's own named sweep (after VAT Audit
+Report, Reconciliation Exceptions, Audit Cases & Risk, Compliance
+Overview, Risk Indicators, Obligations, Disputes, Audit Trail,
+Documents, Reports & Analytics, Access Rights, Platform Config,
+Workflow engine, and Taxpayer registry, all above). This is Module 1's
+identity-foundation list screen
+(`app/Http/Controllers/Identity/OrganisationViewController.php`,
+`resources/views/organisations/index.blade.php`) -- scoped to the
+index page only, not the separate per-organisation `show.blade.php`
+detail page, matching this sweep's established precedent of touching
+only the list/register screen and leaving per-entity detail pages
+alone. Unlike most of this sweep, the page already had its 4-tile stat
+row (Canonical organisations/Active branches/Linked identities/Pending
+registrations, added in an earlier gap-finding pass) but no main/side
+split yet -- it went straight from the tiles into a full-width
+"Identity providers" + "Access counts" row, then a full-width
+"Organisations" register table, then a full-width "Recent
+registration applications" table.
+
+- **No controller changes at all**: every value on this page, old and
+  new, already came from one `IdentityFoundationSnapshotService
+  ::getSnapshot()` call the controller's `index()` already made (the
+  source's own single-fetch-reused-everywhere design, per the
+  controller's own doc comment) -- this redesign is pure Blade
+  restructuring.
+- **Main/side split**: `col-lg-8` keeps the "Organisations" register
+  table (the page's actual primary content); `col-lg-4` adds "Access
+  counts" (the small, already-existing 4-row summary list, unchanged)
+  and converts the former full-width "Recent registration
+  applications" **table** into a card-item side panel (5-item preview
+  + "Show N more", capped at the already-fetched 10 most recent
+  applications) -- the same "table-to-queue-panel" conversion already
+  applied to Workflow engine's Pending tasks/Delegations. "Identity
+  providers" stays a separate full-width section below the split, the
+  same "distinct system-config block, not secondary to either half"
+  reasoning already applied to Platform Config's "Provision platform
+  staff" and Workflow engine's "Create a delegation".
+- **Register table consolidated from 6 columns down to 5** (Organisation
+  | Taxpayer | Capabilities | Status | Branches & members), applied
+  proactively before first verification: the former separate
+  right-aligned Branches/Members columns combined into one "Branches &
+  members" cell (branch count bold, "{members} members" as a muted
+  subtitle underneath) -- the same count-pair consolidation already
+  used for Taxpayer registry's own Activity cell.
+- Verified with a real browser session at 1440px and 820px against the
+  real dev database (11 real organisations), logged in as
+  `admin@vat-msa.test` (NAMRA_SYSTEM_SUPPORT, national scope). This
+  index page has no write path of its own (branch/membership/
+  suspension actions all live on the untouched `show.blade.php`), so
+  verification means confirming the tiles and both side panels
+  aggregate the real snapshot data correctly (Canonical organisations
+  11, Active branches 1, Access counts: Active users 21/Memberships 1/
+  Branches 1). No horizontal overflow at either width; the register
+  table's own `table-responsive` was individually checked (763px/794px
+  scrollWidth vs. clientWidth at 1440px/820px respectively, no
+  clipping).
+- Full suite: 1182 tests attempted, 1172 passed, 0 regressions caused
+  by this change -- the same 10 pre-existing, unrelated quotation
+  test-fixture failures from the Taxpayer registry entry above persist
+  identically (not reproduced again here; see that entry for the full
+  root-cause writeup). `tests/Feature/Identity/OrganisationViewTest.php`'s
+  existing 16 tests -- covering the identity snapshot rendering, the
+  metric tiles, the new-registration action link, and the full branch/
+  membership/suspension write-path suite on the separate `show` page
+  -- all pass unedited; one new test added
+  (`test_the_index_page_renders_its_side_panels`) covering both new
+  side panels and the consolidated register table cell against a real
+  organisation and a real pending registration application.
+- Scope unchanged from the prior entries: this closes the fifteenth
+  screen in the user's own named sweep.

@@ -140,6 +140,34 @@ class OrganisationViewTest extends TestCase
     }
 
     /**
+     * Redesign coverage (2026-10-06): the new "Access counts" and
+     * "Recent registration applications" side panels are derived from
+     * the same already-fetched IdentityFoundationSnapshotService
+     * snapshot the page's own tiles and tables already used -- proves
+     * the side panels render real snapshot data, not just that the
+     * panel labels exist.
+     */
+    public function test_the_index_page_renders_its_side_panels(): void
+    {
+        $fx = $this->ownerWithOrganisation('VAT-VIEW-ORG-SIDEPANEL');
+        $admin = $this->pilotAdmin();
+        RegistrationApplication::create([
+            'id' => (string) Str::uuid(), 'idempotency_key' => Str::random(20), 'request_hash' => str_repeat('c', 64),
+            'vat_number' => 'VAT-VIEW-ORG-SIDEPANEL-APP', 'tin' => 'TIN-VAT-VIEW-ORG-SIDEPANEL-APP', 'legal_name' => 'Side Panel Applicant Co',
+            'taxpayer_type' => 'PRIVATE_COMPANY', 'return_frequency' => 'MONTHLY', 'address' => '1 Test Street',
+            'email' => 'sidepanel-app@test.test', 'status' => 'PENDING_VERIFICATION', 'verification_source' => 'MANUAL',
+            'submitted_by' => $admin->id, 'submitted_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->get('/organisations');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Access counts', 'Active users']);
+        $response->assertSeeInOrder(['Recent registration applications', 'Side Panel Applicant Co']);
+        $response->assertSeeInOrder([$fx['organisation']->legal_name, 'branches', 'members']);
+    }
+
+    /**
      * Gap-finding pass (2026-09-23): app/organisations/page.tsx's own
      * PageHeader `actions` slot (a "New registration" button) had no
      * Laravel equivalent -- the page had no header-level call to action
