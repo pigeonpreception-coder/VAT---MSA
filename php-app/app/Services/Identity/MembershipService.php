@@ -28,6 +28,24 @@ class MembershipService
         if (! $targetUser->isActive()) {
             throw ValidationException::withMessages(['user_id' => 'The target user is not active.']);
         }
+        // Red-team finding RT-001 (2026-10-24): source's own assignMembership
+        // only ever sets taxpayer_id when it is still NULL ("UPDATE app_users
+        // SET taxpayer_id=? WHERE id=? AND taxpayer_id IS NULL") -- correct
+        // for its actual intended case, a user who doesn't belong to a
+        // taxpayer yet, but silently no-op for a user who already belongs to
+        // a DIFFERENT one. Every scope check in this app (TaxpayerScope::
+        // requireTaxpayer, matching source's own requireTaxpayerScope) reads
+        // only that single taxpayer_id field, never this membership row, so
+        // that silent no-op previously left the membership row created, the
+        // UI reporting success, and the assignee with zero real access to
+        // this organisation -- confirmed live (403 on direct navigation,
+        // absent from their own organisations list, role badge unchanged).
+        // Reject it explicitly instead, the same way the sibling "not
+        // found"/"not active" guards above already do, rather than silently
+        // accepting an assignment this app has no mechanism to honour.
+        if ($targetUser->taxpayer_id !== null && $targetUser->taxpayer_id !== $organisation->taxpayer_id) {
+            throw ValidationException::withMessages(['user_id' => 'This user already belongs to a different taxpayer organisation and cannot be assigned here.']);
+        }
         if (! empty($assignment['branch_id']) && ! Branch::where('id', $assignment['branch_id'])->where('organisation_id', $organisationId)->exists()) {
             throw ValidationException::withMessages(['branch_id' => 'The branch is outside this organisation.']);
         }
