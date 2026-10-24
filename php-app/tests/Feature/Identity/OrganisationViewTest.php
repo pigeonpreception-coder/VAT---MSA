@@ -210,6 +210,7 @@ class OrganisationViewTest extends TestCase
         $response->assertOk();
         $response->assertDontSee('Add branch');
         $response->assertDontSee('Assign membership');
+        $response->assertDontSee('Send invitation');
         $response->assertDontSee('Taxpayer suspension');
     }
 
@@ -463,5 +464,94 @@ class OrganisationViewTest extends TestCase
 
         $response->assertOk();
         $response->assertDontSee('Suspend taxpayer');
+    }
+
+    /**
+     * Red-team finding RT-002 (2026-10-24): UserInvitationService::invite()/
+     * claim() were fully built and tested (tests/Feature/Identity/
+     * UserInvitationTest.php) but invite() had no Blade entry point at all --
+     * only a JSON route nothing in resources/views/ ever referenced, so a
+     * real customer could never reach it. This test proves the new Blade
+     * form end to end: invite from the Organisations page, follow the
+     * resulting claim link exactly as a real invitee would (no shortcuts
+     * through the service), and confirm the claimed account can actually
+     * log in with the role and taxpayer it was invited with -- the same
+     * standard UserInvitationTest's own JSON-originated round trip holds
+     * itself to, just starting from the UI instead of a raw API call.
+     */
+    public function test_an_organisation_admin_can_invite_a_new_teammate_and_the_claim_link_completes_a_real_login(): void
+    {
+        $fx = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT002-A');
+        $owner = $this->taxpayerOwner($fx['taxpayer']->id, 'owner-rt002-a@test.test');
+
+        $response = $this->actingAs($owner)
+            ->withFreshStepUp()
+            ->post(route('organisations.invitations.store', $fx['organisation']->id), [
+                'email' => 'new-hire-rt002@test.test', 'role_code' => 'TAXPAYER_STAFF',
+            ]);
+
+        $response->assertRedirect(route('organisations.show', $fx['organisation']->id));
+        $response->assertSessionHas('claimLink');
+        $invitation = \App\Models\UserInvitation::where('email', 'new-hire-rt002@test.test')->firstOrFail();
+        $this->assertSame('PENDING', $invitation->status);
+        $this->assertSame($fx['organisation']->id, $invitation->organisation_id);
+
+        $showAfter = $this->actingAs($owner)->get(route('organisations.show', $fx['organisation']->id));
+        $showAfter->assertSee('new-hire-rt002@test.test');
+        $showAfter->assertSee($invitation->claim_token);
+
+        // Follow the claim link exactly as the invited person would -- a
+        // fresh, unauthenticated visit, not a shortcut through the service.
+        $this->post('/logout');
+        $claimPage = $this->get(route('invitations.claim', ['token' => $invitation->claim_token]));
+        $claimPage->assertOk()->assertSee('Claim your invitation');
+
+        $claimResponse = $this->post('/invitations/claim', [
+            'token' => $invitation->claim_token, 'name' => 'New Hire',
+            'password' => 'CorrectHorse1', 'password_confirmation' => 'CorrectHorse1',
+        ]);
+        $claimResponse->assertRedirect(route('login'));
+
+        $newUser = User::where('email', 'new-hire-rt002@test.test')->firstOrFail();
+        $this->assertSame('TAXPAYER_STAFF', $newUser->role);
+        $this->assertSame($fx['taxpayer']->id, $newUser->taxpayer_id);
+        $this->assertDatabaseHas('organisation_memberships', [
+            'organisation_id' => $fx['organisation']->id, 'user_id' => $newUser->id, 'role_code' => 'TAXPAYER_STAFF', 'status' => 'ACTIVE',
+        ]);
+
+        $loginResponse = $this->post('/login', ['email' => 'new-hire-rt002@test.test', 'password' => 'CorrectHorse1']);
+        $loginResponse->assertRedirect(route('dashboard'));
+        $this->assertAuthenticatedAs($newUser);
+    }
+
+    public function test_inviting_an_email_that_already_has_an_account_is_a_friendly_form_error(): void
+    {
+        $fx = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT002-B');
+        $owner = $this->taxpayerOwner($fx['taxpayer']->id, 'owner-rt002-b@test.test');
+        $existing = $this->taxpayerOwner($fx['taxpayer']->id, 'already-a-user-rt002@test.test');
+
+        $response = $this->actingAs($owner)
+            ->withFreshStepUp()
+            ->post(route('organisations.invitations.store', $fx['organisation']->id), [
+                'email' => $existing->email, 'role_code' => 'TAXPAYER_STAFF',
+            ]);
+
+        $response->assertSessionHasErrors('form');
+        $this->assertDatabaseMissing('user_invitations', ['email' => $existing->email]);
+    }
+
+    public function test_a_read_only_viewer_cannot_send_an_invitation_directly(): void
+    {
+        $fx = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT002-C');
+        $viewer = $this->taxpayerViewer($fx['taxpayer']->id);
+
+        $response = $this->actingAs($viewer)
+            ->withFreshStepUp()
+            ->post(route('organisations.invitations.store', $fx['organisation']->id), [
+                'email' => 'should-not-happen@test.test', 'role_code' => 'TAXPAYER_STAFF',
+            ]);
+
+        $response->assertForbidden();
+        $this->assertDatabaseCount('user_invitations', 0);
     }
 }

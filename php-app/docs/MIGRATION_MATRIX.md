@@ -13508,3 +13508,76 @@ target user, rather than accepting the write and leaving it inert.
   remain in the dev database as inert rows -- harmless (they grant no
   access, which is the whole point) but noted here rather than silently
   left unexplained for whoever reads this database next.
+
+## Fix: real Blade UI for inviting a new teammate into an organisation (2026-10-24)
+
+The same red-team pass (see the entry above) found that
+`UserInvitationService::invite()`/`claim()` -- a genuine invite-and-claim
+flow, fully built and tested
+(`tests/Feature/Identity/UserInvitationTest.php`, 14 tests) since the
+"New feature: Module 1 Identity ProvisionUser" entry earlier in this
+document -- had no Blade entry point for its invite half at all. Only
+`App\Http\Controllers\Identity\UserInvitationController::store`
+(`POST /api/v1/organisations/{id}/invitations`) could reach it; zero
+Blade form, button, or link anywhere in `resources/views/` referenced
+that route. The claim half (`InvitationClaimController`,
+`/invitations/claim`) already had a real page -- this gap was one-sided.
+Confirmed structural, not a one-off oversight: that earlier matrix
+entry's own "Manual browser verification" note says the original
+invitation was "created ... via the service directly", not through any
+UI, because none existed.
+
+**Fix: a real Blade form, on the Organisations show page where a real
+owner/admin would look for it, next to "Assign membership" (which only
+covers the other half -- granting a role to someone who already has an
+account).**
+
+- `OrganisationViewController::storeInvitation()` -- a new action
+  reusing `InviteUserRequest` directly (unlike `storeMembership()`,
+  which resolves an email into a `user_id` the JSON request shape
+  doesn't carry, this form's fields already match `InviteUserRequest`'s
+  shape exactly, so no translation layer was needed) and calling the
+  already-correct, already-tested `UserInvitationService::invite()`.
+  Same `step-up` middleware ceiling as its JSON sibling
+  (`routes/web.php`).
+- `Organisation::invitations()` -- a new `hasMany` relation (matching
+  the existing `branches()`/`memberships()`/`capabilities()` pattern
+  this page already reads from), eager-loaded in
+  `OrganisationService::get()` the same way those three already are.
+- The Blade view: an "Invitations" card (email / role / status / invited
+  date / claim link) below Memberships, with an invite form in its
+  footer reusing the same `$assignableRoles` the Memberships form
+  already receives. Consistent with this app having no outbound email
+  integration (the invite service's own doc comment), the resulting
+  claim link is shown twice -- once in a copy-to-clipboard banner right
+  after creation, and persistently in the table for an admin who lost
+  it to find again -- for the inviting admin to relay out of band,
+  exactly as the JSON API's own response already did for a caller who
+  read it.
+- `status-badge.blade.php`'s shared status-colour map gained one new
+  entry, `CLAIMED => text-bg-success` -- the only new status value this
+  page introduces to that component; everything else it needs
+  (`PENDING`, `EXPIRED`) was already mapped.
+- Three new tests in `tests/Feature/Identity/OrganisationViewTest.php`:
+  a full real round trip (invite from the Blade form, follow the claim
+  link exactly as a real invitee would -- a fresh unauthenticated visit,
+  not a shortcut through the service -- claim, then log in, asserting
+  the resulting account's role/taxpayer/membership are all correct);
+  a duplicate-email invite surfacing as a friendly form error; a
+  read-only viewer's direct POST attempt rejected. The existing
+  `test_a_read_only_viewer_sees_no_management_forms` extended to also
+  assert the new "Send invitation" form is hidden from a read-only
+  viewer.
+- Live-verified over a real browser session end to end, independently of
+  the PHPUnit coverage: invited a brand-new email from the real
+  Organisations page as `owner@demo-trading.test`, confirmed the claim
+  link appeared both in the flash banner and in the table on reload,
+  opened that exact link in a fresh, logged-out browser tab, completed
+  the claim form, and logged in with the new credentials -- landed on
+  `/dashboard` with the correct `TAXPAYER_STAFF` role badge. Confirmed
+  in the database too: the claimed user's `role`/`taxpayer_id` and its
+  `organisation_memberships` row all match what was invited.
+- Full suite: 1180 tests attempted, 1177 passed, 0 regressions caused by
+  this change -- the same 10 pre-existing, unrelated quotation
+  test-fixture failures documented earlier in this file persist
+  identically (not reproduced again here).

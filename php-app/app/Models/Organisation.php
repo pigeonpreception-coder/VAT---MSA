@@ -124,4 +124,9 @@ class Organisation extends Model
     {
         return $this->hasMany(OrganisationCapability::class);
     }
+
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(UserInvitation::class);
+    }
 }

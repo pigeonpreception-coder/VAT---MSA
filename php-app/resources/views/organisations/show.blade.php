@@ -29,6 +29,17 @@
     </div>
 @endif
 
+@if (session('claimLink'))
+    {{-- layouts.app already shows session('status') as its own banner above this. --}}
+    <div class="alert alert-info" role="alert">
+        <div class="small text-uppercase fw-semibold mb-1">Invitation link -- copy and send this yourself</div>
+        <div class="input-group input-group-sm">
+            <input type="text" class="form-control font-monospace" value="{{ session('claimLink') }}" readonly onclick="this.select()">
+            <button type="button" class="btn btn-outline-secondary" onclick="navigator.clipboard.writeText('{{ session('claimLink') }}'); this.textContent='Copied';">Copy</button>
+        </div>
+    </div>
+@endif
+
 <div class="row g-3 mb-3">
     <div class="col-lg-8">
         <div class="card mb-3">
@@ -100,7 +111,7 @@
             @endif
         </div>
 
-        <div class="card">
+        <div class="card mb-3">
             <div class="card-header">Memberships</div>
             <div class="table-responsive">
                 <table class="table table-sm mb-0 align-middle">
@@ -159,6 +170,86 @@
                         </div>
                         <div class="col-md-3 align-self-end">
                             <button type="submit" class="btn btn-primary btn-sm w-100">Assign membership</button>
+                        </div>
+                    </form>
+                </div>
+            @endif
+        </div>
+
+        <div class="card">
+            {{-- RT-002 (2026-10-24): assigning a membership above only works for
+                 someone who already has an account. This is the other half --
+                 provisioning a brand-new person's login -- which previously had
+                 no UI at all despite the backend (UserInvitationService) being
+                 fully built and tested. --}}
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Invitations</span>
+                <span class="badge text-bg-light border">{{ $organisation->invitations->count() }}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                    <caption class="visually-hidden">Invitations sent to join this organisation</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Email</th>
+                            <th scope="col">Role</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Invited</th>
+                            @if ($canManage)
+                                <th scope="col">Claim link</th>
+                            @endif
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($organisation->invitations as $invitation)
+                            <tr>
+                                <td>{{ $invitation->email }}</td>
+                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $invitation->role_code))) }}</td>
+                                <td><x-status-badge :value="$invitation->status" type="status" /></td>
+                                <td>{{ $invitation->invited_at->format('d M Y') }}</td>
+                                @if ($canManage)
+                                    <td>
+                                        @if ($invitation->status === 'PENDING')
+                                            <a href="{{ route('invitations.claim', ['token' => $invitation->claim_token]) }}" class="small font-monospace text-break">{{ route('invitations.claim', ['token' => $invitation->claim_token]) }}</a>
+                                        @else
+                                            <span class="text-muted small">—</span>
+                                        @endif
+                                    </td>
+                                @endif
+                            </tr>
+                        @empty
+                            <tr><td colspan="{{ $canManage ? 5 : 4 }}" class="text-center text-muted py-3">No invitations sent yet.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+            @if ($canManage)
+                <div class="card-footer">
+                    {{-- Step-up gated: routes/web.php applies 'step-up' to this
+                         route, matching the JSON API's own
+                         /organisations/{id}/invitations POST. Nothing is
+                         emailed automatically (this app has no outbound email
+                         integration) -- the resulting claim link is shown
+                         above and in this table for the inviting admin to
+                         relay out of band. --}}
+                    <form method="POST" action="{{ route('organisations.invitations.store', $organisation->id) }}" class="row g-2">
+                        @csrf
+                        <div class="col-md-5">
+                            <label for="invite_email" class="form-label small mb-0">Email to invite</label>
+                            <input type="email" id="invite_email" name="email" value="{{ old('email') }}" class="form-control form-control-sm @error('email') is-invalid @enderror" required>
+                            @error('email')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                        <div class="col-md-4">
+                            <label for="invite_role_code" class="form-label small mb-0">Role</label>
+                            <select id="invite_role_code" name="role_code" class="form-select form-select-sm @error('role_code') is-invalid @enderror" required>
+                                @foreach ($assignableRoles as $role)
+                                    <option value="{{ $role }}" @selected(old('role_code') === $role)>{{ ucwords(strtolower(str_replace('_', ' ', $role))) }}</option>
+                                @endforeach
+                            </select>
+                            @error('role_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                        <div class="col-md-3 align-self-end">
+                            <button type="submit" class="btn btn-primary btn-sm w-100">Send invitation</button>
                         </div>
                     </form>
                 </div>
