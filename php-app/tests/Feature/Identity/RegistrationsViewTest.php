@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\InteractsWithStepUp;
 use Tests\TestCase;
 
 /**
@@ -25,11 +26,24 @@ use Tests\TestCase;
 class RegistrationsViewTest extends TestCase
 {
     use RefreshDatabase;
+    use InteractsWithStepUp;
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->seed(RoleSeeder::class);
+    }
+
+    private function pendingApplication(User $submitter, array $overrides = []): RegistrationApplication
+    {
+        return RegistrationApplication::create([
+            'id' => (string) Str::uuid(), 'idempotency_key' => 'regview-decide-key-'.Str::random(8), 'request_hash' => str_repeat('a', 64),
+            'vat_number' => 'VAT-REGDECIDE-'.Str::random(6), 'tin' => 'TIN-REGDECIDE-'.Str::random(6), 'legal_name' => 'Regdecide Trading Co',
+            'taxpayer_type' => 'PRIVATE_COMPANY', 'return_frequency' => 'MONTHLY', 'address' => '1 Regdecide Street',
+            'email' => 'finance@regdecide-trading.test', 'status' => 'UNDER_REVIEW', 'verification_source' => 'ITAS',
+            'submitted_by' => $submitter->id, 'submitted_at' => now(),
+            ...$overrides,
+        ]);
     }
 
     private function nationalAdmin(): User
@@ -183,5 +197,116 @@ class RegistrationsViewTest extends TestCase
         ]);
 
         $response->assertForbidden();
+    }
+
+    public function test_a_namra_officer_can_approve_a_registration_application_through_the_form_and_the_new_owner_can_log_in(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $application = $this->pendingApplication($owner);
+        $admin = $this->nationalAdmin();
+
+        $response = $this->actingAs($admin)->withFreshStepUp()->post(route('registrations.decision', $application->id), [
+            'decision' => 'APPROVE', 'reason' => 'Verification checks out; approving.',
+        ]);
+
+        $response->assertRedirect(route('registrations.index'));
+        $response->assertSessionHas('status');
+        $this->assertDatabaseHas('registration_applications', ['id' => $application->id, 'status' => 'APPROVED']);
+        $this->assertDatabaseHas('taxpayers', ['vat_number' => $application->vat_number, 'vat_status' => 'ACTIVE']);
+        $this->assertDatabaseHas('organisations', ['legal_name' => $application->legal_name, 'status' => 'ACTIVE']);
+        $this->assertDatabaseHas('organisation_memberships', ['user_id' => $owner->id, 'role_code' => 'TAXPAYER_OWNER', 'status' => 'ACTIVE']);
+
+        $owner->refresh();
+        $this->assertNotNull($owner->taxpayer_id);
+        $organisation = \App\Models\Organisation::where('taxpayer_id', $owner->taxpayer_id)->firstOrFail();
+
+        // Prove it's a real, working login for the newly materialized organisation, not just a DB row.
+        $this->post('/logout');
+        $dashboard = $this->actingAs($owner->refresh())->get('/organisations/'.$organisation->id);
+        $dashboard->assertOk()->assertSee($application->legal_name);
+    }
+
+    public function test_a_namra_officer_can_reject_a_registration_application_with_a_reason(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $application = $this->pendingApplication($owner);
+        $admin = $this->nationalAdmin();
+
+        $response = $this->actingAs($admin)->withFreshStepUp()->post(route('registrations.decision', $application->id), [
+            'decision' => 'REJECT', 'reason' => 'VAT number does not match TIN records.',
+        ]);
+
+        $response->assertRedirect(route('registrations.index'));
+        $this->assertDatabaseHas('registration_applications', [
+            'id' => $application->id, 'status' => 'REJECTED', 'review_reason' => 'VAT number does not match TIN records.',
+        ]);
+        $this->assertDatabaseMissing('taxpayers', ['vat_number' => $application->vat_number]);
+    }
+
+    public function test_the_submitting_user_cannot_decide_their_own_registration_application_through_the_form(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $owner->update(['role' => 'NAMRA_SYSTEM_SUPPORT', 'taxpayer_id' => null]); // grant registrations:approve too, to isolate the self-decide check
+        $application = $this->pendingApplication($owner);
+
+        $response = $this->actingAs($owner)->withFreshStepUp()->post(route('registrations.decision', $application->id), [
+            'decision' => 'APPROVE', 'reason' => 'Approving my own application.',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseHas('registration_applications', ['id' => $application->id, 'status' => 'UNDER_REVIEW']);
+    }
+
+    public function test_a_role_without_registrations_approve_is_denied_the_decision_form(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $application = $this->pendingApplication($owner);
+
+        $response = $this->actingAs($owner)->withFreshStepUp()->post(route('registrations.decision', $application->id), [
+            'decision' => 'APPROVE', 'reason' => 'Attempting to self-serve approve.',
+        ]);
+
+        $response->assertForbidden();
+    }
+
+    public function test_deciding_an_already_decided_application_is_a_friendly_error_not_a_crash(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $application = $this->pendingApplication($owner, ['status' => 'REJECTED', 'reviewed_at' => now(), 'review_reason' => 'Already handled.']);
+        $admin = $this->nationalAdmin();
+
+        $response = $this->actingAs($admin)->withFreshStepUp()->post(route('registrations.decision', $application->id), [
+            'decision' => 'APPROVE', 'reason' => 'Trying to approve it anyway.',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors();
+        $this->assertDatabaseHas('registration_applications', ['id' => $application->id, 'status' => 'REJECTED']);
+    }
+
+    public function test_the_decision_controls_are_hidden_from_a_role_without_registrations_approve(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $this->pendingApplication($owner);
+
+        $response = $this->actingAs($owner)->get('/registrations');
+
+        $response->assertOk();
+        $response->assertDontSee('Approve');
+        $response->assertDontSee('Reject');
+    }
+
+    public function test_the_decision_controls_are_shown_to_a_namra_officer_for_a_pending_application(): void
+    {
+        $owner = $this->taxpayerOwner();
+        $this->pendingApplication($owner);
+        $admin = $this->nationalAdmin();
+
+        $response = $this->actingAs($admin)->get('/registrations');
+
+        $response->assertOk();
+        $response->assertSee('Approve');
+        $response->assertSee('Reject');
     }
 }

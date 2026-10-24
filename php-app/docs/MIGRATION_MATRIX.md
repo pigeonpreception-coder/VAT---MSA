@@ -13581,3 +13581,92 @@ account).**
   this change -- the same 10 pre-existing, unrelated quotation
   test-fixture failures documented earlier in this file persist
   identically (not reproduced again here).
+
+## Fix: real Blade UI to approve or reject a registration application (2026-10-24)
+
+The same red-team pass (see the two entries above) found the most severe
+gap of the three: `RegistrationService::decide()` -- the approve/reject
+action that materializes a brand-new `Taxpayer`/`Organisation`/`Branch`/
+`OrganisationMembership` and promotes the submitter to `TAXPAYER_OWNER`,
+or rejects the application with a reason -- had no Blade entry point at
+all. Only `RegistrationApplicationController::decision()`
+(`POST /api/v1/registration-applications/{id}/decision`) could reach it.
+The `/registrations` Blade page already listed every controlled
+application in a table, but that table had no Action column whatsoever --
+confirmed via a full-page screenshot during the original assessment. Since
+`submit()` (the other half of this same page) already had a working Blade
+form, this was a one-sided gap exactly like the invitation fix above: no
+NamRA officer could ever onboard a taxpayer, or reject a bad application,
+through the product itself -- only by calling the JSON API directly.
+
+Verified source-faithful against `lib/data/identity-repository.ts`'s
+`decideRegistrationApplication` before fixing: the not-found/not-pending/
+self-decide guards, the guarded atomic status update (`UPDATE ... WHERE
+status IN (...)`, this codebase's own TOCTOU defense, already present in
+`decide()`'s PHP port per its own "Red-team punch list #8" comment), the
+taxpayer-conflict check, and the `WHERE taxpayer_id IS NULL` submitter-
+promotion guard are all already correctly ported. This fix only needed a
+UI path to the existing, already-correct, already-tested service method --
+no service-layer change at all.
+
+**Fix: Approve/Reject controls added directly to the existing
+"Registration applications" table, visible only to an actor who actually
+holds `registrations:approve`.**
+
+- `RegistrationsViewController::storeDecision()` -- a new action reusing
+  `DecideRegistrationRequest` directly (the exact same FormRequest its
+  JSON sibling uses -- `decision`/`reason` already match the form fields
+  needed, no translation layer required) and calling the already-correct
+  `RegistrationService::decide()`. Same `step-up` + `rate-limit:registration`
+  middleware ceiling as its JSON sibling (`routes/web.php`). Catches both
+  `ValidationException` (not found / already decided / self-decide) and
+  `RepositoryConflictException` (the TOCTOU guard / taxpayer conflict) and
+  turns either into a friendly flash error instead of a 500, the same
+  dual-catch convention `OrganisationViewController`'s `messageFrom()`
+  already established.
+- `RegistrationsViewController::index()` now also passes `canDecide`
+  (`$user->hasAppPermission('registrations:approve')`) to the view.
+- The Blade view: a new "Decision" column, header and all, rendered only
+  when `$canDecide` -- the same gating precedent as the Invitations
+  table's "Claim link" column above, not just the form inside it, since
+  approving an application is irreversible (it creates live records) and
+  more consequential than the generic submit form elsewhere on this same
+  page. Per row: one reason textarea plus Approve/Reject buttons (a single
+  shared `<form>`, two `name="decision" value="APPROVE|REJECT"` submit
+  buttons -- only the clicked button's value is sent, no JavaScript
+  needed) when the application is still decidable and wasn't submitted by
+  the viewing officer themselves; a muted "You submitted this -- another
+  officer must decide." note when the self-decide guard would otherwise
+  reject it; a muted "--" once already decided. `old('reason')` is
+  deliberately not used to repopulate the textarea on a validation error --
+  with potentially several of these forms on one page sharing the same
+  field name, Laravel's flat `old()`/error bag can't be scoped to a single
+  row, so showing it on every row would mislead rather than help; the
+  page's existing top-of-page `@if ($errors->any())` block (already there
+  for the submit form) surfaces the message instead.
+- Seven new tests in `tests/Feature/Identity/RegistrationsViewTest.php`:
+  a full approve round trip (decide via the Blade form, then confirm the
+  submitting user can really log in and reach the new organisation's own
+  page); reject with a reason; self-decide blocked; a role without
+  `registrations:approve` denied (403); re-deciding an already-decided
+  application surfaces a friendly redirect-with-error instead of a crash;
+  the Decision controls hidden from a non-approver and shown to a NamRA
+  officer for a pending application.
+- Live-verified over a real browser session end to end: submitted two
+  fresh applications as a brand-new, taxpayer-less account; confirmed the
+  Decision column is completely absent from that same account's own view
+  of the page; as `admin@vat-msa.test` (`NAMRA_SYSTEM_SUPPORT`), approved
+  one and rejected the other through the real form with step-up: both
+  flipped status immediately and collapsed to "--" in the Decision column;
+  the approved one's VAT number now has a real `ACTIVE` taxpayer and
+  organisation row; logged back in as the original submitter and reached
+  the new organisation's real dashboard (a genuinely working login, not a
+  DB flag flip). Unexpected bonus confirmation of the self-decide guard
+  on real pre-existing data: two `PENDING_VERIFICATION` applications left
+  over from this same account's own earlier red-team probes correctly
+  showed "You submitted this -- another officer must decide." instead of
+  decision buttons, with no test data crafted for that case specifically.
+- Full suite: 1194 tests attempted, 1184 passed, 0 regressions caused by
+  this change -- the same 10 pre-existing, unrelated quotation
+  test-fixture failures documented earlier in this file persist
+  identically (not reproduced again here).
