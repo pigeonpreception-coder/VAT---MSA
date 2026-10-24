@@ -292,6 +292,62 @@ class OrganisationViewTest extends TestCase
     }
 
     /**
+     * Red-team finding RT-001 (2026-10-24): assigning an existing user who
+     * already belongs to a DIFFERENT taxpayer organisation used to silently
+     * create a membership row while leaving the assignee's own taxpayer_id
+     * untouched -- every scope check in this app reads only that single
+     * field (TaxpayerScope::requireTaxpayer, matching source's own
+     * requireTaxpayerScope), so the assignee got zero real access to the
+     * organisation they were "added" to, while the UI reported success.
+     * Confirmed live during the red-team assessment: the assigned user's
+     * own role badge never changed, the organisation never appeared in
+     * their own organisations list, and direct navigation to it returned
+     * "outside your authorised taxpayer scope" (403) -- this test proves
+     * the fix: the assignment itself is now rejected up front, with a
+     * clear field error, rather than silently accepted and ineffective.
+     */
+    public function test_assigning_a_membership_to_a_user_who_already_belongs_to_a_different_organisation_is_rejected(): void
+    {
+        $orgA = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT001-A');
+        $orgB = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT001-B');
+        $ownerOfA = $this->taxpayerOwner($orgA['taxpayer']->id, 'owner-rt001-a@test.test');
+        $ownerOfB = $this->taxpayerOwner($orgB['taxpayer']->id, 'owner-rt001-b@test.test');
+
+        $response = $this->actingAs($ownerOfA)
+            ->withFreshStepUp()
+            ->post(route('organisations.memberships.store', $orgA['organisation']->id), [
+                'email' => 'owner-rt001-b@test.test', 'role_code' => 'TAXPAYER_ADMIN',
+            ]);
+
+        $response->assertSessionHasErrors('user_id');
+        $this->assertDatabaseMissing('organisation_memberships', ['organisation_id' => $orgA['organisation']->id, 'user_id' => $ownerOfB->id]);
+        // The target's own taxpayer scope must be completely untouched -- the
+        // whole point of the fix is that this assignment never happens at all.
+        $this->assertSame($orgB['taxpayer']->id, $ownerOfB->fresh()->taxpayer_id);
+    }
+
+    /**
+     * Same fix as above, exercised through the JSON API controller that
+     * shares the identical MembershipService::assign() call.
+     */
+    public function test_the_json_api_also_rejects_assigning_a_user_who_already_belongs_to_a_different_organisation(): void
+    {
+        $orgA = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT001-C');
+        $orgB = $this->ownerWithOrganisation('VAT-VIEW-ORG-RT001-D');
+        $ownerOfA = $this->taxpayerOwner($orgA['taxpayer']->id, 'owner-rt001-c@test.test');
+        $ownerOfB = $this->taxpayerOwner($orgB['taxpayer']->id, 'owner-rt001-d@test.test');
+
+        $response = $this->actingAs($ownerOfA)
+            ->withFreshStepUp()
+            ->postJson("/api/v1/organisations/{$orgA['organisation']->id}/memberships", [
+                'user_id' => $ownerOfB->id, 'role_code' => 'TAXPAYER_ADMIN',
+            ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('user_id');
+        $this->assertDatabaseMissing('organisation_memberships', ['organisation_id' => $orgA['organisation']->id, 'user_id' => $ownerOfB->id]);
+    }
+
+    /**
      * 2026-09-15 TOTP cutover: walks the real enrol -> verify -> confirm
      * step-up sequence App\Http\Middleware\EnsureFreshStepUp now sends a
      * not-yet-enrolled user through, proving `redirect_to` survives every

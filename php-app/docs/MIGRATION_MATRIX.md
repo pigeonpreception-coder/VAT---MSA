@@ -13436,3 +13436,75 @@ registration applications" table.
   organisation and a real pending registration application.
 - Scope unchanged from the prior entries: this closes the fifteenth
   screen in the user's own named sweep.
+
+## Fix: membership assignment to a user who already belongs elsewhere now rejected, not silently ineffective (2026-10-24)
+
+A fresh, extensive black-box red-team pass (10-phase brief, browser-only,
+no privileged access -- see the session's own delivered report) found
+that `MembershipService::assign()` (`OrganisationViewController::
+storeMembership`'s Blade form, and the identical `MembershipController::
+store` JSON route) reported success and created a real
+`organisation_memberships` row when assigning an existing user who
+already belonged to a *different* taxpayer organisation -- but the
+assignee got zero real access to the organisation they were "added" to.
+Live-reproduced: assigned `owner-NEMA-SEED-SUP-1@demo-taxpayer.test`
+(owner of a separate seeded organisation) a Taxpayer Admin membership on
+Demo Trading Co; the UI showed `Membership assigned` and the row appeared
+Active in the Memberships table; logging in as that user, their own role
+badge was unchanged, Demo Trading Co never appeared in their Organisations
+list, and navigating to it directly returned `Access denied -- The
+requested record is outside your authorised taxpayer scope` (403).
+
+**Root cause, confirmed against the actual TypeScript source (`lib/`),
+not assumed from the port alone:** `assignMembership` in
+`lib/data/identity-repository.ts` only ever sets `taxpayer_id` on the
+target user `WHERE taxpayer_id IS NULL` -- `MembershipService::assign()`
+already ported that condition exactly
+(`User::where(...)->whereNull('taxpayer_id')->update(...)`). This is not
+a porting bug: `lib/domain/access.ts`'s own `requireTaxpayerScope`
+(`TaxpayerScope::requireTaxpayer`'s own source) and `hasPermission` both
+resolve access and role from a single `taxpayerId`/`role` per user, with
+no multi-organisation-membership concept anywhere in the source's access
+model -- confirmed by reading `lib/domain/access.ts` and
+`lib/data/identity-repository.ts` in full, not inferred. The *intended*
+case for this guard is a user who doesn't belong to any taxpayer yet; the
+gap is that attempting to assign a user who already belongs to a
+*different* one was never rejected, just silently ineffective. The
+existing PHPUnit coverage for this method
+(`test_assigning_a_membership_with_a_confirmed_session_creates_a_real_
+membership`) only ever exercised the intended case -- its fixture user is
+created with `taxpayer_id => null` -- so this gap had no regression test
+either side of the port.
+
+Given that ground truth, the correct fix is the narrow one, not a new
+multi-organisation access model grafted onto an application that was
+never designed for one (which would have meant reworking
+`TaxpayerScope`/`hasAppPermission` -- shared by every authorization check
+in the app -- against the grain of both the source and this port, for a
+capability nobody asked for): `MembershipService::assign()` now rejects
+the assignment up front with a clear field error when the target user's
+`taxpayer_id` is non-null and does not match the organisation's own, the
+same way its sibling guards already reject a nonexistent or inactive
+target user, rather than accepting the write and leaving it inert.
+
+- Two new tests in `tests/Feature/Identity/OrganisationViewTest.php`:
+  one through the Blade form (asserts the field error, asserts no
+  membership row was created, asserts the target's own `taxpayer_id` is
+  completely untouched), one through the JSON API controller that shares
+  the identical service call (asserts 422 + the same validation error).
+- Live-verified over real HTTP/browser after the fix: assigning a
+  different, previously-unassigned seeded owner
+  (`owner-NEMA-SEED-SUP-3@demo-taxpayer.test`) to Demo Trading Co now
+  shows "This user already belongs to a different taxpayer organisation
+  and cannot be assigned here." immediately, with no new row added to
+  the Memberships table.
+- Full suite: 1176 tests attempted, 1174 passed, 0 regressions caused by
+  this change -- the same 10 pre-existing, unrelated quotation
+  test-fixture failures documented in the Taxpayer registry entry above
+  persist identically (not reproduced again here).
+- Scope: this fix only covers the assignment path. The two already-
+  created-before-this-fix broken membership rows from the red-team
+  session's own live reproduction (against `owner-NEMA-SEED-SUP-1`/`-2`)
+  remain in the dev database as inert rows -- harmless (they grant no
+  access, which is the whole point) but noted here rather than silently
+  left unexplained for whoever reads this database next.
