@@ -304,17 +304,20 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/obligations/{id}/satisfaction', [ObligationViewController::class, 'storeSatisfaction'])->name('obligations.satisfaction.store');
 
     // Real Blade UI bundling Module 1's own Organisations/Branches/
-    // Memberships/Taxpayer-suspension/Identity-snapshot services, alongside
-    // the JSON API surface below -- see OrganisationViewController's own
-    // doc comment for why these five small services were built as one
-    // slice rather than split further. Membership assignment and taxpayer
-    // suspension carry the same 'step-up' middleware as their JSON API
-    // siblings.
+    // Memberships/Invitations/Taxpayer-suspension/Identity-snapshot
+    // services, alongside the JSON API surface below -- see
+    // OrganisationViewController's own doc comment for why these services
+    // were built as one slice rather than split further. Membership
+    // assignment, teammate invitation, and taxpayer suspension all carry
+    // the same 'step-up' middleware as their JSON API siblings.
     Route::get('/organisations', [OrganisationViewController::class, 'index'])->name('organisations.index');
     Route::get('/organisations/{id}', [OrganisationViewController::class, 'show'])->name('organisations.show');
     Route::post('/organisations/{organisation}/branches', [OrganisationViewController::class, 'storeBranch'])->name('organisations.branches.store');
     Route::patch('/organisations/{organisation}/branches/{branch}', [OrganisationViewController::class, 'updateBranch'])->name('organisations.branches.update');
     Route::post('/organisations/{organisation}/memberships', [OrganisationViewController::class, 'storeMembership'])->name('organisations.memberships.store')->middleware('step-up');
+    // RT-002 (2026-10-24): same step-up ceiling as its JSON sibling,
+    // POST /api/v1/organisations/{id}/invitations.
+    Route::post('/organisations/{organisation}/invitations', [OrganisationViewController::class, 'storeInvitation'])->name('organisations.invitations.store')->middleware('step-up');
     Route::post('/organisations/{organisation}/taxpayer-suspension', [OrganisationViewController::class, 'storeSuspension'])->name('organisations.taxpayer-suspension.store')->middleware('step-up');
 
     // Real Blade UI bundling BusinessPartyService (customers/suppliers)

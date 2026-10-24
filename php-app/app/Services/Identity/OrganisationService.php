@@ -43,6 +43,10 @@ class OrganisationService
             'branches' => fn ($q) => $q->orderByDesc('is_head_office')->orderBy('name'),
             'memberships.user',
             'capabilities',
+            // RT-002 (2026-10-24): the Blade "invite a teammate" panel's own
+            // read -- UserInvitationService::invite() already writes this
+            // table, nothing read it back for display until now.
+            'invitations' => fn ($q) => $q->orderByDesc('invited_at'),
         ])->find($organisationId);
 
         if (! $organisation) {

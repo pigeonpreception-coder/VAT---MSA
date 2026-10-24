@@ -6,6 +6,7 @@ use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Identity\AssignMembershipRequest;
 use App\Http\Requests\Identity\CreateBranchRequest;
+use App\Http\Requests\Identity\InviteUserRequest;
 use App\Http\Requests\Identity\SuspendTaxpayerRequest;
 use App\Http\Requests\Identity\UpdateBranchRequest;
 use App\Models\User;
@@ -14,6 +15,7 @@ use App\Services\Identity\IdentityFoundationSnapshotService;
 use App\Services\Identity\MembershipService;
 use App\Services\Identity\OrganisationService;
 use App\Services\Identity\TaxpayerService;
+use App\Services\Identity\UserInvitationService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,17 +40,28 @@ use Illuminate\View\View;
  * `identity:read` is held broadly (almost every role in
  * Permissions::ROLE_PERMISSIONS), so the organisations list/detail stays
  * readable widely; `organisations:manage` (branch create/update, membership
- * assignment) is held by an organisation's own TAXPAYER_OWNER/ADMIN as well
- * as NAMRA_SYSTEM_SUPPORT/NAMRA_SYSTEM_ADMIN -- self-service organisation
- * administration, not officer-only, confirmed against the permission map
- * before writing any UI. `taxpayers:suspend` is rarer still (NAMRA_SYSTEM_SUPPORT/
- * NAMRA_SYSTEM_ADMIN only) and already carries its own step-up
- * requirement -- the `step-up` middleware already registered on
- * this app's JSON `/taxpayers/{id}/suspension` and
+ * assignment, teammate invitation) is held by an organisation's own
+ * TAXPAYER_OWNER/ADMIN as well as NAMRA_SYSTEM_SUPPORT/NAMRA_SYSTEM_ADMIN --
+ * self-service organisation administration, not officer-only, confirmed
+ * against the permission map before writing any UI. `taxpayers:suspend` is
+ * rarer still (NAMRA_SYSTEM_SUPPORT/NAMRA_SYSTEM_ADMIN only) and already
+ * carries its own step-up requirement -- the `step-up` middleware already
+ * registered on this app's JSON `/taxpayers/{id}/suspension` and
  * `/organisations/{id}/memberships` routes (RT-002/RT-005's own, now the
  * real TOTP-backed App\Http\Middleware\EnsureFreshStepUp) is applied
  * identically here, so no new re-auth plumbing was needed, just the same
- * middleware on the same two write routes.
+ * middleware on each write route (including storeInvitation() below).
+ *
+ * `storeInvitation()` (2026-10-24, red-team finding RT-002 -- distinct from
+ * the RT-002 referenced above, this session's own report, not the
+ * step-up-cutover one): `UserInvitationService::invite()`/`claim()` were
+ * fully built and tested (App\Http\Controllers\Identity\
+ * UserInvitationController, InvitationClaimController) but `invite()` had
+ * no Blade entry point at all -- only the JSON route. Reuses
+ * `InviteUserRequest` directly (unlike storeMembership() below, which
+ * can't: that form resolves a target by email into a user_id the JSON
+ * request shape doesn't need) since this form's fields already match the
+ * JSON request's shape exactly.
  *
  * `AssignMembershipRequest::ASSIGNABLE_ROLES` intentionally excludes NamRA/
  * platform/portal roles (its own doc comment: granting those here would be
@@ -76,6 +89,7 @@ class OrganisationViewController extends Controller
         private readonly MembershipService $memberships,
         private readonly TaxpayerService $taxpayers,
         private readonly IdentityFoundationSnapshotService $snapshot,
+        private readonly UserInvitationService $invitations,
     ) {}
 
     public function index(Request $request): View
@@ -170,6 +184,23 @@ class OrganisationViewController extends Controller
         }
 
         return redirect()->route('organisations.show', $organisation)->with('status', "Membership assigned to {$targetUser->name}.");
+    }
+
+    public function storeInvitation(InviteUserRequest $request, string $organisation): RedirectResponse
+    {
+        $this->authorize('permission', 'organisations:manage');
+
+        try {
+            $invitation = $this->invitations->invite($request->user(), $organisation, $request->validated(), (string) Str::uuid());
+        } catch (RepositoryConflictException|AuthorizationException $e) {
+            return back()->withErrors($this->messageFrom($e))->withInput();
+        }
+
+        $claimLink = route('invitations.claim', ['token' => $invitation->claim_token]);
+
+        return redirect()->route('organisations.show', $organisation)
+            ->with('status', "Invitation created for {$invitation->email}. Nothing is emailed automatically -- copy the link below and send it to them yourself.")
+            ->with('claimLink', $claimLink);
     }
 
     public function storeSuspension(SuspendTaxpayerRequest $request, string $organisation): RedirectResponse
