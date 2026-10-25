@@ -13670,3 +13670,123 @@ holds `registrations:approve`.**
   this change -- the same 10 pre-existing, unrelated quotation
   test-fixture failures documented earlier in this file persist
   identically (not reproduced again here).
+
+## Fix: real Blade UI for the Access Governance module (2026-10-25)
+
+The same red-team pass (see the three entries above) found its largest
+gap: `App\Http\Controllers\AccessGovernance\AccessGovernanceController`
+(`requestRoleAccess`/`decideAccessRequest`/`certifyQuarterlyAccess`/
+`revokeAccessGrant`/`offboardUser`, each backed by a fully-built, tested
+`AccessGovernanceService` method) had zero Blade UI anywhere -- a
+full-text search of `resources/views/` for "access-governance" or
+"AccessGovernance" found nothing, not even on the Administration page,
+despite that page's own doc comment naming "access governance" as part
+of its source-intended scope.
+
+That last point turned out to matter: `access-governance:read` is held
+by `TAXPAYER_ACCOUNTANT` -- the red-team finding's own named example role
+-- which does **not** hold `administration:read`
+(`App\Support\Access\Permissions::CONTROL_PLANE_PERMISSIONS`). Folding
+this into the existing `/administration` page, as its doc comment might
+suggest, would have left that exact role still unable to reach it --
+confirmed by writing the test first
+(`test_an_accountant_who_cannot_reach_administration_can_still_reach_access_governance`)
+and watching it fail against that design before building a standalone
+page instead.
+
+**Fix: a new standalone page, `/access-governance`, gated on
+`access-governance:read` alone, with all five write actions and
+step-up/`access-governance:manage` applied exactly where the JSON API
+already applies them.**
+
+- `App\Http\Controllers\AccessGovernance\AccessGovernanceViewController`
+  -- `index()` reuses `AdministrationSnapshotService::getAdministrationSnapshot()`
+  for `accessRequests`/`accessReviews` (the same shared snapshot
+  `AccessGovernanceController::listAccessRequests()`/`listAccessReviews()`
+  already slice down to these same two fields -- not a new read pattern).
+  `activeMembers`/`roleGrants`/`capabilityGrants` (member pickers, a
+  revocable-grants listing) are new Blade-UI-only queries added directly
+  in this controller, deliberately **not** added to
+  `AdministrationSnapshotService` itself -- that service's own doc
+  comment is explicit that its shape mirrors the source's exact "ten
+  independent reads" one-for-one; widening that shared, source-mirroring
+  contract for a UI convenience only this page needs would be a
+  port-fidelity regression, not a fix. The five write actions
+  (`storeRequest`/`storeDecision`/`storeCertification`/`storeRevocation`/
+  `storeOffboarding`) call the unchanged `AccessGovernanceService` methods
+  directly, with the exact payload keys `AccessGovernanceValidator`/the
+  service itself expect (verified against their source before writing
+  the controller, not assumed from the output shape).
+- `routes/web.php`: `GET /access-governance` plus five POST routes, same
+  `step-up` + `rate-limit:control-plane` ceiling as each JSON sibling
+  (`/access-requests`, `/access-requests/{id}/decision`,
+  `/access-reviews/{id}/certifications`, `/access-grants/revocation`,
+  `/organisations/offboarding`) -- `storeRequest` alone is not step-up
+  gated, matching the JSON controller's own doc comment ("the initial
+  self/peer access request itself is not").
+- `resources/views/access-governance/index.blade.php`: a request form
+  (self defaulted, peer selectable); an access-requests table with
+  per-row Approve/Reject (mirroring RT-003's established pattern --
+  one shared `<form>`, two `name="decision" value="APPROVE|REJECT"`
+  submit buttons, collapsing to "--" once decided); the existing
+  "quarterly reviews" listing extended with a certify mini-form
+  (review id typed directly -- the review table itself shows name/type/
+  due date, not its id, and extending the shared snapshot's row shape
+  for this was kept out of this pass for the same port-fidelity reason
+  above); two "active grants" tables (role, capability) each with an
+  inline per-row Revoke form; a danger-styled, clearly-worded "Offboard a
+  user" card. Every manage-gated control (decide/certify/revoke/offboard)
+  is hidden outright for a read-only holder, not just denied server-side
+  -- the same precedent RT-002/RT-003 already established.
+- `resources/views/layouts/app.blade.php`: a new top-level sidebar item,
+  "Access Governance" -- deliberately **not** nested inside the existing
+  "Administration" dropdown group, for the same reachability reason
+  above (nesting it there would visually imply a dependency on
+  `administration:read` that the route itself does not have; the
+  sidebar's other links are already unconditional regardless of group,
+  relying entirely on each destination route's own authorization).
+- Nine new tests in `tests/Feature/AccessGovernance/AccessGovernanceViewTest.php`,
+  fixture conventions copied directly from the existing
+  `AccessGovernanceTest.php` (the JSON-API coverage for the same
+  service) rather than reinvented: the TAXPAYER_ACCOUNTANT reachability
+  regression test above; full request -> decide -> role-assignment round
+  trip; self-decide blocked with a friendly redirect, not a crash;
+  step-up enforced; certify; revoke; offboard; a role without
+  `access-governance:read` forbidden; the page listing requests/reviews/
+  grants correctly.
+- Live-verified over a real browser session end to end, using a freshly
+  created `TAXPAYER_ACCOUNTANT` member of the real `Demo Trading Co`
+  organisation specifically to reproduce the finding's own named-role
+  gap: confirmed `/administration` returns 403 for this account while
+  `/access-governance` returns 200 with the request form visible and the
+  manage-gated controls (Certify, Offboard) absent; as
+  `owner@demo-trading.test` (`TAXPAYER_OWNER`, holds
+  `access-governance:manage`), decided the accountant's submitted
+  request with real step-up (status flipped to Approved, Decision column
+  collapsed to "--", a real `user_role_assignments` row created);
+  certified the open quarterly review for the same member; revoked the
+  role grant through its own inline form, confirmed `REVOKED` in the
+  database directly (the live page's role-name text staying visible
+  afterwards is correct, not a bug -- the role definition itself stays
+  active and selectable for a future request; only the grant row's
+  status changes, confirmed via direct query rather than page text).
+  Offboarding is covered by its own passing feature test, not repeated
+  live in this pass -- the simplest of the five actions, and the same
+  underlying service call already proven live for decide/certify/revoke.
+- A real precondition surfaced during this work, not introduced by it:
+  `decideAccessRequest`/`revokeAccessGrant`/`offboardUser` all gate on
+  `EntitlementGate`'s `ADMIN_WRITE` operation class, which additionally
+  requires a current-quarter `access_reviews` row (OPEN or COMPLETED, not
+  overdue) to already exist for the organisation -- confirmed this is
+  already seeded for the real demo organisation
+  (`DemoSeeder`'s own `access_reviews` `updateOrInsert`, added in an
+  earlier pass of this migration for exactly this reason) rather than
+  being another RT-004-style dead end; new tests open one explicitly via
+  the existing `POST /api/v1/access-reviews` endpoint first, matching
+  `AccessGovernanceTest.php`'s own established convention.
+- Full suite: 1195 tests attempted, 1184 passed (the known, unrelated
+  quotation baseline) + 11 of this fix's own new tests, 0 regressions. A
+  single additional, non-reproducing quotation-test failure appeared on
+  one run and was gone on an immediate re-run -- a flake in that same
+  known-fragile area, not a regression this change caused (confirmed by
+  the second run exactly matching the expected count).

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Access\AccessRightsViewController;
 use App\Http\Controllers\AccessGovernance\AccessGovernanceController;
+use App\Http\Controllers\AccessGovernance\AccessGovernanceViewController;
 use App\Http\Controllers\AuthorityGovernance\AuthorityGovernanceController;
 use App\Http\Controllers\Administration\AdministrationController;
 use App\Http\Controllers\Administration\AdministrationViewController;
@@ -503,6 +504,26 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         ->name('administration.employees.store')->middleware('step-up');
     Route::post('/administration/roles', [AdministrationViewController::class, 'storeRole'])
         ->name('administration.roles.store')->middleware('step-up');
+
+    // RT-005 (docs/MIGRATION_MATRIX.md): a standalone page, not folded
+    // into /administration above -- access-governance:read is held by
+    // roles that do not hold administration:read (TAXPAYER_ACCOUNTANT),
+    // so gating this on administration:read would leave them still
+    // unable to reach it. See AccessGovernanceViewController's own doc
+    // comment. Same step-up ceiling as each JSON sibling under
+    // /api/v1/access-requests, /access-reviews/{id}/certifications,
+    // /access-grants/revocation and /organisations/offboarding below.
+    Route::get('/access-governance', [AccessGovernanceViewController::class, 'index'])->name('access-governance.index');
+    Route::post('/access-governance/requests', [AccessGovernanceViewController::class, 'storeRequest'])
+        ->name('access-governance.requests.store')->middleware('rate-limit:control-plane');
+    Route::post('/access-governance/requests/{id}/decision', [AccessGovernanceViewController::class, 'storeDecision'])
+        ->name('access-governance.requests.decision')->middleware(['step-up', 'rate-limit:control-plane']);
+    Route::post('/access-governance/certifications', [AccessGovernanceViewController::class, 'storeCertification'])
+        ->name('access-governance.certifications.store')->middleware(['step-up', 'rate-limit:control-plane']);
+    Route::post('/access-governance/revocations', [AccessGovernanceViewController::class, 'storeRevocation'])
+        ->name('access-governance.revocations.store')->middleware(['step-up', 'rate-limit:control-plane']);
+    Route::post('/access-governance/offboarding', [AccessGovernanceViewController::class, 'storeOffboarding'])
+        ->name('access-governance.offboarding.store')->middleware(['step-up', 'rate-limit:control-plane']);
 
     // Ported from the source's own app/documents/page.tsx +
     // DocumentUploadForm.tsx -- see DocumentViewController's own doc
