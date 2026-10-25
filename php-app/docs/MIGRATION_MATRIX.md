@@ -13790,3 +13790,157 @@ already applies them.**
   one run and was gone on an immediate re-run -- a flake in that same
   known-fragile area, not a regression this change caused (confirmed by
   the second run exactly matching the expected count).
+
+## Fix: real Blade UI for Communications (notices, responses, closure) (2026-10-25)
+
+The same red-team pass's next finding claimed Communications
+(`App\Services\Compliance\CommunicationService`: `sendNotice`/`respond`/
+`close`/`inbox`/`conversation`, Module 6 Phase C) had **no** Blade UI at
+all -- "no file in `resources/views/` references `communicat*`, and no GET
+route renders a communications page."
+
+That claim turned out to be only half right, the same shape of correction
+RT-006 needed. `compliance/overview.blade.php`
+(`ComplianceOverviewViewController`) already rendered a full read-only
+preview of every thread -- subject, status, channel/direction, actor and
+date -- confirmed by reading the view directly and by an existing passing
+test assertion (`assertSee('No communications recorded.')`). But that page
+is permanently read-only by its own documented design
+(`ComplianceSnapshotService` has no write side at all, a fact its own
+controller doc comment states explicitly) -- so the real gap survives the
+correction: there was never anywhere in the UI to actually send a notice,
+respond to one, or close a thread. Unlike RT-004/RT-006, this did not
+become a "close as not-a-bug" question -- the underlying gap is real, just
+narrower than the finding stated.
+
+**Fix: a new standalone two-page module, `/communications` (inbox) and
+`/communications/{id}` (thread detail), with all three write actions
+gated exactly where the JSON API already gates them; `compliance/
+overview.blade.php`'s Communications card moved from its permanent inline
+preview to the same count+link treatment every other domain on that page
+already gets, now that a dedicated page exists for it to link to.**
+
+- `App\Http\Controllers\Compliance\CommunicationViewController` --
+  `index()`/`show()` call `CommunicationService::inbox()`/`conversation()`
+  directly (no new query methods needed); `storeNotice`/`storeResponse`/
+  `storeClosure` call `sendNotice`/`respond`/`close` with the exact
+  payload keys `ComplianceValidator::notice()`/`conversationResponse()`/
+  `conversationClosure()` expect, verified against their source before
+  writing the controller. `index()`/`show()`/`storeResponse()` gate on the
+  same broad `compliance:read` the JSON siblings do
+  (`CommunicationController::inbox`/`show`/`respond`) -- the real respond
+  permission (`communications:manage` OR `communications:respond`) is
+  enforced inside the service itself, the exact layered-permission
+  pattern the JSON controller already uses. `storeNotice`/`storeClosure`
+  gate on `communications:manage` directly, matching their JSON siblings.
+- A real, pre-existing asymmetry surfaced while gating `show()`/
+  `storeResponse()`, not introduced by this fix: `TAXPAYER_ACCOUNTANT`
+  holds `communications:respond` but **not** `compliance:read`
+  (`App\Support\Access\Permissions::ROLE_PERMISSIONS`), so it cannot reach
+  this page -- or the JSON endpoint it mirrors -- at all, despite holding
+  the respond permission. Confirmed this is the JSON API's own existing
+  behaviour (the same gate, the same gap), not something this UI pass
+  introduced; left as-is rather than widened, since broadening a
+  permission gate is a separate decision from building the UI a gate
+  already allows.
+- A second, more consequential correctness fix landed inside the
+  controller itself during testing, not the view: the first draft caught
+  `AuthorizationException` in all three write actions' catch blocks
+  alongside `ComplianceResourceException`/`RepositoryConflictException`,
+  converting it to a friendly inline form error (mirroring
+  `AuditCaseViewController`'s own pattern for its segregation-of-duties
+  override case). A live test proved this wrong for Communications
+  specifically: a cross-tenant `storeResponse` attempt returned 302 with a
+  flashed error instead of a 403, diverging from both the JSON sibling's
+  real behaviour and this controller's own `show()` method (which lets the
+  identical `AuthorizationException` from `conversation()` bubble to the
+  framework's standard 403, the RT-002 clean-403 convention). The
+  distinction: `AuditCaseService`'s SoD-override exception means "you hold
+  manage and legitimate access to this exact case, just not this action
+  without an override reason" -- genuinely form-shaped feedback.
+  `CommunicationService`'s `AuthorizationException` cases mean either "no
+  business-rule standing to act at all" or "this thread is outside your
+  tenant" -- genuine access denials. Fixed by removing
+  `AuthorizationException` from all three catch blocks, letting it fall
+  through to the framework's own 403 uncaught, matching the JSON sibling
+  exactly.
+- `routes/web.php`: `GET /communications`, `GET /communications/{id}`,
+  `POST /communications/notices`, `POST /communications/{id}/responses`,
+  `POST /communications/{id}/closure` -- no `step-up` and no extra
+  rate-limit, matching each JSON sibling (`CommunicationService` never
+  calls `EntitlementGate::assert`, confirmed by grep, unlike
+  `AccessGovernanceService`'s `ADMIN_WRITE` operation class).
+- `resources/views/communications/index.blade.php`: a "Send a notice" form
+  (manage-gated, hidden outright for a respond-only holder) restricted to
+  `AUDIT_CASE`/`RECONCILIATION_EXCEPTION` reference types only --
+  deliberately excluding `REFUND_CLAIM`, a valid
+  `ComplianceValidator::CASE_REFERENCE_TYPES` member that
+  `CommunicationService::resolveCaseReference()` always rejects with a 422
+  ("the refund_claims table has not been ported"), the same RT-004 lesson
+  applied here before writing a button that can never succeed; a
+  status-filterable thread table, mirroring Audit Cases' own filter-form
+  pattern. `resources/views/communications/show.blade.php`: thread record,
+  full message history (actor names resolved via one bulk
+  `User::whereIn()` lookup, the Audit Cases precedent), a Respond form
+  (shown while open to any `communications:manage`-or-`respond` holder)
+  and a danger-styled Close form (shown while open to a manage holder
+  only, with a confirm() guard) -- both hidden once the thread is closed,
+  not just rejected server-side.
+- `resources/views/layouts/app.blade.php`: "Communications" added to the
+  existing "VAT Management" sidebar group (between Obligations and
+  Compliance Overview), alongside Disputes/Obligations/Audit Cases rather
+  than as a new standalone top-level item the way RT-005's Access
+  Governance was. Unlike "Administration" (itself also a permission name
+  most of its own sidebar siblings share), "VAT Management" is not a
+  permission and is already a heterogeneous bucket -- its existing
+  siblings alone span `compliance:read` (Obligations, Compliance
+  Overview), `risk:read` (Risk Indicators) and others -- so adding a
+  fourth distinct gate (`compliance:read`, shared with Obligations/
+  Compliance Overview here) here follows that same established precedent
+  rather than creating the RT-005-shaped "implies a dependency that isn't
+  real" risk a reader could draw from a group whose name IS a permission.
+- `resources/views/compliance/overview.blade.php` /
+  `ComplianceOverviewViewController`: Communications moved from the
+  four-card, permanently-inline preview row into the `$stats` count+link
+  array (now six domains, `row-cols-lg-3 row-cols-xl-6`), leaving three
+  inline-preview cards (Notifications, Consent grants, Delegations --
+  `row-cols-lg-3`, down from four). The controller's bulk `User::
+  whereIn()` actor-name lookup dropped the now-unneeded `communications`
+  `actor_id` merge; `show()`'s own bulk lookup in the new controller
+  resolves those names instead.
+- 13 new tests in `tests/Feature/Compliance/CommunicationViewTest.php`,
+  fixture conventions copied directly from the existing
+  `CommunicationAndNotificationTest.php` (the JSON-API coverage for the
+  same service): send notice opens a thread and redirects to it; a
+  duplicate notice for the same case is rejected with a form error (not a
+  crash); a role without `communications:manage` cannot send a notice; the
+  thread's own taxpayer can respond while open; responding after closure
+  is rejected; a different taxpayer gets a real 403 on both view and
+  respond (the regression test for the `AuthorizationException` fix
+  above); closing a thread through the form; a taxpayer cannot close a
+  thread; manage-gated controls hidden from a respond-only holder on both
+  pages; the overview page links out instead of rendering inline. Three
+  existing assertions in `ComplianceOverviewViewTest.php` updated to match
+  the new page (a stale inline-subject assertion replaced with a
+  link-presence one, the now-impossible "No communications recorded."
+  empty-state assertion removed, the "every domain links out" test
+  extended to all six cards) -- not weakened, each updated assertion
+  proves the equivalent new behaviour.
+- Live-verified over a real browser session end to end, using the real
+  `namra-compliance@vat-msa.test` (`NAMRA_COMPLIANCE_OFFICER`) and
+  `owner@demo-trading.test` (`TAXPAYER_OWNER`) demo accounts: officer
+  opened a fresh audit case, sent a notice against it from the new page
+  (thread created `OPEN`, redirected straight to its detail page); the
+  owner saw it listed in their own inbox with no "Send a notice" card
+  visible, opened it, saw a Respond form but no Close-thread form, and
+  replied; the officer saw that reply, closed the thread with a reason;
+  both the Respond and Close-thread forms were gone from the page
+  immediately after, for both roles. Confirmed `/compliance-overview`
+  no longer renders the closed card's own per-thread markup
+  (`comm-item`, the removed card's own CSS hook) and links out to
+  `/communications` instead.
+- Full suite: 1218 tests attempted, 1208 passed (the 1195 known-good
+  baseline left by the Access Governance fix above + 13 of this fix's own
+  new tests) + the same 10 pre-existing, unrelated quotation test-fixture
+  failures documented earlier in this file, 0 regressions caused by this
+  change.

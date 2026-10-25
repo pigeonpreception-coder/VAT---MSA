@@ -153,7 +153,12 @@ class ComplianceOverviewViewTest extends TestCase
         $response = $this->actingAs($auditor)->get('/compliance-overview');
 
         $response->assertOk()->assertViewIs('compliance.overview');
-        $response->assertSee('Filing reminder outreach');
+        // RT-007 (docs/MIGRATION_MATRIX.md): the notice's own subject no
+        // longer renders inline here -- Communications moved to a
+        // count+link stat card (CommunicationViewTest covers that page's
+        // own content directly), the same treatment every other domain's
+        // card already gets.
+        $response->assertSee(route('communications.index'), false);
         $response->assertSee('VAT return due soon');
         $response->assertSee('VAT return preparation');
         $response->assertSee('Granted by Taxpayer Owner');
@@ -200,23 +205,25 @@ class ComplianceOverviewViewTest extends TestCase
         $response = $this->actingAs($owner)->get('/compliance-overview');
 
         $response->assertOk();
-        $response->assertSee('No communications recorded.');
         $response->assertSee('No notifications recorded.');
         $response->assertSee('No consent grants recorded.');
         $response->assertSee('No delegations recorded.');
     }
 
     /**
-     * All five stat-card domains (Obligations, Audit Cases, Disputes, Risk
-     * Indicators, Refunds) had merged to main by the time this PR itself
-     * was merged -- so every card renders as a real Route::has()-guarded
-     * link here. This supersedes what was originally two separate tests
-     * (one for domains already merged when this PR was *written*, one
-     * proving the not-yet-merged ones degraded to plain text): the second
-     * one's own doc comment said explicitly that it would stop proving
-     * anything, and fail, the moment those routes existed -- which is
-     * exactly what happened at merge time, confirming the Route::has()
-     * guard did its job rather than silently masking a real problem.
+     * All five original stat-card domains (Obligations, Audit Cases,
+     * Disputes, Risk Indicators, Refunds) had merged to main by the time
+     * this PR itself was merged -- so every card renders as a real
+     * Route::has()-guarded link here. This supersedes what was originally
+     * two separate tests (one for domains already merged when this PR was
+     * *written*, one proving the not-yet-merged ones degraded to plain
+     * text): the second one's own doc comment said explicitly that it
+     * would stop proving anything, and fail, the moment those routes
+     * existed -- which is exactly what happened at merge time, confirming
+     * the Route::has() guard did its job rather than silently masking a
+     * real problem. Communications joined this same card group as a sixth
+     * domain under RT-007 (docs/MIGRATION_MATRIX.md), moved out of its own
+     * permanently-inline preview card now that it has a dedicated page.
      */
     public function test_stat_cards_link_to_every_domains_own_dedicated_page(): void
     {
@@ -231,5 +238,6 @@ class ComplianceOverviewViewTest extends TestCase
         $response->assertSee(route('disputes.index'), false);
         $response->assertSee(route('refunds.index'), false);
         $response->assertSee(route('risk-indicators.index'), false);
+        $response->assertSee(route('communications.index'), false);
     }
 }
