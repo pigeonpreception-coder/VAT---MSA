@@ -7,15 +7,15 @@ use Tests\TestCase;
 class ExampleTest extends TestCase
 {
     /**
-     * Replaces Laravel's default scaffold assertion (which expected a 200
-     * welcome page at `/`) -- routes/web.php redirects `/` to `/dashboard`,
-     * which itself requires authentication and (unfollowed, one hop at a
-     * time, matching the test client's own behaviour) bounces an
-     * unauthenticated visitor on to `/login` in turn.
+     * `/` used to redirect straight to /dashboard (and on to /login for a
+     * guest). It is now the public landing page every visitor sees first,
+     * so a guest gets a 200 there -- while the dashboard itself still
+     * requires authentication. Landing-page behaviour in full lives in
+     * Tests\Feature\Site\PublicSiteTest.
      */
-    public function test_the_root_route_redirects_toward_the_dashboard_which_then_requires_login(): void
+    public function test_the_root_route_is_the_public_landing_page_and_the_dashboard_still_requires_login(): void
     {
-        $this->get('/')->assertRedirect('/dashboard');
+        $this->get('/')->assertOk();
         $this->get('/dashboard')->assertRedirect('/login');
     }
 }
