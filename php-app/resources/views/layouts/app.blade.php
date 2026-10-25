@@ -211,6 +211,14 @@
                         </ul>
                     </li>
 
+                    {{-- RT-005: a standalone top-level item, not nested in the
+                         Administration group above -- access-governance:read is
+                         held by roles that don't hold administration:read
+                         (TAXPAYER_ACCOUNTANT), so this needs to read as
+                         independent of that group, not implicitly gated
+                         behind it. See AccessGovernanceViewController's own
+                         doc comment. --}}
+                    <li class="nav-item"><a class="nav-link" href="{{ route('access-governance.index') }}" @if (request()->routeIs('access-governance.*')) aria-current="page" @endif>Access Governance</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('licensing.index') }}" @if (request()->routeIs('licensing.*')) aria-current="page" @endif>Licensing &amp; Subscription</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('platform.index') }}" @if (request()->routeIs('platform.*')) aria-current="page" @endif>Platform</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ route('access-rights.index') }}" @if (request()->routeIs('access-rights.*')) aria-current="page" @endif>Access Rights</a></li>
