@@ -1,2 +1,4 @@
 User-agent: *
 Disallow:
+
+Sitemap: https://vat.safi-nuru.com/sitemap.xml

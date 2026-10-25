@@ -124,7 +124,11 @@ use App\Http\Controllers\Workflow\WorkflowController;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn () => redirect()->route('dashboard'));
+// Public marketing site: `/` (home), /product, /trust, /plans, /verify and
+// /sitemap.xml. `/` used to be a bare redirect to the dashboard; it is now
+// the landing page every visitor sees first, and SiteController::home()
+// still forwards an already-signed-in user to their dashboard.
+require __DIR__.'/site.php';
 
 // Module 2 Phase C/B: GetPublicVerification -- deliberately outside every
 // auth-gated group below (both the 'guest' group, which locks out an
