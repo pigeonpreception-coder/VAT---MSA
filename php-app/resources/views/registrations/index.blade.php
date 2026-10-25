@@ -168,10 +168,16 @@
                     <th scope="col">Mismatch</th>
                     <th scope="col">Submitted</th>
                     <th scope="col">Status</th>
+                    @if ($canDecide)
+                        <th scope="col">Decision</th>
+                    @endif
                 </tr>
             </thead>
             <tbody>
                 @forelse ($applications as $application)
+                    @php
+                        $isDecidable = in_array($application['status'], ['PENDING_VERIFICATION', 'UNDER_REVIEW', 'VERIFIED'], true);
+                    @endphp
                     <tr>
                         <td>
                             <strong>{{ $application['legal_name'] }}</strong>
@@ -189,9 +195,32 @@
                         <td><x-status-badge :value="$application['mismatch_status'] ?? 'NONE'" /></td>
                         <td>{{ optional($application['submitted_at'])->format('Y-m-d H:i') }}</td>
                         <td><x-status-badge :value="$application['status']" /></td>
+                        @if ($canDecide)
+                            <td style="min-width: 220px;">
+                                @if ($isDecidable && $application['submitted_by'] !== auth()->id())
+                                    {{-- Step-up gated: routes/web.php applies 'step-up' to
+                                         this route, matching the JSON API's own
+                                         /registration-applications/{id}/decision POST.
+                                         One reason field, two submit buttons -- only the
+                                         clicked button's name=decision value is sent. --}}
+                                    <form method="POST" action="{{ route('registrations.decision', $application['id']) }}">
+                                        @csrf
+                                        <textarea name="reason" rows="1" minlength="5" maxlength="240" required placeholder="Reason (min. 5 characters)" class="form-control form-control-sm mb-1"></textarea>
+                                        <div class="d-flex gap-1">
+                                            <button type="submit" name="decision" value="APPROVE" class="btn btn-success btn-sm flex-fill">Approve</button>
+                                            <button type="submit" name="decision" value="REJECT" class="btn btn-outline-danger btn-sm flex-fill">Reject</button>
+                                        </div>
+                                    </form>
+                                @elseif ($isDecidable)
+                                    <span class="text-muted small">You submitted this -- another officer must decide.</span>
+                                @else
+                                    <span class="text-muted small">—</span>
+                                @endif
+                            </td>
+                        @endif
                     </tr>
                 @empty
-                    <tr><td colspan="10" class="text-center text-muted py-4">No registration applications have been submitted.</td></tr>
+                    <tr><td colspan="{{ $canDecide ? 11 : 10 }}" class="text-center text-muted py-4">No registration applications have been submitted.</td></tr>
                 @endforelse
             </tbody>
         </table>

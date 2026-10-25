@@ -547,6 +547,11 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/registrations', [RegistrationsViewController::class, 'index'])->name('registrations.index');
     Route::post('/registrations', [RegistrationsViewController::class, 'store'])
         ->name('registrations.store')->middleware('rate-limit:registration');
+    // RT-003 (2026-10-24): same step-up ceiling as its JSON sibling,
+    // POST /api/v1/registration-applications/{id}/decision -- no Blade
+    // path existed to approve or reject an application at all.
+    Route::post('/registrations/{registration}/decision', [RegistrationsViewController::class, 'storeDecision'])
+        ->name('registrations.decision')->middleware(['step-up', 'rate-limit:registration']);
 
     // Frontend UI build-out: the Reports & Analytics console, reusing
     // ReportExportService/DataProductService directly (see
