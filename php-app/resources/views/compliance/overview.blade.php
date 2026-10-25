@@ -25,10 +25,16 @@
         ['key' => 'disputes', 'label' => 'Disputes', 'route' => 'disputes.index'],
         ['key' => 'risks', 'label' => 'Risk Indicators', 'route' => 'risk-indicators.index'],
         ['key' => 'refunds', 'label' => 'Refunds', 'route' => 'refunds.index'],
+        // RT-007 (docs/MIGRATION_MATRIX.md): moved here from its own inline
+        // preview card below -- CommunicationViewController now gives this
+        // domain the same dedicated page every other stat card already
+        // links to, so it gets the same count+link treatment, not a
+        // second, permanently read-only rendering of the same data.
+        ['key' => 'communications', 'label' => 'Communications', 'route' => 'communications.index'],
     ];
     $previewLimit = 5;
 @endphp
-<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-5 g-3 mb-4">
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-6 g-3 mb-4">
     @foreach ($stats as $stat)
         <div class="col">
             @if (Route::has($stat['route']))
@@ -52,35 +58,7 @@
     @endforeach
 </div>
 
-<div class="row row-cols-1 row-cols-lg-2 g-3">
-    <div class="col">
-        <div class="card h-100">
-            <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
-                <span>Communications</span>
-                <span class="badge text-bg-light border">{{ count($snapshot['communications']) }}</span>
-            </div>
-            <div class="card-body">
-                @forelse ($snapshot['communications'] as $index => $communication)
-                    <div class="mb-3 pb-3 border-bottom comm-item" @if ($index >= $previewLimit) hidden @endif>
-                        <div class="d-flex justify-content-between align-items-start">
-                            <strong>{{ $communication['subject'] }}</strong>
-                            <x-status-badge :value="$communication['status']" type="status" />
-                        </div>
-                        <div class="text-muted small mt-1">{{ ucfirst(strtolower($communication['channel'])) }} &middot; {{ ucfirst(strtolower($communication['direction'])) }}</div>
-                        <div class="text-muted small mt-1">{{ $userNames[$communication['actor_id']] ?? 'Unknown' }} &middot; {{ \Illuminate\Support\Carbon::parse($communication['occurred_at'])->format('d M Y') }}</div>
-                    </div>
-                @empty
-                    <p class="text-muted small mb-0">No communications recorded.</p>
-                @endforelse
-                @if (count($snapshot['communications']) > $previewLimit)
-                    <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1" data-show-more-target="comm-item" data-show-more-count="{{ count($snapshot['communications']) - $previewLimit }}">
-                        Show {{ count($snapshot['communications']) - $previewLimit }} more
-                    </button>
-                @endif
-            </div>
-        </div>
-    </div>
-
+<div class="row row-cols-1 row-cols-lg-3 g-3">
     <div class="col">
         <div class="card h-100">
             <div class="card-header fw-semibold d-flex justify-content-between align-items-center">

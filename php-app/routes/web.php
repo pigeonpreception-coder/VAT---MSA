@@ -60,6 +60,7 @@ use App\Http\Controllers\Compliance\AuditCaseViewController;
 use App\Http\Controllers\Compliance\ComplianceOverviewViewController;
 use App\Http\Controllers\Compliance\ComplianceSnapshotController;
 use App\Http\Controllers\Compliance\CommunicationController;
+use App\Http\Controllers\Compliance\CommunicationViewController;
 use App\Http\Controllers\Compliance\DisputeController;
 use App\Http\Controllers\Compliance\DisputeViewController;
 use App\Http\Controllers\Compliance\NotificationController;
@@ -294,6 +295,18 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::get('/disputes', [DisputeViewController::class, 'index'])->name('disputes.index');
     Route::get('/disputes/{id}', [DisputeViewController::class, 'show'])->name('disputes.show');
     Route::post('/disputes', [DisputeViewController::class, 'store'])->name('disputes.store');
+
+    // RT-007 (docs/MIGRATION_MATRIX.md): real Blade UI for Module 6 Phase C
+    // (communications), alongside the JSON API surface below -- see
+    // CommunicationViewController's own doc comment. compliance-overview's
+    // Communications card links here instead of inline-rendering now that
+    // this page exists. No step-up and no extra rate-limit, matching each
+    // JSON sibling under /communications/{notices,{id}/responses,{id}/closure}.
+    Route::get('/communications', [CommunicationViewController::class, 'index'])->name('communications.index');
+    Route::get('/communications/{id}', [CommunicationViewController::class, 'show'])->name('communications.show');
+    Route::post('/communications/notices', [CommunicationViewController::class, 'storeNotice'])->name('communications.notices.store');
+    Route::post('/communications/{id}/responses', [CommunicationViewController::class, 'storeResponse'])->name('communications.responses.store');
+    Route::post('/communications/{id}/closure', [CommunicationViewController::class, 'storeClosure'])->name('communications.closure.store');
 
     // Real Blade UI for Module 3 Phase D (tax obligations), alongside the
     // JSON API surface below -- see ObligationViewController's own doc

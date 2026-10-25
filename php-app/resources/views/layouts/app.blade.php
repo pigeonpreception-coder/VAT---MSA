@@ -53,7 +53,7 @@
                     // which group starts expanded.
                     $groups = [
                         'dashboard' => ['dashboard', 'portals.*'],
-                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'audit-trail.*', 'disputes.*', 'obligations.*', 'compliance-overview.*', 'exceptions.*'],
+                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'audit-trail.*', 'disputes.*', 'obligations.*', 'communications.*', 'compliance-overview.*', 'exceptions.*'],
                         'invoice-management' => ['invoice-management.*', 'invoices.*'],
                         'accounting-finance' => ['accounting.*'],
                         'operations' => ['operations.*'],
@@ -96,6 +96,7 @@
                             <li><a class="nav-link" href="{{ route('audit-trail.index') }}" @if (request()->routeIs('audit-trail.*')) aria-current="page" @endif>Audit Trail</a></li>
                             <li><a class="nav-link" href="{{ route('disputes.index') }}" @if (request()->routeIs('disputes.*')) aria-current="page" @endif>Disputes</a></li>
                             <li><a class="nav-link" href="{{ route('obligations.index') }}" @if (request()->routeIs('obligations.*')) aria-current="page" @endif>Obligations</a></li>
+                            <li><a class="nav-link" href="{{ route('communications.index') }}" @if (request()->routeIs('communications.*')) aria-current="page" @endif>Communications</a></li>
                             <li><a class="nav-link" href="{{ route('compliance-overview.index') }}" @if (request()->routeIs('compliance-overview.*')) aria-current="page" @endif>Compliance Overview</a></li>
                         </ul>
                     </li>
