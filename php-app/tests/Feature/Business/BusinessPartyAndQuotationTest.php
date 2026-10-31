@@ -135,11 +135,17 @@ class BusinessPartyAndQuotationTest extends TestCase
         $response->assertStatus(403);
     }
 
+    /**
+     * issue_date/valid_until are relative to now(), never literal dates: once valid_until
+     * has passed, QuotationService refuses to accept, reject or edit the quotation (409
+     * "validity period has ended"), so a literal date breaks every lifecycle test the day
+     * after it.
+     */
     private function quotationPayload(string $customerPartyId, array $overrides = []): array
     {
         return array_replace_recursive([
             'schema_version' => '1.0.0', 'customer_party_id' => $customerPartyId, 'quotation_number' => 'QUO-TEST-0001',
-            'currency' => 'NAD', 'issue_date' => '2026-09-01', 'valid_until' => '2026-09-30',
+            'currency' => 'NAD', 'issue_date' => now()->toDateString(), 'valid_until' => now()->addDays(30)->toDateString(),
             'lines' => [['description' => 'Consulting services', 'quantity_micros' => 1_000_000, 'unit_code' => 'EA', 'unit_price_cents' => 100_000, 'tax_category' => 'STANDARD', 'tax_rate_bps' => 1500]],
         ], $overrides);
     }
@@ -174,7 +180,7 @@ class BusinessPartyAndQuotationTest extends TestCase
         $accept->assertStatus(200)->assertJsonPath('resource.status', 'ACCEPTED');
 
         $convert = $this->actingAs($seller['owner'])->postJson("/api/v1/quotations/{$quotationId}/convert", [
-            'schema_version' => '1.0.0', 'invoice_number' => 'INV-FROM-QUO-0001', 'issue_date' => '2026-09-02',
+            'schema_version' => '1.0.0', 'invoice_number' => 'INV-FROM-QUO-0001', 'issue_date' => now()->toDateString(),
         ], ['Idempotency-Key' => 'test-idem-quo-convert-0001']);
 
         // CERTIFIED rather than MATCHED: the quotation's customer_party_id is a local
@@ -231,7 +237,7 @@ class BusinessPartyAndQuotationTest extends TestCase
         });
 
         $convert = $this->actingAs($seller['owner'])->postJson("/api/v1/quotations/{$quotationId}/convert", [
-            'schema_version' => '1.0.0', 'invoice_number' => 'INV-RACE-LOSER-0001', 'issue_date' => '2026-09-02',
+            'schema_version' => '1.0.0', 'invoice_number' => 'INV-RACE-LOSER-0001', 'issue_date' => now()->toDateString(),
         ], ['Idempotency-Key' => 'test-idem-quo-race-convert-0001']);
 
         $this->assertTrue($raced, 'The DB::listen() hook must have fired to simulate the race (it never fires at all on the pre-fix code path, which has no lockForUpdate query).');

@@ -77,11 +77,17 @@ class QuotationViewTest extends TestCase
         return $id;
     }
 
+    /**
+     * issue_date/valid_until are relative to now(), never literal dates: once valid_until
+     * has passed, QuotationService refuses to accept, reject or edit the quotation (409
+     * "validity period has ended"), so a literal date breaks every lifecycle test the day
+     * after it.
+     */
     private function quotationFormPayload(string $customerPartyId, array $overrides = []): array
     {
         return array_replace([
             'quotation_number' => 'QUO-VIEW-0001', 'customer_party_id' => $customerPartyId,
-            'issue_date' => '2026-09-01', 'valid_until' => '2026-09-30',
+            'issue_date' => now()->toDateString(), 'valid_until' => now()->addDays(30)->toDateString(),
             'description' => 'Consulting services', 'quantity' => 1, 'unit_code' => 'EA', 'unit_price_cents' => 100000,
         ], $overrides);
     }
@@ -184,7 +190,7 @@ class QuotationViewTest extends TestCase
         $this->assertDatabaseHas('quotations', ['id' => $quotationId, 'status' => 'ACCEPTED']);
 
         $convert = $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/convert", [
-            'invoice_number' => 'INV-FROM-VIEW-0001', 'issue_date' => '2026-09-02',
+            'invoice_number' => 'INV-FROM-VIEW-0001', 'issue_date' => now()->toDateString(),
         ]);
         $convert->assertRedirect();
         $this->assertStringContainsString('/invoices/', $convert->headers->get('Location'));
@@ -249,7 +255,7 @@ class QuotationViewTest extends TestCase
 
         $response = $this->actingAs($seller['owner'])->patch("/quotations/{$quotationId}", [
             'quotation_number' => 'QUO-VIEW-0001', 'customer_party_id' => $customerPartyId,
-            'issue_date' => '2026-09-01', 'valid_until' => '2026-09-30',
+            'issue_date' => now()->toDateString(), 'valid_until' => now()->addDays(30)->toDateString(),
             'lines' => [
                 ['description' => 'Consulting services', 'quantity' => 1, 'unit_code' => 'EA', 'unit_price_cents' => 100000, 'tax_category' => 'STANDARD', 'tax_rate_bps' => 1500],
                 ['description' => 'Training session', 'quantity' => 2, 'unit_code' => 'EA', 'unit_price_cents' => 50000, 'tax_category' => 'STANDARD', 'tax_rate_bps' => 1500],
@@ -297,7 +303,7 @@ class QuotationViewTest extends TestCase
         $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/sending");
         $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/accept");
         $this->actingAs($seller['owner'])->post("/quotations/{$convertedId}/convert", [
-            'invoice_number' => 'INV-FROM-VIEW-CONVERTED', 'issue_date' => '2026-09-02',
+            'invoice_number' => 'INV-FROM-VIEW-CONVERTED', 'issue_date' => now()->toDateString(),
         ]);
         $this->actingAs($seller['owner'])->post('/quotations', $this->quotationFormPayload($customerPartyId, ['quotation_number' => 'QUO-VIEW-STILL-DRAFT']));
 
@@ -327,17 +333,17 @@ class QuotationViewTest extends TestCase
         $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/sending");
         $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/accept");
         $convert = $this->actingAs($seller['owner'])->post("/quotations/{$quotationId}/convert", [
-            'invoice_number' => 'INV-VIEW-XREF', 'issue_date' => '2026-09-02',
+            'invoice_number' => 'INV-VIEW-XREF', 'issue_date' => now()->toDateString(),
         ]);
         $invoiceId = \App\Models\Invoice::where('invoice_number', 'INV-VIEW-XREF')->firstOrFail()->id;
         $sourceDocumentId = \App\Models\Invoice::findOrFail($invoiceId)->source_document_id;
 
         $creditNote = $this->actingAs($seller['owner'])->postJson('/api/v1/invoices', [
             'schema_version' => '1.0.0', 'invoice_number' => 'CN-VIEW-XREF', 'document_type' => 'CREDIT_NOTE',
-            'source' => ['system_id' => 'erp-test', 'document_id' => 'doc-cn-view-xref', 'submitted_at' => '2026-09-03T09:00:00Z'],
+            'source' => ['system_id' => 'erp-test', 'document_id' => 'doc-cn-view-xref', 'submitted_at' => now()->toISOString()],
             'supplier' => ['name' => 'VAT-SELLER-0011 Trading Co', 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => 'VAT-SELLER-0011']]],
             'customer' => ['name' => 'Northgate Customer', 'identifiers' => [['type' => 'VAT_NUMBER', 'value' => 'VAT-CUST-0011']]],
-            'issue_date' => '2026-09-03', 'currency' => 'NAD',
+            'issue_date' => now()->toDateString(), 'currency' => 'NAD',
             'original_document_reference' => ['vat_msa_invoice_id' => $invoiceId, 'source_document_id' => $sourceDocumentId, 'reason_code' => 'PRICING_ERROR', 'reason' => 'Agreed pricing correction.'],
             'lines' => [['line_number' => 1, 'description' => 'Consulting services', 'quantity' => '1', 'unit_code' => 'EA', 'unit_price' => '-100.00', 'net_amount' => '-100.00', 'tax' => ['category' => 'STANDARD', 'rate' => '15.00', 'taxable_amount' => '-100.00', 'tax_amount' => '-15.00']]],
             'totals' => ['line_net_amount' => '-100.00', 'tax_exclusive_amount' => '-100.00', 'tax_amount' => '-15.00', 'tax_inclusive_amount' => '-115.00', 'payable_amount' => '-115.00'],
