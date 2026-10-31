@@ -123,11 +123,17 @@ class SellerPortalTest extends TestCase
         return $id;
     }
 
+    /**
+     * issue_date/valid_until are relative to now(), never literal dates: once valid_until
+     * has passed, QuotationService refuses to accept, reject or edit the quotation (409
+     * "validity period has ended"), so a literal date breaks the accept step the day after
+     * it.
+     */
     private function quotationPayload(string $customerPartyId, array $overrides = []): array
     {
         return array_replace_recursive([
             'schema_version' => '1.0.0', 'customer_party_id' => $customerPartyId, 'quotation_number' => 'QUO-SELLERPORTAL-0001',
-            'currency' => 'NAD', 'issue_date' => '2026-09-01', 'valid_until' => '2026-09-30',
+            'currency' => 'NAD', 'issue_date' => now()->toDateString(), 'valid_until' => now()->addDays(30)->toDateString(),
             'lines' => [['description' => 'Consulting services', 'quantity_micros' => 1_000_000, 'unit_code' => 'EA', 'unit_price_cents' => 100_000, 'tax_category' => 'STANDARD', 'tax_rate_bps' => 1500]],
         ], $overrides);
     }
