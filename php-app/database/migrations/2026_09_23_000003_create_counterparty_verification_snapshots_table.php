@@ -37,8 +37,8 @@ return new class extends Migration
             $table->text('matched_fields');
             $table->text('conflicting_fields');
             $table->string('evidence_hash');
-            $table->timestamp('checked_at');
-            $table->timestamp('expires_at');
+            $table->timestamp('checked_at')->useCurrent();
+            $table->timestamp('expires_at')->useCurrent();
             $table->foreignUuid('recorded_by')->constrained('users');
 
             $table->unique(['provider', 'source_reference'], 'counterparty_verification_snapshots_provider_source_unique');
