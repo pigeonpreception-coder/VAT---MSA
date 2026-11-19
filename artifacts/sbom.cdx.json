@@ -1,10 +1,10 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:4dd7ca0f-2f2f-4ab6-a5df-de5335e1da8a",
+  "serialNumber": "urn:uuid:ec3afc7e-a1c3-4b59-8b72-87d2c63a8404",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-08-27T18:44:51.129Z",
+    "timestamp": "2026-11-19T20:29:35.029Z",
     "tools": [
       {
         "vendor": "VAT-MSA",
@@ -30,16 +30,16 @@
     {
       "type": "library",
       "name": "react-dom",
-      "version": "19.2.8",
-      "bom-ref": "pkg:npm/react-dom@19.2.8",
-      "purl": "pkg:npm/react-dom@19.2.8"
+      "version": "19.2.9",
+      "bom-ref": "pkg:npm/react-dom@19.2.9",
+      "purl": "pkg:npm/react-dom@19.2.9"
     },
     {
       "type": "library",
       "name": "react",
-      "version": "19.2.8",
-      "bom-ref": "pkg:npm/react@19.2.8",
-      "purl": "pkg:npm/react@19.2.8"
+      "version": "19.2.9",
+      "bom-ref": "pkg:npm/react@19.2.9",
+      "purl": "pkg:npm/react@19.2.9"
     },
     {
       "type": "library",
