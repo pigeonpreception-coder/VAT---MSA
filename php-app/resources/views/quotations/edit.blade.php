@@ -7,42 +7,27 @@
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Quotation lifecycle</div>
-        <h1 class="h3 mb-1">Edit {{ $quotation['quotation_number'] }}</h1>
-        <p class="text-muted mb-0">Only an unexpired issued quotation may change. Accepted, rejected, expired and converted quotations remain immutable.</p>
-    </div>
-    <a href="{{ route('quotations.index') }}" class="btn btn-secondary">Back to quotations</a>
-</div>
+<x-page-header :title="'Edit '.$quotation['quotation_number']" :back="route('quotations.index')" back-label="Quotations"
+    subtitle="Only issued quotations that haven't expired can be changed. Accepted, rejected, expired and converted quotations are locked." />
 
 <div class="row row-cols-1 row-cols-sm-2 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Status</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Status</div>
             <div class="fs-4 fw-semibold"><x-status-badge :value="$quotation['status']" type="status" /></div>
-            <div class="small text-muted">Lifecycle guard enforced server-side</div>
+            <div class="small text-muted">Only drafts can be edited</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Recorded revisions</div>
-            <div class="fs-2 fw-semibold">{{ number_format($quotation['revision_count']) }}</div>
-            <div class="small text-muted">Hash-chained immutable snapshots</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Recorded revisions</div>
+            <div class="stat-value">{{ number_format($quotation['revision_count']) }}</div>
+            <div class="small text-muted">Every saved version is kept and can't be changed</div>
         </div></div>
     </div>
 </div>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>Quotation needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @if (! $editPolicy['allowed'])
     <div class="alert alert-danger" role="alert">
@@ -53,7 +38,7 @@
     <div class="card">
         <div class="card-header">
             <div class="fw-semibold">Commercial terms</div>
-            <div class="text-muted small">Every successful save appends a hashed immutable revision</div>
+            <div class="text-muted small">Each save adds a new version; earlier versions are kept</div>
         </div>
         <div class="card-body">
             <form method="POST" action="{{ route('quotations.update', $quotation['id']) }}">
@@ -97,7 +82,7 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <div>
                         <h2 class="h6 mb-0">Quotation lines</h2>
-                        <div class="text-muted small">Amounts and VAT are recalculated server-side</div>
+                        <div class="text-muted small">Totals and VAT are recalculated when you save</div>
                     </div>
                     <button type="button" id="add-line" class="btn btn-sm btn-secondary">Add line</button>
                 </div>

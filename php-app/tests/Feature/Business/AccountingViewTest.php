@@ -94,12 +94,13 @@ class AccountingViewTest extends TestCase
         $response = $this->actingAs($seller['owner'])->get('/accounting');
 
         $response->assertOk()->assertViewIs('accounting.index');
-        $response->assertSee('Controlled general ledger');
+        $response->assertSee('General ledger');
+        $response->assertSee('A journal must balance before it can be posted.');
         $response->assertSee('CASH-001');
         $response->assertSee('Cash on hand');
         $response->assertSee('JRN-0001');
         $response->assertSee('Opening balance entry');
-        $response->assertSee('Posting interface is active.');
+        $response->assertSee('which only accepts balanced entries');
         $response->assertSee('<caption class="visually-hidden">', false);
         $response->assertSee('scope="col"', false);
         $response->assertViewHas('postedCount', 1);

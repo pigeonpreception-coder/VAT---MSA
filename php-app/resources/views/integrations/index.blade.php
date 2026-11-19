@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Integrations and platform health')
+@section('title', 'Integration health')
 
 @php
     $configured = collect($data['integrations'])->where('configuration_status', 'CONFIGURED')->count();
@@ -16,39 +16,36 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Platform ecosystem</div>
-    <h1 class="h3 mb-1">Integration contracts and operational health</h1>
-    <p class="text-muted mb-0">Each external capability has an explicit contract, credential reference, configuration state and health outcome. Missing authority or banking agreements remain disabled rather than simulated.</p>
-</div>
+<x-page-header title="Integration health"
+    subtitle="The status of each external connection, such as ITAS, banking and payments. Connections without a signed agreement stay switched off." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Connections</div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($data['integrations'])) }}</div>
-            <div class="small text-muted">Government, banking and payment boundaries</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Connections</div>
+            <div class="stat-value">{{ number_format(count($data['integrations'])) }}</div>
+            <div class="small text-muted">Government, banking and payment services</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Configured</div>
-            <div class="fs-2 fw-semibold">{{ number_format($configured) }}</div>
-            <div class="small text-muted">Ready for governed execution</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Configured</div>
+            <div class="stat-value">{{ number_format($configured) }}</div>
+            <div class="small text-muted">Ready to use</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Blocked jobs</div>
-            <div class="fs-2 fw-semibold">{{ number_format($blockedJobs) }}</div>
-            <div class="small text-warning">External setup required</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Blocked jobs</div>
+            <div class="stat-value">{{ number_format($blockedJobs) }}</div>
+            <div class="small text-warning">Need setup outside this system</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Outbox pending</div>
-            <div class="fs-2 fw-semibold">{{ number_format($outboxPending) }}</div>
-            <div class="small text-muted">Durable events awaiting publisher</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Outbox pending</div>
+            <div class="stat-value">{{ number_format($outboxPending) }}</div>
+            <div class="small text-muted">Events waiting to be sent</div>
         </div></div>
     </div>
 </div>
@@ -56,7 +53,7 @@
 <div class="card mb-3">
     <div class="card-header">
         <div class="fw-semibold">Integration registry</div>
-        <div class="text-muted small">No credentials are stored in application tables</div>
+        <div class="text-muted small">Credentials are kept outside the application</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -79,11 +76,11 @@
                             <strong>{{ $integration['display_name'] }}</strong>
                             <div class="text-muted small font-monospace">{{ $integration['provider_key'] }}</div>
                         </td>
-                        <td>{{ $integration['category'] }}</td>
+                        <td>@humanize($integration['category'])</td>
                         <td class="font-monospace">{{ $integration['capabilities'] }}</td>
                         <td><x-status-badge :value="$integration['configuration_status']" type="status" /></td>
                         <td><x-status-badge :value="$integration['operational_status']" type="status" /></td>
-                        <td>{{ $integration['data_classification'] }}</td>
+                        <td>@humanize($integration['data_classification'])</td>
                         <td>{{ $integration['last_health_check_at'] ? \Illuminate\Support\Carbon::parse($integration['last_health_check_at'])->format('d M Y, H:i') : 'Not checked' }}</td>
                     </tr>
                 @empty
@@ -97,7 +94,7 @@
 <div class="card">
     <div class="card-header">
         <div class="fw-semibold">Service component posture</div>
-        <div class="text-muted small">Readiness is capability-specific, not one global green light</div>
+        <div class="text-muted small">Each capability is checked separately</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -123,7 +120,7 @@
                 @forelse ($data['components'] as $serviceComponent)
                     <tr>
                         <td><strong>{{ $serviceComponent['display_name'] }}</strong></td>
-                        <td>{{ $serviceComponent['component_type'] }}</td>
+                        <td>@humanize($serviceComponent['component_type'])</td>
                         <td><x-status-badge :value="$serviceComponent['criticality']" type="risk" /></td>
                         <td><x-status-badge :value="$serviceComponent['configuration_status']" type="status" /></td>
                         <td><x-status-badge :value="$serviceComponent['operational_status']" type="status" /></td>

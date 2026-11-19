@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\AccessGovernance;
 
+use App\Domain\Licensing\AccessReviewWindow;
 use App\Models\Organisation;
 use App\Models\OrganisationLicense;
 use App\Models\OrganisationMembership;
@@ -210,6 +211,44 @@ class AccessGovernanceViewTest extends TestCase
 
         $response->assertRedirect(route('security.mfa', ['redirect_to' => url('/')]));
         $this->assertDatabaseHas('access_requests', ['id' => $requestId, 'status' => 'PENDING_MANAGER']);
+    }
+
+    /** The quarterly review had no page before (only POST /api/v1/access-reviews), yet inviting and creating roles need it. */
+    public function test_a_manager_can_start_the_quarterly_review_from_the_page(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-AGVIEW-0010');
+        $window = AccessReviewWindow::current();
+
+        $this->actingAs($ctx['owner'])->get('/access-governance')->assertSee("Start {$window['key']} review");
+
+        $response = $this->actingAs($ctx['owner'])->withFreshStepUp()
+            ->from('/access-governance')->post(route('access-governance.reviews.store'));
+
+        $response->assertRedirect('/access-governance');
+        $response->assertSessionHas('status');
+        $this->assertDatabaseHas('access_reviews', [
+            'organisation_id' => $ctx['organisation']->id, 'review_type' => 'QUARTERLY', 'status' => 'OPEN',
+            'period_start' => $window['periodStart'],
+        ]);
+        $this->actingAs($ctx['owner'])->get('/access-governance')->assertDontSee("Start {$window['key']} review");
+
+        // Idempotent: a second submit returns the same review rather than opening another.
+        $this->actingAs($ctx['owner'])->withFreshStepUp()->from('/access-governance')->post(route('access-governance.reviews.store'));
+        $this->assertSame(1, \Illuminate\Support\Facades\DB::table('access_reviews')->where('organisation_id', $ctx['organisation']->id)->count());
+    }
+
+    public function test_starting_the_quarterly_review_needs_access_governance_manage_and_step_up(): void
+    {
+        $ctx = $this->makeLicensedOrganisation('VAT-AGVIEW-0011');
+        $accountant = $this->makeMember($ctx['taxpayer'], $ctx['organisation'], 'accountant-0011@test.test', $ctx['owner'], 'TAXPAYER_ACCOUNTANT');
+
+        $this->actingAs($accountant)->get('/access-governance')->assertOk()->assertDontSee(route('access-governance.reviews.store'), false);
+        $this->actingAs($accountant)->withFreshStepUp()->post(route('access-governance.reviews.store'))->assertForbidden();
+
+        // Without a fresh step-up the request is sent to the MFA screen first.
+        $this->actingAs($ctx['owner'])->post(route('access-governance.reviews.store'))
+            ->assertRedirectContains(route('security.mfa'));
+        $this->assertDatabaseMissing('access_reviews', ['organisation_id' => $ctx['organisation']->id]);
     }
 
     public function test_certifying_through_the_form_retains_or_revokes(): void

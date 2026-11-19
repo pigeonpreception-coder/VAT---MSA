@@ -5,28 +5,14 @@
 @php
     $money = fn (int $cents) => $claim['currency'].' '.number_format($cents / 100, 2);
     $dateTime = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y, H:i') : '—';
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Refund claim</div>
-        <h1 class="h3 mb-1">{{ $claim['claim_number'] }}</h1>
-        <p class="text-muted mb-0">{{ $claim['legal_name'] }} &middot; {{ $claim['vat_number'] }}</p>
-    </div>
-    <a href="{{ route('refunds.index') }}" class="btn btn-outline-secondary align-self-center">&larr; Back to refund claims</a>
-</div>
+<x-page-header :title="$claim['claim_number']" :back="route('refunds.index')" back-label="VAT refunds"
+    :subtitle="$claim['legal_name'].' · '.$claim['vat_number']" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -59,7 +45,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h6">Review decision</h2>
-                    <p class="text-muted small">Officer-only, maker-checker enforced -- you cannot review your own request, and a HIGH/CRITICAL-risk or payment-authorising decision requires a distinct reviewer from the immediately preceding step.</p>
+                    <p class="text-muted small">Officers only. You can't review your own request, and high-risk or payment decisions need a different reviewer from the previous step.</p>
                     <form method="POST" action="{{ route('refunds.transition.store', $claim['id']) }}">
                         @csrf
                     <x-idempotency-key />
@@ -67,7 +53,7 @@
                             <label for="action" class="form-label">Action</label>
                             <select id="action" name="action" class="form-select @error('action') is-invalid @enderror" required>
                                 @foreach ($validActions as $action)
-                                    <option value="{{ $action }}" @selected(old('action') === $action)>{{ ucwords(strtolower(str_replace('_', ' ', $action))) }}</option>
+                                    <option value="{{ $action }}" @selected(old('action') === $action)>@humanize($action)</option>
                                 @endforeach
                             </select>
                             @error('action')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -110,7 +96,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h6">Record payment</h2>
-                    <p class="text-muted small">This claim has cleared payment authorisation. Recording a payment goes through the payment connector -- in this deployment that connector stays DISABLED PENDING AUTHORITY (see the Platform console's service posture), so this will honestly report "Awaiting authority" rather than issue a live payment instruction.</p>
+                    <p class="text-muted small">This claim is authorised for payment. Payments go through the payment connector, which is switched off in this environment until {{ $tenantAuthorityShortName }} authorises it — so you'll see "Awaiting authority" instead of a live payment.</p>
                     <form method="POST" action="{{ route('refunds.payment.store', $claim['id']) }}">
                         @csrf
                     <x-idempotency-key />
@@ -135,7 +121,7 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h2 class="h6">Allocate settlement</h2>
-                    <p class="text-muted small">Match a settlement confirmation to the recorded payment instruction. Refused with the same "Awaiting authority" honesty until the connector is authorised.</p>
+                    <p class="text-muted small">Match a settlement confirmation to the recorded payment. This also shows "Awaiting authority" until the payment connector is authorised.</p>
                     <form method="POST" action="{{ route('refunds.payment.allocation.store', $claim['id']) }}">
                         @csrf
                     <x-idempotency-key />
@@ -174,7 +160,7 @@
 <div class="card mt-3">
     <div class="card-header">
         <div class="fw-semibold">Eligibility checks</div>
-        <div class="text-muted small">Evaluated once, frozen alongside the claim snapshot -- each its own explainable pass/fail, never a black-box score</div>
+        <div class="text-muted small">Checked once when the claim was made. Each check passes or fails on its own, with a reason.</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">

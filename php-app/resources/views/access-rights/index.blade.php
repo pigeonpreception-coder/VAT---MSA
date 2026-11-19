@@ -7,28 +7,17 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Super Administration</div>
-    <h1 class="h3 mb-1">User access rights</h1>
-    <p class="text-muted mb-0">Grant a user one of the app's roles at a Local Office, Regional/Provincial, National or Global scope. Granting a role immediately updates the user's own role; scope level and office/region are recorded as governance context alongside it.</p>
-</div>
+<x-page-header title="Access rights"
+    subtitle="Assign roles to users at local office, regional, national or global scope. A new role takes effect immediately; its scope is recorded for governance." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Grants</span><span>N</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['total']) }}</div>
+                <div class="stat-label"><span>Grants</span></div>
+                <div class="stat-value">{{ number_format($metrics['total']) }}</div>
                 <div class="small text-muted">Most recent 100</div>
             </div>
         </div>
@@ -36,8 +25,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Active</span><span>&check;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['active']) }}</div>
+                <div class="stat-label"><span>Active</span></div>
+                <div class="stat-value">{{ number_format($metrics['active']) }}</div>
                 <div class="small text-muted">Currently in effect</div>
             </div>
         </div>
@@ -45,8 +34,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Revoked</span><span>&times;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['revoked']) }}</div>
+                <div class="stat-label"><span>Revoked</span></div>
+                <div class="stat-value">{{ number_format($metrics['revoked']) }}</div>
                 <div class="small text-muted">No longer in effect</div>
             </div>
         </div>
@@ -54,8 +43,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Users</span><span>U</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['users']) }}</div>
+                <div class="stat-label"><span>Users</span></div>
+                <div class="stat-value">{{ number_format($metrics['users']) }}</div>
                 <div class="small text-muted">System-wide</div>
             </div>
         </div>
@@ -80,7 +69,7 @@
                                 <select class="form-select" id="user_id" name="user_id" required>
                                     <option value="" disabled selected>Select user</option>
                                     @foreach ($users as $user)
-                                        <option value="{{ $user->id }}" @selected(old('user_id') === $user->id)>{{ $user->name }} ({{ $user->email }}) &mdash; {{ str_replace('_', ' ', $user->role) }}</option>
+                                        <option value="{{ $user->id }}" @selected(old('user_id') === $user->id)>{{ $user->name }} ({{ $user->email }}) &mdash; @humanize($user->role)</option>
                                     @endforeach
                                 </select>
                             </div>
@@ -141,7 +130,7 @@
                                 <td>{{ $grant->user->name ?? 'Unknown user' }}<div class="text-muted small">{{ $grant->user->email ?? '' }}</div></td>
                                 <td>
                                     <span class="font-monospace">{{ $grant->role_code }}</span>
-                                    <div class="text-muted small">{{ str_replace('_', ' ', $grant->scope_level) }}{{ $grant->scope_label ? ' · '.$grant->scope_label : '' }}</div>
+                                    <div class="text-muted small">@humanize($grant->scope_level){{ $grant->scope_label ? ' · '.$grant->scope_label : '' }}</div>
                                 </td>
                                 <td class="small">
                                     {{ $grant->granted_at?->format('d M Y, H:i') }}
@@ -193,7 +182,7 @@
             <div class="card-body">
                 @forelse ($byScope as $row)
                     <div class="mb-2 d-flex justify-content-between align-items-center">
-                        <span>{{ str_replace('_', ' ', $row['scope_level']) }}</span>
+                        <span>@humanize($row['scope_level'])</span>
                         <span class="fw-semibold">{{ number_format($row['count']) }}</span>
                     </div>
                 @empty

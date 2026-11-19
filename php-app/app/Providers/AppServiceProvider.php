@@ -9,9 +9,11 @@ use App\Integrations\Itas\UnavailableItasIdentityAdapter;
 use App\Integrations\Payment\PaymentConnectorPort;
 use App\Integrations\Payment\SandboxPaymentConnector;
 use App\Models\User;
+use App\Support\Navigation\Sidebar;
 use App\Support\Tenancy\TenantBranding;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -86,5 +88,13 @@ class AppServiceProvider extends ServiceProvider
                     ->all()
             );
         });
+
+        View::composer('layouts.app', function ($view) {
+            $user = Auth::user();
+            $view->with('navigation', $user ? Sidebar::build($user, request()) : null);
+        });
+
+        // @humanize($code): "PENDING_VERIFICATION" -> "Pending verification".
+        Blade::directive('humanize', fn (string $expression) => "<?php echo e(\\App\\Support\\Ui\\Humanize::enum({$expression})); ?>");
     }
 }

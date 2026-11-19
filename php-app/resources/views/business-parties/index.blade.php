@@ -1,29 +1,34 @@
 @extends('layouts.app')
 
-@section('title', 'Business Parties')
+@section('title', 'Business parties')
+
+@php
+    $openRegisterForm = $errors->any() || old('display_name') !== null;
+    $preselectedRelationships = old('relationships', ($filters['relationship'] ?? '') !== '' ? [$filters['relationship']] : []);
+@endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Business domain</div>
-    <h1 class="h3 mb-1">Business Parties</h1>
-    <p class="text-muted mb-0">Customers and suppliers trading with this organisation. A supplier can be verified against the national taxpayer register directly from its own page.</p>
-</div>
+<x-page-header :title="['CUSTOMER' => 'Customers', 'SUPPLIER' => 'Suppliers', 'SERVICE_PROVIDER' => 'Service providers'][$filters['relationship'] ?? ''] ?? 'Business parties'"
+        subtitle="Organisations you trade with. Open a party to verify it against the national taxpayer register.">
+    <x-slot:actions>
+        <button type="button" class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#register-party"
+            aria-expanded="{{ $openRegisterForm ? 'true' : 'false' }}" aria-controls="register-party">
+            <i class="bi bi-plus-lg" aria-hidden="true"></i> Register a party
+        </button>
+    </x-slot:actions>
+</x-page-header>
 
+<div class="collapse @if ($openRegisterForm) show @endif" id="register-party">
 <div class="card mb-3">
+    <div class="card-header">
+        <div class="fw-semibold">Register a party</div>
+        <div class="text-muted small">Only a display name and a relationship are required. You can verify the party afterwards.</div>
+    </div>
     <div class="card-body">
-        <h2 class="h6">Register a party</h2>
-        @if ($errors->any())
-            <div class="alert alert-danger py-2" role="alert">
-                <ul class="mb-0 ps-3">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
+        <x-form-errors />
         <form method="POST" action="{{ route('business-parties.store') }}" class="row g-2">
-            @csrf
-                    <x-idempotency-key />
+                        @csrf
+            <x-idempotency-key />
             <div class="col-md-3">
                 <label for="display_name" class="form-label small mb-0">Display name</label>
                 <input type="text" id="display_name" name="display_name" value="{{ old('display_name') }}" class="form-control form-control-sm @error('display_name') is-invalid @enderror" required>
@@ -52,15 +57,15 @@
             <div class="col-md-2">
                 <label class="form-label small mb-0 d-block">Relationship</label>
                 <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="rel_customer" name="relationships[]" value="CUSTOMER" @checked(in_array('CUSTOMER', old('relationships', [])))>
+                    <input class="form-check-input" type="checkbox" id="rel_customer" name="relationships[]" value="CUSTOMER" @checked(in_array('CUSTOMER', $preselectedRelationships, true))>
                     <label class="form-check-label small" for="rel_customer">Customer</label>
                 </div>
                 <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="rel_supplier" name="relationships[]" value="SUPPLIER" @checked(in_array('SUPPLIER', old('relationships', [])))>
+                    <input class="form-check-input" type="checkbox" id="rel_supplier" name="relationships[]" value="SUPPLIER" @checked(in_array('SUPPLIER', $preselectedRelationships, true))>
                     <label class="form-check-label small" for="rel_supplier">Supplier</label>
                 </div>
                 <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="rel_service_provider" name="relationships[]" value="SERVICE_PROVIDER" @checked(in_array('SERVICE_PROVIDER', old('relationships', [])))>
+                    <input class="form-check-input" type="checkbox" id="rel_service_provider" name="relationships[]" value="SERVICE_PROVIDER" @checked(in_array('SERVICE_PROVIDER', $preselectedRelationships, true))>
                     <label class="form-check-label small" for="rel_service_provider">Service provider</label>
                 </div>
                 @error('relationships')<div class="text-danger small">{{ $message }}</div>@enderror
@@ -70,11 +75,12 @@
                 <input type="text" id="address" name="address" value="{{ old('address') }}" class="form-control form-control-sm @error('address') is-invalid @enderror">
                 @error('address')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-md-4 align-self-end">
+                        <div class="col-md-4 align-self-end">
                 <button type="submit" class="btn btn-primary btn-sm w-100">Register party</button>
             </div>
         </form>
     </div>
+</div>
 </div>
 
 <div class="card">
@@ -119,12 +125,12 @@
                         <td class="font-monospace">{{ $party['vat_number'] ?? '—' }}</td>
                         <td>
                             @foreach ($party['relationships'] as $relationship)
-                                <span class="badge text-bg-light border">{{ ucwords(strtolower(str_replace('_', ' ', $relationship))) }}</span>
+                                <span class="badge text-bg-light border">@humanize($relationship)</span>
                             @endforeach
                         </td>
                         <td><x-status-badge :value="$party['status']" type="status" /></td>
                         <td>
-                            <span class="badge text-bg-light border">{{ ucwords(strtolower(str_replace('_', ' ', $party['trust_status'] ?? 'PENDING_PROVIDER'))) }}</span>
+                            <span class="badge text-bg-light border">@humanize($party['trust_status'] ?? 'PENDING_PROVIDER')</span>
                         </td>
                     </tr>
                 @empty

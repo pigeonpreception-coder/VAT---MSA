@@ -1,30 +1,20 @@
 @extends('layouts.app')
 
-@section('title', 'Ongoing Project Reports')
+@section('title', 'Ongoing projects')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Project Management</div>
-        <h1 class="h3 mb-1">Ongoing Project Reports</h1>
-        <p class="text-muted mb-0">Every active project's approved budget, posted cost, revenue recognised so far and running profit. Mark a project completed once its work has finished.</p>
-    </div>
-    <a href="{{ route('project-management.new') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Planned projects</a>
-</div>
+<x-page-header title="Ongoing projects"
+    subtitle="Budget, posted cost, revenue and running profit for every active project. Mark a project completed when its work is done.">
+    <x-slot:actions>
+        <a href="{{ route('project-management.new') }}" class="btn btn-outline-secondary btn-sm">Planned projects</a>
+    </x-slot:actions>
+</x-page-header>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="card">
     <div class="card-header">

@@ -1,27 +1,16 @@
 @extends('layouts.app')
 
-@section('title', 'Workflow engine')
+@section('title', 'Workflows')
 
 @php
     $sidePreviewLimit = 5;
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Workflow engine</div>
-    <h1 class="h3 mb-1">Versioned approval workflows</h1>
-    <p class="text-muted mb-0">A draft is created, tested and published before it can route anything; a published version is immutable, and every decision is checked against segregation-of-duties (no self-approval).</p>
-</div>
+<x-page-header title="Workflows"
+    subtitle="Approval workflows for your organisation. A workflow is drafted, tested and published before use; published versions can't change, and nobody can approve their own request." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 @if ($testResult)
     <div class="alert alert-info">
         <strong>Test result:</strong> terminal {{ $testResult['terminal'] }} &middot;
@@ -33,8 +22,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Workflows</span><span>W</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['workflows']) }}</div>
+                <div class="stat-label"><span>Workflows</span></div>
+                <div class="stat-value">{{ number_format($metrics['workflows']) }}</div>
                 <div class="small text-muted">Published and draft</div>
             </div>
         </div>
@@ -42,8 +31,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Draft versions</span><span>#</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['draftVersions']) }}</div>
+                <div class="stat-label"><span>Draft versions</span></div>
+                <div class="stat-value">{{ number_format($metrics['draftVersions']) }}</div>
                 <div class="small text-muted">Awaiting test &amp; publish</div>
             </div>
         </div>
@@ -51,8 +40,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending tasks</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['pendingTasks']) }}</div>
+                <div class="stat-label"><span>Pending tasks</span></div>
+                <div class="stat-value">{{ number_format($metrics['pendingTasks']) }}</div>
                 <div class="small text-muted">Awaiting a decision</div>
             </div>
         </div>
@@ -60,8 +49,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Active delegations</span><span>&rarr;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['activeDelegations']) }}</div>
+                <div class="stat-label"><span>Active delegations</span></div>
+                <div class="stat-value">{{ number_format($metrics['activeDelegations']) }}</div>
                 <div class="small text-muted">Redirecting tasks now</div>
             </div>
         </div>
@@ -82,7 +71,7 @@
                             <li class="list-group-item d-flex justify-content-between align-items-start">
                                 <div>
                                     <strong>{{ $workflow['name'] }}</strong>
-                                    <p class="mb-0 small">{{ str_replace('_', ' ', $workflow['domain_action']) }} &middot; version {{ $workflow['version_number'] ?? 'draft' }}</p>
+                                    <p class="mb-0 small">@humanize($workflow['domain_action']) &middot; version {{ $workflow['version_number'] ?? 'draft' }}</p>
                                 </div>
                                 <x-status-badge :value="$workflow['version_status'] ?? $workflow['status']" type="status" />
                             </li>
@@ -143,7 +132,7 @@
                                 <select class="form-select" id="domain_action" name="domain_action" required>
                                     <option value="" disabled selected>Select domain action</option>
                                     @foreach (['PURCHASE_REQUEST', 'EXPENSE', 'JOURNAL', 'VAT_RETURN', 'ROLE_CHANGE', 'PRIMARY_ADMIN_CHANGE', 'API_CREDENTIAL', 'REFUND'] as $action)
-                                        <option value="{{ $action }}" @selected(old('domain_action') === $action)>{{ str_replace('_', ' ', $action) }}</option>
+                                        <option value="{{ $action }}" @selected(old('domain_action') === $action)>@humanize($action)</option>
                                     @endforeach
                                 </select>
                             </div>
@@ -207,7 +196,7 @@
                                 <select class="form-select" id="assign_domain_action" name="domain_action" required>
                                     <option value="" disabled selected>Select</option>
                                     @foreach (['PURCHASE_REQUEST', 'EXPENSE', 'JOURNAL', 'VAT_RETURN', 'ROLE_CHANGE', 'PRIMARY_ADMIN_CHANGE', 'API_CREDENTIAL', 'REFUND'] as $action)
-                                        <option value="{{ $action }}" @selected(old('domain_action') === $action)>{{ str_replace('_', ' ', $action) }}</option>
+                                        <option value="{{ $action }}" @selected(old('domain_action') === $action)>@humanize($action)</option>
                                     @endforeach
                                 </select>
                             </div>
@@ -241,7 +230,7 @@
                 <p class="text-muted small">The initiator can never decide their own task; role-assigned tasks require holding that role.</p>
                 @forelse ($tasks as $index => $task)
                     <div class="mb-3 pb-3 border-bottom pending-task-item" @if ($index >= $sidePreviewLimit) hidden @endif>
-                        <div>{{ $task['resource_type'] }}</div>
+                        <div>@humanize($task['resource_type'])</div>
                         <div class="text-muted small font-monospace">{{ $task['resource_id'] }}</div>
                         <div class="text-muted small mt-1">Assigned to {{ $task['assigned_to'] ?? 'Unassigned role' }}</div>
                         <div class="text-muted small">Initiated by {{ $task['initiated_by'] }}</div>

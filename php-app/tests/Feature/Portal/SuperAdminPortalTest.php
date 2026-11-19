@@ -139,7 +139,7 @@ class SuperAdminPortalTest extends TestCase
         $response = $this->actingAs($admin)->get('/portal/super-admin');
 
         $response->assertOk()->assertViewIs('portal.super-admin');
-        $response->assertSee('Technical health, security and integration configuration');
+        $response->assertSee('Technical health, integrations and security for the platform.');
         $response->assertSee('Invoice Certification Service');
         // The integrations catalogue itself is never rendered as a table on
         // this page (only a "Disabled integrations" count) -- matching the

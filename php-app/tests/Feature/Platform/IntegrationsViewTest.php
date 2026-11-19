@@ -95,7 +95,7 @@ class IntegrationsViewTest extends TestCase
         $response = $this->actingAs($org['owner'])->get('/integrations');
 
         $response->assertOk()->assertViewIs('integrations.index');
-        $response->assertSee('Integration contracts and operational health');
+        $response->assertSee('Integration health');
         $response->assertSeeInOrder(['Connections', '1']);
         $response->assertSeeInOrder(['Configured', '1']);
         $response->assertSeeInOrder(['Blocked jobs', '1']);

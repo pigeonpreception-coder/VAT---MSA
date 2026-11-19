@@ -3,25 +3,14 @@
 @section('title', 'Communications')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance domain</div>
-    <h1 class="h3 mb-1">Communications</h1>
-    <p class="text-muted mb-0">Formal correspondence threads tied to an audit case or reconciliation exception -- every notice, response and closure is recorded, never edited or deleted in place.</p>
-</div>
+<x-page-header title="Communications"
+    subtitle="Formal correspondence about audit cases and reconciliation exceptions. Every notice, response and closure is kept on record." />
 
 @if ($canManage)
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h6">Send a notice</h2>
-            @if ($errors->any())
-                <div class="alert alert-danger py-2" role="alert">
-                    <ul class="mb-0 ps-3">
-                        @foreach ($errors->all() as $error)
-                            <li>{{ $error }}</li>
-                        @endforeach
-                    </ul>
-                </div>
-            @endif
+            <x-form-errors />
             <form method="POST" action="{{ route('communications.notices.store') }}" class="row g-2">
                 @csrf
                 <x-idempotency-key />
@@ -42,7 +31,7 @@
                     <label for="channel" class="form-label small mb-0">Channel</label>
                     <select id="channel" name="channel" class="form-select form-select-sm @error('channel') is-invalid @enderror" required>
                         @foreach (['PORTAL', 'EMAIL', 'SMS', 'LETTER'] as $c)
-                            <option value="{{ $c }}" @selected(old('channel') === $c)>{{ ucfirst(strtolower($c)) }}</option>
+                            <option value="{{ $c }}" @selected(old('channel') === $c)>@humanize($c)</option>
                         @endforeach
                     </select>
                     @error('channel')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -51,7 +40,7 @@
                     <label for="classification" class="form-label small mb-0">Classification</label>
                     <select id="classification" name="classification" class="form-select form-select-sm @error('classification') is-invalid @enderror" required>
                         @foreach (['INTERNAL', 'CONFIDENTIAL', 'TAX_CONFIDENTIAL', 'RESTRICTED'] as $c)
-                            <option value="{{ $c }}" @selected(old('classification') === $c)>{{ ucwords(strtolower(str_replace('_', ' ', $c))) }}</option>
+                            <option value="{{ $c }}" @selected(old('classification') === $c)>@humanize($c)</option>
                         @endforeach
                     </select>
                     @error('classification')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -82,7 +71,7 @@
                 <select id="status" name="status" class="form-select form-select-sm" onchange="this.form.submit()">
                     <option value="" @selected($status === '')>All statuses</option>
                     @foreach (['OPEN', 'CLOSED'] as $s)
-                        <option value="{{ $s }}" @selected($status === $s)>{{ ucfirst(strtolower($s)) }}</option>
+                        <option value="{{ $s }}" @selected($status === $s)>@humanize($s)</option>
                     @endforeach
                 </select>
             </div>
@@ -106,10 +95,10 @@
                     <tr>
                         <td>
                             <a href="{{ route('communications.show', $thread['id']) }}"><strong>{{ $thread['subject'] }}</strong></a>
-                            <div class="text-muted small">{{ ucwords(strtolower(str_replace('_', ' ', $thread['classification']))) }}</div>
+                            <div class="text-muted small">@humanize($thread['classification'])</div>
                         </td>
                         <td>
-                            {{ ucwords(strtolower(str_replace('_', ' ', $thread['related_resource_type']))) }}
+                            @humanize($thread['related_resource_type'])
                             <div class="text-muted small font-monospace">{{ $thread['related_resource_id'] }}</div>
                         </td>
                         <td><x-status-badge :value="$thread['status']" type="status" /></td>

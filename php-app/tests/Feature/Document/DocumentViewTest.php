@@ -97,7 +97,7 @@ class DocumentViewTest extends TestCase
         $response = $this->actingAs($org['owner'])->get('/documents');
 
         $response->assertOk()->assertViewIs('documents.index');
-        $response->assertSee('Evidence custody');
+        $response->assertSee('Documents &amp; records', false);
         $response->assertSee('receipt.pdf');
         $response->assertSee('Add evidence');
         $response->assertSee('Upload to quarantine');
@@ -133,8 +133,8 @@ class DocumentViewTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Documents by domain');
-        $response->assertSeeInOrder(['EXPENSE', '1']);
-        $response->assertSeeInOrder(['AUDIT CASE', '1']);
+        $response->assertSeeInOrder(['Expense', '1']);
+        $response->assertSeeInOrder(['Audit case', '1']);
         $response->assertSee('Documents by classification');
     }
 

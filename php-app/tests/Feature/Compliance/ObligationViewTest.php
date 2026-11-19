@@ -287,8 +287,8 @@ class ObligationViewTest extends TestCase
         $response->assertSee('Overdue');
         $response->assertSee('Satisfied');
         $response->assertSee('Obligations by type');
-        $response->assertSeeInOrder(['Vat Return', '1']);
-        $response->assertSeeInOrder(['Paye', '1']);
+        $response->assertSeeInOrder(['VAT return', '1']);
+        $response->assertSeeInOrder(['PAYE', '1']);
         $response->assertSee('Upcoming due dates');
         $response->assertSee('VAT-VIEW-OBL-0010 Trading Co');
     }

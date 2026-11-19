@@ -212,7 +212,7 @@ class VatAdjustmentReportViewTest extends TestCase
         $response = $this->actingAs($supplier['owner'])->get(route('vat-management.adjustment-report', ['period_id' => $period->id]));
 
         $response->assertOk()->assertViewIs('vat-management.adjustment-report');
-        $response->assertSee('OUTPUT_TAX');
+        $response->assertSee('Output tax');
         $response->assertSee('N$ 50.00'); // approved adjustment amount
         $response->assertSee('Reconciled');
         $response->assertDontSee('more than filed');

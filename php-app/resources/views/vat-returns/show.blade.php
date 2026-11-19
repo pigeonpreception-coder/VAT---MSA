@@ -4,35 +4,21 @@
     $version = $detail['version'];
 @endphp
 
-@section('title', 'Return v'.$version['version_number'])
+@section('title', 'VAT return version '.$version['version_number'])
 
 @php
     $money = fn (int $cents) => $tenantCurrencyCode.' '.number_format($cents / 100, 2);
     $dateTime = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y, H:i') : '—';
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
     $pendingApproval = collect($detail['approvals'])->firstWhere('status', 'PENDING');
     $canDecideThis = $pendingApproval && $pendingApproval['requested_by'] !== $user->id;
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">VAT return draft</div>
-        <h1 class="h3 mb-1">Version {{ $version['version_number'] }}</h1>
-        <p class="text-muted mb-0">Snapshot hash <span class="font-monospace small">{{ $version['ledger_snapshot_hash'] }}</span></p>
-    </div>
-    <a href="{{ route('vat-periods.show', $version['vat_period_id']) }}" class="btn btn-outline-secondary align-self-center">&larr; Back to period</a>
-</div>
+<x-page-header :title="'VAT return — version '.$version['version_number']" :back="route('vat-periods.show', $version['vat_period_id'])" back-label="VAT period"
+    subtitle="A reproducible draft calculated from your posted ledger. Review the figures, then send it for approval." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -61,7 +47,10 @@
             <div class="col"><div class="text-muted small">Generated</div><div class="fw-semibold">{{ $dateTime($version['generated_at']) }}</div></div>
             <div class="col"><div class="text-muted small">Approved</div><div class="fw-semibold">{{ $dateTime($version['approved_at']) }}</div></div>
             <div class="col"><div class="text-muted small">Superseded</div><div class="fw-semibold">{{ $dateTime($version['superseded_at']) }}</div></div>
-            <div class="col"><div class="text-muted small">Net payable</div><div class="fw-semibold">{{ $money($version['net_payable_cents']) }}</div></div>
+                        <div class="col"><div class="text-muted small">Net payable</div><div class="fw-semibold">{{ $money($version['net_payable_cents']) }}</div></div>
+        </div>
+        <div class="small text-muted text-center mt-2 text-truncate" title="{{ $version['ledger_snapshot_hash'] }}">
+            Ledger snapshot <span class="font-monospace">{{ $version['ledger_snapshot_hash'] }}</span>
         </div>
     </div>
 </div>

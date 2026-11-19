@@ -8,21 +8,12 @@
     $approvalFor = fn (string $environment) => collect($usage['environmentApprovals'])->firstWhere('environment', $environment);
 @endphp
 
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Developer domain</div>
-    <h1 class="h3 mb-1">{{ $usage['provider']['legal_name'] }}</h1>
-    <p class="text-muted mb-0">{{ $usage['provider']['provider_key'] }} &middot; {{ $usage['provider']['contact_email'] }} &middot; <x-status-badge :value="$usage['provider']['status']" type="status" /></p>
-</div>
+<x-page-header :title="$usage['provider']['legal_name']" :back="route('saas-providers.index')" back-label="SaaS providers"
+    :subtitle="$usage['provider']['contact_email']">
+    <x-slot:actions><x-status-badge :value="$usage['provider']['status']" type="status" /></x-slot:actions>
+</x-page-header>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-6">
@@ -32,7 +23,8 @@
                 @if ($application)
                     <h2 class="h6">{{ $application['name'] }}</h2>
                     <p class="text-muted small">{{ $application['description'] }}</p>
-                    <dl class="row small mb-0">
+                                        <dl class="row small mb-0">
+                        <dt class="col-5">Provider key</dt><dd class="col-7 font-monospace">{{ $usage['provider']['provider_key'] }}</dd>
                         <dt class="col-5">Endpoint</dt><dd class="col-7">{{ $application['endpoint_reference'] }}</dd>
                         <dt class="col-5">Capabilities</dt><dd class="col-7">{{ implode(', ', $application['requested_capabilities']) }}</dd>
                         <dt class="col-5">Status</dt><dd class="col-7"><x-status-badge :value="$application['status']" type="status" /></dd>
@@ -50,7 +42,7 @@
                 @foreach (['SANDBOX', 'PRODUCTION'] as $environment)
                     @php($approval = $approvalFor($environment))
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span>{{ ucfirst(strtolower($environment)) }}</span>
+                        <span>@humanize($environment)</span>
                         @if ($approval)
                             <x-status-badge :value="$approval['status']" type="status" />
                         @else
@@ -68,7 +60,7 @@
         <div class="card my-3">
             <div class="card-body">
                 <h2 class="h6">Submit a conformance run</h2>
-                <p class="text-muted small mb-2">Runs {{ $tenantAuthorityShortName }}'s fixed conformance harness against the tested capabilities and acknowledged events below. A PASSED SANDBOX run is immediately granted; a PASSED PRODUCTION run awaits {{ $tenantAuthorityShortName }} authority approval.</p>
+                <p class="text-muted small mb-2">Runs {{ $tenantAuthorityShortName }}'s standard conformance tests for the capabilities and events below. A passed sandbox run is approved straight away; a passed production run needs {{ $tenantAuthorityShortName }}'s approval.</p>
                 <form method="POST" action="{{ route('saas-applications.conformance-runs.store', $application['id']) }}" class="row g-2">
                     @csrf
                     <x-idempotency-key />
@@ -104,7 +96,7 @@
     <div class="card-body">
         <p class="small mb-2">Sync jobs across those connections: <strong>{{ $usage['syncStats']['totalJobs'] }}</strong> total, <strong>{{ $usage['syncStats']['failedJobs'] }}</strong> failed.</p>
         @if ($usage['connectionCount'] === 0)
-            <p class="text-muted small mb-0">No tenant has registered an integration connection for this provider's provider_key yet.</p>
+            <p class="text-muted small mb-0">No organisation has connected an integration to this provider yet.</p>
         @endif
     </div>
 </div>

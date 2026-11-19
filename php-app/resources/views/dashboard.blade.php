@@ -4,101 +4,78 @@
 
 @php
     $highRisk = collect($snapshot['risk_counts'])->whereIn('risk_level', ['HIGH', 'CRITICAL'])->sum('count');
+    $canReadInvoices = $user->hasAppPermission('invoices:read');
+    $canReadAudit = $user->hasAppPermission('audit:read');
+    $money = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">{{ $isNationalScope ? 'National operations' : 'Taxpayer operations' }}</div>
-        <h1 class="h3 mb-1">VAT transaction control centre</h1>
-        <p class="text-muted mb-0">Live certification, ledger, reconciliation and compliance position for the controlled pilot.</p>
-    </div>
-    {{-- "+ Submit invoice" (invoices:submit) is deliberately not linked yet --
-         the certification form is the next UI slice; a button with no real
-         destination would be a dead link, not a shortcut. --}}
-</div>
+<x-page-header title="Dashboard"
+    :subtitle="$isNationalScope
+        ? 'National VAT activity across all registered taxpayers.'
+        : (($user->organisation()?->legal_name ?? 'Your organisation').' — VAT activity at a glance.')">
+    @if ($canReadInvoices)
+        <x-slot:actions>
+            <a href="{{ route('invoices.index') }}" class="btn btn-outline-secondary"><i class="bi bi-receipt" aria-hidden="true"></i> All invoices</a>
+        </x-slot:actions>
+    @endif
+</x-page-header>
 
-<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+<div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Certified documents</span><span>#</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($snapshot['metrics']['invoice_count']) }}</div>
-                <div class="small text-success">All records committed atomically</div>
-            </div>
-        </div>
+        <x-stat-tile label="Certified invoices" icon="receipt" :value="number_format($snapshot['metrics']['invoice_count'])" hint="Invoices accepted and certified" />
     </div>
     <div class="col">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Transaction value</span><span>{{ $tenantCurrencySymbol }}</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($snapshot['metrics']['total_cents'] / 100, 2) }}</div>
-                <div class="small text-muted">Gross fiscal value in the pilot ledger</div>
-            </div>
-        </div>
+        <x-stat-tile label="Invoice value" icon="cash-stack" :value="$money($snapshot['metrics']['total_cents'])" hint="Total value of certified invoices" />
     </div>
     <div class="col">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>VAT controlled</span><span>15</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($snapshot['metrics']['tax_cents'] / 100, 2) }}</div>
-                <div class="small text-muted">Output VAT represented by certificates</div>
-            </div>
-        </div>
+        <x-stat-tile label="Output VAT" icon="percent" :value="$money($snapshot['metrics']['tax_cents'])" hint="VAT charged on certified invoices" />
     </div>
     <div class="col">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open exceptions</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($snapshot['metrics']['exception_count']) }}</div>
-                <div class="small {{ $highRisk > 0 ? 'text-warning' : 'text-success' }}">
-                    {{ $highRisk }} high or critical risk item{{ $highRisk === 1 ? '' : 's' }}
-                </div>
-            </div>
-        </div>
+        <x-stat-tile label="Open exceptions" icon="exclamation-triangle" :value="number_format($snapshot['metrics']['exception_count'])"
+            :hint="$highRisk.' high or critical risk item'.($highRisk === 1 ? '' : 's')" :tone="$highRisk > 0 ? 'warning' : 'success'"
+            :href="$user->hasAppPermission('exceptions:read') ? route('exceptions.index') : null" />
     </div>
 </div>
 
 <div class="row g-3">
-    <div class="col-lg-8">
+    <div class="{{ $canReadAudit ? 'col-xl-8' : 'col-12' }}">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
-                    <div class="fw-semibold">Recent fiscal documents</div>
-                    <div class="text-muted small">Latest certified invoice activity</div>
+                    <div class="fw-semibold">Recent invoices</div>
+                    <div class="text-muted small">The latest certified invoices</div>
                 </div>
-                @can('permission', 'invoices:read')
+                @if ($canReadInvoices)
                     <a href="{{ route('invoices.index') }}" class="btn btn-sm btn-outline-secondary">View all</a>
-                @endcan
+                @endif
             </div>
             <div class="table-responsive">
-                <table class="table table-hover mb-0 align-middle">
+                <table class="table table-hover align-middle">
                     <caption class="visually-hidden">The six most recently certified invoices</caption>
                     <thead>
-                        <tr><th scope="col">Invoice</th><th scope="col">Supplier</th><th scope="col">Customer</th><th scope="col" class="text-end">VAT</th><th scope="col">Status</th><th scope="col">Risk</th></tr>
+                        <tr><th scope="col">Invoice</th><th scope="col">Supplier / customer</th><th scope="col" class="text-end">VAT</th><th scope="col">Status</th><th scope="col">Risk</th></tr>
                     </thead>
                     <tbody>
                         @forelse ($snapshot['recent_invoices'] as $invoice)
                             <tr>
-                                <td>
-                                    @can('permission', 'invoices:read')
-                                        <a href="{{ route('invoices.show', $invoice['id']) }}"><strong>{{ $invoice['invoiceNumber'] }}</strong></a>
+                                <td class="text-nowrap">
+                                    @if ($canReadInvoices)
+                                        <a href="{{ route('invoices.show', $invoice['id']) }}">{{ $invoice['invoiceNumber'] }}</a>
                                     @else
-                                        <strong>{{ $invoice['invoiceNumber'] }}</strong>
-                                    @endcan
-                                    <div class="text-muted small font-monospace">{{ $invoice['id'] }}</div>
+                                        <span class="fw-semibold">{{ $invoice['invoiceNumber'] }}</span>
+                                    @endif
                                 </td>
                                 <td>
-                                    {{ $invoice['supplierName'] }}
-                                    <div class="text-muted small">{{ $invoice['supplierVatNumber'] }}</div>
+                                    <div>{{ $invoice['supplierName'] }}</div>
+                                    <div class="text-muted small">to {{ $invoice['customerName'] }}</div>
                                 </td>
-                                <td>{{ $invoice['customerName'] }}</td>
-                                <td class="text-end">{{ $invoice['currency'] }} {{ number_format($invoice['taxCents'] / 100, 2) }}</td>
+                                <td class="text-end text-nowrap">{{ $invoice['currency'] }} {{ number_format($invoice['taxCents'] / 100, 2) }}</td>
                                 <td><x-status-badge :value="$invoice['status']" type="status" /></td>
                                 <td><x-status-badge :value="$invoice['riskLevel']" type="risk" /></td>
                             </tr>
                         @empty
-                            <tr><td colspan="6" class="text-center text-muted py-4">No certified documents yet.</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted">No certified invoices yet.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -106,29 +83,34 @@
         </div>
     </div>
 
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header">
-                <div class="fw-semibold">Evidence stream</div>
-                <div class="text-muted small">Append-only operational audit trail</div>
-            </div>
-            <div class="card-body" style="max-height: 420px; overflow-y: auto;">
-                @forelse ($snapshot['recent_audit'] as $event)
-                    <div class="d-flex mb-3">
-                        <span class="badge rounded-pill bg-primary mt-1 me-2" style="width: .5rem; height: .5rem; padding: 0;"></span>
-                        <div class="flex-grow-1">
-                            <strong>{{ ucwords(strtolower(str_replace('_', ' ', $event['action']))) }}</strong>
-                            <p class="mb-0 text-muted small">{{ $event['resource_type'] }} &middot; <span class="font-monospace">{{ $event['resource_id'] }}</span></p>
-                            <time class="text-muted small">{{ \Illuminate\Support\Carbon::parse($event['occurred_at'])->format('Y-m-d H:i') }}</time>
-                        </div>
+    @if ($canReadAudit)
+        <div class="col-xl-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-semibold">Recent activity</div>
+                        <div class="text-muted small">Latest events in the audit trail</div>
                     </div>
-                @empty
-                    <p class="text-muted small mb-0">
-                        {{ $user->hasAppPermission('audit:read') ? 'No audit events recorded yet.' : 'Audit trail requires audit:read permission.' }}
-                    </p>
-                @endforelse
+                    <a href="{{ route('audit-trail.index') }}" class="btn btn-sm btn-outline-secondary">Audit trail</a>
+                </div>
+                <div class="card-body activity-feed">
+                    @forelse ($snapshot['recent_audit'] as $event)
+                        <div class="activity-item">
+                            <span class="activity-dot" aria-hidden="true"></span>
+                            <div class="min-w-0">
+                                <div class="fw-semibold">@humanize($event['action'])</div>
+                                <div class="text-muted small">
+                                    @humanize($event['resource_type']) &middot;
+                                    <time datetime="{{ $event['occurred_at'] }}">{{ \Illuminate\Support\Carbon::parse($event['occurred_at'])->format('d M Y, H:i') }}</time>
+                                </div>
+                            </div>
+                        </div>
+                    @empty
+                        <p class="text-muted small mb-0">No activity recorded yet.</p>
+                    @endforelse
+                </div>
             </div>
         </div>
-    </div>
+    @endif
 </div>
 @endsection

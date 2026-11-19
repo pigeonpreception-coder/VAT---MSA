@@ -211,7 +211,7 @@ class RefundViewTest extends TestCase
         $response->assertOk();
         $response->assertSeeInOrder(['Refund requests', '1']);
         $response->assertSeeInOrder(['Requested value', 'NAD 150.00']);
-        $response->assertSeeInOrder(['Configuration blocks', '1']);
+        $response->assertSeeInOrder(['<span>Blocked</span></div>', '<div class="stat-value">1</div>', 'Waiting for an ITAS filing acknowledgement'], false);
         $response->assertDontSee('Approved for payment');
     }
 
@@ -243,7 +243,7 @@ class RefundViewTest extends TestCase
         $response->assertSee('Eligibility Negative Net Position');
         // RECEIVED only offers APPROVE/REJECT/REQUEST_INFORMATION/HOLD --
         // RESUME (an EVIDENCE_REQUESTED/ON_HOLD-only action) must not appear.
-        $response->assertSeeInOrder(['Approve', 'Reject', 'Request Information', 'Hold']);
+        $response->assertSeeInOrder(['Approve', 'Reject', 'Request information', 'Hold']);
         $response->assertDontSee('>Resume<', false);
     }
 
@@ -326,7 +326,7 @@ class RefundViewTest extends TestCase
         $response = $this->actingAs($customer['owner'])->get(route('refunds.index', ['period_id' => $version->vat_period_id]));
 
         $response->assertOk()->assertViewIs('refunds.index');
-        $response->assertSee('NamRA VAT Summary Report');
+        $response->assertSee('NamRA VAT summary report');
         $response->assertSee($customer['taxpayer']->tin);
         $response->assertSee('Standard-Rated VAT');
         $response->assertSee('N$ 150.00'); // input tax claimed, from the one certified invoice

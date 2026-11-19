@@ -13944,3 +13944,136 @@ already gets, now that a dedicated page exists for it to link to.**
   new tests) + the same 10 pre-existing, unrelated quotation test-fixture
   failures documented earlier in this file, 0 regressions caused by this
   change.
+
+## UI/UX redesign: navigation, page structure, copy and four workflow gaps (2026-11-18)
+
+A full UI/UX review of every authenticated page, done as one pass so the
+whole application reads as one product. The review crawled the sidebar
+as each seeded role: of the 62 distinct sidebar destinations, 7 ended
+in a bare 403 for an owner, 36 for a compliance officer, 49 for a NamRA
+system admin, 54 for a super admin and 57 for a developer partner, with
+nothing in the menu to say so. Four links were duplicates, page headings
+mixed four different styles,
+and most pages carried internal engineering language (API paths,
+"maker-checker", "outbox", references to repository docs) and raw codes
+such as `PENDING_VERIFICATION` or bare UUIDs.
+
+**App shell and navigation**
+
+- The sidebar now comes from `config/navigation.php` and is built by
+  `App\Support\Navigation\Sidebar` (wired in `AppServiceProvider` as a
+  `layouts.app` view composer). It keeps the master prompt's nine
+  top-level groups (sections 16-21) in order, followed by Records &
+  Reports, Integrations, Taxpayer Registry and Administration (which now
+  also holds RT-005's Access Governance link).
+- The user's own 2026-09-15 decision stands: **every link and group is
+  still shown to every authenticated user** (`SidebarLinkPermissionTest`
+  unchanged and passing). Instead of hiding anything, a link the viewer's
+  permissions don't cover is shown dimmed with a lock icon and a
+  visually-hidden "(no access)" for screen readers; a group whose links
+  are all locked shows the lock on its header. Permissions are resolved
+  once per render (the user's memoized role permissions plus one
+  `DynamicPermissions` lookup), not once per link. The lock is a hint
+  only -- every controller's own gate is untouched.
+- `SidebarLockStateTest` keeps the lock honest: for every seeded role it
+  opens every sidebar link and asserts locked = 403 and unlocked = not
+  403 (100+ link checks). Locks reflect permissions, not licence
+  entitlements; an unlicensed organisation still reaches the 403 page for
+  licence-gated areas, which now says so (below).
+- Top bar: breadcrumb (group › page), workspace search for roles with
+  `search:read`, and an account menu with plain-language role names
+  (`App\Support\Access\RoleLabels`, e.g. `TAXPAYER_ADMIN` → Administrator)
+  and the organisation. The sidebar becomes an off-canvas drawer on
+  small screens.
+- Duplicate links resolved: "Create New Quotation" and "New Quote" are
+  shortcuts to the quotation form (`#issue-quotation`); "New Customer" /
+  "New Supplier" open the party registration form (`#register-party`,
+  collapsed by default) with the matching relationship pre-ticked;
+  "Issued Quotations" and "Converted Quotations" are now distinct filters.
+
+**Design system and shared components**
+
+- `resources/css/app.css` rewritten around design tokens (navy/teal
+  palette, neutral surfaces, soft status colours) on Bootstrap 5.3.
+  Bootstrap Icons are self-hosted through Vite (`bootstrap-icons`
+  1.13.1), so the existing CSP (`default-src 'self'`) needs no change.
+- New Blade components used across the pages: `x-page-header` (title,
+  one-line description, back link, actions), `x-stat-tile`,
+  `x-auth-card` (all four sign-in screens), `x-form-errors` (replaces 46
+  hand-written error blocks) and `x-money-input`.
+- `@humanize` / `App\Support\Ui\Humanize` turn stored codes into words
+  while keeping acronyms (`VAT_RETURN` → "VAT return", `PAYE` stays
+  PAYE). `x-status-badge` uses it too.
+- `x-money-input`: amounts are typed in currency ("1250.00"), not cents.
+  A hidden field carries the integer cents the controllers already expect
+  (`resources/js/app.js` keeps it in sync); without JavaScript the hidden
+  field stays empty, so a required amount fails validation instead of
+  being saved 100x too small. Applied to the debit note, quotation,
+  project budget, budget approval, purchase order, fixed asset and
+  expense forms.
+
+**Pages**
+
+Every page now opens with the same header pattern and plain-language
+copy. Raw identifiers moved out of headings into the details they belong
+to (e.g. a VAT return's ledger snapshot hash, a thread's related record,
+a SaaS provider's key). Redundant content removed:
+
+- Organisation administration no longer repeats the Licensing page's
+  entitlement table, the Workflows list or the Access governance review
+  list; its tiles link to those pages. People and roles sit in two tabs,
+  each with its own form beside the list.
+- Dead code removed: `compliance/cases.blade.php` and
+  `welcome.blade.php` (unreferenced), and the `$plannedRoute`
+  placeholder helper in `routes/web.php` with its
+  `planned/show.blade.php` / `x-planned-module` views -- every
+  placeholder it once served has a real page now.
+- The POS page no longer shows the session warning twice.
+
+**Workflow gaps fixed along the way**
+
+1. *Quarterly access review had no page.* Inviting an employee and
+   creating a role both fail (`QUARTERLY_ACCESS_REVIEW_REQUIRED`) until
+   the current quarter's review is open, but opening one was only
+   possible through `POST /api/v1/access-reviews`. New
+   `POST /access-governance/reviews` (`access-governance:manage`,
+   `step-up`, `rate-limit:control-plane`, idempotent) calls the same
+   `OrganisationAdminService::openQuarterlyAccessReview`. The
+   Administration page shows when changes are paused, with a "Start
+   review" button, and disables the two forms until then.
+   `AccessReviewWindow::currentReview()` / `allowsAdminWrites()` now hold
+   the precondition `EntitlementGate` enforces, so the page and the gate
+   can't drift apart (gate behaviour unchanged).
+2. *Certifying access meant pasting a review UUID.* The certification
+   form now offers the open reviews in a dropdown.
+3. *Creating a role meant typing permission codes.* The free-text
+   "comma-separated codes" field is now a grouped checklist built by
+   `App\Support\Access\PermissionLabels::grantableOptions()`: exactly
+   `Permissions::tenantGrantablePermissions()` that exist in the
+   `access_permissions` catalogue, i.e. what the service accepts. The
+   controller accepts `permissions[]` or the old comma string; validation
+   is unchanged, and a tampered protected value is still refused (new
+   test).
+4. *403 said "no permission" for every denial.* The page now explains
+   licence denials ("This area isn't included in your licence"), the
+   access-review precondition (with a link to Access governance) and
+   missing organisation membership, and keeps the raw reason as small
+   reference text for support.
+
+Also corrected: several forms said "you'll confirm your password" before
+a sensitive change; the step-up is a two-factor code
+(`EnsureFreshStepUp` redirects to the TOTP screen), so the text now says so.
+
+**Tests**
+
+- New: `SidebarLockStateTest` (2), plus Administration (checklist offers
+  only grantable permissions, checklist submission, tampered protected
+  value refused, paused-changes notice) and Access governance (start the
+  quarterly review from the page; manage + step-up required).
+- Updated: assertions that pinned old headings or raw codes now pin the
+  new text (e.g. `'AUDIT CASE'` → `'Audit case'`, a portal's old subtitle
+  → its new one), with generic labels anchored to their tile markup so no
+  assertion became easier to satisfy. Two N+1 guards
+  (`CustomerLedgerViewTest`, `SupplierLedgerViewTest`) allow one more
+  fixed query: the sidebar's single permission lookup per page. Both
+  still fail on any per-row query (40 rows).

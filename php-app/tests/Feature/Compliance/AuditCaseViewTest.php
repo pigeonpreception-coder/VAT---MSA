@@ -237,7 +237,7 @@ class AuditCaseViewTest extends TestCase
         $response->assertSee('FND-0002');
         $response->assertSee('NAD 5,000.00');
         $response->assertSee('Elevated risk indicators');
-        $response->assertSee('High Value Invoice');
+        $response->assertSee('High value invoice');
         $response->assertDontSee('Low Risk Pattern');
         $this->assertCount(1, $response->viewData('preliminaryFindings'));
         $this->assertCount(1, $response->viewData('riskAlerts'));

@@ -1,34 +1,23 @@
 @extends('layouts.app')
 
-@section('title', 'Platform config')
+@section('title', 'Platform configuration')
 
 @php
     $sidePreviewLimit = 5;
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Platform</div>
-    <h1 class="h3 mb-1">Feature flags, platform config &amp; access policies</h1>
-    <p class="text-muted mb-0">Only the value of an existing definition is runtime-changeable, and only through a maker-checker gate: a proposed change is staged until a second, independent reviewer decides it.</p>
-</div>
+<x-page-header title="Platform configuration"
+    subtitle="Feature flags, configuration values and access policies. A change is proposed first and applies only after a second person approves it." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Feature flags</span><span>F</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['feature_flags']) }}</div>
+                <div class="stat-label"><span>Feature flags</span></div>
+                <div class="stat-value">{{ number_format($metrics['feature_flags']) }}</div>
                 <div class="small text-muted">Active</div>
             </div>
         </div>
@@ -36,8 +25,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Config values</span><span>C</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['platform_config']) }}</div>
+                <div class="stat-label"><span>Config values</span></div>
+                <div class="stat-value">{{ number_format($metrics['platform_config']) }}</div>
                 <div class="small text-muted">Active</div>
             </div>
         </div>
@@ -45,8 +34,8 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Access policies</span><span>A</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['access_policies']) }}</div>
+                <div class="stat-label"><span>Access policies</span></div>
+                <div class="stat-value">{{ number_format($metrics['access_policies']) }}</div>
                 <div class="small text-muted">Active</div>
             </div>
         </div>
@@ -54,9 +43,9 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending changes</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['pending_changes']) }}</div>
-                <div class="small {{ $metrics['pending_changes'] > 0 ? 'text-warning' : 'text-muted' }}">Awaiting independent decision</div>
+                <div class="stat-label"><span>Pending changes</span></div>
+                <div class="stat-value">{{ number_format($metrics['pending_changes']) }}</div>
+                <div class="small {{ $metrics['pending_changes'] > 0 ? 'text-warning' : 'text-muted' }}">Waiting for a second reviewer</div>
             </div>
         </div>
     </div>
@@ -67,7 +56,7 @@
         <div class="card mb-3">
             <div class="card-header">
                 <div class="fw-semibold">Feature flags</div>
-                <div class="text-muted small">Proposing a change stages it as PENDING; nothing changes until an independent reviewer approves it</div>
+                <div class="text-muted small">A proposed change waits as pending — nothing changes until a different reviewer approves it</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -90,7 +79,7 @@
                                     <div class="text-muted small">{{ $flag['name'] }}</div>
                                     <div class="text-muted small">{{ $flag['description'] }}</div>
                                 </td>
-                                <td>{{ str_replace('_', ' ', $flag['rollout_scope']) }}</td>
+                                <td>@humanize($flag['rollout_scope'])</td>
                                 <td><x-status-badge :value="$flag['enabled'] ? 'ACTIVE' : 'CANCELLED'" type="status" /></td>
                                 @if ($canManage)
                                     <td>
@@ -133,7 +122,7 @@
                             <tr>
                                 <td>
                                     <span class="font-monospace">{{ $entry['key'] }}</span>
-                                    <div class="text-muted small">{{ $entry['category'] }} &middot; {{ $entry['description'] }}</div>
+                                    <div class="text-muted small">@humanize($entry['category']) &middot; {{ $entry['description'] }}</div>
                                 </td>
                                 <td><span class="font-monospace">{{ $entry['value'] }}</span></td>
                                 @if ($canManage)
@@ -177,7 +166,7 @@
                             <tr>
                                 <td>
                                     <span class="font-monospace">{{ $policy['code'] }}</span>
-                                    <div class="text-muted small">{{ $policy['name'] }} &middot; {{ str_replace('_', ' ', $policy['policy_type']) }}</div>
+                                    <div class="text-muted small">{{ $policy['name'] }} &middot; @humanize($policy['policy_type'])</div>
                                 </td>
                                 <td><span class="font-monospace small">{{ json_encode($policy['parameters']) }}</span></td>
                                 @if ($canManage)
@@ -214,7 +203,7 @@
                 @forelse ($changeRequests as $index => $change)
                     <div class="mb-3 pb-3 border-bottom change-request-item" @if ($index >= $sidePreviewLimit) hidden @endif>
                         <div class="d-flex justify-content-between align-items-start">
-                            <span>{{ str_replace('_', ' ', $change['target_type']) }}</span>
+                            <span>@humanize($change['target_type'])</span>
                             <x-status-badge :value="$change['status']" type="status" />
                         </div>
                         <div class="text-muted small font-monospace mt-1">{{ $change['target_id'] }}</div>
@@ -249,7 +238,7 @@
     <div class="card mt-3">
         <div class="card-header">
             <div class="fw-semibold">Provision platform staff</div>
-            <div class="text-muted small">A national/technical account with no taxpayer organisation -- unconditionally step-up gated</div>
+            <div class="text-muted small">Accounts not tied to a taxpayer organisation. Every change needs two-factor verification.</div>
         </div>
         <div class="card-body">
             <form method="POST" action="{{ route('platform.staff.store') }}">
@@ -273,7 +262,7 @@
                         <select class="form-select" id="role" name="role" required>
                             <option value="" disabled selected>Select role</option>
                             @foreach ($staffRoles as $role)
-                                <option value="{{ $role }}" @selected(old('role') === $role)>{{ str_replace('_', ' ', $role) }}</option>
+                                <option value="{{ $role }}" @selected(old('role') === $role)>@humanize($role)</option>
                             @endforeach
                         </select>
                     </div>

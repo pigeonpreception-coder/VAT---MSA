@@ -1,13 +1,10 @@
 @extends('layouts.app')
 
-@section('title', 'Invoice Reconciliation Report')
+@section('title', 'Invoice reconciliation')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">VAT Management</div>
-    <h1 class="h3 mb-1">Invoice Reconciliation Report</h1>
-    <p class="text-muted mb-0">Certified invoice totals by VAT category for one period, reconciled against the taxpayer's filed VAT return.</p>
-</div>
+<x-page-header title="Invoice reconciliation"
+    subtitle="Certified invoice totals by VAT category for a period, reconciled against the filed VAT return." />
 
 <div class="card mb-4">
     <div class="card-body">
@@ -119,7 +116,7 @@
                 </div>
                 @if ($report['filed_return'])
                     <div class="col-md-4">
-                        <div class="text-muted small">Filed VAT return (v{{ $report['filed_return']['version_number'] }}, {{ $report['filed_return']['status'] }})</div>
+                        <div class="text-muted small">Filed VAT return (version {{ $report['filed_return']['version_number'] }}, @humanize($report['filed_return']['status']))</div>
                         <div class="h5 mb-0">{{ $fmt($report['filed_return']['net_payable_cents']) }}</div>
                     </div>
                     <div class="col-md-4">

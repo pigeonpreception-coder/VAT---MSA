@@ -3,29 +3,17 @@
 @section('title', 'Logistics')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Operations</div>
-    <h1 class="h3 mb-1">Logistics Module</h1>
-    <p class="text-muted mb-0">Delivery, dispatch and fleet-adjacent logistics tracking. A delivery always references the tax invoice (or POS sale) it fulfils.</p>
-</div>
+<x-page-header title="Logistics"
+    subtitle="Deliveries and dispatches, each linked to the invoice or POS sale it fulfils." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Delivery register</div>
-                <div class="text-muted small">{{ count($deliveries) }} deliverie(s) on record</div>
+                <div class="text-muted small">{{ count($deliveries) }} {{ \Illuminate\Support\Str::plural('delivery', count($deliveries)) }} on record</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -46,7 +34,7 @@
                             <tr>
                                 <td><strong>{{ $delivery['delivery_number'] }}</strong></td>
                                 <td>
-                                    {{ $delivery['reference_type'] }}
+                                    @humanize($delivery['reference_type'])
                                     @if ($delivery['reference_id'] ?? null)
                                         <div class="text-muted small font-monospace">{{ $delivery['reference_id'] }}</div>
                                     @endif
@@ -103,7 +91,7 @@
             <div class="card h-100">
                 <div class="card-header">
                     <div class="fw-semibold">Create a delivery</div>
-                    <div class="text-muted small">New deliveries start Pending</div>
+                    <div class="text-muted small">New deliveries start as pending</div>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="{{ route('operations.logistics.store') }}">

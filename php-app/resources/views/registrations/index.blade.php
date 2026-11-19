@@ -1,26 +1,15 @@
 @extends('layouts.app')
 
-@section('title', 'Registration intake')
+@section('title', 'Registration applications')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Controlled onboarding</div>
-    <h1 class="h3 mb-1">Taxpayer registration intake</h1>
-    <p class="text-muted mb-0">Applications are deduplicated and held for authoritative verification. Submission never creates a taxpayer or organisation automatically.</p>
-</div>
+<x-page-header title="Registration applications"
+    subtitle="Taxpayer registration applications awaiting verification. Submitting an application never creates a taxpayer or organisation by itself." />
 
 <div class="card mb-3">
     <div class="card-body">
         <h2 class="h6">New application</h2>
-        @if ($errors->any())
-            <div class="alert alert-danger py-2" role="alert">
-                <ul class="mb-0 ps-3">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
+        <x-form-errors />
         <form method="POST" action="{{ route('registrations.store') }}" class="row g-2">
             @csrf
             <x-idempotency-key />
@@ -116,7 +105,7 @@
                         </td>
                         <td>
                             <strong>{{ $application['applicant_name'] }}</strong>
-                            <div class="text-muted small">{{ str_replace('_', ' ', $application['applicant_role']) }} &middot; {{ $application['contact_email'] }}</div>
+                            <div class="text-muted small">@humanize($application['applicant_role']) &middot; {{ $application['contact_email'] }}</div>
                         </td>
                         <td>{{ $application['legal_name'] }}</td>
                         <td>
@@ -185,11 +174,11 @@
                         </td>
                         <td class="font-monospace">{{ $application['vat_number'] }}</td>
                         <td class="font-monospace">{{ $application['tin'] }}</td>
-                        <td>{{ str_replace('_', ' ', $application['taxpayer_type']) }}</td>
+                        <td>@humanize($application['taxpayer_type'])</td>
                         <td><x-status-badge :value="$application['verification_status'] ?? 'NOT_STARTED'" /></td>
                         <td>
                             <x-status-badge :value="$application['proofing_status'] ?? 'NOT_STARTED'" />
-                            <div class="text-muted small">{{ str_replace('_', ' ', $application['proofing_reason_code'] ?? 'No proofing case') }}</div>
+                            <div class="text-muted small">@humanize($application['proofing_reason_code'] ?? 'No proofing case')</div>
                         </td>
                         <td class="text-end">{{ $application['proofing_confidence_bps'] === null ? '—' : number_format($application['proofing_confidence_bps'] / 100, 2).'%' }}</td>
                         <td><x-status-badge :value="$application['mismatch_status'] ?? 'NONE'" /></td>

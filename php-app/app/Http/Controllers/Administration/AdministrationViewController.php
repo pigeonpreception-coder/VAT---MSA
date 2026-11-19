@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Administration;
 
+use App\Domain\Licensing\AccessReviewWindow;
 use App\Exceptions\LicensingValidationException;
 use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Services\Administration\AdministrationSnapshotService;
 use App\Services\OrganisationAdmin\OrganisationAdminService;
+use App\Support\Access\PermissionLabels;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -50,11 +52,18 @@ class AdministrationViewController extends Controller
     {
         $this->authorize('permission', 'administration:read');
         $user = $request->user();
+        $canManageRoles = $user->hasAppPermission('roles:manage');
+        $snapshot = $this->snapshot->getAdministrationSnapshot($user, $request->query('organisation_id'));
+        $currentReview = AccessReviewWindow::currentReview($snapshot['organisation']['id']);
 
         return view('administration.index', [
-            'snapshot' => $this->snapshot->getAdministrationSnapshot($user, $request->query('organisation_id')),
+            'snapshot' => $snapshot,
+            'reviewWindow' => AccessReviewWindow::current()['key'],
+            'currentReview' => $currentReview,
+            'adminWritesOpen' => AccessReviewWindow::allowsAdminWrites($currentReview),
             'canManageEmployees' => $user->hasAppPermission('employees:manage'),
-            'canManageRoles' => $user->hasAppPermission('roles:manage'),
+            'canManageRoles' => $canManageRoles,
+            'permissionOptions' => $canManageRoles ? PermissionLabels::grantableOptions() : [],
         ]);
     }
 
@@ -72,13 +81,19 @@ class AdministrationViewController extends Controller
             return redirect()->route('administration.index')->withErrors(['employee' => $e->getMessage()])->withInput();
         }
 
-        return redirect()->route('administration.index')->with('status', 'Invitation recorded. External email delivery remains disabled in local staging.');
+        return redirect()->route('administration.index')->with('status', 'Invitation recorded. Emails are not sent from this environment, so let the person know directly.');
     }
 
     public function storeRole(Request $request): RedirectResponse
     {
         $this->authorize('permission', 'roles:manage');
-        $permissions = array_values(array_filter(array_map('trim', explode(',', (string) $request->input('permissions')))));
+        // The page submits a checkbox list (permissions[]); a comma-separated
+        // string is still accepted for scripted callers. Either way the
+        // service validates every code against the grantable catalogue.
+        $input = $request->input('permissions');
+        $permissions = is_array($input)
+            ? array_values(array_filter(array_map(fn ($code) => is_string($code) ? trim($code) : '', $input)))
+            : array_values(array_filter(array_map('trim', explode(',', (string) $input))));
         $payload = [
             'name' => $request->input('name'), 'description' => $request->input('description'), 'permissions' => $permissions,
         ];
@@ -89,6 +104,6 @@ class AdministrationViewController extends Controller
             return redirect()->route('administration.index')->withErrors(['role' => $e->getMessage()])->withInput();
         }
 
-        return redirect()->route('administration.index')->with('status', 'Role created from the approved permission catalogue.');
+        return redirect()->route('administration.index')->with('status', 'Role created.')->with('adminTab', 'roles');
     }
 }

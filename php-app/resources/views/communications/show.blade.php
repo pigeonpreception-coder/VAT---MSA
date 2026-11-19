@@ -3,37 +3,34 @@
 @section('title', $thread['subject'])
 
 @php
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
     $dateTime = fn ($value) => $value ? \Illuminate\Support\Carbon::parse($value)->format('d M Y, H:i') : '—';
     $actorName = fn (?string $id) => $id ? ($actorNames[$id] ?? $id) : '—';
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Communications</div>
-        <h1 class="h3 mb-1">{{ $thread['subject'] }}</h1>
-        <p class="text-muted mb-0">{{ $titleCase($thread['related_resource_type']) }} &middot; <span class="font-monospace">{{ $thread['related_resource_id'] }}</span></p>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-        <x-status-badge :value="$thread['status']" type="status" />
-        <a href="{{ route('communications.index') }}" class="btn btn-outline-secondary">&larr; Back to communications</a>
-    </div>
-</div>
+<x-page-header :title="$thread['subject']" :back="route('communications.index')" back-label="Communications"
+    :subtitle="'About: '.\App\Support\Ui\Humanize::enum($thread['related_resource_type'])">
+    <x-slot:actions><x-status-badge :value="$thread['status']" type="status" /></x-slot:actions>
+</x-page-header>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="card">
     <div class="card-header"><div class="fw-semibold">Thread record</div></div>
     <dl class="card-body row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3 mb-0">
+                <div class="col">
+            <dt class="text-muted small">Related record</dt>
+            <dd class="mb-0">
+                <span class="fw-semibold">@humanize($thread['related_resource_type'])</span>
+                @if ($thread['related_resource_type'] === 'AUDIT_CASE')
+                    <a href="{{ route('audit-cases.show', $thread['related_resource_id']) }}" class="small ms-1">Open case</a>
+                @elseif ($thread['related_resource_type'] === 'RECONCILIATION_EXCEPTION')
+                    <a href="{{ route('exceptions.index') }}" class="small ms-1">Open exceptions</a>
+                @endif
+                <div class="small text-muted font-monospace text-truncate" title="{{ $thread['related_resource_id'] }}">{{ $thread['related_resource_id'] }}</div>
+            </dd>
+        </div>
         <div class="col"><dt class="text-muted small">Classification</dt><dd class="mb-0 fw-semibold">{{ $titleCase($thread['classification']) }}</dd></div>
         <div class="col"><dt class="text-muted small">Opened by</dt><dd class="mb-0 fw-semibold">{{ $actorName($thread['opened_by']) }}</dd></div>
         <div class="col"><dt class="text-muted small">Opened</dt><dd class="mb-0 fw-semibold">{{ $dateTime($thread['opened_at']) }}</dd></div>
@@ -75,7 +72,7 @@
                     <label for="channel" class="form-label small mb-0">Channel</label>
                     <select id="channel" name="channel" class="form-select form-select-sm @error('channel') is-invalid @enderror" required>
                         @foreach (['PORTAL', 'EMAIL', 'SMS', 'LETTER'] as $c)
-                            <option value="{{ $c }}" @selected(old('channel') === $c)>{{ ucfirst(strtolower($c)) }}</option>
+                            <option value="{{ $c }}" @selected(old('channel') === $c)>@humanize($c)</option>
                         @endforeach
                     </select>
                     @error('channel')<div class="invalid-feedback">{{ $message }}</div>@enderror

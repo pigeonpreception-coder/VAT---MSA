@@ -94,7 +94,7 @@ class OfflineViewTest extends TestCase
         $response = $this->actingAs($org['owner'])->get('/offline');
 
         $response->assertOk()->assertViewIs('offline.index');
-        $response->assertSee('Offline devices, number ranges and ordered synchronisation');
+        $response->assertSee('Offline continuity');
         $response->assertSeeInOrder(['Devices', '1']);
         $response->assertSeeInOrder(['Active ranges', '1']);
         $response->assertSeeInOrder(['Rejected batches', '1']);
@@ -111,6 +111,6 @@ class OfflineViewTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('No offline devices are enrolled.');
-        $response->assertSee('No offline batches received.');
+        $response->assertSee('No offline batches received yet.');
     }
 }

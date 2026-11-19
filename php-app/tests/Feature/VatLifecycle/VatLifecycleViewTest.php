@@ -188,7 +188,7 @@ class VatLifecycleViewTest extends TestCase
 
         $show = $this->actingAs($customer['owner'])->get(route('vat-returns.show', $version->id));
         $show->assertOk()->assertViewIs('vat-returns.show');
-        $show->assertSee('Version 1');
+        $show->assertSee('VAT return — version 1');
         $show->assertSee('Output VAT');
         $show->assertSee('NAD 150.00'); // input VAT box amount
         $show->assertSee('Request approval');

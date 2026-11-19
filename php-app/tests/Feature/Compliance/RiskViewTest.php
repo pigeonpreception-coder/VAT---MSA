@@ -109,7 +109,7 @@ class RiskViewTest extends TestCase
 
         $list = $this->actingAs($this->namraAuditor('auditor2@namra.test'))->get(route('risk-indicators.index'));
         $list->assertOk()->assertViewIs('risk-indicators.index');
-        $list->assertSee('Obligation Overdue');
+        $list->assertSee('Obligation overdue');
         $list->assertSee('VAT-VIEW-RISK-0002 Trading Co');
     }
 
@@ -131,7 +131,7 @@ class RiskViewTest extends TestCase
         $this->actingAs($auditor)->post(route('risk-indicators.evaluation.store'), ['vat_number' => 'VAT-VIEW-RISK-0003']);
 
         $matched = $this->actingAs($auditor)->get(route('risk-indicators.index', ['status' => 'OPEN', 'severity' => 'HIGH']));
-        $matched->assertSee('Obligation Overdue');
+        $matched->assertSee('Obligation overdue');
 
         $unmatched = $this->actingAs($auditor)->get(route('risk-indicators.index', ['status' => 'DISMISSED']));
         $unmatched->assertDontSee('Obligation Overdue');

@@ -3,29 +3,17 @@
 @section('title', 'Access governance')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Organisation control plane</div>
-    <h1 class="h3 mb-1">Access governance</h1>
-    <p class="text-muted mb-0">{{ $organisation['legal_name'] }} &middot; maker-checker access requests, quarterly certification, and on-demand revocation/offboarding.</p>
-</div>
+<x-page-header title="Access governance"
+    :subtitle="$organisation['legal_name'].' — request and approve access, run quarterly access reviews, and revoke access when someone changes role or leaves.'" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3 mb-3">
     <div class="col-lg-5">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Request access</div>
-                <div class="text-muted small">Self or peer request for an existing organisation role -- a second reviewer decides it</div>
+                <div class="text-muted small">Request a role for yourself or a colleague. Someone else reviews and decides each request.</div>
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ route('access-governance.requests.store') }}">
@@ -126,10 +114,22 @@
     </div>
 </div>
 
-<div class="card mb-3">
-    <div class="card-header">
-        <div class="fw-semibold">Quarterly access reviews</div>
-        <div class="text-muted small">A review completes automatically once every active member has a certification</div>
+@php
+    $openReviews = collect($accessReviews)->where('status', 'OPEN')->values();
+    $selectedReview = old('review_id', $openReviews->count() === 1 ? $openReviews->first()['id'] : null);
+@endphp
+<div class="card mb-3" id="access-reviews">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <div class="fw-semibold">Quarterly access reviews</div>
+            <div class="text-muted small">Each quarter, confirm who should keep their access. A review completes once every active member is certified.</div>
+        </div>
+        @if ($canManage && ! $currentReview)
+            <form method="POST" action="{{ route('access-governance.reviews.store') }}">
+                @csrf
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-play-circle" aria-hidden="true"></i> Start {{ $reviewWindow }} review</button>
+            </form>
+        @endif
     </div>
     <div class="table-responsive">
         <table class="table table-sm mb-0 align-middle">
@@ -146,54 +146,61 @@
                 @forelse ($accessReviews as $review)
                     <tr>
                         <td>{{ $review['name'] }}</td>
-                        <td>{{ ucwords(strtolower(str_replace('_', ' ', $review['review_type']))) }}</td>
+                        <td>@humanize($review['review_type'])</td>
                         <td class="text-muted small">{{ \Illuminate\Support\Carbon::parse($review['due_at'])->format('d M Y') }}</td>
                         <td><x-status-badge :value="$review['status']" type="status" /></td>
                     </tr>
                 @empty
-                    <tr><td colspan="4" class="text-center text-muted py-3">No access reviews on record.</td></tr>
+                    <tr><td colspan="4" class="text-center text-muted py-3">No access reviews yet.</td></tr>
                 @endforelse
             </tbody>
         </table>
     </div>
     @if ($canManage)
         <div class="card-footer">
-            {{-- Step-up gated, matching the JSON API's own
-                 /access-reviews/{id}/certifications POST. review_id is typed
-                 in directly (the table above lists each review's name/type/
-                 due date, not its id) -- see this page's own doc comment
-                 for why extending the shared snapshot's row shape was kept
-                 out of this pass. --}}
-            <form method="POST" action="{{ route('access-governance.certifications.store') }}" class="row g-2">
-                @csrf
-                <div class="col-md-3">
-                    <label for="review_id" class="form-label small mb-0">Review ID</label>
-                    <input type="text" id="review_id" name="review_id" required class="form-control form-control-sm font-monospace" value="{{ old('review_id') }}">
-                </div>
-                <div class="col-md-3">
-                    <label for="cert_subject_user_id" class="form-label small mb-0">Member</label>
-                    <select id="cert_subject_user_id" name="subject_user_id" class="form-select form-select-sm" required>
-                        <option value="" disabled selected>Choose&hellip;</option>
-                        @foreach ($activeMembers as $member)
-                            <option value="{{ $member['id'] }}" @selected(old('subject_user_id') === $member['id'])>{{ $member['name'] }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label for="disposition" class="form-label small mb-0">Disposition</label>
-                    <select id="disposition" name="disposition" class="form-select form-select-sm" required>
-                        <option value="RETAIN">Retain</option>
-                        <option value="REVOKE">Revoke</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label for="finding" class="form-label small mb-0">Finding (optional)</label>
-                    <input type="text" id="finding" name="finding" maxlength="400" class="form-control form-control-sm" value="{{ old('finding') }}">
-                </div>
-                <div class="col-md-1 align-self-end">
-                    <button type="submit" class="btn btn-primary btn-sm w-100">Certify</button>
-                </div>
-            </form>
+            @if ($openReviews->isEmpty())
+                <p class="small text-muted mb-0">No review is open. Start this quarter's review to certify each member's access.</p>
+            @else
+                {{-- Step-up gated, matching the JSON API's own
+                     /access-reviews/{id}/certifications POST. --}}
+                <form method="POST" action="{{ route('access-governance.certifications.store') }}" class="row g-2">
+                    @csrf
+                    <div class="col-md-3">
+                        <label for="review_id" class="form-label small mb-0">Review</label>
+                        <select id="review_id" name="review_id" class="form-select form-select-sm" required>
+                            @if ($openReviews->count() > 1)
+                                <option value="" disabled @selected(! $selectedReview)>Choose&hellip;</option>
+                            @endif
+                            @foreach ($openReviews as $review)
+                                <option value="{{ $review['id'] }}" @selected($selectedReview === $review['id'])>{{ $review['name'] }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="cert_subject_user_id" class="form-label small mb-0">Member</label>
+                        <select id="cert_subject_user_id" name="subject_user_id" class="form-select form-select-sm" required>
+                            <option value="" disabled @selected(! old('subject_user_id'))>Choose&hellip;</option>
+                            @foreach ($activeMembers as $member)
+                                <option value="{{ $member['id'] }}" @selected(old('subject_user_id') === $member['id'])>{{ $member['name'] }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="disposition" class="form-label small mb-0">Decision</label>
+                        <select id="disposition" name="disposition" class="form-select form-select-sm" required>
+                            <option value="RETAIN" @selected(old('disposition') !== 'REVOKE')>Keep access</option>
+                            <option value="REVOKE" @selected(old('disposition') === 'REVOKE')>Remove access</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="finding" class="form-label small mb-0">Note (optional)</label>
+                        <input type="text" id="finding" name="finding" maxlength="400" class="form-control form-control-sm" value="{{ old('finding') }}">
+                    </div>
+                    <div class="col-md-1 align-self-end">
+                        <button type="submit" class="btn btn-primary btn-sm w-100">Certify</button>
+                    </div>
+                </form>
+            @endif
         </div>
     @endif
 </div>
@@ -266,7 +273,7 @@
                         @forelse ($capabilityGrants as $grant)
                             <tr>
                                 <td>{{ $grant['user_name'] }}</td>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $grant['capability']))) }}</td>
+                                <td>@humanize($grant['capability'])</td>
                                 @if ($canManage)
                                     <td>
                                         <form method="POST" action="{{ route('access-governance.revocations.store') }}" class="d-flex gap-1">
@@ -293,7 +300,7 @@
     <div class="card border-danger">
         <div class="card-header text-danger">Offboard a user</div>
         <div class="card-body">
-            <p class="text-muted small">Immediately revokes this user's organisation membership and every active role/capability grant. For a security incident or an access-only exit -- employment and licence seat records are untouched. Idempotent: safe to submit again.</p>
+            <p class="text-muted small">Immediately removes this person's organisation membership and every role and capability they hold — for a security incident or when someone leaves. Their employment record and licence seat are not changed. Submitting twice is safe.</p>
             {{-- Step-up gated, matching /organisations/offboarding. --}}
             <form method="POST" action="{{ route('access-governance.offboarding.store') }}" class="row g-2">
                 @csrf

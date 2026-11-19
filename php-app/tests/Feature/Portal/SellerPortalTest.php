@@ -187,7 +187,7 @@ class SellerPortalTest extends TestCase
         $response = $this->actingAs($party['owner'])->get('/portal/seller');
 
         $response->assertOk()->assertViewIs('portal.seller');
-        $response->assertSee('Sales, certification and output VAT position');
+        $response->assertSee('Sales, quotations and the output VAT position for your organisation.');
         $response->assertSee('Supplier Co');
         $response->assertSee('Customer Co');
         $response->assertSee('NAD 150.00'); // tax column + output VAT metric

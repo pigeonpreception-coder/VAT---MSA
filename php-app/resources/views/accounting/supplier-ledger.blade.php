@@ -1,41 +1,35 @@
 @extends('layouts.app')
 
-@section('title', 'Supplier Ledger')
+@section('title', 'Supplier ledger')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Accounting & Finance</div>
-        <h1 class="h3 mb-1">Supplier Ledger</h1>
-        <p class="text-muted mb-0">Per-supplier posted balances derived from approved expenses -- the maker-checker equivalent of a posted general-ledger transaction in this platform's lighter accounting model.</p>
-    </div>
-    <a href="{{ route('accounting.index') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Back to Accounting</a>
-</div>
+<x-page-header title="Supplier ledger"
+    subtitle="What you owe each supplier, from approved expenses." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Suppliers with activity</div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($summary['suppliers'])) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Suppliers with activity</div>
+            <div class="stat-value">{{ number_format(count($summary['suppliers'])) }}</div>
             <div class="small text-muted">{{ number_format($suppliers->count()) }} registered supplier{{ $suppliers->count() === 1 ? '' : 's' }} in total</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Total posted balance</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($summary['total_posted_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Total posted balance</div>
+            <div class="stat-value">{{ $fmt($summary['total_posted_cents']) }}</div>
             <div class="small text-success">Approved expenses</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Pending approval</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($summary['total_pending_cents']) }}</div>
-            <div class="small text-muted">Not yet a recognised liability</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Pending approval</div>
+            <div class="stat-value">{{ $fmt($summary['total_pending_cents']) }}</div>
+            <div class="small text-muted">Submitted, awaiting approval</div>
         </div></div>
     </div>
 </div>
@@ -43,7 +37,7 @@
 <div class="card mb-4">
     <div class="card-header">
         <div class="fw-semibold">Supplier balances</div>
-        <div class="text-muted small">Posted = approved expenses; pending = submitted, awaiting approval</div>
+        <div class="text-muted small">Posted: approved expenses · Pending: submitted, awaiting approval</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">

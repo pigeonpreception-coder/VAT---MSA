@@ -1,350 +1,1360 @@
 @import "bootstrap/dist/css/bootstrap.min.css";
+@import "bootstrap-icons/font/bootstrap-icons.min.css";
 
 /*
- * VAT-MSA brand palette, ported from the source's own app/globals.css
- * :root tokens -- applied here as targeted Bootstrap component overrides
- * rather than a parallel design system, since every Blade view in this
- * port already composes plain Bootstrap classes (.card, .table, .btn,
- * .badge, .alert) and a second class vocabulary (the source's own
- * .panel/.metric/.portal-card) would be the first inconsistency in an
- * otherwise uniform frontend.
+ * VAT-MSA design system: Bootstrap 5 with the brand palette ported from the
+ * source's app/globals.css, applied as overrides of Bootstrap's own classes so
+ * every view keeps composing plain Bootstrap markup (.card, .table, .btn,
+ * .badge, .alert) plus a handful of app components (page header, stat tile).
  */
 :root {
+    /* Brand */
     --vatmsa-navy: #09243a;
+    --vatmsa-navy-2: #0c2f48;
     --vatmsa-teal: #0a776f;
+    --vatmsa-teal-dark: #08665f;
     --vatmsa-teal-bright: #18a39a;
-    --vatmsa-teal-pale: #e8f7f5;
-    --vatmsa-green: #287557;
-    --vatmsa-green-pale: #ecf8f1;
-    --vatmsa-amber: #c6861a;
-    --vatmsa-amber-pale: #fff6df;
-    --vatmsa-red: #b44343;
-    --vatmsa-red-pale: #fff0ef;
-    --vatmsa-canvas: #f3f6f8;
-    --vatmsa-line: #dbe4ea;
-    /* Kept for the skip-link's own colour/box-shadow below. */
-    --vatmsa-brand: var(--vatmsa-teal);
+    --vatmsa-teal-pale: #e6f4f2;
 
-    /* Bootstrap's own root-level theme variables -- .bg-primary,
-       .text-primary, .border-primary and .text-bg-* all read these
-       directly, so overriding them here recolours every one of those
-       utilities app-wide without touching each Blade file. */
+    /* Neutrals */
+    --vatmsa-canvas: #f4f6f9;
+    --vatmsa-surface: #ffffff;
+    --vatmsa-surface-muted: #f8fafc;
+    --vatmsa-line: #e2e8ef;
+    --vatmsa-line-strong: #cfd8e2;
+    --vatmsa-ink: #172a3a;
+    --vatmsa-ink-muted: #5d6e7e;
+    --vatmsa-ink-subtle: #8796a5;
+
+    /* Status: soft background + readable ink */
+    --vatmsa-green: #287557;
+    --vatmsa-green-soft: #e6f4ec;
+    --vatmsa-green-ink: #1d5b42;
+    --vatmsa-blue-soft: #e4f1f8;
+    --vatmsa-blue-ink: #1f5670;
+    --vatmsa-amber: #c6861a;
+    --vatmsa-amber-soft: #fdf3dc;
+    --vatmsa-amber-ink: #7a5208;
+    --vatmsa-red: #b44343;
+    --vatmsa-red-soft: #fbeceb;
+    --vatmsa-red-ink: #8a2f2f;
+    --vatmsa-grey-soft: #eef1f4;
+    --vatmsa-grey-ink: #4b5b6a;
+
+    /* Shell */
+    --vatmsa-sidebar-width: 276px;
+    --vatmsa-topbar-height: 60px;
+    --vatmsa-radius: 10px;
+    --vatmsa-radius-sm: 7px;
+    --vatmsa-shadow-sm: 0 1px 2px rgba(16, 38, 58, .05);
+    --vatmsa-shadow: 0 1px 3px rgba(16, 38, 58, .06), 0 6px 16px rgba(16, 38, 58, .04);
+
+    /* Bootstrap root theme variables: .bg-primary, .text-primary,
+       .border-primary, .link-* and .text-bg-* all read these. */
+    --bs-body-font-size: .9375rem;
+    --bs-body-color: var(--vatmsa-ink);
+    --bs-body-bg: var(--vatmsa-canvas);
+    --bs-secondary-color: var(--vatmsa-ink-muted);
+    --bs-border-color: var(--vatmsa-line);
+    --bs-border-radius: var(--vatmsa-radius-sm);
+    --bs-border-radius-lg: var(--vatmsa-radius);
     --bs-primary: var(--vatmsa-teal);
     --bs-primary-rgb: 10, 119, 111;
+    --bs-primary-text-emphasis: #064a45;
+    --bs-primary-bg-subtle: var(--vatmsa-teal-pale);
+    --bs-primary-border-subtle: #b5ddd8;
     --bs-success-rgb: 40, 117, 87;
     --bs-info-rgb: 24, 163, 154;
     --bs-warning-rgb: 198, 134, 26;
     --bs-danger-rgb: 180, 67, 67;
     --bs-link-color: var(--vatmsa-teal);
     --bs-link-color-rgb: 10, 119, 111;
-    --bs-link-hover-color: #08675f;
-    --bs-link-hover-color-rgb: 8, 103, 95;
+    --bs-link-hover-color: var(--vatmsa-teal-dark);
+    --bs-link-hover-color-rgb: 8, 102, 95;
+    --bs-focus-ring-color: rgba(24, 163, 154, .25);
+    --bs-emphasis-color: var(--vatmsa-ink);
+    --bs-heading-color: var(--vatmsa-ink);
 }
 
 body {
     min-height: 100vh;
     background-color: var(--vatmsa-canvas);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
-.navbar-brand {
+h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6 {
     font-weight: 600;
+    letter-spacing: -.01em;
 }
 
-/* The left sidebar, matching the source's own vertical navigation
-   (this port used a top navbar through the dashboard slice and every
-   slice after it; the sidebar below brings it back in line with the
-   source's own layout). Bootstrap's .offcanvas-lg makes it a normal,
-   always-visible column at the lg breakpoint and up, and a sliding
-   off-canvas drawer below it -- but its own >=992px rule forces
-   `.offcanvas-lg` (and `.offcanvas-lg .offcanvas-body`) to a fully
-   transparent background with !important, which otherwise leaves this
-   sidebar's white nav text invisible against the light page canvas
-   showing through. `.sidebar.offcanvas-lg`'s own two-class selector
-   already out-specifies Bootstrap's plain single-class one, so the
-   !important below only has to beat Bootstrap's !important, not also
-   fight specificity. */
-.sidebar {
-    --bs-offcanvas-width: 260px;
-    background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%) !important;
-    color: rgba(255, 255, 255, 0.85);
+.text-muted {
+    color: var(--vatmsa-ink-muted) !important;
 }
 
-.sidebar .offcanvas-header {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+.font-monospace {
+    font-size: .875em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Application shell                                                   */
+/* ------------------------------------------------------------------ */
+
+.app-sidebar {
+    --bs-offcanvas-width: var(--vatmsa-sidebar-width);
+    --bs-offcanvas-bg: var(--vatmsa-navy);
+    display: flex;
+    flex-direction: column;
+    color: rgba(255, 255, 255, .78);
+}
+
+/* Bootstrap's own >=992px .offcanvas-lg rule forces a transparent
+   background with !important; the two-class selector outranks it. */
+.app-sidebar.offcanvas-lg {
+    background: linear-gradient(180deg, #08213a 0%, #0b2c44 60%, #0b3446 100%) !important;
+}
+
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    flex: none;
+    height: var(--vatmsa-topbar-height);
+    padding: 0 1.1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
 }
 
 .sidebar-brand {
-    padding: 1rem 1.25rem;
-    font-weight: 600;
-    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    min-width: 0;
     color: #fff;
     text-decoration: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .sidebar-brand:hover {
     color: #fff;
 }
 
-.sidebar-nav {
-    padding: 0.75rem;
-    gap: 0.15rem;
-}
-
-.sidebar-nav .nav-link {
-    color: rgba(255, 255, 255, 0.75);
-    border-radius: 0.5rem;
-    padding: 0.55rem 0.9rem;
-}
-
-/* Top-level folder items -- both a group's own trigger button
-   (.sidebar-group-trigger) and a flat top-level link with no subfolders
-   of its own (Licensing, Platform, Access Rights) -- get a visibly
-   larger, bolder label than the subfolder items nested inside a group,
-   so the two tiers of the sidebar are easy to tell apart at a glance
-   (user's own explicit request). The child combinator keeps this from
-   also matching .sidebar-subnav's own nested .nav-link items, which sit
-   three levels down from .sidebar-nav, not directly under it. */
-.sidebar-nav > .nav-item > .nav-link {
-    font-size: 1.05rem;
-    font-weight: 600;
-}
-
-.sidebar-nav .nav-link:hover {
-    color: #fff;
-    background-color: rgba(255, 255, 255, 0.08);
-}
-
-.sidebar-nav .nav-link[aria-current="page"] {
-    color: #fff;
-    background-color: var(--vatmsa-teal);
-    font-weight: 600;
-}
-
-/* Sidebar restructuring: each top-level group is a Bootstrap-collapse
-   dropdown (data-bs-toggle="collapse") rather than a flat link list --
-   these three rules style the group trigger button, its caret, and the
-   indented submenu it reveals, reusing the same dark palette and
-   aria-current highlight the flat list already had above. */
-.sidebar-group-trigger {
-    width: 100%;
-    text-align: left;
-    display: flex;
-    justify-content: space-between;
+.sidebar-brand-mark {
+    display: inline-flex;
     align-items: center;
-    background: none;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--vatmsa-teal-bright), var(--vatmsa-teal));
+    color: #fff;
+    font-size: 1.05rem;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
+}
+
+.sidebar-brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+    min-width: 0;
+}
+
+.sidebar-brand-name {
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: .01em;
+}
+
+.sidebar-brand-tagline {
+    font-size: .72rem;
+    color: rgba(255, 255, 255, .55);
+    white-space: nowrap;
+}
+
+.sidebar-nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: .75rem .65rem 1.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, .18) transparent;
+}
+
+/* Two clearly different tiers (user's own explicit request): top-level
+   groups are larger and bolder than the links nested inside them. */
+.sidebar-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    width: 100%;
+    padding: .55rem .7rem;
     border: 0;
+    border-radius: var(--vatmsa-radius-sm);
+    background: none;
+    color: rgba(255, 255, 255, .86);
+    font-size: .9375rem;
+    font-weight: 600;
+    text-align: left;
 }
 
-.sidebar-group-caret {
-    transition: transform 0.15s ease;
-    font-size: 0.7rem;
+.sidebar-group-toggle:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, .06);
 }
 
-.sidebar-group-trigger[aria-expanded="true"] .sidebar-group-caret {
+.sidebar-group-toggle > span {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.sidebar-group-icon {
+    flex: none;
+    width: 1.1rem;
+    font-size: 1.05rem;
+    text-align: center;
+    color: rgba(255, 255, 255, .6);
+}
+
+.sidebar-group-toggle:not(.collapsed) .sidebar-group-icon {
+    color: var(--vatmsa-teal-bright);
+}
+
+.sidebar-chevron {
+    flex: none;
+    font-size: .7rem;
+    opacity: .6;
+    transition: transform .15s ease;
+}
+
+.sidebar-group-toggle:not(.collapsed) .sidebar-chevron {
     transform: rotate(180deg);
 }
 
 .sidebar-subnav {
-    list-style: none;
-    padding-left: 0.75rem;
-    margin: 0.15rem 0 0.35rem;
+    margin: .1rem 0 .4rem 1.55rem;
+    padding-left: .55rem;
+    border-left: 1px solid rgba(255, 255, 255, .1);
 }
 
-.sidebar-subnav .nav-link {
-    font-size: 0.85rem;
-    font-weight: 400;
-    padding: 0.4rem 0.9rem;
+.sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .38rem .7rem;
+    border-radius: var(--vatmsa-radius-sm);
+    color: rgba(255, 255, 255, .68);
+    font-size: .865rem;
+    line-height: 1.35;
+    text-decoration: none;
 }
 
-/* Pinned to the bottom of whichever ancestor actually scrolls (.sidebar
-   itself at >=992px per the fix above; Bootstrap's own .offcanvas-body
-   below that) via `position: sticky`, not a nested overflow/flex
-   constraint on `.sidebar-nav` -- that's the approach the comment above
-   already found broke Collapse's scrollHeight measurement on expand.
-   Sticky leaves `.sidebar-nav` a normal, unconstrained flow element, so
-   there is nothing for Collapse's measurement to collide with; only this
-   one element gains new positioning. Needs its own opaque background
-   (the gradient lives on `.sidebar`, several ancestors up) so scrolled-
-   past nav items don't show through underneath it while it's stuck. */
-.sidebar-user {
-    position: sticky;
-    bottom: 0;
-    padding: 1rem 1.25rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%);
-}
-
-.mobile-topbar {
-    background: linear-gradient(170deg, #081e31 0%, #0b3046 66%, #0b3d4d 100%);
-}
-
-@media (min-width: 992px) {
-    /* Bootstrap's own >=992px .offcanvas-lg rule (bootstrap.min.css) resets
-       .offcanvas-body to `flex-grow: 0; overflow-y: visible` and never
-       gives `.offcanvas-lg` itself `display: flex` at this breakpoint at
-       all (that's only declared under its own `@media (max-width:
-       991.98px)`, the "closed drawer" state) -- so at desktop widths this
-       whole sidebar is just a plain block box that grows to its own full
-       content height (brand + every expanded group + the signed-in-as
-       footer), silently overflowing past the fixed bottom edge below with
-       nothing to scroll it back into view. Confirmed live: with several
-       groups expanded, the lowest folders render below the viewport with
-       no way to reach them (user's own reported bug).
-
-       An earlier version of this fix tried to keep the brand header and
-       footer permanently pinned by making only the inner `.sidebar-nav`
-       list scroll (a nested flex-column chain: `.sidebar` -> `.offcanvas-
-       body` -> `.sidebar-nav`, each needing `flex-grow`/`min-height: 0` to
-       actually constrain the next). That fought Bootstrap's own Collapse
-       plugin: expanding a group measures `scrollHeight` on the collapsing
-       element at the moment of the click, and nesting it inside an
-       already height-constrained, `overflow-y: hidden` ancestor made that
-       measurement come back wrong -- confirmed live: a group's caret
-       flipped to "expanded" but its own subitems never actually appeared.
-
-       This simpler version instead lets the whole sidebar box itself
-       scroll as one unit -- no nested flex constraints for Collapse's own
-       measurement to collide with, at the cost of the brand/footer
-       scrolling along with the rest instead of staying permanently
-       pinned. `.sidebar.offcanvas-lg`'s two-class selector out-specifies
-       Bootstrap's own single-class `.offcanvas-lg`/`.offcanvas-body`
-       rules from the same media query, so no !important is needed. */
-    .sidebar.offcanvas-lg {
-        position: fixed;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        z-index: 1030;
-        width: var(--bs-offcanvas-width);
-        overflow-y: auto;
-    }
-
-    /* .container-fluid (main's own class) is width:100% of the viewport --
-       margin-left alone pushes main right without shrinking it, so it
-       always overflowed the right edge by exactly the sidebar's width on
-       every single page (confirmed: document.scrollWidth was 260px past
-       clientWidth site-wide, not a per-page content issue). width: calc()
-       shrinks main to the space actually left beside the fixed sidebar. */
-    body.has-sidebar main {
-        margin-left: var(--bs-offcanvas-width, 260px);
-        width: calc(100% - var(--bs-offcanvas-width, 260px));
-    }
-}
-
-/* .btn-primary's own background/border/focus-ring are Bootstrap
-   component-local custom properties (baked in at compile time inside
-   the bundled bootstrap.min.css, not inherited from the root --bs-primary
-   above) -- redeclared here, same selector and specificity, so this
-   later rule wins in source order. */
-.btn-primary {
-    --bs-btn-bg: var(--vatmsa-teal);
-    --bs-btn-border-color: var(--vatmsa-teal);
-    --bs-btn-hover-bg: #08675f;
-    --bs-btn-hover-border-color: #08675f;
-    --bs-btn-active-bg: #08675f;
-    --bs-btn-active-border-color: #08675f;
-    --bs-btn-focus-shadow-rgb: 24, 163, 154;
-}
-
-.btn-outline-secondary {
-    --bs-btn-color: var(--vatmsa-navy);
-    --bs-btn-border-color: var(--vatmsa-line);
-    --bs-btn-hover-color: var(--vatmsa-navy);
-    --bs-btn-hover-bg: #f7fafb;
-    --bs-btn-hover-border-color: var(--vatmsa-line);
-    --bs-btn-active-color: var(--vatmsa-navy);
-    --bs-btn-active-bg: #f7fafb;
-    --bs-btn-active-border-color: var(--vatmsa-line);
-}
-
-/* Cards rounded and shadowed a little closer to the source's own
-   .panel/.metric look, without changing Bootstrap's markup structure. */
-.card {
-    border-radius: 0.8rem;
-    border-color: var(--vatmsa-line);
-    box-shadow: 0 4px 16px rgba(14, 37, 55, .035);
-}
-
-.card-header {
-    background-color: #fbfcfd;
-}
-
-/* text-bg-* badge colours, remapped from Bootstrap's default palette to
-   the source's own four status colours (green/teal/amber/red).
-   x-status-badge.blade.php routes every status/risk value to one of
-   these four utility classes, matching the source's own StatusBadge
-   component's className -> app/globals.css `.status-*` colour groups. */
-.text-bg-success {
-    color: #fff !important;
-    background-color: var(--vatmsa-green) !important;
-}
-
-.text-bg-info {
-    color: #fff !important;
-    background-color: var(--vatmsa-teal-bright) !important;
-}
-
-.text-bg-warning {
-    color: #5c4508 !important;
-    background-color: var(--vatmsa-amber) !important;
-}
-
-.text-bg-danger {
-    color: #fff !important;
-    background-color: var(--vatmsa-red) !important;
-}
-
-.alert-success {
-    color: #226448;
-    background-color: var(--vatmsa-green-pale);
-    border-color: #cce8d8;
-}
-
-.alert-info {
-    color: #245a6d;
-    background-color: #edf7fa;
-    border-color: #cde6ed;
-}
-
-.alert-danger {
-    color: #863737;
-    background-color: var(--vatmsa-red-pale);
-    border-color: #f1cfcc;
-}
-
-/* Bootstrap 5.3 has no min-w-0 utility (unlike min-vw-100/min-vh-100) --
-   without this, a flex child's default min-width:auto can force the
-   whole row wider than the viewport once a wide table is inside it,
-   defeating the .table-responsive scroll region that table is meant to
-   contain itself to. */
-#main-content {
+.sidebar-link > span:first-child {
+    flex: 1 1 auto;
     min-width: 0;
 }
 
-/* Skip-to-content link (WCAG 2.1 SC 2.4.1) -- Bootstrap's
-   .visually-hidden-focusable handles show/hide on focus; this just gives
-   it a legible, unmistakable appearance once focused. */
-.skip-link {
-    position: absolute;
-    top: 0.5rem;
-    left: 0.5rem;
-    z-index: 1080;
-    padding: 0.5rem 1rem;
-    background-color: #fff;
-    color: var(--vatmsa-teal);
-    border-radius: 0.375rem;
-    box-shadow: 0 0 0 0.25rem rgba(10, 119, 111, 0.35);
-    text-decoration: none;
+.sidebar-link:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, .06);
+}
+
+.sidebar-link[aria-current="page"] {
+    color: #fff;
+    font-weight: 600;
+    background-color: rgba(24, 163, 154, .22);
+    box-shadow: inset 3px 0 0 var(--vatmsa-teal-bright);
+}
+
+/* Links (and whole groups) the current user can't open stay visible --
+   the menu always shows the full application -- but read as unavailable. */
+.sidebar-link.is-locked,
+.sidebar-group.is-locked > .sidebar-group-toggle {
+    color: rgba(255, 255, 255, .38);
+}
+
+.sidebar-group.is-locked .sidebar-group-icon {
+    color: rgba(255, 255, 255, .3);
+}
+
+.sidebar-lock {
+    flex: none;
+    font-size: .68rem;
+    opacity: .7;
+}
+
+.app-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 100vh;
+}
+
+.app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 1020;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    height: var(--vatmsa-topbar-height);
+    padding: 0 1.75rem;
+    background-color: rgba(255, 255, 255, .96);
+    border-bottom: 1px solid var(--vatmsa-line);
+    backdrop-filter: saturate(1.4) blur(6px);
+}
+
+.topbar-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--vatmsa-line);
+    border-radius: var(--vatmsa-radius-sm);
+    background: #fff;
+    color: var(--vatmsa-ink);
+    font-size: 1.3rem;
+}
+
+.topbar-breadcrumb {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.topbar-breadcrumb .breadcrumb {
+    flex-wrap: nowrap;
+    font-size: .875rem;
+}
+
+.topbar-breadcrumb .breadcrumb-item {
+    color: var(--vatmsa-ink-muted);
+    white-space: nowrap;
+}
+
+.topbar-breadcrumb .breadcrumb-item.active {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--vatmsa-ink);
     font-weight: 600;
 }
 
-/* :focus-visible keeps a visible outline for keyboard users (WCAG 2.4.7)
-   without adding one on every mouse click. */
+.topbar-breadcrumb .breadcrumb-item + .breadcrumb-item::before {
+    content: "\F285"; /* bi-chevron-right */
+    font-family: "bootstrap-icons";
+    font-size: .7rem;
+    color: var(--vatmsa-ink-subtle);
+    padding-top: .2rem;
+}
+
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    flex: none;
+}
+
+.topbar-search {
+    position: relative;
+}
+
+.topbar-search .bi-search {
+    position: absolute;
+    top: 50%;
+    left: .75rem;
+    transform: translateY(-50%);
+    color: var(--vatmsa-ink-subtle);
+    font-size: .85rem;
+    pointer-events: none;
+}
+
+.topbar-search .form-control {
+    width: 240px;
+    height: 38px;
+    padding-left: 2.1rem;
+    background-color: var(--vatmsa-surface-muted);
+    font-size: .875rem;
+}
+
+.topbar-user {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .25rem .5rem .25rem .25rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: var(--vatmsa-ink);
+}
+
+.topbar-user:hover,
+.topbar-user[aria-expanded="true"] {
+    border-color: var(--vatmsa-line);
+    background-color: var(--vatmsa-surface-muted);
+}
+
+.avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 50%;
+    background-color: var(--vatmsa-teal-pale);
+    color: var(--vatmsa-teal-dark);
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.topbar-user-text {
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.15;
+    max-width: 200px;
+}
+
+.topbar-user-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: .875rem;
+    font-weight: 600;
+}
+
+.topbar-user-role {
+    font-size: .75rem;
+    color: var(--vatmsa-ink-muted);
+}
+
+.topbar-user-caret {
+    font-size: .7rem;
+    color: var(--vatmsa-ink-subtle);
+}
+
+.account-menu {
+    width: 280px;
+    padding: .5rem;
+}
+
+.account-menu-header {
+    padding: .5rem .75rem .6rem;
+}
+
+.account-menu-context {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-top: .5rem;
+    min-width: 0;
+}
+
+.account-menu .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .5rem .75rem;
+    border-radius: var(--vatmsa-radius-sm);
+    font-size: .875rem;
+}
+
+.account-menu .dropdown-item.is-locked {
+    color: var(--vatmsa-ink-subtle);
+}
+
+.app-content {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 1680px;
+    min-width: 0;
+    padding: 1.75rem 1.75rem 3rem;
+}
+
+.app-content:focus-visible {
+    outline: none;
+}
+
+@media (min-width: 992px) {
+    .app-sidebar.offcanvas-lg {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 1030;
+        width: var(--vatmsa-sidebar-width);
+    }
+
+    .app-main {
+        margin-left: var(--vatmsa-sidebar-width);
+    }
+}
+
+@media (max-width: 991.98px) {
+    .app-topbar {
+        padding: 0 1rem;
+        gap: .75rem;
+    }
+
+    .app-content {
+        padding: 1.25rem 1rem 2.5rem;
+    }
+}
+
+/* Guest pages (sign in, password reset, invitation claim). */
+.app-guest-content {
+    min-height: 100vh;
+    padding: 2rem 1rem;
+    background:
+        radial-gradient(circle at 15% 10%, rgba(24, 163, 154, .10), transparent 45%),
+        radial-gradient(circle at 85% 90%, rgba(9, 36, 58, .08), transparent 40%),
+        var(--vatmsa-canvas);
+}
+
+.auth-shell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 4rem);
+}
+
+.auth-brand {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin-bottom: 1.5rem;
+    color: var(--vatmsa-ink);
+    text-decoration: none;
+}
+
+.auth-brand .sidebar-brand-mark {
+    width: 42px;
+    height: 42px;
+    font-size: 1.25rem;
+    border-radius: 11px;
+}
+
+.auth-brand-name {
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.auth-brand-tagline {
+    font-size: .8rem;
+    color: var(--vatmsa-ink-muted);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+}
+
+.auth-card .card-body {
+    padding: 2rem;
+}
+
+.auth-title {
+    margin-bottom: .25rem;
+    font-size: 1.25rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Page header                                                         */
+/* ------------------------------------------------------------------ */
+
+.page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.page-header-text {
+    flex: 1 1 420px;
+    min-width: 0;
+}
+
+.page-back {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    margin-bottom: .5rem;
+    color: var(--vatmsa-ink-muted);
+    font-size: .875rem;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.page-back:hover {
+    color: var(--vatmsa-teal);
+}
+
+.page-title {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 650;
+    line-height: 1.25;
+}
+
+.page-subtitle {
+    max-width: 75ch;
+    margin: .35rem 0 0;
+    color: var(--vatmsa-ink-muted);
+}
+
+.page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.section-title {
+    margin: 2rem 0 1rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards, stat tiles                                                   */
+/* ------------------------------------------------------------------ */
+
+.card {
+    --bs-card-border-color: var(--vatmsa-line);
+    --bs-card-border-radius: var(--vatmsa-radius);
+    --bs-card-inner-border-radius: calc(var(--vatmsa-radius) - 1px);
+    --bs-card-cap-bg: var(--vatmsa-surface);
+    --bs-card-cap-padding-y: .85rem;
+    --bs-card-cap-padding-x: 1.25rem;
+    --bs-card-spacer-x: 1.25rem;
+    box-shadow: var(--vatmsa-shadow-sm);
+}
+
+.card-header {
+    background-color: var(--vatmsa-surface);
+    font-weight: 600;
+    font-size: .9375rem;
+}
+
+/* Header subtitles and filter forms inside a card header stay regular. */
+.card-header .text-muted,
+.card-header .small,
+.card-header form,
+.card-header .form-label {
+    font-weight: 400;
+}
+
+.card-header .form-label {
+    font-weight: 500;
+}
+
+.card-header .fw-semibold,
+.card-header .h6,
+.card-header h2 {
+    font-size: .9375rem;
+}
+
+.card-header .text-muted.small,
+.card-header .small.text-muted {
+    font-size: .8125rem;
+}
+
+.card-footer {
+    background-color: var(--vatmsa-surface-muted);
+}
+
+.stat-tile .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+    padding: 1.1rem 1.25rem;
+}
+
+.stat-label {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    color: var(--vatmsa-ink-muted);
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.stat-label .bi {
+    font-size: .95rem;
+    color: var(--vatmsa-teal);
+}
+
+.stat-label .stat-arrow {
+    margin-left: auto;
+    color: var(--vatmsa-ink-subtle);
+    font-size: .85rem;
+    transition: transform .15s ease;
+}
+
+.stat-value {
+    font-size: 1.625rem;
+    font-weight: 650;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.stat-hint {
+    font-size: .8125rem;
+}
+
+.stat-tile-link {
+    color: inherit;
+    text-decoration: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.stat-tile-link:hover {
+    color: inherit;
+    border-color: var(--vatmsa-line-strong);
+    box-shadow: var(--vatmsa-shadow);
+}
+
+.stat-tile-link:hover .stat-arrow {
+    transform: translateX(2px);
+    color: var(--vatmsa-teal);
+}
+
+/* Legacy tiles still written as ".fs-2.fw-semibold" inside a card. */
+.card .fs-2.fw-semibold {
+    font-size: 1.625rem !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Label/value grid for record details (<dl class="detail-grid">). */
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1.1rem 1.5rem;
+}
+
+.detail-grid dt {
+    margin-bottom: .2rem;
+    color: var(--vatmsa-ink-muted);
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+
+.detail-grid dd {
+    margin: 0;
+    font-weight: 500;
+}
+
+.detail-grid .detail-grid-wide {
+    grid-column: 1 / -1;
+}
+
+.min-w-0 {
+    min-width: 0;
+}
+
+.activity-feed {
+    max-height: 440px;
+    overflow-y: auto;
+}
+
+.activity-item {
+    display: flex;
+    gap: .75rem;
+    padding: .55rem 0;
+}
+
+.activity-item + .activity-item {
+    border-top: 1px solid var(--vatmsa-line);
+}
+
+.activity-dot {
+    flex: none;
+    width: .5rem;
+    height: .5rem;
+    margin-top: .45rem;
+    border-radius: 50%;
+    background-color: var(--vatmsa-teal-bright);
+    box-shadow: 0 0 0 3px var(--vatmsa-teal-pale);
+}
+
+.icon-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background-color: var(--vatmsa-teal-pale);
+    color: var(--vatmsa-teal-dark);
+    font-size: 1.5rem;
+}
+
+.icon-circle-sm {
+    width: 40px;
+    height: 40px;
+    font-size: 1.1rem;
+}
+
+.portal-card {
+    color: inherit;
+    transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.portal-card:hover {
+    color: inherit;
+    border-color: #9fd2cc;
+    box-shadow: var(--vatmsa-shadow);
+    transform: translateY(-1px);
+}
+
+.portal-card-cta {
+    color: var(--vatmsa-teal);
+    font-weight: 600;
+    font-size: .875rem;
+}
+
+.icon-circle-warning {
+    background-color: var(--vatmsa-amber-soft);
+    color: var(--vatmsa-amber-ink);
+}
+
+.empty-state {
+    padding: 2.25rem 1rem;
+    color: var(--vatmsa-ink-muted);
+    text-align: center;
+}
+
+.empty-state .bi {
+    display: block;
+    margin-bottom: .5rem;
+    font-size: 1.75rem;
+    color: var(--vatmsa-ink-subtle);
+}
+
+.empty-state strong {
+    display: block;
+    color: var(--vatmsa-ink);
+    font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                              */
+/* ------------------------------------------------------------------ */
+
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-hover-bg: #f6f9fb;
+    --bs-table-border-color: var(--vatmsa-line);
+    margin-bottom: 0;
+    font-size: .875rem;
+}
+
+.table > :not(caption) > * > * {
+    padding: .7rem 1rem;
+}
+
+.table > thead > tr > th,
+.table > thead > tr > td {
+    padding-top: .6rem;
+    padding-bottom: .6rem;
+    background-color: var(--vatmsa-surface-muted);
+    color: var(--vatmsa-ink-muted);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border-bottom-color: var(--vatmsa-line);
+}
+
+.table > tbody > tr:last-child > * {
+    border-bottom: 0;
+}
+
+.table-sm > :not(caption) > * > * {
+    padding: .45rem .75rem;
+}
+
+.table td .text-muted.small,
+.table td .small.text-muted {
+    font-size: .8rem;
+}
+
+.table .text-end,
+.table td.font-monospace {
+    font-variant-numeric: tabular-nums;
+}
+
+.table a:not(.btn) {
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.table a:not(.btn):hover {
+    text-decoration: underline;
+}
+
+.topbar-breadcrumb a {
+    color: var(--vatmsa-ink-muted);
+    text-decoration: none;
+}
+
+.topbar-breadcrumb a:hover {
+    color: var(--vatmsa-teal);
+}
+
+.table .actions-cell {
+    min-width: 260px;
+}
+
+.table .quantity-col {
+    width: 10rem;
+}
+
+/* Empty-table rows ("No X yet.") */
+.table td.text-center.text-muted {
+    padding: 2rem 1rem;
+}
+
+.card > .table-responsive:last-child > .table,
+.card > .table:last-child {
+    border-bottom-left-radius: var(--bs-card-inner-border-radius);
+    border-bottom-right-radius: var(--bs-card-inner-border-radius);
+}
+
+/* ------------------------------------------------------------------ */
+/* Badges: soft fills                                                  */
+/* ------------------------------------------------------------------ */
+
+.badge {
+    --bs-badge-font-size: .72rem;
+    --bs-badge-font-weight: 600;
+    --bs-badge-padding-y: .32em;
+    --bs-badge-padding-x: .6em;
+    --bs-badge-border-radius: 999px;
+    letter-spacing: .01em;
+}
+
+.text-bg-success {
+    color: var(--vatmsa-green-ink) !important;
+    background-color: var(--vatmsa-green-soft) !important;
+}
+
+.text-bg-info,
+.text-bg-primary {
+    color: var(--vatmsa-blue-ink) !important;
+    background-color: var(--vatmsa-blue-soft) !important;
+}
+
+.text-bg-warning {
+    color: var(--vatmsa-amber-ink) !important;
+    background-color: var(--vatmsa-amber-soft) !important;
+}
+
+.text-bg-danger {
+    color: var(--vatmsa-red-ink) !important;
+    background-color: var(--vatmsa-red-soft) !important;
+}
+
+.text-bg-secondary,
+.text-bg-light,
+.text-bg-dark {
+    color: var(--vatmsa-grey-ink) !important;
+    background-color: var(--vatmsa-grey-soft) !important;
+}
+
+.badge.border {
+    border-color: transparent !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.btn {
+    --bs-btn-font-weight: 500;
+    --bs-btn-border-radius: var(--vatmsa-radius-sm);
+    --bs-btn-focus-box-shadow: 0 0 0 .2rem rgba(24, 163, 154, .25);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .4rem;
+}
+
+.btn-sm {
+    --bs-btn-border-radius: 6px;
+}
+
+/* Component-local custom properties are baked into bootstrap.min.css, so
+   each variant is redeclared here rather than inherited from --bs-primary. */
+.btn-primary {
+    --bs-btn-bg: var(--vatmsa-teal);
+    --bs-btn-border-color: var(--vatmsa-teal);
+    --bs-btn-hover-bg: var(--vatmsa-teal-dark);
+    --bs-btn-hover-border-color: var(--vatmsa-teal-dark);
+    --bs-btn-active-bg: var(--vatmsa-teal-dark);
+    --bs-btn-active-border-color: var(--vatmsa-teal-dark);
+    --bs-btn-disabled-bg: var(--vatmsa-teal);
+    --bs-btn-disabled-border-color: var(--vatmsa-teal);
+    --bs-btn-focus-shadow-rgb: 24, 163, 154;
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--vatmsa-teal);
+    --bs-btn-border-color: #9fd2cc;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: var(--vatmsa-teal);
+    --bs-btn-hover-border-color: var(--vatmsa-teal);
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: var(--vatmsa-teal-dark);
+    --bs-btn-active-border-color: var(--vatmsa-teal-dark);
+    --bs-btn-disabled-color: var(--vatmsa-teal);
+    --bs-btn-disabled-border-color: #9fd2cc;
+    --bs-btn-focus-shadow-rgb: 24, 163, 154;
+}
+
+.btn-secondary,
+.btn-outline-secondary {
+    --bs-btn-color: var(--vatmsa-ink);
+    --bs-btn-bg: var(--vatmsa-surface);
+    --bs-btn-border-color: var(--vatmsa-line-strong);
+    --bs-btn-hover-color: var(--vatmsa-ink);
+    --bs-btn-hover-bg: var(--vatmsa-surface-muted);
+    --bs-btn-hover-border-color: #b9c5d1;
+    --bs-btn-active-color: var(--vatmsa-ink);
+    --bs-btn-active-bg: #eef2f6;
+    --bs-btn-active-border-color: #b9c5d1;
+    --bs-btn-disabled-color: var(--vatmsa-ink-subtle);
+    --bs-btn-disabled-bg: var(--vatmsa-surface);
+    --bs-btn-disabled-border-color: var(--vatmsa-line);
+    --bs-btn-focus-shadow-rgb: 24, 163, 154;
+}
+
+.btn-success {
+    --bs-btn-bg: var(--vatmsa-green);
+    --bs-btn-border-color: var(--vatmsa-green);
+    --bs-btn-hover-bg: #215f47;
+    --bs-btn-hover-border-color: #215f47;
+    --bs-btn-active-bg: #1d533f;
+    --bs-btn-active-border-color: #1d533f;
+}
+
+.btn-outline-success {
+    --bs-btn-color: var(--vatmsa-green);
+    --bs-btn-border-color: #a9d3bf;
+    --bs-btn-hover-bg: var(--vatmsa-green);
+    --bs-btn-hover-border-color: var(--vatmsa-green);
+    --bs-btn-active-bg: #215f47;
+    --bs-btn-active-border-color: #215f47;
+}
+
+.btn-danger {
+    --bs-btn-bg: var(--vatmsa-red);
+    --bs-btn-border-color: var(--vatmsa-red);
+    --bs-btn-hover-bg: #9a3838;
+    --bs-btn-hover-border-color: #9a3838;
+    --bs-btn-active-bg: #8a3232;
+    --bs-btn-active-border-color: #8a3232;
+}
+
+.btn-outline-danger {
+    --bs-btn-color: var(--vatmsa-red);
+    --bs-btn-border-color: #e3b4b2;
+    --bs-btn-hover-bg: var(--vatmsa-red);
+    --bs-btn-hover-border-color: var(--vatmsa-red);
+    --bs-btn-active-bg: #9a3838;
+    --bs-btn-active-border-color: #9a3838;
+}
+
+.btn-outline-warning {
+    --bs-btn-color: var(--vatmsa-amber-ink);
+    --bs-btn-border-color: #e8c98c;
+    --bs-btn-hover-color: var(--vatmsa-amber-ink);
+    --bs-btn-hover-bg: var(--vatmsa-amber-soft);
+    --bs-btn-hover-border-color: var(--vatmsa-amber);
+}
+
+.btn-link {
+    --bs-btn-color: var(--vatmsa-teal);
+    --bs-btn-hover-color: var(--vatmsa-teal-dark);
+}
+
+/* ------------------------------------------------------------------ */
+/* Forms                                                               */
+/* ------------------------------------------------------------------ */
+
+.form-label {
+    margin-bottom: .35rem;
+    color: var(--vatmsa-ink);
+    font-size: .8125rem;
+    font-weight: 600;
+}
+
+.form-label.small {
+    font-size: .78rem;
+}
+
+.form-control,
+.form-select {
+    border-color: var(--vatmsa-line-strong);
+    border-radius: var(--vatmsa-radius-sm);
+}
+
+.form-control::placeholder {
+    color: var(--vatmsa-ink-subtle);
+}
+
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus {
+    border-color: var(--vatmsa-teal-bright);
+    box-shadow: 0 0 0 .2rem rgba(24, 163, 154, .18);
+}
+
+.input-icon {
+    position: relative;
+}
+
+.input-icon > .bi {
+    position: absolute;
+    top: 50%;
+    left: .8rem;
+    transform: translateY(-50%);
+    color: var(--vatmsa-ink-subtle);
+    pointer-events: none;
+}
+
+.input-icon > .form-control {
+    padding-left: 2.2rem;
+}
+
+/* Unchecked boxes need a visible edge (3:1 against white). */
+.form-check-input {
+    border-color: var(--vatmsa-ink-subtle);
+}
+
+.form-check-input:checked {
+    background-color: var(--vatmsa-teal);
+    border-color: var(--vatmsa-teal);
+}
+
+.form-text {
+    color: var(--vatmsa-ink-muted);
+    font-size: .8rem;
+}
+
+/* Sections reached by a #fragment link clear the sticky top bar. */
+[id] {
+    scroll-margin-top: calc(var(--vatmsa-topbar-height) + 1rem);
+}
+
+/* Role permission checklist (Administration › Create role) and the chips
+   that list a role's permissions. */
+.permission-picker {
+    max-height: 22rem;
+    overflow-y: auto;
+    border: 1px solid var(--vatmsa-line);
+    border-radius: var(--vatmsa-radius-sm);
+    background: var(--vatmsa-surface);
+}
+
+.permission-area + .permission-area {
+    border-top: 1px solid var(--vatmsa-line);
+}
+
+.permission-area-title {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: .45rem .75rem;
+    background: var(--vatmsa-surface-muted);
+    color: var(--vatmsa-ink-muted);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.permission-row {
+    display: grid;
+    grid-template-columns: minmax(8.5rem, 42%) 1fr;
+    gap: .25rem .75rem;
+    align-items: center;
+    padding: .4rem .75rem;
+    font-size: .85rem;
+}
+
+.permission-row + .permission-row {
+    border-top: 1px dashed var(--vatmsa-line);
+}
+
+.permission-resource {
+    font-weight: 500;
+}
+
+.permission-actions .form-check-inline {
+    margin-right: .85rem;
+}
+
+.permission-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .3rem;
+}
+
+.permission-chip {
+    display: inline-block;
+    padding: .1rem .5rem;
+    border-radius: 999px;
+    background: var(--vatmsa-grey-soft);
+    color: var(--vatmsa-grey-ink);
+    font-size: .75rem;
+    line-height: 1.5;
+}
+
+@media (max-width: 575.98px) {
+    .permission-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Alerts                                                              */
+/* ------------------------------------------------------------------ */
+
+.alert {
+    --bs-alert-border-radius: var(--vatmsa-radius);
+    --bs-alert-padding-y: .85rem;
+    --bs-alert-padding-x: 1rem;
+    font-size: .9rem;
+}
+
+.alert:has(> .bi:first-child) {
+    display: flex;
+    align-items: flex-start;
+    gap: .65rem;
+}
+
+.alert > .bi:first-child {
+    margin-top: .1rem;
+    font-size: 1rem;
+}
+
+.alert-dismissible {
+    padding-right: 3rem;
+}
+
+.alert-success {
+    --bs-alert-color: var(--vatmsa-green-ink);
+    --bs-alert-bg: var(--vatmsa-green-soft);
+    --bs-alert-border-color: #c6e5d4;
+}
+
+.alert-info {
+    --bs-alert-color: var(--vatmsa-blue-ink);
+    --bs-alert-bg: var(--vatmsa-blue-soft);
+    --bs-alert-border-color: #c8e1ee;
+}
+
+.alert-warning {
+    --bs-alert-color: var(--vatmsa-amber-ink);
+    --bs-alert-bg: var(--vatmsa-amber-soft);
+    --bs-alert-border-color: #f1dcab;
+}
+
+.alert-danger {
+    --bs-alert-color: var(--vatmsa-red-ink);
+    --bs-alert-bg: var(--vatmsa-red-soft);
+    --bs-alert-border-color: #f0cdca;
+}
+
+.alert-secondary,
+.alert-light {
+    --bs-alert-color: var(--vatmsa-grey-ink);
+    --bs-alert-bg: var(--vatmsa-grey-soft);
+    --bs-alert-border-color: var(--vatmsa-line);
+}
+
+/* ------------------------------------------------------------------ */
+/* Bootstrap components still carrying default blue                   */
+/* ------------------------------------------------------------------ */
+
+.nav-tabs .nav-link.active,
+.nav-pills .nav-link.active {
+    color: var(--vatmsa-teal);
+}
+
+.nav-pills .nav-link.active {
+    color: #fff;
+    background-color: var(--vatmsa-teal);
+}
+
+.nav-tabs .nav-link,
+.nav-pills .nav-link {
+    color: var(--vatmsa-ink-muted);
+}
+
+.page-link {
+    color: var(--vatmsa-teal);
+}
+
+.active > .page-link,
+.page-link.active {
+    background-color: var(--vatmsa-teal);
+    border-color: var(--vatmsa-teal);
+}
+
+.dropdown-menu {
+    --bs-dropdown-border-color: var(--vatmsa-line);
+    --bs-dropdown-border-radius: var(--vatmsa-radius);
+    --bs-dropdown-link-active-bg: var(--vatmsa-teal);
+    box-shadow: 0 10px 30px rgba(16, 38, 58, .12);
+}
+
+.list-group {
+    --bs-list-group-border-color: var(--vatmsa-line);
+    --bs-list-group-active-bg: var(--vatmsa-teal);
+    --bs-list-group-active-border-color: var(--vatmsa-teal);
+}
+
+.progress {
+    --bs-progress-bar-bg: var(--vatmsa-teal);
+}
+
+/* ------------------------------------------------------------------ */
+/* Accessibility                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Skip-to-content link (WCAG 2.1 SC 2.4.1). */
+.skip-link {
+    position: absolute;
+    top: .5rem;
+    left: .5rem;
+    z-index: 1080;
+    padding: .5rem 1rem;
+    border-radius: var(--vatmsa-radius-sm);
+    background-color: #fff;
+    color: var(--vatmsa-teal);
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: 0 0 0 .25rem rgba(10, 119, 111, .35);
+}
+
+/* Visible outline for keyboard users only (WCAG 2.4.7). */
 :focus-visible {
     outline-color: var(--vatmsa-teal-bright);
 }
 
-main:focus-visible {
-    outline: none;
+.sidebar-group-toggle:focus-visible,
+.sidebar-link:focus-visible {
+    outline: 2px solid var(--vatmsa-teal-bright);
+    outline-offset: 1px;
 }

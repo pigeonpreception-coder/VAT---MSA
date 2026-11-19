@@ -7,60 +7,48 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Operational domains</div>
-    <h1 class="h3 mb-1">Expenses, inventory, projects and imports</h1>
-    <p class="text-muted mb-0">Operational evidence remains linked to the organisation, branch, project and source document so VAT treatment and accounting postings can be reconstructed rather than inferred.</p>
-</div>
+<x-page-header title="Business operations"
+    subtitle="Expenses, inventory, projects and imports, each linked to its supporting documents so VAT and accounting can be traced." />
 
 <div class="row row-cols-1 row-cols-sm-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Expenses</div>
-            <div class="fs-2 fw-semibold">{{ number_format($expenses->count()) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Expenses</div>
+            <div class="stat-value">{{ number_format($expenses->count()) }}</div>
             <div class="small text-muted">{{ $tenantCurrencyCode }} {{ number_format($expenseValueCents / 100, 2) }} recorded</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Inventory items</div>
-            <div class="fs-2 fw-semibold">{{ number_format($balances->count()) }}</div>
-            <div class="small text-muted">Non-negative database invariant</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Inventory items</div>
+            <div class="stat-value">{{ number_format($balances->count()) }}</div>
+            <div class="small text-muted">Stock never goes below zero</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Active projects</div>
-            <div class="fs-2 fw-semibold">{{ number_format($projects->count()) }}</div>
-            <div class="small text-muted">Budget-to-cost traceability</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Active projects</div>
+            <div class="stat-value">{{ number_format($projects->count()) }}</div>
+            <div class="small text-muted">Costs tracked against budget</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Import declarations</div>
-            <div class="fs-2 fw-semibold">{{ number_format($importRecords->count()) }}</div>
-            <div class="small text-warning">Evidence-gated input VAT</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Import declarations</div>
+            <div class="stat-value">{{ number_format($importRecords->count()) }}</div>
+            <div class="small text-warning">Input VAT needs supporting evidence</div>
         </div></div>
     </div>
 </div>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Expense register</div>
-                <div class="text-muted small">Clean receipt evidence and independent maker-checker decisions are enforced before approval</div>
+                <div class="text-muted small">Each expense needs a clean receipt and approval by someone other than the person who entered it</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -93,7 +81,7 @@
                                 <td>
                                     @if ($expense['receipt'])
                                         <strong>{{ $expense['receipt']['file_name'] }}</strong>
-                                        <div class="text-muted small">{{ $expense['receipt']['scan_status'] }} / {{ $expense['receipt']['status'] }}</div>
+                                        <div class="text-muted small">Scan: @humanize($expense['receipt']['scan_status']) &middot; @humanize($expense['receipt']['status'])</div>
                                     @else
                                         <div class="{{ $expense['requires_receipt'] ? 'text-warning' : 'text-muted' }} small">{{ $expense['requires_receipt'] ? 'Receipt required' : 'Receipt optional' }}</div>
                                         {{-- Route::has() guard: the Documents module ships as its own
@@ -161,7 +149,7 @@
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Record an expense</div>
-                <div class="text-muted small">Recorded as a draft; submit it for independent review once ready</div>
+                <div class="text-muted small">Saved as a draft. Submit it for review when it is ready.</div>
             </div>
             <div class="card-body">
                 @if ($categories->isEmpty())
@@ -202,12 +190,12 @@
                         </div>
                         <div class="row">
                             <div class="col-6 mb-3">
-                                <label for="net_cents" class="form-label">Net (cents)</label>
-                                <input type="number" class="form-control" id="net_cents" name="net_cents" required min="0" step="1" value="{{ old('net_cents') }}">
+                                <label for="net_cents" class="form-label">Net amount</label>
+                                <x-money-input name="net_cents" :required="true" />
                             </div>
                             <div class="col-6 mb-3">
-                                <label for="tax_cents" class="form-label">VAT (cents)</label>
-                                <input type="number" class="form-control" id="tax_cents" name="tax_cents" required min="0" step="1" value="{{ old('tax_cents') }}">
+                                <label for="tax_cents" class="form-label">VAT</label>
+                                <x-money-input name="tax_cents" :required="true" />
                             </div>
                         </div>
                         <button type="submit" class="btn btn-primary">Record expense</button>
@@ -223,7 +211,7 @@
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Inventory balances</div>
-                <div class="text-muted small">Signed stock movements update versioned balances</div>
+                <div class="text-muted small">Every stock movement is recorded and updates the balance</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -303,7 +291,7 @@
 <div class="card mt-3">
     <div class="card-header">
         <div class="fw-semibold">Import VAT evidence</div>
-        <div class="text-muted small">Customs claims cannot be treated as verified without evidence</div>
+        <div class="text-muted small">Customs claims need evidence before they count as verified</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">

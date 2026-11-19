@@ -1,40 +1,34 @@
 @extends('layouts.app')
 
-@section('title', 'Customer Ledger')
+@section('title', 'Customer ledger')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Accounting & Finance</div>
-        <h1 class="h3 mb-1">Customer Ledger</h1>
-        <p class="text-muted mb-0">Per-customer posted balances derived from converted quotations -- a converted quotation carries a real certified invoice, the receivables-side counterpart of an approved expense's posted balance in this platform's lighter accounting model.</p>
-    </div>
-    <a href="{{ route('accounting.index') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Back to Accounting</a>
-</div>
+<x-page-header title="Customer ledger"
+    subtitle="What each customer owes, from quotations converted into certified invoices." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Customers with activity</div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($summary['customers'])) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Customers with activity</div>
+            <div class="stat-value">{{ number_format(count($summary['customers'])) }}</div>
             <div class="small text-muted">{{ number_format($customers->count()) }} registered customer{{ $customers->count() === 1 ? '' : 's' }} in total</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Total posted balance</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($summary['total_posted_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Total posted balance</div>
+            <div class="stat-value">{{ $fmt($summary['total_posted_cents']) }}</div>
             <div class="small text-success">Converted quotations (certified invoices)</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Pending conversion</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($summary['total_pending_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Pending conversion</div>
+            <div class="stat-value">{{ $fmt($summary['total_pending_cents']) }}</div>
             <div class="small text-muted">Accepted, not yet invoiced</div>
         </div></div>
     </div>
@@ -43,7 +37,7 @@
 <div class="card mb-4">
     <div class="card-header">
         <div class="fw-semibold">Customer balances</div>
-        <div class="text-muted small">Posted = converted quotations; pending = accepted, awaiting conversion to an invoice</div>
+        <div class="text-muted small">Posted: converted to a certified invoice · Pending: accepted, not yet invoiced</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">

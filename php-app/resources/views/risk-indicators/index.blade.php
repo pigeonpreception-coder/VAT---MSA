@@ -9,30 +9,28 @@
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Compliance domain &middot; {{ $tenantAuthorityShortName }}-restricted</div>
-        <h1 class="h3 mb-1">Risk indicators</h1>
-        <p class="text-muted mb-0">Advisory-only signals from a small, fixed, code-versioned rule catalogue -- never a black-box score, and never auto-escalated to a case without an authorised officer's own decision.</p>
-    </div>
-    <a href="{{ route('risk-indicators.report') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">View summary report</a>
-</div>
+<x-page-header title="Risk indicators"
+    subtitle="Advisory signals from a fixed set of published rules. An indicator never becomes a case without an officer's decision.">
+    <x-slot:actions>
+        <a href="{{ route('risk-indicators.report') }}" class="btn btn-outline-secondary btn-sm">View summary report</a>
+    </x-slot:actions>
+</x-page-header>
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Total indicators</span><span>N</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['total']) }}</div>
-                <div class="small text-muted">Across the full register</div>
+                <div class="stat-label"><span>Total indicators</span></div>
+                <div class="stat-value">{{ number_format($metrics['total']) }}</div>
+                <div class="small text-muted">Across all taxpayers</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Needs review</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['needs_review']) }}</div>
+                <div class="stat-label"><span>Needs review</span></div>
+                <div class="stat-value">{{ number_format($metrics['needs_review']) }}</div>
                 <div class="small text-muted">Open or under review</div>
             </div>
         </div>
@@ -40,18 +38,18 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Critical severity</span><span>C</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['critical']) }}</div>
-                <div class="small {{ $metrics['critical'] > 0 ? 'text-danger' : 'text-muted' }}">Prioritised for officer attention</div>
+                <div class="stat-label"><span>Critical severity</span></div>
+                <div class="stat-value">{{ number_format($metrics['critical']) }}</div>
+                <div class="small {{ $metrics['critical'] > 0 ? 'text-danger' : 'text-muted' }}">Handle these first</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Escalated to case</span><span>&rarr;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['escalated']) }}</div>
-                <div class="small text-muted">Formal audit cases opened</div>
+                <div class="stat-label"><span>Escalated to case</span></div>
+                <div class="stat-value">{{ number_format($metrics['escalated']) }}</div>
+                <div class="small text-muted">Turned into audit cases</div>
             </div>
         </div>
     </div>
@@ -63,7 +61,7 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h2 class="h6">Evaluate a taxpayer</h2>
-                    <p class="text-muted small">Runs the current rule catalogue against a taxpayer's live evidence (invoice risk levels, reconciliation exceptions, overdue obligations) and raises or refreshes any indicators that fire.</p>
+                    <p class="text-muted small">Checks a taxpayer's invoices, reconciliation exceptions and overdue obligations against the current risk rules, and raises or updates any indicators that apply.</p>
                     @if ($errors->has('vat_number'))
                         <div class="alert alert-danger py-2" role="alert">{{ $errors->first('vat_number') }}</div>
                     @endif
@@ -127,7 +125,7 @@
                     <tbody>
                         @forelse ($indicators as $indicator)
                             <tr>
-                                <td><a href="{{ route('risk-indicators.show', $indicator['id']) }}"><strong>{{ ucwords(strtolower(str_replace('_', ' ', $indicator['indicator_code']))) }}</strong></a></td>
+                                <td><a href="{{ route('risk-indicators.show', $indicator['id']) }}"><strong>@humanize($indicator['indicator_code'])</strong></a></td>
                                 <td>
                                     {{ $indicator['legal_name'] ?? '—' }}
                                     <div class="text-muted small">{{ $indicator['vat_number'] ?? '' }}</div>

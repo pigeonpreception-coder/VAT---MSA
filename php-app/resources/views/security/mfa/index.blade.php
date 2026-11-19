@@ -1,23 +1,12 @@
 @extends('layouts.app')
 
-@section('title', 'Security')
+@section('title', 'Two-factor authentication')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Account security</div>
-    <h1 class="h3 mb-1">Multi-Factor Authentication</h1>
-    <p class="text-muted mb-0">A real, server-verified RFC 6238 TOTP credential for your own account -- the standard "authenticator app" second factor.</p>
-</div>
+<x-page-header title="Two-factor authentication"
+    subtitle="Protect your account with an authenticator app. You'll enter a code from the app when you sign in or confirm a sensitive action." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @if ($redirectTo)
     <div class="alert alert-info" role="alert">
@@ -53,7 +42,7 @@
                             <dt class="col-sm-3">Setup link</dt>
                             <dd class="col-sm-9 text-break"><code>{{ $freshOtpauthUri }}</code></dd>
                         </dl>
-                        <p class="small text-muted">This secret is shown only once -- if you navigate away before finishing, use "Start over" below to get a fresh one.</p>
+                        <p class="small text-muted">This secret is shown only once. If you leave before finishing, use "Start over" below to get a new one.</p>
                         <form method="POST" action="{{ route('security.mfa.verify') }}" class="row g-2 align-items-end">
                             @csrf
                             <input type="hidden" name="redirect_to" value="{{ $redirectTo }}">
@@ -83,7 +72,7 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h2 class="h6 text-uppercase text-muted">Confirm step-up</h2>
-                    <p class="small text-muted">Enter a current code from your authenticator app to confirm a fresh step-up -- the real replacement for the client-asserted headers this application used to trust. Every sensitive action across the app (taxpayer suspension, registration decisions, access-rights grants, and more) now requires this to be fresh.</p>
+                    <p class="small text-muted">Enter the current code from your authenticator app. Sensitive actions — suspending a taxpayer, deciding registrations, granting access and more — ask for a recent code.</p>
                     <form method="POST" action="{{ route('security.step-up') }}" class="row g-2 align-items-end">
                         @csrf
                         <input type="hidden" name="redirect_to" value="{{ $redirectTo }}">
@@ -112,7 +101,7 @@
                 </form>
             @endif
         </div>
-        <p class="small text-muted">Every device currently signed in to your account. If you don't recognise one, revoke it -- it will need to sign in again with your password{{ $enrolled ? ' and a fresh MFA code' : '' }}.</p>
+        <p class="small text-muted">Every device signed in to your account. If you don't recognise one, sign it out — it will need your password{{ $enrolled ? ' and a fresh MFA code' : '' }}.</p>
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
                 <thead>

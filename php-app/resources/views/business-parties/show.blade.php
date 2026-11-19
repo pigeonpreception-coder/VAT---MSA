@@ -3,36 +3,22 @@
 @section('title', $party['display_name'])
 
 @section('content')
-<div class="mb-3">
-    <a href="{{ route('business-parties.index') }}" class="small">&larr; Back to business parties</a>
-</div>
-
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Business party</div>
-        <h1 class="h3 mb-1">{{ $party['display_name'] }}</h1>
-        <p class="text-muted mb-0">
+<x-page-header :title="$party['display_name']" :back="route('business-parties.index')" back-label="Customers and suppliers">
+    <x-slot:meta>
+        <p class="page-subtitle">
             {{ $party['legal_name'] }}
             @if ($party['vat_number'])
-                &middot; <span class="font-monospace">{{ $party['vat_number'] }}</span>
+                &middot; VAT {{ $party['vat_number'] }}
             @endif
             @foreach ($party['relationships'] as $relationship)
-                <span class="badge text-bg-light border ms-1">{{ ucwords(strtolower(str_replace('_', ' ', $relationship))) }}</span>
+                <span class="badge text-bg-light border ms-1">@humanize($relationship)</span>
             @endforeach
         </p>
-    </div>
-    <x-status-badge :value="$party['status']" type="status" />
-</div>
+    </x-slot:meta>
+    <x-slot:actions><x-status-badge :value="$party['status']" type="status" /></x-slot:actions>
+</x-page-header>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
@@ -102,19 +88,19 @@
         <div class="card mb-3">
             <div class="card-header">Counterparty trust</div>
             <ul class="list-group list-group-flush">
-                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Trust status</span><span class="badge text-bg-light border">{{ ucwords(strtolower(str_replace('_', ' ', $party['trust_status'] ?? 'PENDING_PROVIDER'))) }}</span></li>
-                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Tax registration</span><span>{{ ucwords(strtolower(str_replace('_', ' ', $party['tax_registration_status'] ?? 'UNKNOWN'))) }}</span></li>
+                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Trust status</span><span class="badge text-bg-light border">@humanize($party['trust_status'] ?? 'PENDING_PROVIDER')</span></li>
+                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Tax registration</span><span>@humanize($party['tax_registration_status'] ?? 'UNKNOWN')</span></li>
                 <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Confidence</span><span>{{ $party['confidence_bps'] === null ? 'No evidence' : number_format($party['confidence_bps'] / 100, 2).'%' }}</span></li>
-                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Provider environment</span><span>{{ ucwords(strtolower(str_replace('_', ' ', $party['provider_environment'] ?? 'UNKNOWN'))) }}</span></li>
+                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Provider environment</span><span>@humanize($party['provider_environment'] ?? 'UNKNOWN')</span></li>
                 @if ($party['expires_at'])
                     <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Expires</span><span>{{ \Illuminate\Support\Carbon::parse($party['expires_at'])->format('d M Y H:i') }}</span></li>
                 @endif
             </ul>
-            <p class="text-muted small px-3 pt-2 mb-0">New quotations, projects and tax-bearing expenses require a current, trusted counterparty -- an active relationship alone is not enough. Real authority verification (NamRA/ITAS/BIPA) is not yet available; see 05-security/issue3-counterparty-trust-boundary.md.</p>
+            <p class="text-muted small px-3 pt-2 mb-0">New quotations, projects and expenses with VAT need a party with a current verification, not just an active relationship. Verification against {{ $tenantAuthorityShortName }}'s official registers isn't connected yet.</p>
             @can('permission', 'parties:manage')
                 @if ($syntheticVerificationEnabled && $party['status'] === 'ACTIVE')
                     <div class="card-footer">
-                        <p class="text-muted small">Labelled synthetic evidence, test environments only. It proves the workflow, not that this counterparty actually exists or is registered anywhere. Leave a field blank to match the party's own recorded value, or type a different one to force a mismatch.</p>
+                        <p class="text-muted small">Test environments only: records clearly labelled test evidence to try the verification workflow. It doesn't prove the party exists. Leave a field as it is to match the party's details, or change it to simulate a mismatch.</p>
                         <form method="POST" action="{{ route('business-parties.synthetic-verification.store', $party['id']) }}">
                             @csrf
                             <x-idempotency-key />
@@ -142,7 +128,7 @@
                                 <label for="authority_tax_registration_status" class="form-label small mb-0">Authority tax-registration status</label>
                                 <select id="authority_tax_registration_status" name="authority_tax_registration_status" class="form-select form-select-sm @error('authority_tax_registration_status') is-invalid @enderror">
                                     @foreach (['ACTIVE', 'INACTIVE', 'SUSPENDED', 'CANCELLED', 'NOT_REGISTERED'] as $status)
-                                        <option value="{{ $status }}" @selected(old('authority_tax_registration_status', 'ACTIVE') === $status)>{{ ucwords(strtolower(str_replace('_', ' ', $status))) }}</option>
+                                        <option value="{{ $status }}" @selected(old('authority_tax_registration_status', 'ACTIVE') === $status)>@humanize($status)</option>
                                     @endforeach
                                 </select>
                                 @error('authority_tax_registration_status')<div class="invalid-feedback">{{ $message }}</div>@enderror

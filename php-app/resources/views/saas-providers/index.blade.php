@@ -3,27 +3,16 @@
 @section('title', 'SaaS providers')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Developer domain</div>
-    <h1 class="h3 mb-1">SaaS provider onboarding</h1>
-    <p class="text-muted mb-0">Register a SaaS/ERP/accounting integration provider and take it through {{ $tenantAuthorityShortName }}'s fixed conformance test harness before it may operate against SANDBOX or PRODUCTION data.</p>
-</div>
+<x-page-header title="SaaS providers"
+    :subtitle="'Software providers (SaaS, ERP, accounting) and their progress through '.$tenantAuthorityShortName.'\'s conformance tests before they can connect to sandbox or production data.'" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @can('permission', 'developer:manage')
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h6">Register a provider</h2>
-            <p class="text-muted small">Registers the provider and its one named application (the one to be conformance-certified) together.</p>
+            <p class="text-muted small">Registers the provider together with the one application that will go through conformance testing.</p>
             <form method="POST" action="{{ route('saas-providers.store') }}" class="row g-2">
                 @csrf
                 <x-idempotency-key />
@@ -98,7 +87,7 @@
                             <strong>{{ $provider['legal_name'] }}</strong>
                             <div class="text-muted small">{{ $provider['provider_key'] }}</div>
                         </td>
-                        <td>{{ ucfirst(strtolower($provider['category'])) }}</td>
+                        <td>@humanize($provider['category'])</td>
                         <td>{{ $provider['contact_email'] }}</td>
                         <td><x-status-badge :value="$provider['status']" type="status" /></td>
                         <td>{{ $provider['registered_at'] ? \Illuminate\Support\Carbon::parse($provider['registered_at'])->format('d M Y, H:i') : '—' }}</td>

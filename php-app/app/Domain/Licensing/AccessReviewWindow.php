@@ -2,6 +2,7 @@
 
 namespace App\Domain\Licensing;
 
+use App\Models\AccessReview;
 use Illuminate\Support\Carbon;
 
 /**
@@ -25,5 +26,23 @@ class AccessReviewWindow
         $dueAt = Carbon::create($year, $startMonth + 4, 1, 0, 0, 0, 'UTC')->subSecond();
 
         return ['key' => "{$year}-Q{$quarter}", 'periodStart' => $periodStart->toDateString(), 'dueAt' => $dueAt];
+    }
+
+    /** The organisation's quarterly review for the current window, if one is OPEN or COMPLETED. */
+    public static function currentReview(string $organisationId): ?AccessReview
+    {
+        return AccessReview::where('organisation_id', $organisationId)->where('review_type', 'QUARTERLY')
+            ->where('period_start', self::current()['periodStart'])->whereIn('status', ['OPEN', 'COMPLETED'])->first();
+    }
+
+    /**
+     * EntitlementGate's ADMIN_WRITE precondition: privileged organisation
+     * changes need the current quarter's review open (and not overdue) or
+     * completed. Also read by the Administration and Access governance
+     * pages so they can say so up front instead of failing on submit.
+     */
+    public static function allowsAdminWrites(?AccessReview $review): bool
+    {
+        return $review !== null && ! ($review->status === 'OPEN' && $review->due_at->isPast());
     }
 }

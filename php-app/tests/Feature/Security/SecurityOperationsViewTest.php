@@ -152,7 +152,7 @@ class SecurityOperationsViewTest extends TestCase
         $response->assertSeeInOrder(['Open incidents', '1']);
         // Only the CRITICAL event counts toward high/critical -- LOW does not.
         $response->assertSeeInOrder(['High / critical events', '1']);
-        $response->assertSeeInOrder(['Pending outbox', '1']);
+        $response->assertSeeInOrder(['Unsent events', '1']);
         $response->assertSee('Data integrity');
         $response->assertSee('audit events');
     }
@@ -278,6 +278,6 @@ class SecurityOperationsViewTest extends TestCase
 
         $response = $this->actingAs($reader)->get('/security');
 
-        $response->assertOk()->assertSee('AUTHORISATION_DENIED');
+        $response->assertOk()->assertSee('Authorisation denied');
     }
 }

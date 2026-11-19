@@ -1,13 +1,10 @@
 @extends('layouts.app')
 
-@section('title', 'VAT Adjustment Report')
+@section('title', 'VAT adjustment report')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">VAT Management</div>
-    <h1 class="h3 mb-1">VAT Adjustment Report</h1>
-    <p class="text-muted mb-0">Credit and debit note corrections issued in a period, alongside manual VAT adjustments reconciled against the filed return.</p>
-</div>
+<x-page-header title="VAT adjustment report"
+    subtitle="Credit and debit notes issued in a period, plus manual VAT adjustments, reconciled against the filed return." />
 
 <div class="card mb-4">
     <div class="card-body">
@@ -124,8 +121,8 @@
                     @forelse ($adjustments['items'] as $item)
                         <tr>
                             <td>{{ $item['created_at'] }}</td>
-                            <td>{{ $item['adjustment_type'] }}</td>
-                            <td>{{ $item['direction'] }}</td>
+                            <td>@humanize($item['adjustment_type'])</td>
+                            <td>@humanize($item['direction'])</td>
                             <td>{{ $item['reason_code'] }}<div class="text-muted small">{{ $item['explanation'] }}</div></td>
                             <td><x-status-badge :value="$item['status']" type="status" /></td>
                             <td class="text-end">{{ $fmt($item['signed_cents']) }}</td>
@@ -152,7 +149,7 @@
                 </div>
                 @if ($report['filed_return'])
                     <div class="col-md-4">
-                        <div class="text-muted small">Filed VAT return (v{{ $report['filed_return']['version_number'] }}, {{ $report['filed_return']['status'] }})</div>
+                        <div class="text-muted small">Filed VAT return (version {{ $report['filed_return']['version_number'] }}, @humanize($report['filed_return']['status']))</div>
                         <div class="h5 mb-0">{{ $fmt($report['filed_return']['adjustment_cents']) }}</div>
                     </div>
                     <div class="col-md-4">

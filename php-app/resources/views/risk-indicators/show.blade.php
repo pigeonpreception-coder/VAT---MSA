@@ -1,31 +1,17 @@
 @extends('layouts.app')
 
-@section('title', ucwords(strtolower(str_replace('_', ' ', $indicator->indicator_code))))
+@section('title', \App\Support\Ui\Humanize::enum($indicator->indicator_code))
 
 @php
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
     $dateTime = fn ($value) => $value ? \Illuminate\Support\Carbon::parse($value)->format('d M Y, H:i') : '—';
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Risk indicator &middot; {{ $tenantAuthorityShortName }}-restricted</div>
-        <h1 class="h3 mb-1">{{ $titleCase($indicator->indicator_code) }}</h1>
-        <p class="text-muted mb-0">{{ $taxpayer->legal_name ?? 'Unknown subject' }} @if ($taxpayer) &middot; {{ $taxpayer->vat_number }} @endif</p>
-    </div>
-    <a href="{{ route('risk-indicators.index') }}" class="btn btn-outline-secondary align-self-center">&larr; Back to risk indicators</a>
-</div>
+<x-page-header :title="\App\Support\Ui\Humanize::enum($indicator->indicator_code)" :back="route('risk-indicators.index')" back-label="Risk indicators"
+    :subtitle="($taxpayer->legal_name ?? 'Unknown subject').($taxpayer ? ' · '.$taxpayer->vat_number : '').' · visible to '.$tenantAuthorityShortName.' only'" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -51,7 +37,7 @@
         <div class="card mt-3">
             <div class="card-body">
                 <h2 class="h6">Assign for review</h2>
-                <p class="text-muted small">Moves this indicator to Under Review under a named officer's own accountability.</p>
+                <p class="text-muted small">Marks the indicator as under review, with you as the responsible officer.</p>
                 <form method="POST" action="{{ route('risk-indicators.assignment.store', $indicator->id) }}" class="row g-2">
                     @csrf
                     <x-idempotency-key />
@@ -77,7 +63,7 @@
         <div class="card mt-3">
             <div class="card-body">
                 <h2 class="h6">Record a decision</h2>
-                <p class="text-muted small">Dismiss the signal, or escalate it into a governed audit case -- the case's risk tier and opening reason are taken from this indicator's own severity and your rationale, never entered independently.</p>
+                <p class="text-muted small">Dismiss the signal, or escalate it to an audit case. The case's risk tier comes from this indicator's severity, and its opening reason from your rationale.</p>
                 <form method="POST" action="{{ route('risk-indicators.decision.store', $indicator->id) }}" id="decision-form">
                     @csrf
                     <x-idempotency-key />

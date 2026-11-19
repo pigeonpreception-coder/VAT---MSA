@@ -104,8 +104,8 @@ class PortalViewTest extends TestCase
         // role) -- with no BUYER/SELLER capability either, this owner is on
         // no portal's role list at all.
         $response->assertOk()->assertViewIs('portals.index');
-        $response->assertSee('Choose an authorised VAT-MSA experience');
-        $response->assertSee('No portal assignment.');
+        $response->assertSee('Each portal is a focused workspace for one kind of work.');
+        $response->assertSee('No portals available');
         $response->assertDontSee('Developer and sandbox');
         $this->assertSame([], $response->viewData('portals'));
     }
@@ -162,7 +162,7 @@ class PortalViewTest extends TestCase
         $response = $this->actingAs($auditor)->get('/portals');
 
         $response->assertOk();
-        $response->assertSee('No portal assignment.');
+        $response->assertSee('No portals available');
         $this->assertSame([], $response->viewData('portals'));
     }
 }

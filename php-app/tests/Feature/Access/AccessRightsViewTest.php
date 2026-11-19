@@ -260,8 +260,8 @@ class AccessRightsViewTest extends TestCase
         $response->assertOk();
         $response->assertSeeInOrder(['Grants', 'Active', 'Revoked', 'Users']);
         $response->assertSeeInOrder(['Grants by role', 'TAXPAYER_ADMIN']);
-        $response->assertSeeInOrder(['Grants by scope', 'GLOBAL']);
-        $response->assertSeeInOrder(['Grants by scope', 'NATIONAL']);
+        $response->assertSeeInOrder(['Grants by scope', 'Global']);
+        $response->assertSeeInOrder(['Grants by scope', 'National']);
     }
 
     public function test_granting_requires_access_rights_manage(): void

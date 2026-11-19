@@ -1,25 +1,12 @@
 @extends('layouts.app')
 
-@section('title', 'Create New Project')
+@section('title', 'New project')
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Project Management</div>
-        <h1 class="h3 mb-1">Create New Project</h1>
-        <p class="text-muted mb-0">Every planned project awaiting activation. Once a project starts, activate it here to move it onto the Ongoing Project Reports page.</p>
-    </div>
-</div>
+<x-page-header title="New project"
+    subtitle="Planned projects waiting to start. Activate a project when work begins to move it to Ongoing projects." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-7">
@@ -76,7 +63,7 @@
         <div class="card">
             <div class="card-header">
                 <div class="fw-semibold">New project</div>
-                <div class="text-muted small">Starts in Planned status until activated above</div>
+                <div class="text-muted small">New projects start as planned until you activate them</div>
             </div>
             <div class="card-body">
                 @can('permission', 'projects:manage')
@@ -111,9 +98,9 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label for="budget_cents" class="form-label">Proposed budget (cents, optional)</label>
-                            <input type="number" class="form-control" id="budget_cents" name="budget_cents" min="0" step="1" value="{{ old('budget_cents') }}">
-                            <div class="form-text">Enter {{ $tenantCurrencySymbol }} 100.00 as 10000. Awaits approval on the Budgets page.</div>
+                            <label for="budget_cents" class="form-label">Proposed budget (optional)</label>
+                            <x-money-input name="budget_cents" />
+                            <div class="form-text">The budget is approved separately on the Budgets page.</div>
                         </div>
                         <button type="submit" class="btn btn-primary">Create project</button>
                     </form>

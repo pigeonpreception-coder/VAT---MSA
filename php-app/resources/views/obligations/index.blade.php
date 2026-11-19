@@ -7,45 +7,42 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance domain</div>
-    <h1 class="h3 mb-1">Tax Obligations</h1>
-    <p class="text-muted mb-0">{{ $tenantAuthorityShortName }}-imposed obligations against a taxpayer -- a filing, payment, or other duty with a due date, tracked to satisfaction.</p>
-</div>
+<x-page-header title="Obligations"
+    :subtitle="'Filing, payment and other duties set by '.$tenantAuthorityShortName.', each with a due date and tracked until met.'" />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Total obligations</span><span>N</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['total']) }}</div>
-                <div class="small text-muted">Within the visible scope</div>
+                <div class="stat-label"><span>Total obligations</span></div>
+                <div class="stat-value">{{ number_format($metrics['total']) }}</div>
+                <div class="small text-muted">That you can see</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending</span><span>P</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['pending']) }}</div>
-                <div class="small text-muted">Not yet satisfied</div>
+                <div class="stat-label"><span>Pending</span></div>
+                <div class="stat-value">{{ number_format($metrics['pending']) }}</div>
+                <div class="small text-muted">Still to do</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Overdue</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['overdue']) }}</div>
-                <div class="small {{ $metrics['overdue'] > 0 ? 'text-danger' : 'text-muted' }}">Past their due date</div>
+                <div class="stat-label"><span>Overdue</span></div>
+                <div class="stat-value">{{ number_format($metrics['overdue']) }}</div>
+                <div class="small {{ $metrics['overdue'] > 0 ? 'text-danger' : 'text-muted' }}">Past the due date</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Satisfied</span><span>&check;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['satisfied']) }}</div>
+                <div class="stat-label"><span>Satisfied</span></div>
+                <div class="stat-value">{{ number_format($metrics['satisfied']) }}</div>
                 <div class="small text-muted">Marked complete</div>
             </div>
         </div>
@@ -58,15 +55,7 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h2 class="h6">Create an obligation</h2>
-                    @if ($errors->any())
-                        <div class="alert alert-danger py-2" role="alert">
-                            <ul class="mb-0 ps-3">
-                                @foreach ($errors->all() as $error)
-                                    <li>{{ $error }}</li>
-                                @endforeach
-                            </ul>
-                        </div>
-                    @endif
+                    <x-form-errors />
                     <form method="POST" action="{{ route('obligations.store') }}" class="row g-2">
                         @csrf
                             <x-idempotency-key />
@@ -140,7 +129,7 @@
                                     {{ $obligation['legal_name'] ?? '—' }}
                                     <div class="text-muted small">{{ $obligation['vat_number'] ?? '' }}</div>
                                 </td>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $obligation['obligation_type']))) }}</td>
+                                <td>@humanize($obligation['obligation_type'])</td>
                                 <td>{{ $obligation['period_code'] }}</td>
                                 <td>
                                     {{ \Illuminate\Support\Carbon::parse($obligation['due_date'])->format('d M Y') }}
@@ -178,7 +167,7 @@
             <div class="card-body">
                 @forelse ($byType as $row)
                     <div class="mb-2 d-flex justify-content-between align-items-center">
-                        <span>{{ ucwords(strtolower(str_replace('_', ' ', $row['type']))) }}</span>
+                        <span>@humanize($row['type'])</span>
                         <span class="fw-semibold">{{ number_format($row['count']) }}</span>
                     </div>
                 @empty
@@ -199,7 +188,7 @@
                             <strong>{{ $obligation['legal_name'] ?? 'Unknown taxpayer' }}</strong>
                             <span class="text-muted small text-nowrap">{{ \Illuminate\Support\Carbon::parse($obligation['due_date'])->format('d M Y') }}</span>
                         </div>
-                        <div class="text-muted small mt-1">{{ ucwords(strtolower(str_replace('_', ' ', $obligation['obligation_type']))) }} &middot; {{ $obligation['period_code'] }}</div>
+                        <div class="text-muted small mt-1">@humanize($obligation['obligation_type']) &middot; {{ $obligation['period_code'] }}</div>
                         @if (\Illuminate\Support\Carbon::parse($obligation['due_date'])->isPast())
                             <div class="text-danger small mt-1">Overdue</div>
                         @endif

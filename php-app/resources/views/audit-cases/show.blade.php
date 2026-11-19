@@ -3,31 +3,17 @@
 @section('title', $case->case_number)
 
 @php
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
     $dateTime = fn ($value) => $value ? \Illuminate\Support\Carbon::parse($value)->format('d M Y, H:i') : '—';
     $money = fn (int $cents, ?string $currency = null) => ($currency ?? $tenantCurrencyCode).' '.number_format($cents / 100, 2);
     $actorName = fn (?string $id) => $id ? ($actorNames[$id] ?? $id) : '—';
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Audit case</div>
-        <h1 class="h3 mb-1">{{ $case->case_number }}</h1>
-        <p class="text-muted mb-0">{{ $case->title }} @if ($taxpayer) &middot; {{ $taxpayer->legal_name }} ({{ $taxpayer->vat_number }}) @endif</p>
-    </div>
-    <a href="{{ route('audit-cases.index') }}" class="btn btn-outline-secondary align-self-center">&larr; Back to audit cases</a>
-</div>
+<x-page-header :title="$case->case_number" :back="route('audit-cases.index')" back-label="Audit cases"
+    :subtitle="$case->title.($taxpayer ? ' · '.$taxpayer->legal_name.' ('.$taxpayer->vat_number.')' : '')" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -205,7 +191,7 @@
 </div>
 
 <div class="card mt-3">
-    <div class="card-header"><div class="fw-semibold">Evidence</div><div class="text-muted small">Preserved with a checksum at citation time; superseding replaces the active citation without deleting the prior one</div></div>
+    <div class="card-header"><div class="fw-semibold">Evidence</div><div class="text-muted small">Each file is fingerprinted when cited. Replacing evidence keeps the earlier version on record.</div></div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
             <caption class="visually-hidden">Evidence cited against this case</caption>
@@ -313,7 +299,7 @@
 </div>
 
 <div class="card mt-3">
-    <div class="card-header"><div class="fw-semibold">Notes</div><div class="text-muted small">Append-only -- a correction is a new note, the original is never edited</div></div>
+    <div class="card-header"><div class="fw-semibold">Notes</div><div class="text-muted small">Notes can't be edited — add a new note to correct one</div></div>
     <div class="card-body">
         @forelse ($notes as $note)
             <div class="mb-3 pb-3 border-bottom">

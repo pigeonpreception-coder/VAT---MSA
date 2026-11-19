@@ -5,11 +5,8 @@
 @section('content')
 <div class="row justify-content-center">
     <div class="col-md-10 col-lg-8">
-        <div class="mb-4">
-            <div class="text-uppercase text-muted small fw-semibold">Self-serve signup</div>
-            <h1 class="h3 mb-1">Apply for a commercial VAT-MSA subscription</h1>
-            <p class="text-muted mb-0">This starts a controlled application, held for administrator and organisation verification. No account, payment, subscription or licence is activated by submitting this form.</p>
-        </div>
+                <x-page-header title="Apply for a VAT-MSA subscription"
+            subtitle="Tell us about your organisation. We verify every application before an account is created — nothing is charged or activated when you submit this form." />
 
         @if (session('accepted'))
             @php($accepted = session('accepted'))
@@ -18,15 +15,7 @@
                 <p class="mb-0 small">{{ $accepted['next_action'] }}</p>
             </div>
         @endif
-        @if ($errors->any())
-            <div class="alert alert-danger" role="alert">
-                <ul class="mb-0 ps-3">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
+        <x-form-errors />
 
         <div class="card">
             <div class="card-body">

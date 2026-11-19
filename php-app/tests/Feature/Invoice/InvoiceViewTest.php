@@ -160,16 +160,14 @@ class InvoiceViewTest extends TestCase
         $response = $this->actingAs($ctx['supplier']['owner'])->get("/invoices/{$ctx['invoiceId']}?created=1");
 
         $response->assertOk()->assertViewIs('invoices.show');
-        $response->assertSee('Invoice certified successfully.');
-        $response->assertSee('Document record');
-        $response->assertSee('Certification receipt');
-        $response->assertSee('Invoice lines');
-        $response->assertSee('VAT sub-ledger postings');
+        $response->assertSeeText('Invoice certified. The certificate, VAT transaction and ledger entries were recorded together.');
+        $response->assertSee('Invoice details');
+        $response->assertSee('Certification details');
+        $response->assertSee('Line items');
+        $response->assertSee('VAT postings');
         $response->assertSee('Consulting services');
-        // Net and VAT are shown (in the document record panel and again per
-        // invoice line); totalCents itself is never rendered on this page,
-        // matching the source's own detail page exactly.
-        $response->assertSeeInOrder(['Net value', 'NAD 1,000.00', 'VAT amount', 'NAD 150.00']);
+        // The summary tiles show net, VAT and the gross total (net + VAT).
+        $response->assertSeeInOrder(['Net value', 'NAD 1,000.00', 'VAT', 'NAD 150.00', 'Total', 'NAD 1,150.00']);
         $response->assertSee('Certificate ID'); // the certificate/transaction/hash detail block rendered
     }
 

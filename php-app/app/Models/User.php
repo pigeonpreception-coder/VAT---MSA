@@ -138,12 +138,20 @@ class User extends Authenticatable
 
     public function hasAppPermission(string $permission): bool
     {
-        if ($this->resolvedRolePermissionsCache === null) {
-            $this->resolvedRolePermissionsCache = AuthorityRolePermissions::forRole($this->taxAuthorityId(), $this->role);
-        }
-
-        return in_array($permission, $this->resolvedRolePermissionsCache, true)
+        return in_array($permission, $this->rolePermissions(), true)
             || in_array($permission, DynamicPermissions::forUser($this), true);
+    }
+
+    /**
+     * The built-in role's permissions for this user's tax authority
+     * (memoized, see above). Dynamic organisation-role grants are separate:
+     * DynamicPermissions::forUser().
+     *
+     * @return list<string>
+     */
+    public function rolePermissions(): array
+    {
+        return $this->resolvedRolePermissionsCache ??= AuthorityRolePermissions::forRole($this->taxAuthorityId(), $this->role);
     }
 
     /**

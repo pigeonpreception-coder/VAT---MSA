@@ -133,7 +133,7 @@ class OrganisationViewTest extends TestCase
         $response = $this->actingAs($admin)->get('/organisations');
 
         $response->assertOk();
-        $response->assertSeeInOrder(['Canonical organisations', '1']);
+        $response->assertSeeInOrder(['<span>Organisations</span></div>', '<div class="stat-value">1</div>', 'Each linked to one taxpayer'], false);
         $response->assertSeeInOrder(['Active branches', '1']);
         $response->assertSeeInOrder(['Pending registrations', '1']);
         $response->assertSee('Buyer');

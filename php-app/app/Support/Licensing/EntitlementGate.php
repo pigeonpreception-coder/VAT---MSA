@@ -4,7 +4,6 @@ namespace App\Support\Licensing;
 
 use App\Domain\Licensing\AccessReviewWindow;
 use App\Domain\Licensing\EntitlementEvaluator;
-use App\Models\AccessReview;
 use App\Models\Organisation;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -41,9 +40,7 @@ class EntitlementGate
 
         if ($operationClass === 'ADMIN_WRITE') {
             $window = AccessReviewWindow::current();
-            $currentReview = AccessReview::where('organisation_id', $organisation->id)->where('review_type', 'QUARTERLY')
-                ->where('period_start', $window['periodStart'])->whereIn('status', ['OPEN', 'COMPLETED'])->first();
-            if (! $currentReview || ($currentReview->status === 'OPEN' && $currentReview->due_at->isPast())) {
+            if (! AccessReviewWindow::allowsAdminWrites(AccessReviewWindow::currentReview($organisation->id))) {
                 throw new AuthorizationException("QUARTERLY_ACCESS_REVIEW_REQUIRED: Open or complete the {$window['key']} access review before privileged organisation changes.");
             }
         }

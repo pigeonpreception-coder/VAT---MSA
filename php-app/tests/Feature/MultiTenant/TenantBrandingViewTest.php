@@ -107,7 +107,7 @@ class TenantBrandingViewTest extends TestCase
 
         $response = $this->actingAs($party['owner'])->get('/refunds');
 
-        $response->assertOk()->assertSee('NamRA VAT Summary Report');
+        $response->assertOk()->assertSee('NamRA VAT summary report');
     }
 
     public function test_a_second_tenants_refunds_page_shows_its_own_authority_name_not_namra(): void
@@ -117,7 +117,7 @@ class TenantBrandingViewTest extends TestCase
 
         $response = $this->actingAs($party['owner'])->get('/refunds');
 
-        $response->assertOk()->assertSee('ZTRA VAT Summary Report');
+        $response->assertOk()->assertSee('ZTRA VAT summary report');
         $response->assertDontSee('NamRA VAT Summary Report');
     }
 }

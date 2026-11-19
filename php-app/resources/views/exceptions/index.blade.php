@@ -3,56 +3,45 @@
 @section('title', 'Reconciliation exceptions')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">VAT management</div>
-    <h1 class="h3 mb-1">Reconciliation exceptions</h1>
-    <p class="text-muted mb-0">The reconciliation matching engine's work queue -- invoices whose ledger postings did not tie out against their own declared figures, awaiting officer review.</p>
-</div>
+<x-page-header title="Reconciliation exceptions"
+    subtitle="Invoices whose VAT postings don't match their declared figures, waiting for review." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open exceptions</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($summary['open_count']) }}</div>
-                <div class="small text-muted">Awaiting controlled review</div>
+                <div class="stat-label"><span>Open exceptions</span></div>
+                <div class="stat-value">{{ number_format($summary['open_count']) }}</div>
+                <div class="small text-muted">Waiting for review</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Critical severity</span><span>C</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($summary['critical_count']) }}</div>
-                <div class="small text-warning">Prioritised for officer attention</div>
+                <div class="stat-label"><span>Critical severity</span></div>
+                <div class="stat-value">{{ number_format($summary['critical_count']) }}</div>
+                <div class="small text-warning">Handle these first</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Exception value</span><span>{{ $tenantCurrencySymbol }}</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($summary['total_value_cents'] / 100, 2) }}</div>
-                <div class="small text-muted">Gross value under exception control</div>
+                <div class="stat-label"><span>Exception value</span></div>
+                <div class="stat-value">{{ $tenantCurrencySymbol }} {{ number_format($summary['total_value_cents'] / 100, 2) }}</div>
+                <div class="small text-muted">Total value of open exceptions</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Resolution policy</span><span>2</span></div>
-                <div class="fs-2 fw-semibold">Dual</div>
-                <div class="small text-muted">High-impact closure requires approval</div>
+                <div class="stat-label"><span>Resolution policy</span></div>
+                <div class="stat-value">Dual</div>
+                <div class="small text-muted">High-impact closures need a second approver</div>
             </div>
         </div>
     </div>

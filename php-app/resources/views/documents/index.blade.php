@@ -1,63 +1,51 @@
 @extends('layouts.app')
 
-@section('title', 'Evidence documents')
+@section('title', 'Documents & records')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Evidence custody</div>
-    <h1 class="h3 mb-1">Private documents, integrity checks and quarantine</h1>
-    <p class="text-muted mb-0">Evidence objects are private, checksummed and classified. New uploads remain quarantined until a separately configured malware scanner records a clean result; this application never guesses that outcome.</p>
-</div>
+<x-page-header title="Documents & records"
+    subtitle="Private evidence documents with integrity checks. New uploads stay quarantined until a virus scan confirms they're clean." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Documents</span><span>N</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($documents->count()) }}</div>
-                <div class="small text-muted">Tenant-scoped metadata records</div>
+                <div class="stat-label"><span>Documents</span></div>
+                <div class="stat-value">{{ number_format($documents->count()) }}</div>
+                <div class="small text-muted">Evidence files on record</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Quarantined</span><span>Q</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($documents->where('status', 'QUARANTINED')->count()) }}</div>
-                <div class="small text-warning">Not available for consumption</div>
+                <div class="stat-label"><span>Quarantined</span></div>
+                <div class="stat-value">{{ number_format($documents->where('status', 'QUARANTINED')->count()) }}</div>
+                <div class="small text-warning">Can't be opened until scanned</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Clean</span><span>&check;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($documents->where('scan_status', 'CLEAN')->count()) }}</div>
-                <div class="small text-muted">Verified by an external scanner</div>
+                <div class="stat-label"><span>Clean</span></div>
+                <div class="stat-value">{{ number_format($documents->where('scan_status', 'CLEAN')->count()) }}</div>
+                <div class="small text-muted">Passed the malware scan</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Legal holds</span><span>&#128274;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($documents->where('legal_hold', true)->count()) }}</div>
-                <div class="small text-muted">Deletion protection</div>
+                <div class="stat-label"><span>Legal holds</span></div>
+                <div class="stat-value">{{ number_format($documents->where('legal_hold', true)->count()) }}</div>
+                <div class="small text-muted">Protected from deletion</div>
             </div>
         </div>
     </div>
 </div>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>Upload rejected.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
@@ -65,7 +53,7 @@
             <div class="card mb-3">
                 <div class="card-header">
                     <div class="fw-semibold">Add evidence</div>
-                    <div class="text-muted small">Object storage write followed by atomic metadata, audit and outbox records</div>
+                    <div class="text-muted small">Files are held in quarantine until they pass a malware scan</div>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="{{ route('documents.store') }}" enctype="multipart/form-data">
@@ -112,7 +100,7 @@
         <div class="card">
             <div class="card-header">
                 <div class="fw-semibold">Evidence register</div>
-                <div class="text-muted small">Downloads are unavailable while malware scanning is not configured</div>
+                <div class="text-muted small">Downloads are off until malware scanning is connected</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -134,7 +122,7 @@
                                     <div class="text-muted small font-monospace">{{ substr($document->checksum_sha256, 0, 16) }}...</div>
                                 </td>
                                 <td>
-                                    {{ str_replace('_', ' ', $document->owner_domain) }}
+                                    @humanize($document->owner_domain)
                                     <div class="text-muted small font-monospace">{{ $document->owner_resource_id }}</div>
                                 </td>
                                 <td><x-status-badge :value="$document->classification" type="status" /></td>
@@ -162,7 +150,7 @@
             <div class="card-body">
                 @forelse ($byDomain as $row)
                     <div class="mb-2 d-flex justify-content-between align-items-center">
-                        <span>{{ str_replace('_', ' ', $row['domain']) }}</span>
+                        <span>@humanize($row['domain'])</span>
                         <span class="fw-semibold">{{ number_format($row['count']) }}</span>
                     </div>
                 @empty

@@ -107,7 +107,7 @@ class LicensingViewTest extends TestCase
         $response->assertOk()->assertViewIs('licensing.index');
         $response->assertSee('Professional Pilot');
         $response->assertSee('Organisation administration');
-        $response->assertSee('User Seats');
+        $response->assertSee('User seats');
         $response->assertSee('2026-Q3');
     }
 
