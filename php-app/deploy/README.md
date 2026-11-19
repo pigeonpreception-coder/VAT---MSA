@@ -55,15 +55,18 @@ cd /var/www/vat-msa/php-app
 ./deploy/deploy.sh
 ```
 
-...or automatically, via `.github/workflows/deploy.yml` -- see the next
-section.
+...or from GitHub Actions, via `.github/workflows/deploy.yml` -- see the
+next section.
 
 ## Automated deploys (GitHub Actions)
 
 No interactive Claude Code session can reach the VPS directly (it has no
 general outbound network access), so `.github/workflows/deploy.yml` runs
-`deploy.sh` over SSH from GitHub's own runners instead, on every push to
-`main` that touches `php-app/**` (or on a manual `workflow_dispatch`).
+`deploy.sh` over SSH from GitHub's own runners instead, when started by
+hand (`workflow_dispatch`). It used to run on every push to `main` that
+touches `php-app/**`; that trigger is off until the live server's pages
+are in git and `deploy.sh` matches the host, because the script begins
+with `git reset --hard origin/main` (see the comment in the workflow).
 
 To enable it, add these repository secrets (Settings -> Secrets and
 variables -> Actions -> New repository secret), ideally scoped to a
