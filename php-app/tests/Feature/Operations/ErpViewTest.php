@@ -105,7 +105,7 @@ class ErpViewTest extends TestCase
         $response = $this->actingAs($org['owner'])->get('/operations/erp');
 
         $response->assertOk()->assertViewIs('operations.erp.index');
-        $response->assertSee('ERP Module');
+        $response->assertSee('ERP overview');
         $response->assertSee('Human Resources');
         $response->assertSee('Fixed Assets');
         $response->assertSee('NAD 120,000.00');

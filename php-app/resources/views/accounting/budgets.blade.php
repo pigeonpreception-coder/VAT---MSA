@@ -7,50 +7,36 @@
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Accounting & Finance</div>
-        <h1 class="h3 mb-1">Budgets</h1>
-        <p class="text-muted mb-0">Every project's proposed and approved budget against its actual posted cost, organisation-wide. A proposed budget awaits an independent approver -- never the project's own manager -- before it counts toward the approved figure below.</p>
-    </div>
-    <a href="{{ route('accounting.index') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Back to Accounting</a>
-</div>
+<x-page-header title="Budgets"
+    subtitle="Proposed and approved project budgets against actual posted costs. A proposed budget needs approval from someone other than the project manager before it counts." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Proposed</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($totals['proposed_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Proposed</div>
+            <div class="stat-value">{{ $fmt($totals['proposed_cents']) }}</div>
             <div class="small text-muted">Across all projects</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Approved</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($totals['approved_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Approved</div>
+            <div class="stat-value">{{ $fmt($totals['approved_cents']) }}</div>
             <div class="small text-success">Counts toward variance</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Actual cost</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($totals['cost_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Actual cost</div>
+            <div class="stat-value">{{ $fmt($totals['cost_cents']) }}</div>
             <div class="small text-muted">Posted project costs</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Variance</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Variance</div>
             <div class="fs-2 fw-semibold {{ $totals['variance_cents'] < 0 ? 'text-danger' : 'text-success' }}">{{ $fmt($totals['variance_cents']) }}</div>
             <div class="small text-muted">Approved minus actual cost</div>
         </div></div>
@@ -60,7 +46,7 @@
 <div class="card">
     <div class="card-header">
         <div class="fw-semibold">Project budgets</div>
-        <div class="text-muted small">Approved = ProjectBudget.approved_amount_cents where status is APPROVED; variance is negative once actual cost exceeds it</div>
+        <div class="text-muted small">Variance turns negative once actual cost exceeds the approved budget</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -102,7 +88,7 @@
                                     <form method="POST" action="{{ route('accounting.budgets.approval', $project['id']) }}" class="d-flex gap-1 justify-content-end">
                                         @csrf
                                         <x-idempotency-key />
-                                        <input type="number" name="approved_amount_cents" class="form-control form-control-sm" style="width: 8rem" placeholder="Cents" value="{{ $project['proposed_cents'] }}" min="0" required>
+                                        <x-money-input name="approved_amount_cents" :id="'approved-'.$project['id']" :value="$project['proposed_cents']" size="sm" :required="true" style="width: 8rem" aria-label="Approved amount for {{ $project['name'] ?? 'this project' }}" />
                                         <button type="submit" class="btn btn-success btn-sm text-nowrap">Approve</button>
                                     </form>
                                 @endif

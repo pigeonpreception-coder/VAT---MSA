@@ -107,7 +107,7 @@
         'incident' => $incidentMap[$value] ?? 'text-bg-light',
         default => $statusMap[$value] ?? 'text-bg-light',
     };
-    $label = ucwords(strtolower(str_replace('_', ' ', (string) $value)));
+    $label = \App\Support\Ui\Humanize::title((string) $value);
 @endphp
 
 <span {{ $attributes->merge(['class' => "badge {$class}"]) }}>{{ $label }}</span>

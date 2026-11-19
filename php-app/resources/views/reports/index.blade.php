@@ -7,56 +7,45 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Reports & analytics</div>
-    <h1 class="h3 mb-1">Governed reporting, exports and certified metrics</h1>
-    <p class="text-muted mb-0">Every report run reconciles to source control totals before it can be published; a sensitive export needs a second, independent approval and a fresh password confirmation.</p>
-</div>
+<x-page-header title="Reports & analytics"
+    subtitle="Run reports, publish results and request exports. Sensitive exports need a second person's approval." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Definitions</span><span>R</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($reportsSummary['definitions_count']) }}</div>
-                <div class="small text-muted">Versioned and allow-listed</div>
+                <div class="stat-label"><span>Definitions</span></div>
+                <div class="stat-value">{{ number_format($reportsSummary['definitions_count']) }}</div>
+                <div class="small text-muted">Approved report templates</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Completed inline</span><span>C</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($reportsSummary['completed_count']) }}</div>
-                <div class="small text-success">Bounded query aggregates</div>
+                <div class="stat-label"><span>Completed runs</span></div>
+                <div class="stat-value">{{ number_format($reportsSummary['completed_count']) }}</div>
+                <div class="small text-success">Finished successfully</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Failed</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($reportsSummary['failed_count']) }}</div>
-                <div class="small text-muted">Visible execution outcomes</div>
+                <div class="stat-label"><span>Failed</span></div>
+                <div class="stat-value">{{ number_format($reportsSummary['failed_count']) }}</div>
+                <div class="small text-muted">Check the error and run again</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Export worker</span><span>X</span></div>
-                <div class="fs-2 fw-semibold">Off</div>
-                <div class="small text-warning">External scanner required</div>
+                <div class="stat-label"><span>Export worker</span></div>
+                <div class="stat-value">Off</div>
+                <div class="small text-warning">Needs a malware scanner to be connected</div>
             </div>
         </div>
     </div>
@@ -67,7 +56,7 @@
         <div class="card mb-3">
             <div class="card-header">
                 <div class="fw-semibold">Report catalogue</div>
-                <div class="text-muted small">Running a report re-computes it inline; nothing is official until it is published</div>
+                <div class="text-muted small">Running a report recalculates it. Nothing is official until it is published.</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -88,11 +77,11 @@
                                 <td><span class="font-monospace">{{ $definition->code }}</span></td>
                                 <td>
                                     {{ $definition->name }}
-                                    <div class="text-muted small">{{ str_replace('_', ' ', $definition->audience) }}</div>
+                                    <div class="text-muted small">@humanize($definition->audience)</div>
                                 </td>
                                 <td>
                                     <x-status-badge :value="$definition->classification" type="status" />
-                                    <div class="text-muted small mt-1">{{ str_replace('_', ' ', $definition->freshness_tier) }}</div>
+                                    <div class="text-muted small mt-1">@humanize($definition->freshness_tier)</div>
                                 </td>
                                 @if ($canRun)
                                     <td>
@@ -118,7 +107,7 @@
         <div class="card">
             <div class="card-header">
                 <div class="fw-semibold">My report runs</div>
-                <div class="text-muted small">Publish reconciles the run against live source data before it becomes official</div>
+                <div class="text-muted small">Publishing checks the run against the latest data before making it official</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -173,7 +162,7 @@
                 <span class="badge text-bg-light border">{{ count($myExports) }}</span>
             </div>
             <div class="card-body">
-                <p class="text-muted small">A sensitive report's export starts quarantined until an independent approval.</p>
+                <p class="text-muted small">Exports of sensitive reports are held until someone else approves them.</p>
                 @forelse ($myExports as $index => $export)
                     <div class="mb-3 pb-3 border-bottom my-export-item" @if ($index >= $sidePreviewLimit) hidden @endif>
                         <div class="d-flex justify-content-between align-items-start">
@@ -217,7 +206,7 @@
                     <span class="badge text-bg-light border">{{ count($pendingApprovals) }}</span>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small">A national role may approve or cancel a colleague's pending export, never their own.</p>
+                    <p class="text-muted small">You can approve or cancel a colleague's pending export, but not your own.</p>
                     @forelse ($pendingApprovals as $index => $export)
                         <div class="mb-3 pb-3 border-bottom pending-approval-item" @if ($index >= $sidePreviewLimit) hidden @endif>
                             <div class="d-flex justify-content-between align-items-start">
@@ -254,9 +243,8 @@
 </div>
 
 <div class="mb-3 mt-4">
-    <div class="text-uppercase text-muted small fw-semibold">Analytics</div>
-    <h2 class="h4 mb-1">Certified data products</h2>
-    <p class="text-muted mb-0">A model run may only be fed by an already-published, reconciled report run -- never a live query against invoices, returns or audit cases directly.</p>
+    <h2 class="section-title mb-1">Certified data products</h2>
+    <p class="text-muted small mb-0">Analytics models only ever read published, reconciled report runs — never live invoice, return or audit data.</p>
 </div>
 
 <div class="row row-cols-1 row-cols-lg-2 g-3 mb-3">

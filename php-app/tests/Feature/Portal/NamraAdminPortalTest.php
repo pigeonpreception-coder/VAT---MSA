@@ -121,12 +121,12 @@ class NamraAdminPortalTest extends TestCase
         $response = $this->actingAs($admin)->get('/portal/namra-admin');
 
         $response->assertOk()->assertViewIs('portal.namra-admin');
-        $response->assertSee('Authority provisioning, federation and activation control');
+        $response->assertSee('Authority structure, identity federation, protected administrator roles and quarterly access reviews.');
         $response->assertSee('Head Office');
         $response->assertSee('ITAS identity provider');
         $response->assertSee('<caption class="visually-hidden">', false);
         $response->assertSee('scope="col"', false);
-        $response->assertSee('No implicit authority or financial access.');
+        $response->assertSee('Approvals recorded here exercise the governance workflow only.');
         // The assigned-authority count is a metric only -- like the
         // source's own page, the authority's name is never rendered as
         // visible text anywhere on this screen.

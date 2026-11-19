@@ -1,13 +1,10 @@
 @extends('layouts.app')
 
-@section('title', 'VAT Audit Report')
+@section('title', 'VAT audit report')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">VAT Management</div>
-    <h1 class="h3 mb-1">VAT Audit Report</h1>
-    <p class="text-muted mb-0">A period's certified-invoice risk posture: risk-level breakdown, reconciliation exceptions raised, and any audit case opened.</p>
-</div>
+<x-page-header title="VAT audit report"
+    subtitle="The risk profile of a period's certified invoices: risk levels, reconciliation exceptions and any audit cases opened." />
 
 @if (! $report)
     <div class="card"><div class="card-body text-center text-muted py-5">No VAT period is available to report on.</div></div>
@@ -26,35 +23,35 @@
         <div class="col">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Certified invoices</span><span>N</span></div>
-                    <div class="fs-2 fw-semibold">{{ number_format($summary['total_count']) }}</div>
-                    <div class="small text-muted">All risk levels combined</div>
+                    <div class="stat-label"><span>Certified invoices</span></div>
+                    <div class="stat-value">{{ number_format($summary['total_count']) }}</div>
+                    <div class="small text-muted">All risk levels</div>
                 </div>
             </div>
         </div>
         <div class="col">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Certified value</span><span>N$</span></div>
-                    <div class="fs-2 fw-semibold">{{ $fmt($summary['total_cents']) }}</div>
-                    <div class="small text-muted">Total certified output</div>
+                    <div class="stat-label"><span>Certified value</span></div>
+                    <div class="stat-value">{{ $fmt($summary['total_cents']) }}</div>
+                    <div class="small text-muted">Total certified sales</div>
                 </div>
             </div>
         </div>
         <div class="col">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between text-muted small text-uppercase"><span>High + critical risk</span><span>!</span></div>
-                    <div class="fs-2 fw-semibold">{{ number_format($highCriticalCount) }}</div>
-                    <div class="small {{ $highCriticalCount > 0 ? 'text-danger' : 'text-muted' }}">Elevated review needed</div>
+                    <div class="stat-label"><span>High + critical risk</span></div>
+                    <div class="stat-value">{{ number_format($highCriticalCount) }}</div>
+                    <div class="small {{ $highCriticalCount > 0 ? 'text-danger' : 'text-muted' }}">Need a closer look</div>
                 </div>
             </div>
         </div>
         <div class="col">
             <div class="card h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Exceptions raised</span><span>X</span></div>
-                    <div class="fs-2 fw-semibold">{{ number_format(count($exceptions)) }}</div>
+                    <div class="stat-label"><span>Exceptions raised</span></div>
+                    <div class="stat-value">{{ number_format(count($exceptions)) }}</div>
                     <div class="small {{ count($exceptions) > 0 ? 'text-warning' : 'text-muted' }}">Reconciliation flags this period</div>
                 </div>
             </div>
@@ -111,7 +108,7 @@
                 </div>
                 <div class="card-footer">
                     @foreach ($summary['by_status'] as $row)
-                        <span class="badge text-bg-light border me-2">{{ $row['status'] }}: {{ $row['count'] }}</span>
+                        <span class="badge text-bg-light border me-2">@humanize($row['status']): {{ $row['count'] }}</span>
                     @endforeach
                     @if (empty($summary['by_status']))
                         <span class="text-muted small">No certified invoices in this period.</span>
@@ -155,7 +152,7 @@
                                 <strong>{{ $exception['invoice_number'] }}</strong>
                                 <x-status-badge :value="$exception['severity']" type="risk" />
                             </div>
-                            <div class="text-muted small">{{ $exception['exception_type'] }} &middot; <x-status-badge :value="$exception['status']" type="status" /></div>
+                            <div class="text-muted small">@humanize($exception['exception_type']) &middot; <x-status-badge :value="$exception['status']" type="status" /></div>
                             <div class="small mt-1">{{ $exception['summary'] }}</div>
                             <div class="text-muted small mt-1">
                                 Raised {{ $exception['created_at'] }}
@@ -187,7 +184,7 @@
                                 <strong>{{ $case['case_number'] }}</strong>
                                 <x-status-badge :value="$case['risk_tier']" type="risk" />
                             </div>
-                            <div class="text-muted small">{{ $case['case_type'] }} &middot; <x-status-badge :value="$case['status']" type="status" /></div>
+                            <div class="text-muted small">@humanize($case['case_type']) &middot; <x-status-badge :value="$case['status']" type="status" /></div>
                             <div class="small mt-1">{{ $case['title'] }}</div>
                             <div class="text-muted small mt-1">
                                 Opened {{ $case['opened_at'] }}

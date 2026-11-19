@@ -105,8 +105,9 @@ class DashboardTest extends TestCase
         $this->assertTrue(collect($snapshot['recent_invoices'])->every(fn ($i) => $i['supplierName'] === 'Test Supplier'));
         // TAXPAYER_OWNER lacks audit:read -- the evidence stream stays empty regardless of real audit rows existing.
         $this->assertSame([], $snapshot['recent_audit']);
-        $response->assertSee('VAT transaction control centre');
-        $response->assertSee('Audit trail requires audit:read permission.');
+        $response->assertSee('VAT activity at a glance.');
+        // Without audit:read the activity panel isn't rendered at all.
+        $response->assertDontSee('Recent activity');
     }
 
     public function test_a_national_actor_sees_every_taxpayers_invoices_and_the_real_audit_trail(): void
@@ -129,7 +130,7 @@ class DashboardTest extends TestCase
         $this->assertSame(300_000, $snapshot['metrics']['total_cents']);
         $this->assertCount(2, $snapshot['recent_audit']);
         $this->assertSame('TEST_EVENT_TWO', $snapshot['recent_audit'][0]['action']);
-        $response->assertSee('Test Event Two');
+        $response->assertSee('Test event two');
     }
 
     public function test_the_high_risk_footnote_counts_only_high_and_critical_invoices(): void

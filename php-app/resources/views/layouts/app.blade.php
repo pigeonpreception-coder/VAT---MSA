@@ -4,247 +4,171 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ config('app.name', 'VAT-MSA') }} @hasSection('title')&mdash; @yield('title')@endif</title>
+    <title>@hasSection('title')@yield('title') &middot; @endif{{ config('app.name', 'VAT-MSA') }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="@auth has-sidebar @endauth">
-    {{-- WCAG 2.1 SC 2.4.1 "Bypass Blocks" -- lets keyboard/screen-reader users
-         skip the repeated nav on every page. Visually hidden until focused. --}}
+<body class="{{ auth()->check() ? 'app-authenticated' : 'app-guest' }}">
+    {{-- WCAG 2.1 SC 2.4.1 "Bypass Blocks": visually hidden until focused. --}}
     <a class="visually-hidden-focusable skip-link" href="#main-content">Skip to main content</a>
 
     @auth
-        {{-- Below the lg breakpoint the sidebar below becomes an off-canvas
-             drawer (Bootstrap's own .offcanvas-lg responsive behaviour) --
-             this slim bar is its toggle and stays in the normal document
-             flow, so it needs no fixed positioning of its own. --}}
-        <nav class="navbar navbar-dark d-lg-none mobile-topbar px-3" aria-label="Primary">
-            <a class="navbar-brand" href="{{ route('dashboard') }}">VAT-MSA</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-        </nav>
+        @php
+            $currentUser = auth()->user();
+            $currentRoleLabel = \App\Support\Access\RoleLabels::for($currentUser->role);
+            $currentContext = $currentUser->organisation()?->legal_name ?? $tenantAuthorityName;
+            $currentInitials = collect(preg_split('/\s+/', trim($currentUser->name)))
+                ->filter()->take(2)->map(fn ($part) => mb_strtoupper(mb_substr($part, 0, 1)))->implode('');
 
-        {{-- Deliberately offcanvas-lg + offcanvas-start only -- NOT the
-             plain .offcanvas class too. Bootstrap's plain .offcanvas
-             carries its own unconditional (non-responsive) drawer/
-             transform rules that would fight offcanvas-lg's >=992px
-             "always visible, normal column" behaviour if both were
-             present together (confirmed live: with .offcanvas added,
-             the sidebar stayed translateX(-100%)/visibility:hidden even
-             at desktop widths where offcanvas-lg's own media query
-             correctly matched). --}}
-        <div class="offcanvas-start offcanvas-lg sidebar" tabindex="-1" id="sidebar" aria-labelledby="sidebarLabel">
-            <div class="offcanvas-header d-lg-none">
-                <span class="offcanvas-title h5 mb-0" id="sidebarLabel">VAT-MSA</span>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" data-bs-target="#sidebar" aria-label="Close"></button>
-            </div>
-            <div class="offcanvas-body d-flex flex-column p-0">
-                <a class="sidebar-brand d-none d-lg-block" href="{{ route('dashboard') }}">VAT-MSA</a>
-                @php
-                    // Sidebar restructured into the 9 top-level groups the
-                    // NamRA e-VAT MS master prompt names (sections 16-21),
-                    // matching the source's own db/runtime.ts navigation
-                    // seed 1:1 in taxonomy, order and permission gating.
-                    // Documents & Records / Reporting & Analytics /
-                    // Administration / Licensing & Subscription / Platform
-                    // are kept unchanged and resorted after the 9, per the
-                    // master prompt's own "keep everything not expressly
-                    // modified" rule. Each group's routeIs() patterns decide
-                    // which group starts expanded.
-                    $groups = [
-                        'dashboard' => ['dashboard', 'portals.*'],
-                        'vat-management' => ['vat-management.*', 'vat-periods.*', 'vat-returns.*', 'refunds.*', 'risk-indicators.*', 'audit-cases.*', 'audit-trail.*', 'disputes.*', 'obligations.*', 'communications.*', 'compliance-overview.*', 'exceptions.*'],
-                        'invoice-management' => ['invoice-management.*', 'invoices.*'],
-                        'accounting-finance' => ['accounting.*'],
-                        'operations' => ['operations.*'],
-                        'quotation' => ['quotation.*', 'quotations.*'],
-                        'project-management' => ['project-management.*'],
-                        'registered' => ['registered.*', 'business-parties.*', 'taxpayer-systems.*', 'saas-providers.*'],
-                        'new-registration' => ['new-registration.*'],
-                        'documents' => ['documents.*'],
-                        'reporting' => ['reports.*'],
-                        'administration' => ['administration.*', 'organisations.*', 'workflows.*', 'security.operations', 'security.incidents.*'],
-                        'licensing' => ['licensing.*'],
-                        'platform' => ['platform.*'],
-                    ];
-                    $activeGroup = collect($groups)->search(fn ($patterns) => request()->routeIs(...$patterns)) ?: 'dashboard';
-                @endphp
-                <ul class="nav flex-column sidebar-nav flex-grow-1" id="sidebar-accordion">
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-dashboard" aria-expanded="{{ $activeGroup === 'dashboard' ? 'true' : 'false' }}">
-                            <span>Dashboard</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'dashboard') show @endif" id="group-dashboard" data-bs-parent="#sidebar-accordion">
-                            <li><a class="nav-link" href="{{ route('dashboard') }}" @if (request()->routeIs('dashboard')) aria-current="page" @endif>Dashboard</a></li>
-                            <li><a class="nav-link" href="{{ route('portals.index') }}" @if (request()->routeIs('portals.*')) aria-current="page" @endif>Portals</a></li>
-                        </ul>
-                    </li>
+            // Breadcrumb: group > section > page. On a section's own index
+            // page the section label is the last crumb; on a detail page
+            // the section becomes a link and the page title follows it.
+            $pageTitle = html_entity_decode(trim($__env->yieldContent('title')), ENT_QUOTES) ?: config('app.name', 'VAT-MSA');
+            $crumbs = [];
+            if ($navigation['activeGroup']) {
+                $crumbs[] = ['label' => $navigation['activeGroup']['label'], 'url' => null];
+            }
+            $activeItem = $navigation['activeItem'];
+            if ($activeItem && request()->routeIs($activeItem['route'])) {
+                $currentCrumb = $activeItem['label'];
+            } else {
+                if ($activeItem) {
+                    $crumbs[] = ['label' => $activeItem['label'], 'url' => $activeItem['url']];
+                }
+                $currentCrumb = $pageTitle;
+            }
+            if ($crumbs !== [] && $crumbs[0]['label'] === $currentCrumb) {
+                array_shift($crumbs);
+            }
+        @endphp
 
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-vat-management" aria-expanded="{{ $activeGroup === 'vat-management' ? 'true' : 'false' }}">
-                            <span>VAT Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'vat-management') show @endif" id="group-vat-management" data-bs-parent="#sidebar-accordion">
-                            <li><a class="nav-link" href="{{ route('vat-management.audit-report') }}" @if (request()->routeIs('vat-management.audit-report')) aria-current="page" @endif>VAT Audit Report</a></li>
-                            <li><a class="nav-link" href="{{ route('vat-management.reconciliation') }}" @if (request()->routeIs('vat-management.reconciliation')) aria-current="page" @endif>Invoice Reconciliation</a></li>
-                            <li><a class="nav-link" href="{{ route('exceptions.index') }}" @if (request()->routeIs('exceptions.*')) aria-current="page" @endif>Reconciliation Exceptions</a></li>
-                            <li><a class="nav-link" href="{{ route('vat-periods.index') }}" @if (request()->routeIs('vat-periods.*', 'vat-returns.*')) aria-current="page" @endif>VAT Returns</a></li>
-                            <li><a class="nav-link" href="{{ route('refunds.index') }}" @if (request()->routeIs('refunds.*')) aria-current="page" @endif>VAT Refund Report</a></li>
-                            <li><a class="nav-link" href="{{ route('vat-management.adjustment-report') }}" @if (request()->routeIs('vat-management.adjustment-report')) aria-current="page" @endif>VAT Adjustment Report</a></li>
-                            <li><a class="nav-link" href="{{ route('risk-indicators.index') }}" @if (request()->routeIs('risk-indicators.*')) aria-current="page" @endif>Risk Indicators</a></li>
-                            <li><a class="nav-link" href="{{ route('audit-cases.index') }}" @if (request()->routeIs('audit-cases.*')) aria-current="page" @endif>Audit Cases &amp; Risk</a></li>
-                            <li><a class="nav-link" href="{{ route('audit-trail.index') }}" @if (request()->routeIs('audit-trail.*')) aria-current="page" @endif>Audit Trail</a></li>
-                            <li><a class="nav-link" href="{{ route('disputes.index') }}" @if (request()->routeIs('disputes.*')) aria-current="page" @endif>Disputes</a></li>
-                            <li><a class="nav-link" href="{{ route('obligations.index') }}" @if (request()->routeIs('obligations.*')) aria-current="page" @endif>Obligations</a></li>
-                            <li><a class="nav-link" href="{{ route('communications.index') }}" @if (request()->routeIs('communications.*')) aria-current="page" @endif>Communications</a></li>
-                            <li><a class="nav-link" href="{{ route('compliance-overview.index') }}" @if (request()->routeIs('compliance-overview.*')) aria-current="page" @endif>Compliance Overview</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-invoice-management" aria-expanded="{{ $activeGroup === 'invoice-management' ? 'true' : 'false' }}">
-                            <span>Invoice Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'invoice-management') show @endif" id="group-invoice-management" data-bs-parent="#sidebar-accordion">
-                            <li><a class="nav-link" href="{{ route('invoice-management.local') }}" @if (request()->routeIs('invoice-management.local')) aria-current="page" @endif>Local Invoices</a></li>
-                            <li><a class="nav-link" href="{{ route('invoice-management.foreign') }}" @if (request()->routeIs('invoice-management.foreign')) aria-current="page" @endif>Foreign Invoices</a></li>
-                            <li><a class="nav-link" href="{{ route('invoices.index') }}" @if (request()->routeIs('invoices.*')) aria-current="page" @endif>All Invoices</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-accounting-finance" aria-expanded="{{ $activeGroup === 'accounting-finance' ? 'true' : 'false' }}">
-                            <span>Accounting &amp; Finance</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'accounting-finance') show @endif" id="group-accounting-finance" data-bs-parent="#sidebar-accordion">
-                                <li><a class="nav-link" href="{{ route('accounting.index') }}" @if (request()->routeIs('accounting.index')) aria-current="page" @endif>General Ledger</a></li>
-                                <li><a class="nav-link" href="{{ route('accounting.supplier-ledger') }}" @if (request()->routeIs('accounting.supplier-ledger')) aria-current="page" @endif>Supplier Ledger</a></li>
-                                <li><a class="nav-link" href="{{ route('accounting.customer-ledger') }}" @if (request()->routeIs('accounting.customer-ledger')) aria-current="page" @endif>Customer Ledger</a></li>
-                                <li><a class="nav-link" href="{{ route('accounting.fixed-assets') }}" @if (request()->routeIs('accounting.fixed-assets')) aria-current="page" @endif>Fixed Asset Module</a></li>
-                                <li><a class="nav-link" href="{{ route('accounting.budgets') }}" @if (request()->routeIs('accounting.budgets')) aria-current="page" @endif>Budgets</a></li>
-                                <li><a class="nav-link" href="{{ route('accounting.purchase-orders') }}" @if (request()->routeIs('accounting.purchase-orders')) aria-current="page" @endif>Purchase Orders</a></li>
-                                <li><a class="nav-link" href="{{ route('accounting.cash-flow') }}" @if (request()->routeIs('accounting.cash-flow')) aria-current="page" @endif>Cash Flow Projects</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-operations" aria-expanded="{{ $activeGroup === 'operations' ? 'true' : 'false' }}">
-                            <span>Operations</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'operations') show @endif" id="group-operations" data-bs-parent="#sidebar-accordion">
-                            <li><a class="nav-link" href="{{ route('operations.index') }}" @if (request()->routeIs('operations.index')) aria-current="page" @endif>Expenses, Inventory &amp; Project Register</a></li>
-                            <li><a class="nav-link" href="{{ route('operations.human-resources') }}" @if (request()->routeIs('operations.human-resources')) aria-current="page" @endif>Human Resources Module</a></li>
-                            <li><a class="nav-link" href="{{ route('operations.immovable-assets') }}" @if (request()->routeIs('operations.immovable-assets')) aria-current="page" @endif>Immovable Asset Management</a></li>
-                            <li><a class="nav-link" href="{{ route('operations.movable-assets') }}" @if (request()->routeIs('operations.movable-assets')) aria-current="page" @endif>Movable Asset Management</a></li>
-                            <li><a class="nav-link" href="{{ route('operations.logistics') }}" @if (request()->routeIs('operations.logistics')) aria-current="page" @endif>Logistics Module</a></li>
-                            <li><a class="nav-link" href="{{ route('operations.inventory') }}" @if (request()->routeIs('operations.inventory')) aria-current="page" @endif>Inventory Module</a></li>
-                            <li><a class="nav-link" href="{{ route('operations.erp') }}" @if (request()->routeIs('operations.erp')) aria-current="page" @endif>ERP Module</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-quotation" aria-expanded="{{ $activeGroup === 'quotation' ? 'true' : 'false' }}">
-                            <span>Quotation</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'quotation') show @endif" id="group-quotation" data-bs-parent="#sidebar-accordion">
-                                <li><a class="nav-link" href="{{ route('quotations.index') }}" @if (request()->routeIs('quotations.*')) aria-current="page" @endif>Create New Quotation</a></li>
-                                <li><a class="nav-link" href="{{ route('quotations.index') }}">Issued Quotations</a></li>
-                                <li><a class="nav-link" href="{{ route('quotations.index', ['status' => 'CONVERTED']) }}" @if (request()->routeIs('quotations.index') && request()->query('status') === 'CONVERTED') aria-current="page" @endif>Converted Quotations</a></li>
-                                <li><a class="nav-link" href="{{ route('quotation.converted-invoices') }}" @if (request()->routeIs('quotation.converted-invoices')) aria-current="page" @endif>Converted Quotations into Invoices</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-project-management" aria-expanded="{{ $activeGroup === 'project-management' ? 'true' : 'false' }}">
-                            <span>Project Management</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'project-management') show @endif" id="group-project-management" data-bs-parent="#sidebar-accordion">
-                                <li><a class="nav-link" href="{{ route('project-management.new') }}" @if (request()->routeIs('project-management.new')) aria-current="page" @endif>Create New Project</a></li>
-                                <li><a class="nav-link" href="{{ route('project-management.ongoing') }}" @if (request()->routeIs('project-management.ongoing')) aria-current="page" @endif>Ongoing Project Reports</a></li>
-                                <li><a class="nav-link" href="{{ route('project-management.completed') }}" @if (request()->routeIs('project-management.completed')) aria-current="page" @endif>Completed Projects</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-registered" aria-expanded="{{ $activeGroup === 'registered' ? 'true' : 'false' }}">
-                            <span>Registered</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'registered') show @endif" id="group-registered" data-bs-parent="#sidebar-accordion">
-                                <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'CUSTOMER') aria-current="page" @endif>Customers</a></li>
-                                <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SUPPLIER') aria-current="page" @endif>Suppliers</a></li>
-                                <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SERVICE_PROVIDER']) }}" @if (request()->routeIs('business-parties.*') && request()->query('relationship') === 'SERVICE_PROVIDER') aria-current="page" @endif>Service Providers</a></li>
-                                <li><a class="nav-link" href="{{ route('taxpayer-systems.index') }}" @if (request()->routeIs('taxpayer-systems.*')) aria-current="page" @endif>Taxpayer Systems</a></li>
-                                <li><a class="nav-link" href="{{ route('saas-providers.index') }}" @if (request()->routeIs('saas-providers.*')) aria-current="page" @endif>SaaS Providers</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-new-registration" aria-expanded="{{ $activeGroup === 'new-registration' ? 'true' : 'false' }}">
-                            <span>New Registration</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'new-registration') show @endif" id="group-new-registration" data-bs-parent="#sidebar-accordion">
-                            <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'CUSTOMER']) }}">New Customer</a></li>
-                            <li><a class="nav-link" href="{{ route('business-parties.index', ['relationship' => 'SUPPLIER']) }}">New Supplier</a></li>
-                            <li><a class="nav-link" href="{{ route('quotations.index') }}">New Quote</a></li>
-                            <li><a class="nav-link" href="{{ route('new-registration.credit-note') }}" @if (request()->routeIs('new-registration.credit-note')) aria-current="page" @endif>New Credit Note</a></li>
-                            <li><a class="nav-link" href="{{ route('new-registration.debit-note') }}" @if (request()->routeIs('new-registration.debit-note')) aria-current="page" @endif>New Debit Note</a></li>
-                        </ul>
-                    </li>
-
-                    <li class="nav-item"><a class="nav-link" href="{{ route('documents.index') }}" @if (request()->routeIs('documents.*')) aria-current="page" @endif>Documents &amp; Records</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('developer.index') }}" @if (request()->routeIs('developer.index')) aria-current="page" @endif>Developer</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('reports.index') }}" @if (request()->routeIs('reports.*')) aria-current="page" @endif>Reporting &amp; Analytics</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('offline.index') }}" @if (request()->routeIs('offline.*')) aria-current="page" @endif>Offline Continuity</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('integrations.index') }}" @if (request()->routeIs('integrations.*')) aria-current="page" @endif>Integrations</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('workspace-search.index') }}" @if (request()->routeIs('workspace-search.*')) aria-current="page" @endif>Workspace Search</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('taxpayers.index') }}" @if (request()->routeIs('taxpayers.*')) aria-current="page" @endif>Taxpayer Registry</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('registrations.index') }}" @if (request()->routeIs('registrations.*')) aria-current="page" @endif>Registration Intake</a></li>
-
-                    <li class="nav-item sidebar-group">
-                        <button class="nav-link sidebar-group-trigger" type="button" data-bs-toggle="collapse" data-bs-target="#group-administration" aria-expanded="{{ $activeGroup === 'administration' ? 'true' : 'false' }}">
-                            <span>Administration</span><span class="sidebar-group-caret" aria-hidden="true">&#9662;</span>
-                        </button>
-                        <ul class="collapse sidebar-subnav @if ($activeGroup === 'administration') show @endif" id="group-administration" data-bs-parent="#sidebar-accordion">
-                            <li><a class="nav-link" href="{{ route('administration.index') }}" @if (request()->routeIs('administration.*')) aria-current="page" @endif>Administration Command Centre</a></li>
-                            <li><a class="nav-link" href="{{ route('organisations.index') }}" @if (request()->routeIs('organisations.*')) aria-current="page" @endif>Organisations</a></li>
-                            <li><a class="nav-link" href="{{ route('workflows.index') }}" @if (request()->routeIs('workflows.*')) aria-current="page" @endif>Workflows</a></li>
-                            <li><a class="nav-link" href="{{ route('security.operations') }}" @if (request()->routeIs('security.operations') || request()->routeIs('security.incidents.*')) aria-current="page" @endif>Security Operations</a></li>
-                        </ul>
-                    </li>
-
-                    {{-- RT-005: a standalone top-level item, not nested in the
-                         Administration group above -- access-governance:read is
-                         held by roles that don't hold administration:read
-                         (TAXPAYER_ACCOUNTANT), so this needs to read as
-                         independent of that group, not implicitly gated
-                         behind it. See AccessGovernanceViewController's own
-                         doc comment. --}}
-                    <li class="nav-item"><a class="nav-link" href="{{ route('access-governance.index') }}" @if (request()->routeIs('access-governance.*')) aria-current="page" @endif>Access Governance</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('licensing.index') }}" @if (request()->routeIs('licensing.*')) aria-current="page" @endif>Licensing &amp; Subscription</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('platform.index') }}" @if (request()->routeIs('platform.*')) aria-current="page" @endif>Platform</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('access-rights.index') }}" @if (request()->routeIs('access-rights.*')) aria-current="page" @endif>Access Rights</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ route('security.mfa') }}" @if (request()->routeIs('security.mfa')) aria-current="page" @endif>Security (MFA)</a></li>
-                </ul>
-                <div class="sidebar-user">
-                    <div class="small text-white-50">Signed in as</div>
-                    <div class="fw-semibold text-truncate">{{ auth()->user()->name }}</div>
-                    <span class="badge bg-secondary">{{ auth()->user()->role }}</span>
-                    <form method="POST" action="{{ route('logout') }}" class="mt-2">
-                        @csrf
-                        <button type="submit" class="btn btn-outline-light btn-sm w-100">Log out</button>
-                    </form>
+        <div class="app-shell">
+            {{-- Below the lg breakpoint this becomes an off-canvas drawer
+                 (Bootstrap's responsive .offcanvas-lg). Deliberately not the
+                 plain .offcanvas class as well: its unconditional drawer
+                 transform fights offcanvas-lg's always-visible desktop mode. --}}
+            <aside class="app-sidebar offcanvas-lg offcanvas-start" tabindex="-1" id="sidebar" aria-label="Main navigation">
+                <div class="sidebar-header">
+                    <a class="sidebar-brand" href="{{ route('dashboard') }}">
+                        <span class="sidebar-brand-mark" aria-hidden="true"><i class="bi bi-shield-check"></i></span>
+                        <span class="sidebar-brand-text">
+                            <span class="sidebar-brand-name">VAT-MSA</span>
+                            <span class="sidebar-brand-tagline">VAT management system</span>
+                        </span>
+                    </a>
+                    <button type="button" class="btn-close btn-close-white d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#sidebar" aria-label="Close navigation"></button>
                 </div>
+
+                <nav class="sidebar-nav" aria-label="Primary">
+                    <ul class="list-unstyled mb-0" id="sidebar-accordion">
+                        @foreach ($navigation['groups'] as $group)
+                            <li class="sidebar-group @if ($group['locked']) is-locked @endif">
+                                <button class="sidebar-group-toggle @unless ($group['current']) collapsed @endunless" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#nav-{{ $group['key'] }}"
+                                    aria-expanded="{{ $group['current'] ? 'true' : 'false' }}" aria-controls="nav-{{ $group['key'] }}">
+                                    <i class="bi bi-{{ $group['icon'] }} sidebar-group-icon" aria-hidden="true"></i>
+                                    <span>{{ $group['label'] }}</span>
+                                    @if ($group['locked'])
+                                        <i class="bi bi-lock-fill sidebar-lock" aria-hidden="true" title="You don't have access to this area"></i>
+                                    @endif
+                                    <i class="bi bi-chevron-down sidebar-chevron" aria-hidden="true"></i>
+                                </button>
+                                <ul class="collapse list-unstyled sidebar-subnav @if ($group['current']) show @endif" id="nav-{{ $group['key'] }}" data-bs-parent="#sidebar-accordion">
+                                    @foreach ($group['items'] as $item)
+                                        <li>
+                                            <a class="sidebar-link @if ($item['locked']) is-locked @endif" href="{{ $item['url'] }}"
+                                                @if ($item['current']) aria-current="page" @endif
+                                                @if ($item['locked']) title="You don't have access to this page" @endif>
+                                                <span>{{ $item['label'] }}</span>
+                                                @if ($item['locked'])
+                                                    <i class="bi bi-lock-fill sidebar-lock" aria-hidden="true"></i>
+                                                    <span class="visually-hidden">(no access)</span>
+                                                @endif
+                                            </a>
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </li>
+                        @endforeach
+                    </ul>
+                </nav>
+            </aside>
+
+            <div class="app-main">
+                <header class="app-topbar">
+                    <button class="topbar-menu-btn d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="Open navigation">
+                        <i class="bi bi-list" aria-hidden="true"></i>
+                    </button>
+
+                    <nav class="topbar-breadcrumb" aria-label="Breadcrumb">
+                        <ol class="breadcrumb mb-0">
+                            @foreach ($crumbs as $crumb)
+                                <li class="breadcrumb-item">
+                                    @if ($crumb['url'])<a href="{{ $crumb['url'] }}">{{ $crumb['label'] }}</a>@else{{ $crumb['label'] }}@endif
+                                </li>
+                            @endforeach
+                            <li class="breadcrumb-item active" aria-current="page">{{ $currentCrumb }}</li>
+                        </ol>
+                    </nav>
+
+                    <div class="topbar-actions">
+                        @if ($navigation['searchUrl'])
+                            <form class="topbar-search d-none d-md-block" role="search" method="GET" action="{{ $navigation['searchUrl'] }}">
+                                <i class="bi bi-search" aria-hidden="true"></i>
+                                <input type="search" name="q" class="form-control" placeholder="Search workspace" aria-label="Search workspace"
+                                    minlength="2" maxlength="80" value="{{ request()->routeIs('workspace-search.*') ? request('q') : '' }}">
+                            </form>
+                        @endif
+
+                        <div class="dropdown">
+                            <button class="topbar-user" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account menu for {{ $currentUser->name }}">
+                                <span class="avatar" aria-hidden="true">{{ $currentInitials }}</span>
+                                <span class="topbar-user-text d-none d-md-flex">
+                                    <span class="topbar-user-name">{{ $currentUser->name }}</span>
+                                    <span class="topbar-user-role">{{ $currentRoleLabel }}</span>
+                                </span>
+                                <i class="bi bi-chevron-down topbar-user-caret d-none d-md-inline" aria-hidden="true"></i>
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-end account-menu">
+                                <div class="account-menu-header">
+                                    <div class="fw-semibold text-truncate">{{ $currentUser->name }}</div>
+                                    <div class="small text-muted text-truncate">{{ $currentUser->email }}</div>
+                                    <div class="account-menu-context">
+                                        <span class="badge text-bg-light">{{ $currentRoleLabel }}</span>
+                                        @if ($currentContext)
+                                            <span class="small text-muted text-truncate">{{ $currentContext }}</span>
+                                        @endif
+                                    </div>
+                                </div>
+                                <div class="dropdown-divider"></div>
+                                @foreach ($navigation['accountLinks'] as $link)
+                                    <a class="dropdown-item @if ($link['locked']) is-locked @endif" href="{{ $link['url'] }}"
+                                        @if ($link['current']) aria-current="page" @endif
+                                        @if ($link['locked']) title="You don't have access to this page" @endif>
+                                        <i class="bi bi-{{ $link['icon'] }}" aria-hidden="true"></i> {{ $link['label'] }}
+                                        @if ($link['locked'])<i class="bi bi-lock-fill ms-auto" aria-hidden="true"></i>@endif
+                                    </a>
+                                @endforeach
+                                <form method="POST" action="{{ route('logout') }}">
+                                    @csrf
+                                    <button type="submit" class="dropdown-item"><i class="bi bi-box-arrow-right" aria-hidden="true"></i> Log out</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <main id="main-content" class="app-content" tabindex="-1">
+                    @include('layouts.partials.flash')
+                    @yield('content')
+                </main>
             </div>
         </div>
+    @else
+        <main id="main-content" class="app-guest-content" tabindex="-1">
+            @include('layouts.partials.flash')
+            @yield('content')
+        </main>
     @endauth
-
-    <main id="main-content" class="container-fluid py-4" tabindex="-1">
-        @if (session('status'))
-            <div class="alert alert-success" role="alert">{{ session('status') }}</div>
-        @endif
-
-        @yield('content')
-    </main>
 
     @stack('scripts')
 </body>

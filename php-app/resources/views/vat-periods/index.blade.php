@@ -9,46 +9,43 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">VAT return lifecycle</div>
-    <h1 class="h3 mb-1">VAT periods &amp; returns</h1>
-    <p class="text-muted mb-0">Generate, review and submit VAT returns from certified invoice activity, with maker-checker approval at every controlled step.</p>
-</div>
+<x-page-header title="VAT returns"
+    subtitle="Generate, review and submit VAT returns from your certified invoices. Each step needs approval from a second person." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Output VAT</span><span>O</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($outputTaxCents / 100, 2) }}</div>
-                <div class="small text-muted">Certificate-backed seller liability</div>
+                <div class="stat-label"><span>Output VAT</span></div>
+                <div class="stat-value">{{ $tenantCurrencySymbol }} {{ number_format($outputTaxCents / 100, 2) }}</div>
+                <div class="small text-muted">From certified sales invoices</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Eligible input</span><span>I</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($inputTaxCents / 100, 2) }}</div>
-                <div class="small text-muted">Matched buyer evidence only</div>
+                <div class="stat-label"><span>Eligible input</span></div>
+                <div class="stat-value">{{ $tenantCurrencySymbol }} {{ number_format($inputTaxCents / 100, 2) }}</div>
+                <div class="small text-muted">Only purchases with matched evidence</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Net position</span><span>&Sigma;</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format(($outputTaxCents - $inputTaxCents) / 100, 2) }}</div>
-                <div class="small text-muted">Across latest controlled versions</div>
+                <div class="stat-label"><span>Net position</span></div>
+                <div class="stat-value">{{ $tenantCurrencySymbol }} {{ number_format(($outputTaxCents - $inputTaxCents) / 100, 2) }}</div>
+                <div class="small text-muted">Across the latest return versions</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Approval queue</span><span>M/C</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($pendingApprovalCount) }}</div>
-                <div class="small text-warning">Independent maker-checker decisions</div>
+                <div class="stat-label"><span>Approval queue</span></div>
+                <div class="stat-value">{{ number_format($pendingApprovalCount) }}</div>
+                <div class="small text-warning">Returns waiting for a second approver</div>
             </div>
         </div>
     </div>
@@ -144,7 +141,7 @@
                     <div class="col mb-2"><dt class="text-muted small d-inline">State:</dt> <dd class="d-inline mb-0"><x-status-badge :value="$snapshot['provider']['state']" type="status" /></dd></div>
                 </dl>
                 @unless ($snapshot['provider']['configured'])
-                    <p class="text-muted small mb-0">Submissions will record as <strong>Blocked configuration</strong> until this integration is set up.</p>
+                    <p class="text-muted small mb-0">Until this connection is set up, submissions are saved as <strong>blocked</strong> and not sent.</p>
                 @endunless
             </div>
         </div>
@@ -156,7 +153,7 @@
                 @forelse ($pending as $task)
                     <div class="mb-3 pb-3 border-bottom">
                         <div class="d-flex justify-content-between">
-                            <strong>{{ ucwords(strtolower(str_replace('_', ' ', $task['requested_action']))) }}</strong>
+                            <strong>@humanize($task['requested_action'])</strong>
                             <x-status-badge :value="$task['risk_tier']" type="risk" />
                         </div>
                         @if ($task['legal_name'])

@@ -1,35 +1,23 @@
 @extends('layouts.app')
 
-@section('title', 'Purchase Orders')
+@section('title', 'Purchase orders')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Accounting & Finance</div>
-    <h1 class="h3 mb-1">Purchase Orders</h1>
-    <p class="text-muted mb-0">Issue an order to a registered supplier, have an independent reviewer approve it -- never the order's own creator -- then issue it and, once fulfilled, convert it into a real supplier expense.</p>
-</div>
+<x-page-header title="Purchase orders"
+    subtitle="Raise orders to registered suppliers. Someone other than the creator approves each order; it is then issued and, once fulfilled, converted into a supplier expense." />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Purchase order register</div>
-                <div class="text-muted small">DRAFT &rarr; SUBMITTED &rarr; APPROVED &rarr; ISSUED &rarr; CONVERTED, or REJECTED / CANCELLED</div>
+                <div class="text-muted small">Draft &rarr; Submitted &rarr; Approved &rarr; Issued &rarr; Converted to an expense (or Rejected / Cancelled)</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -181,12 +169,12 @@
                         </div>
                         <div class="row g-2 mb-3">
                             <div class="col">
-                                <label for="net_cents" class="form-label small">Net (cents)</label>
-                                <input type="number" id="net_cents" name="net_cents" class="form-control form-control-sm" min="0" required>
+                                <label for="net_cents" class="form-label small">Net amount</label>
+                                <x-money-input name="net_cents" size="sm" :required="true" />
                             </div>
                             <div class="col">
-                                <label for="tax_cents" class="form-label small">VAT (cents)</label>
-                                <input type="number" id="tax_cents" name="tax_cents" class="form-control form-control-sm" min="0" value="0" required>
+                                <label for="tax_cents" class="form-label small">VAT</label>
+                                <x-money-input name="tax_cents" size="sm" :value="0" :required="true" />
                             </div>
                         </div>
                         <button type="submit" class="btn btn-primary btn-sm w-100">Create purchase order</button>

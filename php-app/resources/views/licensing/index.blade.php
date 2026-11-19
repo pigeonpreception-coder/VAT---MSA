@@ -1,26 +1,14 @@
 @extends('layouts.app')
 
-@section('title', 'Licensing')
+@section('title', 'Licensing and subscription')
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Platform domain</div>
-        <h1 class="h3 mb-1">Licensing &amp; Entitlements</h1>
-        <p class="text-muted mb-0">{{ $organisation['legal_name'] }}'s current licence, feature entitlements, and metered usage.</p>
-    </div>
-    <x-status-badge :value="$license['state']" type="license" />
-</div>
+<x-page-header title="Licensing and subscription"
+    :subtitle="$organisation['legal_name'].' — your plan, the features it includes, and how much of each you have used.'">
+    <x-slot:actions><x-status-badge :value="$license['state']" type="license" /></x-slot:actions>
+</x-page-header>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-4">
@@ -28,7 +16,7 @@
             <div class="card-header">Licence</div>
             <ul class="list-group list-group-flush">
                 <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Plan</span><span>{{ $license['plan_name'] }} (v{{ $license['plan_version'] }})</span></li>
-                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Retention</span><span>{{ ucwords(strtolower(str_replace('_', ' ', $license['retention_policy']))) }}</span></li>
+                <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Retention</span><span>@humanize($license['retention_policy'])</span></li>
                 <li class="list-group-item d-flex justify-content-between"><span class="text-muted">Period</span><span>{{ \Illuminate\Support\Carbon::parse($license['current_period_start'])->format('d M Y') }} &ndash; {{ \Illuminate\Support\Carbon::parse($license['current_period_end'])->format('d M Y') }}</span></li>
             </ul>
         </div>
@@ -38,7 +26,7 @@
                 <div class="card-header">Change licence state</div>
                 <div class="card-body">
                     @if (empty($availableActions))
-                        <p class="text-muted small mb-0">No state change is valid from {{ ucfirst(strtolower($license['state'])) }}.</p>
+                        <p class="text-muted small mb-0">No change is available while the licence is @humanize($license['state']).</p>
                     @else
                         {{-- Step-up gated: routes/web.php applies 'step-up'
                              to this route, matching the JSON API's own
@@ -49,7 +37,7 @@
                                 <label for="action" class="form-label small mb-0">Action</label>
                                 <select id="action" name="action" class="form-select form-select-sm @error('action') is-invalid @enderror" required>
                                     @foreach ($availableActions as $action)
-                                        <option value="{{ $action }}" @selected(old('action') === $action)>{{ ucfirst(strtolower($action)) }}</option>
+                                        <option value="{{ $action }}" @selected(old('action') === $action)>@humanize($action)</option>
                                     @endforeach
                                 </select>
                             </div>
@@ -122,7 +110,7 @@
                     <tbody>
                         @forelse ($usage as $row)
                             <tr>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $row['metric_key']))) }}</td>
+                                <td>@humanize($row['metric_key'])</td>
                                 <td>{{ $row['period_key'] }}</td>
                                 <td class="text-end">{{ $row['used_value'] }}</td>
                                 <td class="text-end">{{ $row['reserved_value'] }}</td>

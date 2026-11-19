@@ -3,14 +3,12 @@
 @section('title', 'Organisations')
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Identity domain</div>
-        <h1 class="h3 mb-1">Organisations</h1>
-        <p class="text-muted mb-0">Module 1's own identity foundation -- taxpayer organisations, identity providers, and platform-wide access counts.</p>
-    </div>
-    <a href="{{ route('registrations.index') }}" class="btn btn-primary text-nowrap">New registration</a>
-</div>
+<x-page-header title="Organisations"
+    subtitle="Registered taxpayer organisations, identity providers and access totals.">
+    <x-slot:actions>
+        <a href="{{ route('registrations.index') }}" class="btn btn-primary text-nowrap">New registration</a>
+    </x-slot:actions>
+</x-page-header>
 
 @php
     $pendingRegistrations = collect($snapshot['registrations'])->whereNotIn('status', ['APPROVED', 'REJECTED', 'CANCELLED'])->count();
@@ -22,36 +20,36 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Canonical organisations</span><span>O</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format(count($organisations)) }}</div>
-                <div class="small text-success">One-to-one taxpayer mappings</div>
+                <div class="stat-label"><span>Organisations</span></div>
+                <div class="stat-value">{{ number_format(count($organisations)) }}</div>
+                <div class="small text-success">Each linked to one taxpayer</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Active branches</span><span>B</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($snapshot['access']['active_branches']) }}</div>
-                <div class="small text-muted">Branch-scoped access boundary</div>
+                <div class="stat-label"><span>Active branches</span></div>
+                <div class="stat-value">{{ number_format($snapshot['access']['active_branches']) }}</div>
+                <div class="small text-muted">Access can be limited by branch</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Linked identities</span><span>ID</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($snapshot['access']['active_identity_links']) }}</div>
-                <div class="small text-muted">Provider subject links -- not email identity</div>
+                <div class="stat-label"><span>Linked identities</span></div>
+                <div class="stat-value">{{ number_format($snapshot['access']['active_identity_links']) }}</div>
+                <div class="small text-muted">Sign-in accounts linked by the identity provider</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending registrations</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($pendingRegistrations) }}</div>
-                <div class="small text-warning">No auto-activation before authority checks</div>
+                <div class="stat-label"><span>Pending registrations</span></div>
+                <div class="stat-value">{{ number_format($pendingRegistrations) }}</div>
+                <div class="small text-warning">Checked by the tax authority before activation</div>
             </div>
         </div>
     </div>
@@ -144,15 +142,15 @@
             <li class="list-group-item d-flex justify-content-between align-items-center">
                 <div>
                     <strong>{{ $provider['display_name'] }}</strong>
-                    <div class="text-muted small">{{ ucwords(strtolower(str_replace('_', ' ', $provider['provider_type']))) }} &middot; {{ ucwords(strtolower(str_replace('_', ' ', $provider['configuration_status']))) }}</div>
+                    <div class="text-muted small">@humanize($provider['provider_type']) &middot; @humanize($provider['configuration_status'])</div>
                 </div>
                 <x-status-badge :value="$provider['status']" type="status" />
             </li>
         @endforeach
     </ul>
     <div class="alert alert-info mb-0 rounded-0 border-0 border-top small">
-        <strong>ITAS integration boundary is ready.</strong><br>
-        Live federation and taxpayer verification remain disabled until NamRA/ITAS confirms the protocol, claims and authoritative response contract.
+                <i class="bi bi-info-circle" aria-hidden="true"></i>
+        <div>Live sign-in and taxpayer checks through ITAS are switched off until {{ $tenantAuthorityShortName }} confirms how the connection works.</div>
     </div>
 </div>
 @endsection

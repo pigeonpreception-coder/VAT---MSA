@@ -1,20 +1,18 @@
 @extends('layouts.app')
 
-@section('title', 'Completed Projects')
+@section('title', 'Completed projects')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Project Management</div>
-        <h1 class="h3 mb-1">Completed Projects</h1>
-        <p class="text-muted mb-0">A read-only summary of every finished project's final budget, revenue, cost and profit.</p>
-    </div>
-    <a href="{{ route('project-management.ongoing') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Ongoing projects</a>
-</div>
+<x-page-header title="Completed projects"
+    subtitle="Final budget, revenue, cost and profit for every finished project.">
+    <x-slot:actions>
+        <a href="{{ route('project-management.ongoing') }}" class="btn btn-outline-secondary btn-sm">Ongoing projects</a>
+    </x-slot:actions>
+</x-page-header>
 
 <div class="card">
     <div class="card-header">

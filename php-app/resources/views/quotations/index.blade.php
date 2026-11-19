@@ -1,62 +1,51 @@
 @extends('layouts.app')
 
-@section('title', 'Sales and quotations')
+@section('title', 'Quotations')
 
 @php
     $todayIso = now()->toDateString();
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Commercial domain</div>
-        <h1 class="h3 mb-1">Parties, products and quotations</h1>
-        <p class="text-muted mb-0">Tenant-scoped commercial records feed invoicing without bypassing fiscal certification. Quotation totals and VAT are calculated from immutable integer inputs.</p>
-    </div>
-    <a href="{{ route('business-parties.index') }}" class="btn btn-secondary">Manage customers &amp; suppliers</a>
-</div>
+<x-page-header title="Quotations"
+    subtitle="Issue quotations to your customers and convert accepted ones into certified invoices. Totals and VAT are calculated for you.">
+    <x-slot:actions>
+        <a href="{{ route('business-parties.index') }}" class="btn btn-outline-secondary">Manage customers &amp; suppliers</a>
+    </x-slot:actions>
+</x-page-header>
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Business parties</div>
-            <div class="fs-2 fw-semibold">{{ number_format($partyCount) }}</div>
-            <div class="small text-muted">Customer and supplier relationships</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Customers and suppliers</div>
+            <div class="stat-value">{{ number_format($partyCount) }}</div>
+            <div class="small text-muted">Registered with you</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Quotations</div>
-            <div class="fs-2 fw-semibold">{{ number_format($snapshot['total_count']) }}</div>
-            <div class="small text-muted">Versioned commercial offers</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Quotations</div>
+            <div class="stat-value">{{ number_format($snapshot['total_count']) }}</div>
+            <div class="small text-muted">All versions</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Quoted value</div>
-            <div class="fs-2 fw-semibold">{{ $tenantCurrencySymbol }} {{ number_format($quotedValueCents / 100, 2) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Quoted value</div>
+            <div class="stat-value">{{ $tenantCurrencySymbol }} {{ number_format($quotedValueCents / 100, 2) }}</div>
             <div class="small text-muted">Issued, accepted and converted</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Catalog products</div>
-            <div class="fs-2 fw-semibold">{{ number_format($products->count()) }}</div>
-            <div class="small text-muted">Controlled tax categories and rates</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Products</div>
+            <div class="stat-value">{{ number_format($products->count()) }}</div>
+            <div class="small text-muted">With their VAT category and rate</div>
         </div></div>
     </div>
 </div>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>Quotation needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-7">
@@ -174,10 +163,10 @@
     </div>
 
     <div class="col-lg-5">
-        <div class="card">
+                <div class="card" id="issue-quotation">
             <div class="card-header">
                 <div class="fw-semibold">Issue quotation</div>
-                <div class="text-muted small">Standard Namibia pilot VAT rate: 15%</div>
+                <div class="text-muted small">Standard VAT rate: 15%</div>
             </div>
             <div class="card-body">
                 @if ($customers->isEmpty())
@@ -233,9 +222,9 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label for="unit_price_cents" class="form-label">Unit price (cents)</label>
-                            <input type="number" class="form-control" id="unit_price_cents" name="unit_price_cents" required min="0" step="1" value="{{ old('unit_price_cents') }}">
-                            <div class="form-text">Enter {{ $tenantCurrencySymbol }} 100.00 as 10000. VAT is calculated server-side.</div>
+                            <label for="unit_price_cents" class="form-label">Unit price (excl. VAT)</label>
+                            <x-money-input name="unit_price_cents" :required="true" />
+                            <div class="form-text">VAT is added automatically.</div>
                         </div>
                         <div class="mb-3">
                             <label for="notes" class="form-label">Notes</label>

@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\AccessGovernance;
 
+use App\Domain\Licensing\AccessReviewWindow;
 use App\Exceptions\LicensingValidationException;
 use App\Exceptions\RepositoryConflictException;
 use App\Http\Controllers\Controller;
 use App\Services\Administration\AdministrationSnapshotService;
 use App\Services\AccessGovernance\AccessGovernanceService;
+use App\Services\OrganisationAdmin\OrganisationAdminService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +50,7 @@ class AccessGovernanceViewController extends Controller
     public function __construct(
         private readonly AccessGovernanceService $access,
         private readonly AdministrationSnapshotService $snapshot,
+        private readonly OrganisationAdminService $admin,
     ) {}
 
     public function index(Request $request): View
@@ -69,7 +72,32 @@ class AccessGovernanceViewController extends Controller
             'roles' => $snapshot['roles'],
             'currentUserId' => $user->id,
             'canManage' => $user->hasAppPermission('access-governance:manage'),
+            'reviewWindow' => AccessReviewWindow::current()['key'],
+            'currentReview' => AccessReviewWindow::currentReview($orgId),
         ]);
+    }
+
+    /**
+     * Opens the current quarter's access review -- the same
+     * OrganisationAdminService::openQuarterlyAccessReview that
+     * POST /api/v1/access-reviews serves, which until now had no page.
+     * Privileged organisation changes (inviting employees, creating roles)
+     * stay blocked until this review exists. Idempotent: an existing review
+     * for the quarter is returned unchanged.
+     */
+    public function storeReview(Request $request): RedirectResponse
+    {
+        $this->authorize('permission', 'access-governance:manage');
+
+        try {
+            $review = $this->admin->openQuarterlyAccessReview($request->user(), $request->query('organisation_id'));
+        } catch (LicensingValidationException|RepositoryConflictException $e) {
+            return back()->withErrors(['review' => $e->getMessage()]);
+        }
+
+        return back()->with('status', $review['status'] === 'OPEN'
+            ? 'This quarter\'s access review is open. Certify each member before it is due.'
+            : 'This quarter\'s access review is already complete.');
     }
 
     public function storeRequest(Request $request): RedirectResponse

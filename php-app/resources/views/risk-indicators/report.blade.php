@@ -1,16 +1,10 @@
 @extends('layouts.app')
 
-@section('title', 'Risk indicators summary report')
+@section('title', 'Risk indicator summary')
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Compliance domain &middot; {{ $tenantAuthorityShortName }}-restricted</div>
-        <h1 class="h3 mb-1">Risk indicators summary report</h1>
-        <p class="text-muted mb-0">A national, all-time rollup of the live risk-indicator register: severity and status posture, which rule fired, and the taxpayers most flagged.</p>
-    </div>
-    <a href="{{ route('risk-indicators.index') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Back to register</a>
-</div>
+<x-page-header title="Risk indicator summary" :back="route('risk-indicators.index')" back-label="Risk indicators"
+    subtitle="An all-time national summary: severity and status, which rules fired, and the taxpayers flagged most often." />
 
 <div class="row g-3 mb-4">
     <div class="col-md-6">

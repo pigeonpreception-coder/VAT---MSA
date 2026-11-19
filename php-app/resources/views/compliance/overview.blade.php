@@ -1,59 +1,30 @@
 @extends('layouts.app')
 
-@section('title', 'Compliance Overview')
+@section('title', 'Compliance overview')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance domain</div>
-    <h1 class="h3 mb-1">Compliance Overview</h1>
-    <p class="text-muted mb-0">A single read-only aggregate across every compliance signal -- the same snapshot the JSON API's own compliance endpoint returns.</p>
-</div>
+<x-page-header title="Compliance overview"
+    subtitle="Every compliance area in one place, with a link to each area's full page." />
 
 @php
-    // Every stat card links out to that domain's own dedicated page rather
-    // than duplicating a full table here -- see this controller's own doc
-    // comment. Route::has() guards each link because this build-out ships
-    // several of these domains as separate, independently-mergeable PRs
-    // off main (see docs/MIGRATION_MATRIX.md): whichever of Obligations/
-    // Disputes merges after this page does would otherwise 500 on a route
-    // name that doesn't exist yet on main at merge time. A card degrades to
-    // plain (unlinked) text until its own PR lands, then activates with no
-    // further change needed here.
+    // Each tile links to that area's own page rather than repeating its
+    // table here (see ComplianceOverviewViewController's doc comment).
     $stats = [
-        ['key' => 'obligations', 'label' => 'Obligations', 'route' => 'obligations.index'],
-        ['key' => 'cases', 'label' => 'Audit Cases', 'route' => 'audit-cases.index'],
-        ['key' => 'disputes', 'label' => 'Disputes', 'route' => 'disputes.index'],
-        ['key' => 'risks', 'label' => 'Risk Indicators', 'route' => 'risk-indicators.index'],
-        ['key' => 'refunds', 'label' => 'Refunds', 'route' => 'refunds.index'],
-        // RT-007 (docs/MIGRATION_MATRIX.md): moved here from its own inline
-        // preview card below -- CommunicationViewController now gives this
-        // domain the same dedicated page every other stat card already
-        // links to, so it gets the same count+link treatment, not a
-        // second, permanently read-only rendering of the same data.
-        ['key' => 'communications', 'label' => 'Communications', 'route' => 'communications.index'],
+        ['key' => 'obligations', 'label' => 'Obligations', 'route' => 'obligations.index', 'icon' => 'calendar-check'],
+        ['key' => 'cases', 'label' => 'Audit cases', 'route' => 'audit-cases.index', 'icon' => 'briefcase'],
+        ['key' => 'disputes', 'label' => 'Disputes', 'route' => 'disputes.index', 'icon' => 'exclamation-diamond'],
+        ['key' => 'risks', 'label' => 'Risk indicators', 'route' => 'risk-indicators.index', 'icon' => 'activity'],
+        ['key' => 'refunds', 'label' => 'VAT refunds', 'route' => 'refunds.index', 'icon' => 'cash-coin'],
+        // RT-007: Communications has its own page, so it gets a count + link too.
+        ['key' => 'communications', 'label' => 'Communications', 'route' => 'communications.index', 'icon' => 'envelope'],
     ];
     $previewLimit = 5;
 @endphp
-<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-6 g-3 mb-4">
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-6 g-3 mb-4">
     @foreach ($stats as $stat)
         <div class="col">
-            @if (Route::has($stat['route']))
-                <a href="{{ route($stat['route']) }}" class="card h-100 text-decoration-none text-reset">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between text-muted small text-uppercase"><span>{{ $stat['label'] }}</span><span>&rarr;</span></div>
-                        <div class="fs-2 fw-semibold">{{ number_format($counts[$stat['key']]) }}</div>
-                        <div class="small text-muted">View all</div>
-                    </div>
-                </a>
-            @else
-                <div class="card h-100">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between text-muted small text-uppercase"><span>{{ $stat['label'] }}</span></div>
-                        <div class="fs-2 fw-semibold">{{ number_format($counts[$stat['key']]) }}</div>
-                        <div class="small text-muted">&nbsp;</div>
-                    </div>
-                </div>
-            @endif
+            <x-stat-tile :label="$stat['label']" :icon="$stat['icon']" :value="number_format($counts[$stat['key']])"
+                :href="Route::has($stat['route']) ? route($stat['route']) : null" />
         </div>
     @endforeach
 </div>
@@ -101,7 +72,7 @@
                             <x-status-badge :value="$consent['status']" type="status" />
                         </div>
                         <div class="text-muted small mt-1">Granted by {{ $userNames[$consent['granted_by']] ?? 'Unknown' }}</div>
-                        <div class="text-muted small mt-1">{{ ucfirst(strtolower($consent['grantee_type'])) }}: {{ $consent['grantee_id'] }} &middot; {{ $consent['valid_to'] ? \Illuminate\Support\Carbon::parse($consent['valid_to'])->format('d M Y') : 'Ongoing' }}</div>
+                        <div class="text-muted small mt-1">@humanize($consent['grantee_type']): {{ $consent['grantee_id'] }} &middot; {{ $consent['valid_to'] ? \Illuminate\Support\Carbon::parse($consent['valid_to'])->format('d M Y') : 'Ongoing' }}</div>
                     </div>
                 @empty
                     <p class="text-muted small mb-0">No consent grants recorded.</p>

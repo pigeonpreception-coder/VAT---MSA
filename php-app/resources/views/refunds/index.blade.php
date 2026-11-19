@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Refund claims')
+@section('title', 'VAT refunds')
 
 @php
     $requestedValueCents = collect($claims)->sum('amount_cents');
@@ -8,11 +8,8 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Refund domain</div>
-    <h1 class="h3 mb-1">Refund claims</h1>
-    <p class="text-muted mb-0">Every claim traces back to a filed VAT return's negative net position, with a frozen eligibility snapshot and full maker-checker history.</p>
-</div>
+<x-page-header title="VAT refunds"
+    subtitle="Refund claims raised from filed VAT returns with a net refund due, and every decision taken on them." />
 
 {{--
     Source's own fourth tile ("Approved for payment", counting
@@ -25,27 +22,27 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Refund requests</span><span>R</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format(count($claims)) }}</div>
-                <div class="small text-muted">Preliminary and controlled records</div>
+                <div class="stat-label"><span>Refund requests</span></div>
+                <div class="stat-value">{{ number_format(count($claims)) }}</div>
+                <div class="small text-muted">Requested so far</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Requested value</span><span>{{ $tenantCurrencySymbol }}</span></div>
-                <div class="fs-2 fw-semibold">{{ $tenantCurrencyCode }} {{ number_format($requestedValueCents / 100, 2) }}</div>
-                <div class="small text-muted">Not an approved payment amount</div>
+                <div class="stat-label"><span>Requested value</span></div>
+                <div class="stat-value">{{ $tenantCurrencyCode }} {{ number_format($requestedValueCents / 100, 2) }}</div>
+                <div class="small text-muted">Requested — not yet approved for payment</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Configuration blocks</span><span>B</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($configurationBlockCount) }}</div>
-                <div class="small text-warning">No ITAS filing acknowledgement</div>
+                <div class="stat-label"><span>Blocked</span></div>
+                <div class="stat-value">{{ number_format($configurationBlockCount) }}</div>
+                <div class="small text-warning">Waiting for an ITAS filing acknowledgement</div>
             </div>
         </div>
     </div>
@@ -150,8 +147,7 @@
 </div>
 
 <div class="mt-5">
-    <div class="text-uppercase text-muted small fw-semibold">VAT Refund Report</div>
-    <h2 class="h4 mb-3">{{ $tenantAuthorityShortName }} VAT Summary Report</h2>
+        <h2 class="section-title">{{ $tenantAuthorityShortName }} VAT summary report</h2>
 
     <div class="card mb-3">
         <div class="card-body">

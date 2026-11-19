@@ -1,49 +1,41 @@
 @extends('layouts.app')
 
-@section('title', 'Portal switchboard')
+@section('title', 'Portals')
+
+@php
+    $portalIcons = [
+        'buyer' => 'cart3', 'seller' => 'shop', 'namra' => 'bank2', 'namra-admin' => 'building-gear',
+        'super-admin' => 'shield-lock', 'developer' => 'code-slash',
+    ];
+@endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Workspace switchboard</div>
-    <h1 class="h3 mb-1">Choose an authorised VAT-MSA experience</h1>
-    <p class="text-muted mb-0">Portal availability derives from identity role, active organisation scope and Buyer or Seller capability. Switching workspace changes tasks and visibility, not the canonical taxpayer record.</p>
-</div>
+<x-page-header title="Portals" subtitle="Each portal is a focused workspace for one kind of work. You see the portals your role and organisation can use." />
 
 @if (count($portals))
-    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3">
+    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
         @foreach ($portals as $portal)
             <div class="col">
-                <div class="card h-100">
-                    <div class="card-body d-flex flex-column">
-                        <div class="text-uppercase text-muted small fw-semibold mb-1">{{ $portal['audience'] }}</div>
-                        <h2 class="h5">{{ $portal['name'] }}</h2>
-                        <p class="text-muted flex-grow-1">{{ $portal['description'] }}</p>
-                        {{-- All six portal dashboards are real destinations
-                             now -- PortalDefinitions::all()'s own 'href'
-                             for every portal is identical to its actual
-                             Laravel route path (e.g. '/portal/buyer'), so
-                             this links straight to it rather than through a
-                             route-name lookup table (dropped now that
-                             there's no portal left to fall back to
-                             route('dashboard') for -- see git history for
-                             that earlier, now-obsolete precedent). --}}
-                        <a href="{{ $portal['href'] }}" class="btn btn-primary align-self-start">Open {{ $portal['name'] }}</a>
+                {{-- Each portal's 'href' (PortalDefinitions::all()) is its real route path. --}}
+                <a href="{{ $portal['href'] }}" class="card h-100 portal-card text-decoration-none">
+                    <div class="card-body">
+                        <span class="icon-circle mb-3"><i class="bi bi-{{ $portalIcons[$portal['key']] ?? 'grid' }}" aria-hidden="true"></i></span>
+                        <div class="stat-label mb-1">{{ $portal['audience'] }}</div>
+                        <h2 class="h5 mb-2">{{ $portal['name'] }}</h2>
+                        <p class="text-muted mb-3">{{ $portal['description'] }}</p>
+                        <span class="portal-card-cta">Open {{ $portal['name'] }} <i class="bi bi-arrow-right" aria-hidden="true"></i></span>
                     </div>
-                </div>
+                </a>
             </div>
         @endforeach
     </div>
 @else
     <div class="card">
-        <div class="card-body">
-            <strong>No portal assignment.</strong>
-            Your identity is authenticated but has no active portal role or organisation capability. Contact an authorised access administrator.
+        <div class="empty-state">
+            <i class="bi bi-grid" aria-hidden="true"></i>
+            <strong>No portals available</strong>
+            Your account isn't assigned to a portal yet. Ask your access administrator to assign a role.
         </div>
     </div>
 @endif
-
-<div class="alert alert-info mt-3" role="status">
-    <strong>Separation is enforced server-side.</strong><br>
-    A hidden navigation link does not grant access. Each portal route re-evaluates role and capability, and every domain repository still applies record scope.
-</div>
 @endsection

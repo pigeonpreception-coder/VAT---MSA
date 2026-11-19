@@ -3,36 +3,22 @@
 @section('title', $organisation->legal_name)
 
 @section('content')
-<div class="mb-3">
-    <a href="{{ route('organisations.index') }}" class="small">&larr; Back to organisations</a>
-</div>
-
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Organisation</div>
-        <h1 class="h3 mb-1">{{ $organisation->legal_name }}</h1>
-        <p class="text-muted mb-0">
-            {{ $organisation->taxpayer?->vat_number }} &middot; {{ $organisation->taxpayer?->tin }}
-            &middot; <x-status-badge :value="$organisation->taxpayer?->vat_status" type="taxpayer" />
+<x-page-header :title="$organisation->legal_name" :back="route('organisations.index')" back-label="Organisations">
+    <x-slot:meta>
+        <p class="page-subtitle">
+            VAT {{ $organisation->taxpayer?->vat_number ?? '—' }} &middot; TIN {{ $organisation->taxpayer?->tin ?? '—' }}
+            &middot; VAT status <x-status-badge :value="$organisation->taxpayer?->vat_status" type="taxpayer" />
         </p>
-    </div>
-    <x-status-badge :value="$organisation->status" type="status" />
-</div>
+    </x-slot:meta>
+    <x-slot:actions><x-status-badge :value="$organisation->status" type="status" /></x-slot:actions>
+</x-page-header>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @if (session('claimLink'))
     {{-- layouts.app already shows session('status') as its own banner above this. --}}
     <div class="alert alert-info" role="alert">
-        <div class="small text-uppercase fw-semibold mb-1">Invitation link -- copy and send this yourself</div>
+                <div class="fw-semibold mb-1">Invitation link — copy it and send it to the person yourself</div>
         <div class="input-group input-group-sm">
             <input type="text" class="form-control font-monospace" value="{{ session('claimLink') }}" readonly onclick="this.select()">
             <button type="button" class="btn btn-outline-secondary" onclick="navigator.clipboard.writeText('{{ session('claimLink') }}'); this.textContent='Copied';">Copy</button>
@@ -128,7 +114,7 @@
                         @forelse ($organisation->memberships as $membership)
                             <tr>
                                 <td>{{ $membership->user?->name }} <div class="text-muted small">{{ $membership->user?->email }}</div></td>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $membership->role_code))) }}</td>
+                                <td>@humanize($membership->role_code)</td>
                                 <td>{{ $organisation->branches->firstWhere('id', $membership->branch_id)?->name ?? '—' }}</td>
                                 <td><x-status-badge :value="$membership->status" type="status" /></td>
                             </tr>
@@ -154,7 +140,7 @@
                             <label for="role_code" class="form-label small mb-0">Role</label>
                             <select id="role_code" name="role_code" class="form-select form-select-sm @error('role_code') is-invalid @enderror" required>
                                 @foreach ($assignableRoles as $role)
-                                    <option value="{{ $role }}" @selected(old('role_code') === $role)>{{ ucwords(strtolower(str_replace('_', ' ', $role))) }}</option>
+                                    <option value="{{ $role }}" @selected(old('role_code') === $role)>@humanize($role)</option>
                                 @endforeach
                             </select>
                             @error('role_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -204,7 +190,7 @@
                         @forelse ($organisation->invitations as $invitation)
                             <tr>
                                 <td>{{ $invitation->email }}</td>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $invitation->role_code))) }}</td>
+                                <td>@humanize($invitation->role_code)</td>
                                 <td><x-status-badge :value="$invitation->status" type="status" /></td>
                                 <td>{{ $invitation->invited_at->format('d M Y') }}</td>
                                 @if ($canManage)
@@ -243,7 +229,7 @@
                             <label for="invite_role_code" class="form-label small mb-0">Role</label>
                             <select id="invite_role_code" name="role_code" class="form-select form-select-sm @error('role_code') is-invalid @enderror" required>
                                 @foreach ($assignableRoles as $role)
-                                    <option value="{{ $role }}" @selected(old('role_code') === $role)>{{ ucwords(strtolower(str_replace('_', ' ', $role))) }}</option>
+                                    <option value="{{ $role }}" @selected(old('role_code') === $role)>@humanize($role)</option>
                                 @endforeach
                             </select>
                             @error('role_code')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -263,7 +249,7 @@
             <ul class="list-group list-group-flush">
                 @forelse ($organisation->capabilities as $capability)
                     <li class="list-group-item d-flex justify-content-between align-items-center">
-                        {{ ucwords(strtolower($capability->capability)) }}
+                        @humanize($capability->capability)
                         <x-status-badge :value="$capability->status" type="status" />
                     </li>
                 @empty
@@ -279,7 +265,7 @@
                     @if ($organisation->taxpayer?->vat_status === 'SUSPENDED')
                         <p class="text-muted small mb-0">This taxpayer is already suspended.</p>
                     @else
-                        <p class="text-muted small">Suspending flips this taxpayer's VAT status platform-wide. This is a sensitive, step-up gated action.</p>
+                        <p class="text-muted small">Suspending changes this taxpayer's VAT status everywhere in the system. You'll verify with two-factor authentication first.</p>
                         <form method="POST" action="{{ route('organisations.taxpayer-suspension.store', $organisation->id) }}">
                             @csrf
                             <input type="hidden" name="taxpayer_id" value="{{ $organisation->taxpayer_id }}">

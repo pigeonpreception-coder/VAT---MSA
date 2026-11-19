@@ -3,72 +3,68 @@
 @section('title', $tenantAuthorityShortName.' administration portal')
 
 @php
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
     $dateTime = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y, H:i') : '—';
     $date = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y') : '—';
     $federationReady = collect($governance['federation'])->where('status', 'PRODUCTION_APPROVED')->count();
     $productionActivated = collect($governance['onboardingCases'])->where('status', 'PRODUCTION_ACTIVATED')->count();
+    $unitNames = collect($governance['units'])->pluck('name', 'id');
+    // Assignment scope is stored as JSON, e.g. {"jurisdiction":"NA","environment":"LOCAL_STAGING"}.
+    $scope = function (?string $json) {
+        $parts = json_decode((string) $json, true);
+        if (! is_array($parts)) {
+            return $json ?: '—';
+        }
+
+        $show = fn ($value) => match (true) {
+            ! is_scalar($value) => json_encode($value),
+            strlen((string) $value) <= 3 => (string) $value,
+            default => \App\Support\Ui\Humanize::enum((string) $value),
+        };
+
+        return collect($parts)->map(fn ($value, $key) => \App\Support\Ui\Humanize::enum($key).': '.$show($value))->implode(' · ');
+    };
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Tax Authority governance</div>
-    <h1 class="h3 mb-1">Authority provisioning, federation and activation control</h1>
-    <p class="text-muted mb-0">Authority hierarchy, protected roles, federation posture, independent onboarding decisions and quarterly access review. Live federation and production activation remain disabled until approved evidence exists.</p>
-</div>
+<x-page-header :title="$tenantAuthorityShortName.' administration portal'" :back="route('portals.index')" back-label="Portals"
+    subtitle="Authority structure, identity federation, protected administrator roles and quarterly access reviews." />
 
-<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+<div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Assigned authorities</span><span>A</span></div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($governance['authorities'])) }}</div>
-            <div class="small text-muted">Explicit administration scope</div>
-        </div></div>
+        <x-stat-tile label="Authorities" icon="bank2" :value="number_format(count($governance['authorities']))" hint="Tax authorities you administer" />
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Authority units</span><span>H</span></div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($governance['units'])) }}</div>
-            <div class="small text-muted">Governed hierarchy</div>
-        </div></div>
+        <x-stat-tile label="Authority units" icon="diagram-3" :value="number_format(count($governance['units']))" hint="Units in the authority hierarchy" />
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Federation ready</span><span>F</span></div>
-            <div class="fs-2 fw-semibold">{{ number_format($federationReady) }}</div>
-            <div class="small text-warning">Contract and conformance required</div>
-        </div></div>
+        <x-stat-tile label="Federation ready" icon="person-badge" :value="number_format($federationReady)" hint="Needs a signed contract and conformance evidence" tone="warning" />
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Production activated</span><span>P</span></div>
-            <div class="fs-2 fw-semibold">{{ number_format($productionActivated) }}</div>
-            <div class="small text-warning">Disabled in this environment</div>
-        </div></div>
+        <x-stat-tile label="Production activations" icon="rocket-takeoff" :value="number_format($productionActivated)" hint="Not enabled in this environment" tone="warning" />
     </div>
 </div>
 
 <div class="row g-3">
-    <div class="col-lg-6">
+    <div class="col-xl-6">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Authority hierarchy</div>
-                <div class="text-muted small">Jurisdiction-scoped organisational units</div>
+                <div class="text-muted small">Organisational units and the jurisdiction they cover</div>
             </div>
             <div class="table-responsive">
-                <table class="table table-hover mb-0 align-middle">
+                <table class="table table-hover align-middle">
                     <caption class="visually-hidden">Authority units, their type and status</caption>
-                    <thead><tr><th scope="col">Unit</th><th scope="col">Type</th><th scope="col">Parent</th><th scope="col">Status</th></tr></thead>
+                    <thead><tr><th scope="col">Unit</th><th scope="col">Type</th><th scope="col">Parent unit</th><th scope="col">Status</th></tr></thead>
                     <tbody>
                         @forelse ($governance['units'] as $item)
                             <tr>
-                                <td><strong>{{ $item['name'] }}</strong><div class="text-muted small font-monospace">{{ $item['code'] }}</div></td>
-                                <td>{{ $titleCase($item['unit_type']) }}</td>
-                                <td class="font-monospace small">{{ $item['parent_unit_id'] ?? '—' }}</td>
+                                <td><span class="fw-semibold">{{ $item['name'] }}</span><div class="text-muted small">{{ $item['code'] }}</div></td>
+                                <td>@humanize($item['unit_type'])</td>
+                                <td>{{ $item['parent_unit_id'] ? ($unitNames[$item['parent_unit_id']] ?? '—') : '—' }}</td>
                                 <td><x-status-badge :value="$item['status']" type="status" /></td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="text-center text-muted py-4">No authority units on record.</td></tr>
+                            <tr><td colspan="4" class="text-center text-muted">No authority units on record.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -76,26 +72,26 @@
         </div>
     </div>
 
-    <div class="col-lg-6">
+    <div class="col-xl-6">
         <div class="card h-100">
             <div class="card-header">
-                <div class="fw-semibold">Federation registrations</div>
-                <div class="text-muted small">Protocol is unconfirmed until the authority contract is approved</div>
+                <div class="fw-semibold">Identity federation</div>
+                <div class="text-muted small">Connections stay unconfirmed until the authority contract is approved</div>
             </div>
             <div class="table-responsive">
-                <table class="table table-hover mb-0 align-middle">
+                <table class="table table-hover align-middle">
                     <caption class="visually-hidden">Identity federation connections, their environment, protocol and status</caption>
                     <thead><tr><th scope="col">Provider</th><th scope="col">Environment</th><th scope="col">Protocol</th><th scope="col">Status</th></tr></thead>
                     <tbody>
                         @forelse ($governance['federation'] as $item)
                             <tr>
-                                <td><strong>{{ $item['display_name'] }}</strong><div class="text-muted small font-monospace">{{ $item['provider_key'] }}</div></td>
-                                <td>{{ $titleCase($item['environment']) }}</td>
-                                <td>{{ $item['protocol'] }}</td>
+                                <td><span class="fw-semibold">{{ $item['display_name'] }}</span><div class="text-muted small">{{ $item['provider_key'] }}</div></td>
+                                <td>@humanize($item['environment'])</td>
+                                <td>@humanize($item['protocol'])</td>
                                 <td><x-status-badge :value="$item['status']" type="status" /></td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="text-center text-muted py-4">No federation registrations on record.</td></tr>
+                            <tr><td colspan="4" class="text-center text-muted">No federation connections on record.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -106,41 +102,41 @@
 
 <div class="card mt-3">
     <div class="card-header">
-        <div class="fw-semibold">Protected administrative assignments</div>
-        <div class="text-muted small">Maker and activation duties cannot be combined; all assignments retain approval evidence</div>
+        <div class="fw-semibold">Protected administrator assignments</div>
+        <div class="text-muted small">Preparing and activating changes are always held by different people</div>
     </div>
     <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
+        <table class="table table-hover align-middle">
             <caption class="visually-hidden">Administrators with a protected governance role assignment</caption>
             <thead><tr><th scope="col">Administrator</th><th scope="col">Role</th><th scope="col">Duty</th><th scope="col">Scope</th><th scope="col">Status</th></tr></thead>
             <tbody>
                 @forelse ($governance['assignments'] as $item)
                     <tr>
-                        <td><strong>{{ $item['display_name'] }}</strong><div class="text-muted small">{{ $item['email'] }}</div></td>
+                        <td><span class="fw-semibold">{{ $item['display_name'] }}</span><div class="text-muted small">{{ $item['email'] }}</div></td>
                         <td>{{ $item['role_name'] }}</td>
-                        <td>{{ $titleCase($item['duty_class']) }}</td>
-                        <td class="font-monospace small">{{ $item['scope'] }}</td>
+                        <td>@humanize($item['duty_class'])</td>
+                        <td class="small">{{ $scope($item['scope']) }}</td>
                         <td><x-status-badge :value="$item['status']" type="status" /></td>
                     </tr>
                 @empty
-                    <tr><td colspan="5" class="text-center text-muted py-4">No protected assignments on record.</td></tr>
+                    <tr><td colspan="5" class="text-center text-muted">No protected assignments on record.</td></tr>
                 @endforelse
             </tbody>
         </table>
     </div>
 </div>
 
-<div class="row g-3 mt-1">
-    <div class="col-lg-6">
+<div class="row g-3 mt-0">
+    <div class="col-xl-6">
         <div class="card h-100">
             <div class="card-header">
-                <div class="fw-semibold">Quarterly authority access review</div>
-                <div class="text-muted small">Privileged decisions fail closed without a current review</div>
+                <div class="fw-semibold">Quarterly access reviews</div>
+                <div class="text-muted small">Privileged changes are blocked unless a current review exists</div>
             </div>
             <div class="table-responsive">
-                <table class="table table-hover mb-0 align-middle">
+                <table class="table table-hover align-middle">
                     <caption class="visually-hidden">Quarterly access reviews, their period, due date and status</caption>
-                    <thead><tr><th scope="col">Period</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead>
+                    <thead><tr><th scope="col">Period starting</th><th scope="col">Due</th><th scope="col">Status</th></tr></thead>
                     <tbody>
                         @forelse ($governance['accessReviews'] as $item)
                             <tr>
@@ -149,7 +145,7 @@
                                 <td><x-status-badge :value="$item['status']" type="status" /></td>
                             </tr>
                         @empty
-                            <tr><td colspan="3" class="text-center text-muted py-4">No access reviews on record.</td></tr>
+                            <tr><td colspan="3" class="text-center text-muted">No access reviews on record.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -157,25 +153,25 @@
         </div>
     </div>
 
-    <div class="col-lg-6">
+    <div class="col-xl-6">
         <div class="card h-100">
             <div class="card-header">
-                <div class="fw-semibold">Identity provider boundary</div>
-                <div class="text-muted small">Authentication never grants authority by itself</div>
+                <div class="fw-semibold">Identity providers</div>
+                <div class="text-muted small">Signing in through a provider never grants access on its own</div>
             </div>
             <div class="table-responsive">
-                <table class="table table-hover mb-0 align-middle">
+                <table class="table table-hover align-middle">
                     <caption class="visually-hidden">Identity providers, their status and configuration</caption>
                     <thead><tr><th scope="col">Provider</th><th scope="col">Status</th><th scope="col">Configuration</th></tr></thead>
                     <tbody>
                         @forelse ($identity['providers'] as $item)
                             <tr>
-                                <td><strong>{{ $item['display_name'] }}</strong><div class="text-muted small font-monospace">{{ $item['provider_key'] }}</div></td>
+                                <td><span class="fw-semibold">{{ $item['display_name'] }}</span><div class="text-muted small">{{ $item['provider_key'] }}</div></td>
                                 <td><x-status-badge :value="$item['status']" type="status" /></td>
                                 <td><x-status-badge :value="$item['configuration_status']" type="status" /></td>
                             </tr>
                         @empty
-                            <tr><td colspan="3" class="text-center text-muted py-4">No identity providers on record.</td></tr>
+                            <tr><td colspan="3" class="text-center text-muted">No identity providers on record.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -184,8 +180,8 @@
     </div>
 </div>
 
-<div class="alert alert-info mt-3" role="status">
-    <strong>No implicit authority or financial access.</strong><br>
-    A local-staging approval proves only the internal governance workflow. It does not activate ITAS federation, a production Tax Authority, statutory rules, taxpayer accounts, tax subscriptions or transaction access.
-</div>
+<p class="small text-muted mt-3 mb-0">
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    Approvals recorded here exercise the governance workflow only. They don't switch on ITAS federation, a production tax authority, statutory rules or taxpayer access.
+</p>
 @endsection

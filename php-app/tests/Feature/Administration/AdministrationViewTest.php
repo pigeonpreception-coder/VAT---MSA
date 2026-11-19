@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Administration;
 
+use App\Domain\Licensing\AccessReviewWindow;
 use App\Models\LicenseUsage;
 use App\Models\Organisation;
 use App\Models\OrganisationCapability;
@@ -115,14 +116,51 @@ class AdministrationViewTest extends TestCase
         $response = $this->actingAs($org['owner'])->get('/administration');
 
         $response->assertOk()->assertViewIs('administration.index');
-        $response->assertSee('Administration command centre');
+        $response->assertSee('Organisation administration');
         $response->assertSee('Professional Pilot');
         $response->assertSee('User seats');
-        $response->assertSee('Licence entitlements and usage');
+        $response->assertSee('Team members');
         $response->assertSee('Invite employee');
         $response->assertSee('Create organisation role');
+        // The full entitlements table lives on the Licensing page; the
+        // licence tile links there instead of repeating it.
+        $response->assertSee(route('licensing.index'), false);
         $response->assertSee('<caption class="visually-hidden">', false);
         $response->assertSee('scope="col"', false);
+    }
+
+    /** The role form offers a checklist of exactly the grantable catalogue -- never a protected permission. */
+    public function test_the_create_role_form_offers_only_grantable_permissions(): void
+    {
+        $org = $this->makeLicensedOrganisation('VAT-SELLER-0010');
+
+        $response = $this->actingAs($org['owner'])->get('/administration');
+
+        $response->assertSee('name="permissions[]"', false);
+        $response->assertSee('value="invoices:read"', false);
+        $response->assertSee('value="returns:approve"', false);
+        foreach (['security:manage', 'platform:manage', 'access-rights:manage', 'authority-governance:manage'] as $protected) {
+            $response->assertDontSee('value="'.$protected.'"', false);
+        }
+    }
+
+    /** Inviting and creating roles fail server-side until the quarter's review is open, so the page says so up front. */
+    public function test_the_page_explains_when_changes_are_paused_for_the_quarterly_access_review(): void
+    {
+        $org = $this->makeLicensedOrganisation('VAT-SELLER-0011');
+        $window = AccessReviewWindow::current()['key'];
+
+        $paused = $this->actingAs($org['owner'])->get('/administration');
+        $paused->assertSee("Start the {$window} access review to make changes.");
+        $paused->assertSee('action="'.route('access-governance.reviews.store').'"', false);
+        $paused->assertSee('<fieldset disabled>', false);
+
+        $this->openReview($org['owner']);
+
+        $open = $this->actingAs($org['owner'])->get('/administration');
+        $open->assertDontSee("Start the {$window} access review to make changes.");
+        $open->assertDontSee('<fieldset disabled>', false);
+        $open->assertSee("{$window} review in place");
     }
 
     public function test_an_employee_can_be_invited_with_step_up_confirmed(): void
@@ -185,6 +223,45 @@ class AdministrationViewTest extends TestCase
         $this->assertDatabaseHas('organisation_roles', ['organisation_id' => $org['organisation']->id, 'name' => 'Branch VAT Reviewer']);
         $this->assertDatabaseHas('organisation_role_permissions', ['permission_code' => 'invoices:read']);
         $this->assertDatabaseHas('organisation_role_permissions', ['permission_code' => 'returns:read']);
+    }
+
+    public function test_an_organisation_role_can_be_created_from_the_permission_checklist(): void
+    {
+        $org = $this->makeLicensedOrganisation('VAT-SELLER-0012');
+        $this->openReview($org['owner']);
+
+        $response = $this->actingAs($org['owner'])->withFreshStepUp()
+            ->post('/administration/roles', [
+                'name' => 'Checklist Reviewer', 'description' => 'Built from the checklist',
+                'permissions' => ['invoices:read', 'returns:read'],
+            ]);
+
+        $response->assertRedirect('/administration');
+        $response->assertSessionHas('status');
+        $response->assertSessionHas('adminTab', 'roles');
+        $roleId = DB::table('organisation_roles')->where('organisation_id', $org['organisation']->id)->where('name', 'Checklist Reviewer')->value('id');
+        $this->assertNotNull($roleId);
+        $this->assertEqualsCanonicalizing(
+            ['invoices:read', 'returns:read'],
+            DB::table('organisation_role_permissions')->where('organisation_role_id', $roleId)->pluck('permission_code')->all(),
+        );
+    }
+
+    /** The checklist path goes through the same validator: a tampered protected value is still refused. */
+    public function test_the_permission_checklist_cannot_smuggle_in_a_protected_permission(): void
+    {
+        $org = $this->makeLicensedOrganisation('VAT-SELLER-0013');
+        $this->openReview($org['owner']);
+
+        $response = $this->actingAs($org['owner'])->withFreshStepUp()
+            ->post('/administration/roles', [
+                'name' => 'Tampered Role', 'description' => 'Adds a protected value to the checklist',
+                'permissions' => ['invoices:read', 'security:manage'],
+            ]);
+
+        $response->assertRedirect('/administration');
+        $response->assertSessionHasErrors('role');
+        $this->assertDatabaseMissing('organisation_roles', ['name' => 'Tampered Role']);
     }
 
     /** RT-016: OrganisationAdminService::createOrganisationRole() originally had no idempotency-key support and no uniqueness guard (version increments intentionally on same-name resaves) -- a double-submit minted two indistinguishable ACTIVE versions of the same role. */

@@ -3,18 +3,10 @@
 @section('title', $dispute->dispute_number)
 
 @section('content')
-<div class="mb-3">
-    <a href="{{ route('disputes.index') }}" class="small">&larr; Back to disputes</a>
-</div>
-
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Dispute</div>
-        <h1 class="h3 mb-1">{{ $dispute->dispute_number }}</h1>
-        <p class="text-muted mb-0">{{ $taxpayer?->legal_name ?? 'Unknown taxpayer' }} &middot; {{ $taxpayer?->vat_number }}</p>
-    </div>
-    <x-status-badge :value="$dispute->status" type="status" />
-</div>
+<x-page-header :title="$dispute->dispute_number" :back="route('disputes.index')" back-label="Disputes"
+    :subtitle="($taxpayer?->legal_name ?? 'Unknown taxpayer').($taxpayer?->vat_number ? ' · '.$taxpayer->vat_number : '')">
+    <x-slot:actions><x-status-badge :value="$dispute->status" type="status" /></x-slot:actions>
+</x-page-header>
 
 <div class="row g-3">
     <div class="col-lg-8">
@@ -30,7 +22,7 @@
             <div class="card-body">
                 <dl class="row mb-0">
                     <dt class="col-sm-4">Type</dt>
-                    <dd class="col-sm-8">{{ ucwords(strtolower(str_replace('_', ' ', $dispute->disputed_resource_type))) }}</dd>
+                    <dd class="col-sm-8">@humanize($dispute->disputed_resource_type)</dd>
                     <dt class="col-sm-4">Resource ID</dt>
                     <dd class="col-sm-8 font-monospace">{{ $dispute->disputed_resource_id }}</dd>
                     @if ($dispute->audit_case_id)

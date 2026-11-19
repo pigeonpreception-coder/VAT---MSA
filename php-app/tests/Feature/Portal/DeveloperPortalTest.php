@@ -138,7 +138,7 @@ class DeveloperPortalTest extends TestCase
         $response = $this->actingAs($owner)->get('/portal/developer');
 
         $response->assertOk()->assertViewIs('portal.developer');
-        $response->assertSee('Applications, contracts, webhooks and conformance posture');
+        $response->assertSee('Register applications, manage their API credentials and track conformance testing.');
         $response->assertSee('ERP Sync Client');
         $response->assertSee('STANDARD');
         $response->assertSee('<caption class="visually-hidden">', false);
@@ -160,7 +160,7 @@ class DeveloperPortalTest extends TestCase
         $response = $this->actingAs($partner)->get('/portal/developer');
 
         $response->assertOk();
-        $response->assertSee('No applications in scope');
+        $response->assertSee('No applications registered');
         $this->assertSame([], $response->viewData('snapshot')['clients']);
     }
 }

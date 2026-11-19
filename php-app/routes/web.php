@@ -535,6 +535,8 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
         ->name('access-governance.requests.store')->middleware('rate-limit:control-plane');
     Route::post('/access-governance/requests/{id}/decision', [AccessGovernanceViewController::class, 'storeDecision'])
         ->name('access-governance.requests.decision')->middleware(['step-up', 'rate-limit:control-plane']);
+    Route::post('/access-governance/reviews', [AccessGovernanceViewController::class, 'storeReview'])
+        ->name('access-governance.reviews.store')->middleware(['step-up', 'rate-limit:control-plane']);
     Route::post('/access-governance/certifications', [AccessGovernanceViewController::class, 'storeCertification'])
         ->name('access-governance.certifications.store')->middleware(['step-up', 'rate-limit:control-plane']);
     Route::post('/access-governance/revocations', [AccessGovernanceViewController::class, 'storeRevocation'])
@@ -693,18 +695,10 @@ Route::middleware(['auth', PreventAuthenticatedPageCaching::class])->group(funct
     Route::post('/portal/developer/clients/{id}/conformance-runs', [DeveloperPortalController::class, 'runConformance'])
         ->name('portal.developer.conformance')->middleware('rate-limit:developer');
 
-    // Sidebar restructuring (master prompt sections 16-21): reserved
-    // navigation/architecture placeholders for subfolders the new 9-group
-    // sidebar names but that have no backing feature yet -- mirrors the
-    // source's own app/vat-management, app/invoice-management etc.
-    // PlannedModule pages 1:1 (route path, permission and copy match).
-    $plannedRoute = function (string $path, string $name, string $permission, string $eyebrow, string $title, string $description, string $scopeNote) {
-        Route::get($path, function () use ($permission, $eyebrow, $title, $description, $scopeNote) {
-            Gate::authorize('permission', $permission);
-            return view('planned.show', compact('eyebrow', 'title', 'description', 'scopeNote'));
-        })->name($name);
-    };
-
+    // Sidebar restructuring (master prompt sections 16-21) originally
+    // registered "planned module" placeholder pages here through a
+    // $plannedRoute helper. Every placeholder has since been replaced by a
+    // real page (notes below), so the helper and its view were removed.
     // VAT Audit Report is no longer a planned-module placeholder -- see
     // the real route registered alongside the other VAT-lifecycle routes
     // above (VatAuditReportViewController). Route name and permission

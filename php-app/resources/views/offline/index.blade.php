@@ -9,39 +9,36 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Business continuity</div>
-    <h1 class="h3 mb-1">Offline devices, number ranges and ordered synchronisation</h1>
-    <p class="text-muted mb-0">Offline documents require an enrolled device, verified public key, reserved number range, contiguous sequence, hash-chain continuity and a valid signature before fiscal processing.</p>
-</div>
+<x-page-header title="Offline continuity"
+    subtitle="Devices that issue invoices while offline, their reserved number ranges, and documents waiting to sync." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Devices</div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($data['devices'])) }}</div>
-            <div class="small text-muted">Trust bootstrap required</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Devices</div>
+            <div class="stat-value">{{ number_format(count($data['devices'])) }}</div>
+            <div class="small text-muted">Must be approved before use</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Active ranges</div>
-            <div class="fs-2 fw-semibold">{{ number_format($activeRanges) }}</div>
-            <div class="small text-muted">Reserved document numbers</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Active ranges</div>
+            <div class="stat-value">{{ number_format($activeRanges) }}</div>
+            <div class="small text-muted">Invoice numbers reserved for offline use</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Rejected batches</div>
-            <div class="fs-2 fw-semibold">{{ number_format($rejectedBatches) }}</div>
-            <div class="small text-warning">Preserved for security evidence</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Rejected batches</div>
+            <div class="stat-value">{{ number_format($rejectedBatches) }}</div>
+            <div class="small text-warning">Kept as security evidence</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Open conflicts</div>
-            <div class="fs-2 fw-semibold">{{ number_format($openConflicts) }}</div>
-            <div class="small text-muted">Human resolution queue</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Open conflicts</div>
+            <div class="stat-value">{{ number_format($openConflicts) }}</div>
+            <div class="small text-muted">Need someone to resolve</div>
         </div></div>
     </div>
 </div>
@@ -51,7 +48,7 @@
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Device registry</div>
-                <div class="text-muted small">No device may self-enrol</div>
+                <div class="text-muted small">Devices are added by an administrator</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -92,7 +89,7 @@
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Number ranges</div>
-                <div class="text-muted small">Held until device trust is verified</div>
+                <div class="text-muted small">Held until the device is trusted</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -110,7 +107,7 @@
                     <tbody>
                         @forelse ($data['numberRanges'] as $range)
                             <tr>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $range['document_type']))) }}</td>
+                                <td>@humanize($range['document_type'])</td>
                                 <td class="font-monospace">{{ $range['prefix'] }}</td>
                                 <td>{{ number_format($range['range_start']) }}&ndash;{{ number_format($range['range_end']) }}</td>
                                 <td class="text-end">{{ number_format($range['next_number']) }}</td>
@@ -133,7 +130,7 @@
 <div class="card mt-3">
     <div class="card-header">
         <div class="fw-semibold">Batch intake</div>
-        <div class="text-muted small">Rejected attempts remain auditable</div>
+        <div class="text-muted small">Rejected uploads stay on record</div>
     </div>
     @if (count($data['batches']))
         <div class="table-responsive">
@@ -165,7 +162,7 @@
         </div>
     @else
         <div class="card-body">
-            <p class="text-muted mb-0"><strong>No offline batches received.</strong> Batch validation is available through the versioned API.</p>
+            <p class="text-muted mb-0">No offline batches received yet.</p>
         </div>
     @endif
 </div>

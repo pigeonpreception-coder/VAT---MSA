@@ -1,46 +1,40 @@
 @extends('layouts.app')
 
-@section('title', 'Cash Flow Projects')
+@section('title', 'Project cash flow')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Accounting & Finance</div>
-        <h1 class="h3 mb-1">Cash Flow Projects</h1>
-        <p class="text-muted mb-0">Real posted revenue and cost per project, organisation-wide -- monitoring what has actually been posted to date, not a projection: this platform has no forecast data to derive one from.</p>
-    </div>
-    <a href="{{ route('accounting.index') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Back to Accounting</a>
-</div>
+<x-page-header title="Project cash flow"
+    subtitle="Revenue and costs posted to each project so far. These are actual figures, not forecasts." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Approved budget</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($totals['approved_budget_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Approved budget</div>
+            <div class="stat-value">{{ $fmt($totals['approved_budget_cents']) }}</div>
             <div class="small text-muted">Across all projects</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Revenue posted</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($totals['revenue_cents']) }}</div>
-            <div class="small text-success">Project-tagged REVENUE journal lines</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Revenue posted</div>
+            <div class="stat-value">{{ $fmt($totals['revenue_cents']) }}</div>
+            <div class="small text-success">Revenue posted to projects</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Cost posted</div>
-            <div class="fs-2 fw-semibold">{{ $fmt($totals['cost_cents']) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Cost posted</div>
+            <div class="stat-value">{{ $fmt($totals['cost_cents']) }}</div>
             <div class="small text-muted">Approved expenses and manual entries</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Net cash flow</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Net cash flow</div>
             <div class="fs-2 fw-semibold {{ $totals['net_cash_flow_cents'] < 0 ? 'text-danger' : 'text-success' }}">{{ $fmt($totals['net_cash_flow_cents']) }}</div>
             <div class="small text-muted">Revenue minus cost</div>
         </div></div>
@@ -50,7 +44,7 @@
 <div class="card mb-4">
     <div class="card-header">
         <div class="fw-semibold">Project cash flow</div>
-        <div class="text-muted small">Net cash flow = revenue posted minus cost posted; a negative figure means the project has cost more than it has earned so far</div>
+        <div class="text-muted small">Net cash flow is revenue minus cost. A negative figure means the project has cost more than it has earned so far</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -112,7 +106,7 @@
                     @forelse ($timeline['lines'] as $line)
                         <tr>
                             <td>{{ $line['occurred_at'] }}</td>
-                            <td>{{ ucfirst(strtolower($line['cost_type'])) }}</td>
+                            <td>@humanize($line['cost_type'])</td>
                             <td>{{ $line['description'] ?? '—' }}</td>
                             <td class="text-end">{{ $timeline['project']['currency'] }} {{ number_format($line['amount_cents'] / 100, 2) }}</td>
                             <td class="text-end fw-semibold">{{ $timeline['project']['currency'] }} {{ number_format($line['cumulative_cost_cents'] / 100, 2) }}</td>

@@ -47,7 +47,7 @@ class FixedAssetViewController extends Controller
         return view('operations.fixed-assets.index', [
             'assetClass' => $assetClass,
             'routeName' => $assetClass === 'IMMOVABLE' ? 'operations.immovable-assets' : 'operations.movable-assets',
-            'title' => $assetClass === 'IMMOVABLE' ? 'Immovable Asset Management' : 'Movable Asset Management',
+            'title' => $assetClass === 'IMMOVABLE' ? 'Immovable assets' : 'Movable assets',
             'serialLabel' => $assetClass === 'IMMOVABLE' ? 'Title deed / registration number' : 'Serial number / registration',
             'categories' => $assetClass === 'IMMOVABLE' ? self::IMMOVABLE_CATEGORIES : self::MOVABLE_CATEGORIES,
             'assets' => $assets,

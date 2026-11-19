@@ -112,7 +112,7 @@ class HumanResourcesViewTest extends TestCase
         $response = $this->actingAs($org['owner'])->get('/operations/human-resources');
 
         $response->assertOk()->assertViewIs('operations.human-resources.index');
-        $response->assertSee('Human Resources Module');
+        $response->assertSee('Employee directory, onboarding invitations and offboarding.');
         $response->assertSee('Invite an employee');
     }
 

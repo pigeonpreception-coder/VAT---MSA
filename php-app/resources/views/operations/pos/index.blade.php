@@ -1,30 +1,15 @@
 @extends('layouts.app')
 
-@section('title', 'Inventory (POS)')
+@section('title', 'Inventory')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Operations</div>
-    <h1 class="h3 mb-1">Inventory Module</h1>
-    <p class="text-muted mb-0">Functions like a point-of-sale system: build a cart, complete the sale, and a certified tax invoice plus matching stock issue are recorded together.</p>
-</div>
+<x-page-header title="Inventory"
+    subtitle="Works like a point-of-sale till: build a cart and complete the sale, and the certified invoice and stock movement are recorded together." />
 
-@if (session('warning'))
-    <div class="alert alert-warning" role="alert">{{ session('warning') }}</div>
-@endif
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>The sale could not be completed.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @if (! $canSell)
-    <div class="alert alert-info">You have read-only access to inventory. A user with <code>inventory:manage</code> can complete a sale.</div>
+    <div class="alert alert-info" role="status"><i class="bi bi-eye" aria-hidden="true"></i><div>You can view stock but not sell. Ask an administrator for inventory management access to complete sales.</div></div>
 @endif
 
 <div class="row g-3">
@@ -32,7 +17,7 @@
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Products</div>
-                <div class="text-muted small">Available stock across warehouses</div>
+                <div class="text-muted small">Stock available across all warehouses</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle" id="pos-product-table">
@@ -73,7 +58,7 @@
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Cart</div>
-                <div class="text-muted small">Point-of-sale checkout</div>
+                <div class="text-muted small">Checkout</div>
             </div>
             <div class="card-body">
                 @if ($canSell)

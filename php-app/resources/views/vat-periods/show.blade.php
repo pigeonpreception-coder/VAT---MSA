@@ -1,35 +1,21 @@
 @extends('layouts.app')
 
-@section('title', $period['period_code'])
+@section('title', 'VAT period '.$period['period_code'])
 
 @php
     $money = fn (int $cents) => $tenantCurrencyCode.' '.number_format($cents / 100, 2);
     $date = fn (?string $iso) => $iso ? \Illuminate\Support\Carbon::parse($iso)->format('d M Y') : '—';
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
     $blockingStatuses = ['PENDING_APPROVAL', 'APPROVED', 'AWAITING_PROVIDER', 'FILED'];
     $returnIsBlocked = in_array($period['return_status'] ?? null, $blockingStatuses, true);
     $canGenerateNow = $canGenerateReturn && $period['status'] === 'OPEN' && ! $returnIsBlocked;
 @endphp
 
 @section('content')
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">VAT period</div>
-        <h1 class="h3 mb-1">{{ $period['period_code'] }}</h1>
-        <p class="text-muted mb-0">{{ $period['legal_name'] }} &middot; {{ $period['vat_number'] }}</p>
-    </div>
-    <a href="{{ route('vat-periods.index') }}" class="btn btn-outline-secondary align-self-center">&larr; Back to VAT periods</a>
-</div>
+<x-page-header :title="'VAT period '.$period['period_code']" :back="route('vat-periods.index')" back-label="VAT returns"
+    :subtitle="$period['legal_name'].' · '.$period['vat_number']" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-6">

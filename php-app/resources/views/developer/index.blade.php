@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Developer and webhooks')
+@section('title', 'API clients & webhooks')
 
 @php
     $activeClients = collect($data['clients'])->where('status', 'ACTIVE')->count();
@@ -8,39 +8,36 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Controlled interoperability</div>
-    <h1 class="h3 mb-1">API clients, webhook contracts and durable delivery</h1>
-    <p class="text-muted mb-0">Machine access is deny-by-default. Client credentials remain in an external secret manager, webhook delivery is signed, and domain events first commit to a transactional outbox.</p>
-</div>
+<x-page-header title="API clients & webhooks"
+    subtitle="API clients and webhook subscriptions across the platform. Client secrets are kept in a secure vault and are never shown." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">API clients</div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($data['clients'])) }}</div>
-            <div class="small text-muted">Scoped machine identities</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">API clients</div>
+            <div class="stat-value">{{ number_format(count($data['clients'])) }}</div>
+            <div class="small text-muted">System accounts with limited access</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Active clients</div>
-            <div class="fs-2 fw-semibold">{{ number_format($activeClients) }}</div>
-            <div class="small text-muted">Credentials must be externally provisioned</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Active clients</div>
+            <div class="stat-value">{{ number_format($activeClients) }}</div>
+            <div class="small text-muted">Credentials are issued outside this page</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Webhooks</div>
-            <div class="fs-2 fw-semibold">{{ number_format(count($data['webhooks'])) }}</div>
-            <div class="small text-muted">Signed delivery subscriptions</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Webhooks</div>
+            <div class="stat-value">{{ number_format(count($data['webhooks'])) }}</div>
+            <div class="small text-muted">Signed event notifications</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Outbox pending</div>
-            <div class="fs-2 fw-semibold">{{ number_format($pendingEvents) }}</div>
-            <div class="small text-warning">Consumer connection pending</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Outbox pending</div>
+            <div class="stat-value">{{ number_format($pendingEvents) }}</div>
+            <div class="small text-warning">Waiting for a delivery service</div>
         </div></div>
     </div>
 </div>
@@ -48,7 +45,7 @@
 <div class="card mb-3">
     <div class="card-header">
         <div class="fw-semibold">API client registry</div>
-        <div class="text-muted small">Secret values never appear in this registry</div>
+        <div class="text-muted small">Secrets are never shown here</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -87,7 +84,7 @@
 <div class="card mb-3">
     <div class="card-header">
         <div class="fw-semibold">Webhook subscriptions</div>
-        <div class="text-muted small">HTTPS, signing-key references, retries and dead-letter handling are mandatory</div>
+        <div class="text-muted small">Every webhook uses HTTPS, a signing key, and automatic retries</div>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
@@ -118,8 +115,8 @@
     </div>
 </div>
 
-<div class="alert alert-info">
-    <strong>Publishing remains safely queued.</strong><br>
-    The outbox is durable, but no external event-bus or webhook worker is configured. Events are preserved instead of being marked delivered without evidence.
-</div>
+<p class="small text-muted mb-0">
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    Events are queued safely but not delivered yet: no delivery service is connected in this environment. Nothing is marked as delivered until it really is.
+</p>
 @endsection

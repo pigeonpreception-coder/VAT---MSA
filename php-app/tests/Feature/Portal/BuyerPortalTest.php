@@ -167,7 +167,7 @@ class BuyerPortalTest extends TestCase
         $response = $this->actingAs($party['owner'])->get('/portal/buyer');
 
         $response->assertOk()->assertViewIs('portal.buyer');
-        $response->assertSee('Purchases, input VAT and evidence requiring action');
+        $response->assertSee('Purchases, expenses, input VAT and the supporting evidence that needs your attention.');
         $response->assertSee('EXP-BUYERPORTAL-0001');
         $response->assertSee('Buyer Portal Supplier'); // supplier_name resolved from supplier_party_id
         $response->assertSee('Category TRAVEL');

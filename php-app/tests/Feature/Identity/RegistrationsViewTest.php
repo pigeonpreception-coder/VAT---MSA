@@ -99,7 +99,7 @@ class RegistrationsViewTest extends TestCase
         $response->assertOk()->assertViewIs('registrations.index');
         $response->assertSee('Regview Trading Co');
         $response->assertSee('82.00%');
-        $response->assertSee('AUTOMATED MATCH');
+        $response->assertSee('Automated match');
     }
 
     public function test_the_self_serve_queue_is_hidden_from_a_non_national_scope_actor(): void

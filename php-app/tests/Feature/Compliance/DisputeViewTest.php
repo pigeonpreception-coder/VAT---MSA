@@ -247,8 +247,8 @@ class DisputeViewTest extends TestCase
         $response->assertSee('Filed this week');
         $response->assertSeeInOrder(['Taxpayers', '2']);
         $response->assertSee('Disputes by resource type');
-        $response->assertSeeInOrder(['Audit Finding', '1']);
-        $response->assertSeeInOrder(['Vat Return', '1']);
+        $response->assertSeeInOrder(['Audit finding', '1']);
+        $response->assertSeeInOrder(['VAT return', '1']);
         $response->assertSee('Most active taxpayers');
         $response->assertSee('VAT-VIEW-DSP-0009 Trading Co');
         $response->assertSee('VAT-VIEW-DSP-0010 Trading Co');
@@ -265,7 +265,7 @@ class DisputeViewTest extends TestCase
         ]);
 
         $matched = $this->actingAs($owner)->get(route('disputes.index', ['status' => 'FILED']));
-        $matched->assertSee('Audit Finding');
+        $matched->assertSee('Audit finding');
 
         $unmatched = $this->actingAs($owner)->get(route('disputes.index', ['status' => 'DISPUTED']));
         $unmatched->assertSee('No disputes match this view.');

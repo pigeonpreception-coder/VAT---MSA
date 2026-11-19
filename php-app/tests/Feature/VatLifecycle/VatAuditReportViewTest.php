@@ -136,7 +136,7 @@ class VatAuditReportViewTest extends TestCase
         $response->assertOk()->assertViewIs('vat-management.audit-report');
         $response->assertSee('Low'); // x-status-badge title-cases the raw risk_level value
         $response->assertSee('N$ 1,150.00'); // total value of the certified invoice
-        $response->assertSee('MATCHED'); // status footer badge (plain, not through x-status-badge)
+        $response->assertSee('Matched: 1'); // status footer badge (plain, not through x-status-badge)
         $response->assertSee('No reconciliation exceptions raised in this period.');
         $response->assertSee('No audit cases opened against this taxpayer during this period.');
     }
@@ -164,7 +164,7 @@ class VatAuditReportViewTest extends TestCase
         $response = $this->actingAs($supplier['owner'])->get(route('vat-management.audit-report', ['period_id' => $period->id]));
 
         $response->assertOk();
-        $response->assertSee('RISK_REVIEW');
+        $response->assertSee('Risk review');
         $response->assertSee('Invoice value significantly above the taxpayer\'s historical average.');
         $response->assertSee('CASE-2026-TEST0001');
         $response->assertSee('Routine VAT audit');

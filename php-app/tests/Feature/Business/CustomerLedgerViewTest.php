@@ -239,6 +239,9 @@ class CustomerLedgerViewTest extends TestCase
         DB::disableQueryLog();
 
         $response->assertOk();
-        $this->assertLessThan(10, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 customers/120 quotations -- an N+1 regression scales with row count, not a fixed ceiling.");
+        // Ceiling includes the layout's one sidebar permission lookup per page
+        // (App\Support\Navigation\Sidebar marks locked links); an N+1 here
+        // would add dozens of queries for 40 customers/120 quotations.
+        $this->assertLessThan(11, $queryCount, "Expected a small, row-count-independent query count; got {$queryCount} for 40 customers/120 quotations -- an N+1 regression scales with row count, not a fixed ceiling.");
     }
 }

@@ -254,7 +254,7 @@ class SelfServeSignupTest extends TestCase
         $response = $this->get('/signup');
 
         $response->assertOk()->assertViewIs('signup.create');
-        $response->assertSee('Apply for a commercial VAT-MSA subscription');
+        $response->assertSee('Apply for a VAT-MSA subscription');
     }
 
     /**

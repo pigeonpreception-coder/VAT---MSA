@@ -9,61 +9,49 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Security domain</div>
-    <h1 class="h3 mb-1">Security operations</h1>
-    <p class="text-muted mb-0">Correlated security events, detection-rule findings and the incidents they open. A detection rule fires automatically once its threshold is met within its window; an analyst can also open an incident by hand.</p>
-</div>
+<x-page-header title="Security operations"
+    subtitle="Security events, detection rule findings and the incidents they open. Rules open incidents automatically when their threshold is reached; analysts can also open one by hand." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open incidents</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($openIncidents) }}</div>
-                <div class="small text-warning">Human review required for high-impact containment</div>
+                <div class="stat-label"><span>Open incidents</span></div>
+                <div class="stat-value">{{ number_format($openIncidents) }}</div>
+                <div class="small text-warning">High-impact containment needs a person to review</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>High / critical events</span><span>S</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($highCriticalEvents) }}</div>
-                <div class="small text-muted">Correlated application security evidence</div>
+                <div class="stat-label"><span>High / critical events</span></div>
+                <div class="stat-value">{{ number_format($highCriticalEvents) }}</div>
+                <div class="small text-muted">Linked security events from the application</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Pending outbox</span><span>Q</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($pendingOutbox) }}</div>
-                <div class="small text-muted">Replay-safe events awaiting publication</div>
+                <div class="stat-label"><span>Unsent events</span></div>
+                <div class="stat-value">{{ number_format($pendingOutbox) }}</div>
+                <div class="small text-muted">Events waiting to be sent</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Data integrity</span><span>DB</span></div>
-                <div class="fs-2 fw-semibold">Healthy</div>
+                <div class="stat-label"><span>Data integrity</span></div>
+                <div class="stat-value">Healthy</div>
                 <div class="small text-success">{{ number_format($metrics['invoice_count']) }} invoices &middot; {{ number_format($metrics['audit_event_count']) }} audit events</div>
             </div>
         </div>
     </div>
 </div>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @can('permission', 'security:manage')
     <div class="card mb-3">
@@ -110,7 +98,7 @@
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <div>
                 <h2 class="h6 mb-0">Incident queue</h2>
-                <div class="text-muted small">Detect, classify, contain, recover and learn</div>
+                <div class="text-muted small">Detect, classify, contain, recover and review</div>
             </div>
         </div>
         <form method="GET" action="{{ route('security.operations') }}" class="row g-2 align-items-center">
@@ -119,7 +107,7 @@
                 <select id="status" name="status" class="form-select form-select-sm" onchange="this.form.submit()">
                     <option value="" @selected($statusFilter === null)>All statuses</option>
                     @foreach (['OPEN', 'CONTAINED', 'CLOSED'] as $s)
-                        <option value="{{ $s }}" @selected($statusFilter === $s)>{{ ucwords(strtolower($s)) }}</option>
+                        <option value="{{ $s }}" @selected($statusFilter === $s)>@humanize($s)</option>
                     @endforeach
                 </select>
             </div>
@@ -128,7 +116,7 @@
                 <select id="severity" name="severity" class="form-select form-select-sm" onchange="this.form.submit()">
                     <option value="" @selected($severityFilter === null)>All severities</option>
                     @foreach (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as $s)
-                        <option value="{{ $s }}" @selected($severityFilter === $s)>{{ ucwords(strtolower($s)) }}</option>
+                        <option value="{{ $s }}" @selected($severityFilter === $s)>@humanize($s)</option>
                     @endforeach
                 </select>
             </div>
@@ -208,7 +196,7 @@
 <div class="card mb-3">
     <div class="card-header">
         <h2 class="h6 mb-0">Control posture</h2>
-        <div class="text-muted small">Runtime controls implemented in this release</div>
+        <div class="text-muted small">Security controls in this release</div>
     </div>
     <div class="list-group list-group-flush">
         @foreach ([
@@ -250,7 +238,7 @@
             <tbody>
                 @forelse ($events as $event)
                     <tr>
-                        <td>{{ $event['event_type'] }}</td>
+                        <td>@humanize($event['event_type'])</td>
                         <td><x-status-badge :value="$event['severity']" type="risk" /></td>
                         <td>{{ $event['action'] }}</td>
                         <td>{{ $event['outcome'] }}</td>

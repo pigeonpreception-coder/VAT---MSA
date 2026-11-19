@@ -1,20 +1,14 @@
 @extends('layouts.app')
 
-@section('title', 'Converted Quotations into Invoices')
+@section('title', 'Converted to invoices')
 
 @php
     $fmt = fn (int $cents) => $tenantCurrencySymbol.' '.number_format($cents / 100, 2);
 @endphp
 
 @section('content')
-<div class="mb-4 d-flex justify-content-between align-items-start">
-    <div>
-        <div class="text-uppercase text-muted small fw-semibold">Commercial domain</div>
-        <h1 class="h3 mb-1">Converted Quotations into Invoices</h1>
-        <p class="text-muted mb-0">Every converted quotation with its real certified invoice, and every credit or debit note ever raised against that invoice, joined into one list.</p>
-    </div>
-    <a href="{{ route('quotations.index') }}" class="btn btn-outline-secondary btn-sm text-nowrap ms-3">Back to quotations</a>
-</div>
+<x-page-header title="Converted to invoices" :back="route('quotations.index')" back-label="Quotations"
+    subtitle="Quotations converted into certified invoices, with any credit or debit notes raised against them." />
 
 <div class="card">
     <div class="card-header">

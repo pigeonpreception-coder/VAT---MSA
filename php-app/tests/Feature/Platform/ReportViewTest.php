@@ -156,7 +156,7 @@ class ReportViewTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Definitions');
-        $response->assertSee('Completed inline');
+        $response->assertSee('Completed runs');
         $response->assertSee('Failed');
         $response->assertSee('Export worker');
         $this->assertSame(1, $response->viewData('reportsSummary')['definitions_count']);

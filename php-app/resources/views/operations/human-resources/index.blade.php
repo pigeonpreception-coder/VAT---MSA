@@ -3,11 +3,8 @@
 @section('title', 'Human resources')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Operations</div>
-    <h1 class="h3 mb-1">Human Resources Module</h1>
-    <p class="text-muted mb-0">Employee directory, controlled onboarding invitations and offboarding. Linking an invited employee to a login identity remains an Administration action.</p>
-</div>
+<x-page-header title="Human resources"
+    subtitle="Employee directory, onboarding invitations and offboarding. Linking an employee to a login is done in Organisation administration." />
 
 @php
     $active = collect($employees)->where('status', 'ACTIVE')->count();
@@ -17,51 +14,42 @@
 
 <div class="row row-cols-1 row-cols-sm-4 g-3 mb-4">
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Active employees</div>
-            <div class="fs-2 fw-semibold">{{ number_format($active) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Active employees</div>
+            <div class="stat-value">{{ number_format($active) }}</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Invited</div>
-            <div class="fs-2 fw-semibold">{{ number_format($invited) }}</div>
-            <div class="small text-muted">Awaiting identity activation</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Invited</div>
+            <div class="stat-value">{{ number_format($invited) }}</div>
+            <div class="small text-muted">Haven't activated their account yet</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Terminated</div>
-            <div class="fs-2 fw-semibold">{{ number_format($terminated) }}</div>
-            <div class="small text-muted">Historical records preserved</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Terminated</div>
+            <div class="stat-value">{{ number_format($terminated) }}</div>
+            <div class="small text-muted">Records are kept</div>
         </div></div>
     </div>
     <div class="col">
-        <div class="card h-100"><div class="card-body">
-            <div class="text-muted small text-uppercase">Departments</div>
-            <div class="fs-2 fw-semibold">{{ number_format((int) ($structures['departments'] ?? 0)) }}</div>
+        <div class="card h-100 stat-tile"><div class="card-body">
+            <div class="stat-label">Departments</div>
+            <div class="stat-value">{{ number_format((int) ($structures['departments'] ?? 0)) }}</div>
             <div class="small text-muted">{{ (int) ($structures['branches'] ?? 0) }} branches &middot; {{ (int) ($structures['job_titles'] ?? 0) }} job titles</div>
         </div></div>
     </div>
 </div>
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Employee directory</div>
-                <div class="text-muted small">Employment structure and status</div>
+                <div class="text-muted small">Job, department and status for each person</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -118,7 +106,7 @@
             <div class="card h-100">
                 <div class="card-header">
                     <div class="fw-semibold">Invite an employee</div>
-                    <div class="text-muted small">External email delivery remains disabled in local staging</div>
+                    <div class="text-muted small">Invitations aren't emailed from this environment</div>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="{{ route('operations.human-resources.employees.store') }}">

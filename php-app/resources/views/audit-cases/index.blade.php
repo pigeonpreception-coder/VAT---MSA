@@ -3,46 +3,43 @@
 @section('title', 'Audit cases')
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance domain</div>
-    <h1 class="h3 mb-1">Audit cases</h1>
-    <p class="text-muted mb-0">A fully governed audit lifecycle -- every status change, finding, evidence citation and note is recorded, never edited or deleted in place.</p>
-</div>
+<x-page-header title="Audit cases"
+    subtitle="Every status change, finding, piece of evidence and note is kept on record — nothing is edited or deleted." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Open cases</span><span>C</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['open_cases']) }}</div>
-                <div class="small text-muted">Controlled officer work queue</div>
+                <div class="stat-label"><span>Open cases</span></div>
+                <div class="stat-value">{{ number_format($metrics['open_cases']) }}</div>
+                <div class="small text-muted">Assigned to officers</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Preliminary findings</span><span>F</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['preliminary_findings']) }}</div>
-                <div class="small text-muted">Not final assessments</div>
+                <div class="stat-label"><span>Preliminary findings</span></div>
+                <div class="stat-value">{{ number_format($metrics['preliminary_findings']) }}</div>
+                <div class="small text-muted">Awaiting review — not final</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Risk indicators</span><span>R</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['risk_indicators']) }}</div>
-                <div class="small text-muted">Explainable, advisory-only signals</div>
+                <div class="stat-label"><span>Risk indicators</span></div>
+                <div class="stat-value">{{ number_format($metrics['risk_indicators']) }}</div>
+                <div class="small text-muted">Advisory signals with explanations</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Critical review</span><span>!</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['critical_review']) }}</div>
-                <div class="small text-warning">Human review required</div>
+                <div class="stat-label"><span>Critical review</span></div>
+                <div class="stat-value">{{ number_format($metrics['critical_review']) }}</div>
+                <div class="small text-warning">Need an officer to review</div>
             </div>
         </div>
     </div>
@@ -54,15 +51,7 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h2 class="h6">Open a case</h2>
-                    @if ($errors->any())
-                        <div class="alert alert-danger py-2" role="alert">
-                            <ul class="mb-0 ps-3">
-                                @foreach ($errors->all() as $error)
-                                    <li>{{ $error }}</li>
-                                @endforeach
-                            </ul>
-                        </div>
-                    @endif
+                    <x-form-errors />
                     <form method="POST" action="{{ route('audit-cases.store') }}" class="row g-2">
                         @csrf
                             <x-idempotency-key />
@@ -117,7 +106,7 @@
                         <select id="status" name="status" class="form-select form-select-sm" onchange="this.form.submit()">
                             <option value="" @selected($status === '')>All statuses</option>
                             @foreach (['PROPOSED', 'AUTHORIZED', 'ASSIGNED', 'PLANNING', 'EVIDENCE_COLLECTION', 'ANALYSIS', 'TAXPAYER_RESPONSE', 'FINDINGS_REVIEW', 'DECISION', 'SUSPENDED', 'CLOSED', 'CANCELLED'] as $s)
-                                <option value="{{ $s }}" @selected($status === $s)>{{ ucwords(strtolower(str_replace('_', ' ', $s))) }}</option>
+                                <option value="{{ $s }}" @selected($status === $s)>@humanize($s)</option>
                             @endforeach
                         </select>
                     </div>
@@ -148,7 +137,7 @@
                                     {{ $case['legal_name'] ?? '—' }}
                                     <div class="text-muted small">{{ $case['vat_number'] ?? '' }}</div>
                                 </td>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $case['case_type']))) }}</td>
+                                <td>@humanize($case['case_type'])</td>
                                 <td><x-status-badge :value="$case['risk_tier']" type="risk" /></td>
                                 <td><x-status-badge :value="$case['status']" type="status" /></td>
                                 <td>{{ \Illuminate\Support\Carbon::parse($case['updated_at'])->format('d M Y H:i') }}</td>
@@ -198,7 +187,7 @@
                 @forelse ($riskAlerts as $risk)
                     <div class="mb-3 pb-3 border-bottom">
                         <div class="d-flex justify-content-between align-items-start">
-                            <strong>{{ ucwords(strtolower(str_replace('_', ' ', $risk['indicator_code']))) }}</strong>
+                            <strong>@humanize($risk['indicator_code'])</strong>
                             <x-status-badge :value="$risk['severity']" type="risk" />
                         </div>
                         @if (! empty($risk['legal_name']))

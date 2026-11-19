@@ -7,27 +7,24 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance domain</div>
-    <h1 class="h3 mb-1">Disputes</h1>
-    <p class="text-muted mb-0">A taxpayer may file a dispute against an audit finding, VAT return, refund decision, or obligation -- reviewed independently of the resource being disputed.</p>
-</div>
+<x-page-header title="Disputes"
+    subtitle="Challenges to an audit finding, VAT return, refund decision or obligation. Each dispute is reviewed independently of the decision it challenges." />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Total disputes</span><span>N</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['total']) }}</div>
-                <div class="small text-muted">Within the visible scope</div>
+                <div class="stat-label"><span>Total disputes</span></div>
+                <div class="stat-value">{{ number_format($metrics['total']) }}</div>
+                <div class="small text-muted">That you can see</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Filed this month</span><span>M</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['this_month']) }}</div>
+                <div class="stat-label"><span>Filed this month</span></div>
+                <div class="stat-value">{{ number_format($metrics['this_month']) }}</div>
                 <div class="small text-muted">Since the 1st</div>
             </div>
         </div>
@@ -35,18 +32,18 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Filed this week</span><span>W</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['this_week']) }}</div>
-                <div class="small text-muted">Recent filing activity</div>
+                <div class="stat-label"><span>Filed this week</span></div>
+                <div class="stat-value">{{ number_format($metrics['this_week']) }}</div>
+                <div class="small text-muted">Since Monday</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Taxpayers</span><span>T</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['taxpayers']) }}</div>
-                <div class="small text-muted">Distinct taxpayers disputing</div>
+                <div class="stat-label"><span>Taxpayers</span></div>
+                <div class="stat-value">{{ number_format($metrics['taxpayers']) }}</div>
+                <div class="small text-muted">With at least one dispute</div>
             </div>
         </div>
     </div>
@@ -58,15 +55,7 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <h2 class="h6">File a dispute</h2>
-                    @if ($errors->any())
-                        <div class="alert alert-danger py-2" role="alert">
-                            <ul class="mb-0 ps-3">
-                                @foreach ($errors->all() as $error)
-                                    <li>{{ $error }}</li>
-                                @endforeach
-                            </ul>
-                        </div>
-                    @endif
+                    <x-form-errors />
                     <form method="POST" action="{{ route('disputes.store') }}" class="row g-2">
                         @csrf
                             <x-idempotency-key />
@@ -150,7 +139,7 @@
                                     <div class="text-muted small">{{ $dispute['vat_number'] ?? '' }}</div>
                                 </td>
                                 <td>
-                                    {{ ucwords(strtolower(str_replace('_', ' ', $dispute['disputed_resource_type']))) }}
+                                    @humanize($dispute['disputed_resource_type'])
                                     <div class="text-muted small font-monospace">{{ $dispute['disputed_resource_id'] }}</div>
                                 </td>
                                 <td class="text-end">{{ $dispute['currency'] }} {{ number_format($dispute['disputed_amount_cents'] / 100, 2) }}</td>
@@ -172,7 +161,7 @@
             <div class="card-body">
                 @forelse ($byType as $row)
                     <div class="mb-2 d-flex justify-content-between align-items-center">
-                        <span>{{ ucwords(strtolower(str_replace('_', ' ', $row['type']))) }}</span>
+                        <span>@humanize($row['type'])</span>
                         <span class="fw-semibold">{{ number_format($row['count']) }}</span>
                     </div>
                 @empty

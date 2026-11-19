@@ -7,49 +7,38 @@
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Compliance &amp; security</div>
-    <h1 class="h3 mb-1">Audit trail and hash-chain verification</h1>
-    <p class="text-muted mb-0">Every audit event is chained by hash to the one before it. Search the trail, or run an on-demand verification pass that re-derives each event's hash and confirms nothing has been tampered with or lost.</p>
-</div>
+<x-page-header title="Audit trail"
+    subtitle="Every recorded action, linked in a tamper-evident chain. Search the trail, or run a check that confirms nothing has been altered or removed." />
 
 @if (session('chainBreak'))
     <div class="alert alert-danger" role="alert">{{ session('chainBreak') }}</div>
 @endif
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Total events</span><span>N</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['total']) }}</div>
-                <div class="small text-muted">System-wide</div>
+                <div class="stat-label"><span>Total events</span></div>
+                <div class="stat-value">{{ number_format($metrics['total']) }}</div>
+                <div class="small text-muted">Across the whole system</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Matching filters</span><span>&equiv;</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['matching']) }}</div>
-                <div class="small text-muted">Current search</div>
+                <div class="stat-label"><span>Matching filters</span></div>
+                <div class="stat-value">{{ number_format($metrics['matching']) }}</div>
+                <div class="small text-muted">For the current filters</div>
             </div>
         </div>
     </div>
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Chain status</span><span>&#128274;</span></div>
-                <div class="fs-2 fw-semibold">{{ $metrics['verification_status'] ? ucfirst(strtolower($metrics['verification_status'])) : 'Not run' }}</div>
+                <div class="stat-label"><span>Chain status</span></div>
+                <div class="stat-value">{{ $metrics['verification_status'] ? \App\Support\Ui\Humanize::enum($metrics['verification_status']) : 'Not run' }}</div>
                 <div class="small {{ $metrics['verification_status'] === 'FAILED' ? 'text-danger' : 'text-muted' }}">Most recent verification</div>
             </div>
         </div>
@@ -57,9 +46,9 @@
     <div class="col">
         <div class="card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between text-muted small text-uppercase"><span>Verification runs</span><span>#</span></div>
-                <div class="fs-2 fw-semibold">{{ number_format($metrics['verification_runs']) }}</div>
-                <div class="small text-muted">All-time</div>
+                <div class="stat-label"><span>Verification runs</span></div>
+                <div class="stat-value">{{ number_format($metrics['verification_runs']) }}</div>
+                <div class="small text-muted">Since records began</div>
             </div>
         </div>
     </div>
@@ -71,7 +60,7 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
                     <div class="fw-semibold">Chain verification</div>
-                    <div class="text-muted small">On-demand -- this deployment has no scheduled job infrastructure to run it automatically.</div>
+                    <div class="text-muted small">Checks that no audit record has been altered or removed. Run it whenever you need to — it isn't scheduled automatically.</div>
                 </div>
                 <form method="POST" action="{{ route('audit-trail.verify') }}">
                     @csrf
@@ -150,7 +139,7 @@
                                 <td class="small">{{ $event->occurred_at->format('Y-m-d H:i:s') }}</td>
                                 <td class="small">{{ $event->actor_role }} <span class="text-muted">({{ $event->actor_id }})</span></td>
                                 <td class="small font-monospace">{{ $event->action }}</td>
-                                <td class="small">{{ $event->resource_type }} <span class="text-muted">{{ $event->resource_id }}</span></td>
+                                <td class="small">@humanize($event->resource_type) <div class="text-muted font-monospace text-truncate" style="max-width: 14rem;" title="{{ $event->resource_id }}">{{ $event->resource_id }}</div></td>
                                 <td><x-status-badge :value="$event->outcome" type="status" /></td>
                             </tr>
                         @empty
@@ -168,7 +157,7 @@
             <div class="card-body">
                 @forelse ($byResourceType as $row)
                     <div class="mb-2 d-flex justify-content-between align-items-center">
-                        <span>{{ ucwords(strtolower(str_replace('_', ' ', $row->resource_type))) }}</span>
+                        <span>@humanize($row->resource_type)</span>
                         <span class="fw-semibold">{{ number_format($row->count) }}</span>
                     </div>
                 @empty

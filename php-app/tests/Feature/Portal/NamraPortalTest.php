@@ -117,7 +117,7 @@ class NamraPortalTest extends TestCase
         $response = $this->actingAs($auditor)->get('/portal/namra');
 
         $response->assertOk()->assertViewIs('portal.namra');
-        $response->assertSee('Due, abnormal, unresolved and assigned work');
+        $response->assertSee('Your audit cases, open risk signals and returns awaiting approval.');
         $response->assertSee('Suspected under-declaration of output VAT');
         $response->assertSee($tp['taxpayer']->legal_name);
         $response->assertSee('<caption class="visually-hidden">', false);

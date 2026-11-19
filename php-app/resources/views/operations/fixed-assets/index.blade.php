@@ -3,29 +3,17 @@
 @section('title', $title)
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Operations</div>
-    <h1 class="h3 mb-1">{{ $title }}</h1>
-    <p class="text-muted mb-0">Register, valuation and disposal tracking. Immovable and Movable Asset Management share one register, filtered here to {{ strtolower($assetClass) }} assets only.</p>
-</div>
+<x-page-header :title="$title"
+    :subtitle="'Register, valuation and disposal of your '.strtolower($assetClass).' assets.'" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <strong>This action needs attention.</strong>
-        <ul class="mb-0">
-            @foreach ($errors->all() as $message)
-                <li>{{ $message }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 <div class="row g-3">
     <div class="col-lg-8">
         <div class="card h-100">
             <div class="card-header">
                 <div class="fw-semibold">Asset register</div>
-                <div class="text-muted small">{{ count($assets) }} {{ strtolower($assetClass) }} asset(s) on record</div>
+                <div class="text-muted small">{{ count($assets) }} {{ strtolower($assetClass) }} {{ \Illuminate\Support\Str::plural('asset', count($assets)) }} on record</div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0 align-middle">
@@ -52,7 +40,7 @@
                                         <div class="text-muted small font-monospace">{{ $asset['serial_or_registration_number'] }}</div>
                                     @endif
                                 </td>
-                                <td>{{ ucwords(strtolower(str_replace('_', ' ', $asset['category']))) }}</td>
+                                <td>@humanize($asset['category'])</td>
                                 <td>{{ $asset['location_or_address'] }}</td>
                                 <td>{{ $tenantCurrencyCode }} {{ number_format(($asset['current_value_cents'] ?? $asset['acquisition_cost_cents']) / 100, 2) }}</td>
                                 <td><x-status-badge :value="$asset['status']" type="status" /></td>
@@ -110,7 +98,7 @@
             <div class="card h-100">
                 <div class="card-header">
                     <div class="fw-semibold">Register an asset</div>
-                    <div class="text-muted small">New assets start Active</div>
+                    <div class="text-muted small">New assets start as active</div>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="{{ route('operations.fixed-assets.store') }}">
@@ -127,7 +115,7 @@
                             <select class="form-select" id="category" name="category" required>
                                 <option value="" disabled selected>Select category</option>
                                 @foreach ($categories as $category)
-                                    <option value="{{ $category }}" @selected(old('category') === $category)>{{ ucwords(strtolower(str_replace('_', ' ', $category))) }}</option>
+                                    <option value="{{ $category }}" @selected(old('category') === $category)>@humanize($category)</option>
                                 @endforeach
                             </select>
                         </div>
@@ -148,8 +136,8 @@
                             <input type="date" class="form-control" id="acquisition_date" name="acquisition_date" required value="{{ old('acquisition_date') }}">
                         </div>
                         <div class="mb-3">
-                            <label for="acquisition_cost_cents" class="form-label">Acquisition cost (cents)</label>
-                            <input type="number" class="form-control" id="acquisition_cost_cents" name="acquisition_cost_cents" required min="0" step="1" value="{{ old('acquisition_cost_cents') }}">
+                            <label for="acquisition_cost_cents" class="form-label">Acquisition cost</label>
+                            <x-money-input name="acquisition_cost_cents" :required="true" />
                         </div>
                         <button type="submit" class="btn btn-primary">Register asset</button>
                     </form>

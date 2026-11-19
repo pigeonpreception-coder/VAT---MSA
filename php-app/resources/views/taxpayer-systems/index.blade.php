@@ -3,31 +3,20 @@
 @section('title', 'Taxpayer systems')
 
 @php
-    $titleCase = fn (?string $value) => $value ? ucwords(strtolower(str_replace('_', ' ', $value))) : '—';
+    $titleCase = fn (?string $value) => \App\Support\Ui\Humanize::title($value);
 @endphp
 
 @section('content')
-<div class="mb-4">
-    <div class="text-uppercase text-muted small fw-semibold">Registered domain</div>
-    <h1 class="h3 mb-1">Registered taxpayer systems</h1>
-    <p class="text-muted mb-0">NamRA e-VAT MS Registered Taxpayer Systems Framework -- a taxpayer's own ERP/POS/accounting/invoicing system, self-registered and approved by {{ $tenantAuthorityShortName }} before it can integrate.</p>
-</div>
+<x-page-header title="Taxpayer systems"
+    :subtitle="'Taxpayers\' own ERP, POS, accounting and invoicing systems. Each system is registered by the taxpayer and approved by '.$tenantAuthorityShortName.' before it can connect.'" />
 
-@if ($errors->any())
-    <div class="alert alert-danger" role="alert">
-        <ul class="mb-0 ps-3">
-            @foreach ($errors->all() as $error)
-                <li>{{ $error }}</li>
-            @endforeach
-        </ul>
-    </div>
-@endif
+<x-form-errors />
 
 @can('permission', 'taxpayer-systems:manage')
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h6">Register a system</h2>
-            <p class="text-muted small">Identity fields must match your own taxpayer's registered VAT number (and TIN, if provided).</p>
+            <p class="text-muted small">The VAT number (and TIN, if you enter one) must match your own registration.</p>
             <form method="POST" action="{{ route('taxpayer-systems.store') }}" class="row g-2">
                 @csrf
                 <x-idempotency-key />
