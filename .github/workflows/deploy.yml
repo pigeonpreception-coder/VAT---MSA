@@ -17,9 +17,17 @@ name: Deploy php-app to production
 #                      /var/www/vat-msa/php-app
 
 on:
-  push:
-    branches: [main]
-    paths: ["php-app/**"]
+  # Manual only for now (2026-11-19). The live site runs on a shared host
+  # without Node, and its current pages were edited on the server and are
+  # not in this repository yet. deploy.sh assumes the VPS described in
+  # php-app/deploy/README.md (Node, systemctl) and starts with
+  # `git reset --hard origin/main`, so running it on every merge could
+  # replace the live pages as soon as the SSH secrets exist. Put the push
+  # trigger back once the server's pages are in git and deploy.sh matches
+  # the host:
+  #   push:
+  #     branches: [main]
+  #     paths: ["php-app/**"]
   workflow_dispatch: {}
 
 permissions:
